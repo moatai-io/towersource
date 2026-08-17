@@ -1,0 +1,76 @@
+#!/usr/bin/env bash
+# runtime-box-cad-doctor — CAD Workbench beta readiness check.
+
+set -u
+
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+RED='\033[0;31m'
+NC='\033[0m'
+
+FAIL=0
+ok() { echo -e "${GREEN}OK${NC}   $*"; }
+warn() { echo -e "${YELLOW}WARN${NC} $*"; }
+fail() { echo -e "${RED}MISS${NC} $*"; FAIL=1; }
+
+has() {
+  if command -v "$1" >/dev/null 2>&1; then ok "$1: $(command -v "$1")"; else fail "$1 missing"; fi
+}
+
+check_imports() {
+  if python - <<'PY' >/dev/null 2>&1
+import ezdxf, matplotlib, PIL
+PY
+  then ok "Python CAD imports: ezdxf matplotlib PIL"; else fail "Python CAD imports failed"; fi
+}
+
+check_cli() {
+  if ! command -v cad-workbench >/dev/null 2>&1; then
+    fail "cad-workbench CLI missing"
+    return
+  fi
+  if cad-workbench --version >/dev/null 2>&1; then ok "cad-workbench CLI responds"; else fail "cad-workbench CLI failed"; fi
+}
+
+check_smoke() {
+  local dir="${TMPDIR:-/tmp}/cad-workbench-doctor-$$"
+  mkdir -p "$dir"
+  if python - "$dir/smoke.dxf" <<'PY' >/dev/null 2>&1
+import sys, ezdxf
+out = sys.argv[1]
+doc = ezdxf.new('R2010')
+msp = doc.modelspace()
+msp.add_line((100000, -50000), (101000, -50000))
+msp.add_text('CAD WORKBENCH SMOKE', dxfattribs={'height': 100}).set_placement((100000, -49800))
+doc.saveas(out)
+PY
+  then
+    :
+  else
+    fail "fixture creation failed"
+    rm -rf "$dir"
+    return
+  fi
+  if cad-workbench qa "$dir/smoke.dxf" --out "$dir/qa" >/dev/null 2>&1 && [[ -s "$dir/qa/qa.json" && -s "$dir/qa/preview.content.png" ]]; then
+    ok "CAD Workbench smoke: qa artifacts generated"
+  else
+    fail "CAD Workbench smoke failed"
+  fi
+  rm -rf "$dir"
+}
+
+echo "=== Tower CAD Workbench doctor ==="
+has python
+has cad-workbench
+check_imports
+check_cli
+check_smoke
+
+if [[ "$FAIL" == "1" ]]; then
+  echo ""
+  fail "CAD Workbench readiness has missing required tools"
+  exit 1
+fi
+
+echo ""
+ok "CAD Workbench readiness looks good"

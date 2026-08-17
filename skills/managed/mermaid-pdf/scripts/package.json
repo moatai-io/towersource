@@ -1,0 +1,14 @@
+{
+  "name": "mermaid-pdf",
+  "version": "1.0.0",
+  "description": "Markdown + Mermaid → PDF 변환 (Puppeteer)",
+  "type": "module",
+  "scripts": {
+    "pdf": "node render_pdf.mjs"
+  },
+  "dependencies": {
+    "puppeteer-core": "^23.0.0",
+    "pdf-lib": "^1.17.1",
+    "marked": "^15.0.0"
+  }
+}

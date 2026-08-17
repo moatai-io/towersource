@@ -1,0 +1,16 @@
+{
+  "theme": "base",
+  "flowchart": {
+    "htmlLabels": false,
+    "curve": "basis"
+  },
+  "themeVariables": {
+    "fontFamily": "Noto Sans CJK KR, Noto Sans KR, sans-serif",
+    "primaryColor": "#e8eef8",
+    "primaryTextColor": "#172554",
+    "primaryBorderColor": "#93a4bd",
+    "lineColor": "#475569",
+    "secondaryColor": "#f8fafc",
+    "tertiaryColor": "#ffffff"
+  }
+}

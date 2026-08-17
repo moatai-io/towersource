@@ -1,0 +1,50 @@
+# CI — clean-checkout 검증 게이트 (게이트 ③)
+#
+# 근거: workspace/decisions/2026-05-24-ai-integration-push-gate-and-ci.md
+#
+# dev(:32355) 는 dirty(미커밋 변경 섞임)라 "dev 에서 잘 돈다" 가
+# "origin/main 만 체크아웃하면 돈다" 를 보장하지 못한다 (거짓 green).
+# 이 워크플로는 push 직후 *깨끗한 체크아웃* 에서 빌드/타입/린트를 돌려
+# 미커밋 의존 buildbreak 를 prod 전에 잡는다.
+#
+# 현재: typecheck + lint + build (DB 불필요, 빠르고 확실).
+# 후속: `npm test`(vitest) 는 일부가 DATABASE_URL 의존이라 PostgreSQL
+#       service 컨테이너 + 마이그레이션 셋업이 필요 → 별도 job 으로 추가 예정.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+# 같은 브랜치에 연속 push 시 이전 run 취소 (Actions 분 절약)
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install (clean)
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint (no native dialogs)
+        run: npm run lint:dialogs
+
+      - name: Build
+        run: npm run build

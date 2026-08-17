@@ -1,0 +1,99 @@
+node_modules/
+dist/
+# Exception: packages/notify-hub/dist 는 backend 가 direct import 하는 monorepo-internal
+# runtime artifact 이므로 commit. (외부 publish 가 아닌 workspaces 의 builds 산출물).
+# 근거: workspace/decisions/2026-05-24-ai-integration-push-gate-and-ci.md (#28 fix)
+!packages/notify-hub/dist/
+/data/*
+!/data/skills/
+/data/skills/
+*.db
+*.db-shm
+*.db-wal
+*.log
+.env
+.env.local
+.env.production
+CLAUDE.local.md
+simple.html
+prompt:*
+permission_issue.md
+
+# Research / scratch docs
+ASCII_ART_*.md
+research_brain.md
+memory_implementation.md
+codify.md
+devserver.md
+
+containerize.md
+group-permissions.md
+bwrap.md
+progress.md
+
+# Dev plans, issues, history (internal artifacts)
+docs/plans/
+history.md
+installation.md
+issue_session_change.md
+plan.md
+plan_done.md
+future_task_manager_plan.md
+business_ai_plan_*.md
+heartbeat_planning_*.md
+prd.md
+migrate_to_chat_ability.md
+
+# Large video files
+*.mov
+*.mp4
+
+.worktrees/
+.mcp.json
+.claude/skills/
+/mcp/
+.pi/
+uploads/
+!packages/backend/services/uploads/
+!packages/backend/services/uploads/**
+!packages/frontend/src/components/uploads/
+!packages/frontend/src/components/uploads/**
+
+# Self-hosted server deployment artifacts
+.credentials.json
+*.pem
+*.key
+deploy-secrets/
+customer-envs/
+
+# Prevent accidental commits of workspace/ repo when tasks run in subfolders
+/workspace/
+
+# Session-local work notes, scratch scripts, QA helpers, and job-board dogfood records.
+# Durable decisions/docs should be promoted to workspace/decisions/ or docs/ before committing.
+/work/
+
+# Local scratch space. Never commit temporary patches, tokens, or runtime handoff files.
+/.tmp/
+/tmp/
+
+# Local dev process bookkeeping. Runtime logs are already ignored by *.log.
+/logs/*.pid
+
+# Tower-generated Runtime Box state (Workbench tools, service logs, pids, caches)
+.runtime-box/
+**/.runtime-box/
+
+# Tower-generated managed skill materialization outputs
+/.tower/
+**/.tower/skills/
+**/.tower/skills/**
+
+# Python bytecode cache
+__pycache__/
+*.pyc
+
+# Playwright E2E artifacts
+/playwright-report/
+/test-results/
+/blob-report/

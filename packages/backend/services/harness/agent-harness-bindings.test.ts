@@ -1,0 +1,9 @@
+import{beforeEach,describe,expect,it,vi}from'vitest';
+const queryOne=vi.fn(),execute=vi.fn();
+vi.mock('../../db/pg-repo.js',()=>({queryOne,transaction:async(fn:any)=>fn({}),withClient:()=>({queryOne,execute})}));
+const{bindAgentHarness,rollbackAgentHarness}=await import('./agent-harness-bindings.js');
+describe('Agent Harness binding revisions',()=>{beforeEach(()=>vi.clearAllMocks());
+it('appends a new revision and advances the current pointer',async()=>{queryOne.mockResolvedValueOnce({current_revision:1}).mockResolvedValueOnce({ok:1});execute.mockResolvedValue({changes:1});const result=await bindAgentHarness({projectId:'p',expectedRevision:1,target:{harnessId:'h',harnessVersion:2,runtimeProfileId:'r',runtimeProfileVersion:1},actorUserId:7});expect(result.revision).toBe(2);expect(execute).toHaveBeenCalledWith(expect.stringContaining('agent_harness_binding_revisions'),expect.arrayContaining(['p',2,'h',2,'r',1]));expect(execute).toHaveBeenCalledWith(expect.stringContaining('current_revision=$6'),expect.arrayContaining(['p','h',2,'r',1,2,7]))});
+it('rejects stale writers before changing history',async()=>{queryOne.mockResolvedValueOnce({current_revision:3});await expect(bindAgentHarness({projectId:'p',expectedRevision:2,target:{harnessId:'h',harnessVersion:2,runtimeProfileId:'r',runtimeProfileVersion:1},actorUserId:7})).rejects.toThrow('revision conflict');expect(execute).not.toHaveBeenCalled()});
+it('rolls back by binding the immutable tuple from an earlier revision',async()=>{queryOne.mockResolvedValueOnce({harness_id:'old',harness_version:1,runtime_profile_id:'std',runtime_profile_version:1}).mockResolvedValueOnce({current_revision:2}).mockResolvedValueOnce({ok:1});execute.mockResolvedValue({changes:1});const result=await rollbackAgentHarness({projectId:'p',expectedRevision:2,targetRevision:1,actorUserId:7});expect(result).toMatchObject({revision:3,harnessId:'old',previousRevision:2})});
+});

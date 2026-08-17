@@ -1,0 +1,505 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Mermaid Lab — Tower Linear Theme</title>
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable.min.css" />
+  <style>
+    /* ── Tower 테마 토큰 (Linear 스타일, 다크) ── */
+    :root {
+      --th-bg-primary: #0a0f1e;
+      --th-bg-secondary: #10172a;
+      --th-bg-tertiary: #151d33;
+      --th-text-primary: #e2e8f0;
+      --th-text-secondary: #94a3b8;
+      --th-border-subtle: rgba(148, 163, 184, 0.25);
+    }
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: var(--th-bg-primary);
+      color: var(--th-text-primary);
+      font-family: "Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont, sans-serif;
+      font-size: 14px;
+      letter-spacing: -0.01em;
+    }
+    .page {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 48px 40px 96px;
+    }
+    h1 { font-size: 28px; font-weight: 700; margin: 0 0 8px; }
+    .sub { color: var(--th-text-secondary); margin-bottom: 40px; font-size: 14px; }
+    .card {
+      margin: 32px 0;
+      padding: 28px;
+      background: var(--th-bg-secondary);
+      border-radius: 16px;
+      border: 1px solid var(--th-border-subtle);
+    }
+    .card h2 {
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--th-text-secondary);
+      margin: 0 0 20px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+
+    /* ════════════════════════════════════════════════════════
+       Mermaid — Linear-inspired (Tower의 index.css와 동기)
+       ════════════════════════════════════════════════════════ */
+    .mermaid-wrapper .node > rect,
+    .mermaid-wrapper .node > polygon,
+    .mermaid-wrapper .node > circle,
+    .mermaid-wrapper .node > ellipse,
+    .mermaid-wrapper .node > path {
+      stroke-width: 1.5 !important;
+      vector-effect: non-scaling-stroke;
+    }
+    .mermaid-wrapper .node > rect { rx: 8; ry: 8; }
+
+    .mermaid-wrapper .edgePath .path,
+    .mermaid-wrapper .flowchart-link {
+      stroke-width: 1.25 !important;
+      vector-effect: non-scaling-stroke;
+    }
+    .mermaid-wrapper .edgeLabel rect,
+    .mermaid-wrapper .edgeLabel .label-container {
+      fill: var(--th-bg-primary) !important;
+    }
+    .mermaid-wrapper .cluster rect,
+    .mermaid-wrapper .cluster > rect {
+      fill: transparent !important;
+      stroke-dasharray: 4 3;
+      stroke-width: 1 !important;
+      rx: 10; ry: 10;
+    }
+    .mermaid-wrapper text,
+    .mermaid-wrapper .nodeLabel,
+    .mermaid-wrapper .edgeLabel,
+    .mermaid-wrapper .cluster-label,
+    .mermaid-wrapper .messageText,
+    .mermaid-wrapper .noteText,
+    .mermaid-wrapper .loopText {
+      -webkit-font-smoothing: antialiased;
+      text-rendering: geometricPrecision;
+      letter-spacing: -0.01em;
+    }
+    .mermaid-wrapper foreignObject { overflow: visible; }
+    .mermaid-wrapper foreignObject > div,
+    .mermaid-wrapper foreignObject .nodeLabel,
+    .mermaid-wrapper foreignObject span.nodeLabel {
+      word-break: keep-all;
+      line-height: 1.38;
+    }
+
+    /* Sequence */
+    .mermaid-wrapper .actor { stroke-width: 1.5 !important; }
+    .mermaid-wrapper .actor-line {
+      stroke-width: 1 !important;
+      stroke-dasharray: 3 3;
+      opacity: 0.5;
+    }
+    .mermaid-wrapper rect.activation0,
+    .mermaid-wrapper rect.activation1,
+    .mermaid-wrapper rect.activation2 {
+      fill: transparent !important;
+      stroke: var(--th-border-subtle) !important;
+      stroke-width: 1 !important;
+    }
+    .mermaid-wrapper .loopLine {
+      stroke-dasharray: 4 3;
+      stroke-width: 1 !important;
+      opacity: 0.65;
+    }
+    .mermaid-wrapper .labelBox {
+      fill: transparent !important;
+      stroke-width: 1 !important;
+      stroke-dasharray: 3 2;
+    }
+    .mermaid-wrapper .note,
+    .mermaid-wrapper rect.note,
+    .mermaid-wrapper g.note rect {
+      fill: transparent !important;
+      stroke-dasharray: 3 2;
+      stroke-width: 1 !important;
+    }
+
+    /* ER */
+    .mermaid-wrapper .row-rect-odd,
+    .mermaid-wrapper .row-rect-even,
+    .mermaid-wrapper path.row-rect-odd,
+    .mermaid-wrapper path.row-rect-even {
+      fill: transparent !important;
+      stroke: var(--th-border-subtle) !important;
+      stroke-width: 0.5 !important;
+      opacity: 0.8;
+    }
+    .mermaid-wrapper .entityBox,
+    .mermaid-wrapper .er.entityBox {
+      stroke: var(--th-border-subtle) !important;
+      stroke-width: 1.5 !important;
+    }
+    .mermaid-wrapper .er .divider,
+    .mermaid-wrapper g.er .divider {
+      stroke: var(--th-border-subtle) !important;
+      stroke-width: 0.5 !important;
+      opacity: 0.6;
+    }
+    .mermaid-wrapper rect[fill="#ffffff"],
+    .mermaid-wrapper rect[fill="#eeeeee"],
+    .mermaid-wrapper rect[fill="#e0e0e0"] {
+      fill: transparent !important;
+    }
+    .mermaid-wrapper .er text,
+    .mermaid-wrapper g.er text,
+    .mermaid-wrapper .attribute-type,
+    .mermaid-wrapper .attribute-name,
+    .mermaid-wrapper .attribute-keys,
+    .mermaid-wrapper .attribute-comment {
+      fill: var(--th-text-primary) !important;
+    }
+
+    .mermaid-wrapper svg { background-color: transparent !important; }
+    .mermaid-wrapper svg > rect:first-child[fill] { fill: transparent !important; }
+
+    /* Pie */
+    .mermaid-wrapper .pieCircle,
+    .mermaid-wrapper g.pie path { stroke-width: 2 !important; }
+    .mermaid-wrapper .pieOuterCircle { stroke-width: 0 !important; opacity: 0; }
+
+    /* Gantt */
+    .mermaid-wrapper .task,
+    .mermaid-wrapper rect.task {
+      stroke-width: 1 !important;
+      rx: 4; ry: 4;
+    }
+    .mermaid-wrapper .grid .tick line,
+    .mermaid-wrapper .grid path {
+      stroke-width: 0.5 !important;
+      opacity: 0.25;
+    }
+    .mermaid-wrapper .sectionTitle,
+    .mermaid-wrapper .titleText { font-weight: 500 !important; }
+    .mermaid-wrapper .taskText { font-size: 12px !important; }
+
+    /* Mindmap */
+    .mermaid-wrapper .mindmap-node > rect,
+    .mermaid-wrapper .mindmap-node > circle,
+    .mermaid-wrapper .mindmap-node > polygon { stroke-width: 1 !important; }
+
+    /* Cluster 라벨 안전망 */
+    .mermaid-wrapper .cluster-label .nodeLabel,
+    .mermaid-wrapper .cluster-label foreignObject span,
+    .mermaid-wrapper .cluster-label foreignObject p {
+      text-shadow:
+        -1px -1px 0 var(--th-bg-primary),
+         1px -1px 0 var(--th-bg-primary),
+        -1px  1px 0 var(--th-bg-primary),
+         1px  1px 0 var(--th-bg-primary);
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <h1>Mermaid Lab</h1>
+    <p class="sub">Tower Linear-inspired theme — capture & iterate</p>
+
+    <div class="card">
+      <h2>1. Flowchart + Subgraph</h2>
+      <div class="mermaid-wrapper"><pre class="mermaid">
+flowchart LR
+  A[사용자 요청] --> B{인증?}
+  B -->|OK| C[처리]
+  B -->|실패| D[거부]
+  subgraph core["Core Pipeline"]
+    C --> E[검증]
+    E --> F[저장]
+  end
+  F --> G[응답]
+      </pre></div>
+    </div>
+
+    <div class="card">
+      <h2>2. Sequence — Inverse Actor</h2>
+      <div class="mermaid-wrapper"><pre class="mermaid">
+sequenceDiagram
+  participant U as User
+  participant A as API
+  participant D as DB
+  U->>A: POST /order
+  activate A
+  A->>D: BEGIN TX
+  alt 재고 있음
+    D-->>A: stock=42
+    A->>D: INSERT order
+    D-->>A: ok
+  else 품절
+    D-->>A: stock=0
+    A-->>U: 409 Conflict
+  end
+  Note over A,D: RR 격리
+  A-->>U: 201 Created
+  deactivate A
+      </pre></div>
+    </div>
+
+    <div class="card">
+      <h2>3. Pie — Single Accent Scale</h2>
+      <div class="mermaid-wrapper"><pre class="mermaid">
+pie showData title 2026 Q1 트래픽
+  "Organic" : 42
+  "Direct" : 23
+  "Referral" : 15
+  "Social" : 10
+  "Email" : 7
+  "Paid" : 3
+      </pre></div>
+    </div>
+
+    <div class="card">
+      <h2>4. Mindmap</h2>
+      <div class="mermaid-wrapper"><pre class="mermaid">
+mindmap
+  root((Tower))
+    Frontend
+      React
+      Virtuoso
+      Mermaid
+    Backend
+      Claude SDK
+      PostgreSQL
+      Engines
+    Ops
+      PM2
+      Nginx
+      Azure
+      </pre></div>
+    </div>
+
+    <div class="card">
+      <h2>5. Gantt — barHeight/Gap 조정 대상</h2>
+      <div class="mermaid-wrapper"><pre class="mermaid">
+gantt
+  title Mermaid Redesign Sprint
+  dateFormat YYYY-MM-DD
+  axisFormat %m/%d
+  section Design
+    팔레트 결정 :done, d1, 2026-04-15, 2d
+    Linear 스케치 :done, d2, after d1, 1d
+  section Build
+    theme 토큰 :active, b1, 2026-04-18, 1d
+    CSS 정리 :active, b2, after b1, 1d
+    CJK 오버플로 :crit, b3, after b2, 1d
+  section Verify
+    샘플 캡처 : v1, after b3, 2d
+    QA : v2, after v1, 1d
+      </pre></div>
+    </div>
+
+    <div class="card">
+      <h2>6. ER Diagram</h2>
+      <div class="mermaid-wrapper"><pre class="mermaid">
+erDiagram
+  USER ||--o{ SESSION : has
+  USER ||--o{ MESSAGE : writes
+  SESSION ||--o{ MESSAGE : contains
+  USER {
+    string id PK
+    string username
+    string role
+    bool disabled
+  }
+  SESSION {
+    string id PK
+    string user_id FK
+    string engine
+    timestamp created_at
+  }
+  MESSAGE {
+    string id PK
+    string session_id FK
+    string role
+    text content
+  }
+      </pre></div>
+    </div>
+
+    <div class="card">
+      <h2>7. State Diagram</h2>
+      <div class="mermaid-wrapper"><pre class="mermaid">
+stateDiagram-v2
+  [*] --> Idle
+  Idle --> Streaming : user message
+  Streaming --> Processing : tool call
+  Processing --> Streaming : tool result
+  Streaming --> Idle : done
+  Streaming --> Error : timeout
+  Error --> Idle : retry
+  Error --> [*] : abort
+      </pre></div>
+    </div>
+
+  </div>
+
+  <script type="module">
+    import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+
+    // Tower의 Linear 테마 — MermaidBlock.tsx와 동기 유지
+    function mix(bg, fg, bgWeight) {
+      const parse = (hex) => {
+        const h = hex.replace('#', '');
+        return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)];
+      };
+      const [br, bgG, bb] = parse(bg);
+      const [fr, fgG, fb] = parse(fg);
+      const blend = (a, b) => Math.round(a * bgWeight + b * (1 - bgWeight));
+      const toHex = (n) => n.toString(16).padStart(2, '0');
+      return '#' + toHex(blend(br, fr)) + toHex(blend(bgG, fgG)) + toHex(blend(bb, fb));
+    }
+
+    const bg = '#0a0f1e';
+    const fg = '#e2e8f0';
+    const accent = '#60a5fa';
+    const crit = '#f87171';
+    const nodeFill = mix(bg, accent, 0.94);
+    const nodeStroke = mix(bg, accent, 0.45);
+    const subtle = mix(bg, fg, 0.82);
+    const muted = mix(bg, fg, 0.60);
+    const edge = mix(bg, fg, 0.70);
+
+    mermaid.initialize({
+      startOnLoad: true,
+      securityLevel: 'loose',
+      theme: 'base',
+      themeVariables: {
+        primaryColor: nodeFill,
+        primaryBorderColor: nodeStroke,
+        primaryTextColor: fg,
+        secondaryColor: mix(bg, accent, 0.90),
+        secondaryBorderColor: nodeStroke,
+        secondaryTextColor: fg,
+        tertiaryColor: mix(bg, accent, 0.86),
+        tertiaryBorderColor: nodeStroke,
+        tertiaryTextColor: fg,
+        background: bg,
+        mainBkg: nodeFill,
+        nodeBorder: nodeStroke,
+        nodeTextColor: fg,
+        clusterBkg: bg,
+        clusterBorder: subtle,
+        defaultLinkColor: edge,
+        lineColor: edge,
+        edgeLabelBackground: bg,
+        titleColor: fg,
+        textColor: fg,
+        labelColor: fg,
+        altBackground: bg,
+        actorBkg: fg,
+        actorBorder: fg,
+        actorTextColor: bg,
+        actorLineColor: muted,
+        signalColor: fg,
+        signalTextColor: fg,
+        labelBoxBkgColor: bg,
+        labelBoxBorderColor: muted,
+        labelTextColor: fg,
+        loopTextColor: fg,
+        noteBkgColor: bg,
+        noteTextColor: fg,
+        noteBorderColor: muted,
+        rowOdd: bg,
+        rowEven: bg,
+        attributeBackgroundColorOdd: bg,
+        attributeBackgroundColorEven: bg,
+        sectionBkgColor: mix(bg, fg, 0.96),
+        altSectionBkgColor: bg,
+        sectionBkgColor2: mix(bg, fg, 0.96),
+        taskBkgColor: mix(bg, accent, 0.70),
+        taskBorderColor: accent,
+        doneTaskBkgColor: mix(bg, fg, 0.85),
+        doneTaskBorderColor: mix(bg, fg, 0.65),
+        activeTaskBkgColor: accent,
+        activeTaskBorderColor: accent,
+        critBkgColor: mix(bg, crit, 0.80),
+        critBorderColor: crit,
+        gridColor: mix(bg, fg, 0.88),
+        todayLineColor: mix(bg, fg, 0.50),
+        taskTextColor: fg,
+        taskTextLightColor: fg,
+        taskTextDarkColor: bg,
+        taskTextOutsideColor: fg,
+        pie1: accent,
+        pie2: mix(bg, accent, 0.40),
+        pie3: mix(bg, accent, 0.60),
+        pie4: mix(bg, accent, 0.78),
+        pie5: mix(bg, fg, 0.55),
+        pie6: mix(bg, fg, 0.70),
+        pie7: mix(bg, fg, 0.82),
+        pie8: mix(bg, fg, 0.90),
+        pieStrokeColor: bg,
+        pieStrokeWidth: '2px',
+        pieOuterStrokeWidth: '0px',
+        pieOpacity: '1',
+        pieSectionTextColor: bg,
+        pieSectionTextSize: '13px',
+        pieTitleTextColor: fg,
+        pieTitleTextSize: '16px',
+        pieLegendTextColor: fg,
+        pieLegendTextSize: '12px',
+        cScale0: accent,
+        cScale1: mix(bg, fg, 0.78),
+        cScale2: mix(bg, fg, 0.84),
+        cScale3: mix(bg, fg, 0.90),
+        cScale4: mix(bg, fg, 0.93),
+        cScale5: mix(bg, fg, 0.78),
+        cScale6: mix(bg, fg, 0.84),
+        cScale7: mix(bg, fg, 0.90),
+        cScalePeer0: accent,
+        cScalePeer1: muted,
+        cScalePeer2: muted,
+        cScalePeer3: muted,
+        cScaleLabel0: bg,
+        cScaleLabel1: fg, cScaleLabel2: fg, cScaleLabel3: fg,
+        cScaleLabel4: fg, cScaleLabel5: fg, cScaleLabel6: fg, cScaleLabel7: fg,
+        fontFamily: '"Pretendard Variable", Pretendard, Inter, -apple-system, sans-serif',
+        fontSize: '14px',
+      },
+      flowchart: {
+        padding: 24,
+        nodeSpacing: 54,
+        rankSpacing: 68,
+        htmlLabels: true,
+        wrappingWidth: 220,
+        curve: 'basis',
+      },
+      sequence: {
+        boxMargin: 14,
+        noteMargin: 14,
+        messageMargin: 42,
+      },
+      gantt: {
+        barHeight: 28,
+        barGap: 8,
+        topPadding: 60,
+        leftPadding: 90,
+        sidePadding: 40,
+        fontSize: 13,
+        sectionFontSize: 14,
+        gridLineStartPadding: 35,
+        titleTopMargin: 24,
+        numberSectionStyles: 4,
+      },
+      pie: {
+        textPosition: 0.6,
+      },
+    });
+
+    await document.fonts.ready;
+    await mermaid.run();
+  </script>
+</body>
+</html>

@@ -1,0 +1,27 @@
+# Decisions
+
+- background Session 실행은 spawn/send/wake별 복제 대신 `runSessionTurnStream` 하나를 사용한다.
+- runner는 실행 mechanics만 소유한다. 권한, durable turn 등록, report delivery와 queue 정책은 호출자가 주입한다.
+- iterator의 첫 `next()` 호출 직후를 runner 시작 acknowledgement 경계로 유지한다.
+- `engine_done`이나 iterator 종료만으로 durable 완료를 추론하지 않는다. 호출자가 Tower terminal event를 해석한다.
+- 신규 barrel `index.ts`는 만들지 않고 public implementation을 직접 import한다.
+- PostgreSQL의 `agent_messages`와 `agent_message_deliveries`가 향후 durability 정본이며 WebSocket/process notification은 notify-only로 둔다.
+- message acceptance와 최초 pending delivery 생성은 한 transaction으로 처리한다.
+- shadow 저장 API 검증과 실제 전달 authority 전환을 분리해 rollback 범위를 작게 유지한다.
+- 기존 send는 legacy user message 저장 뒤 durable envelope을 best-effort로 기록한다. shadow 실패가 기존 send 성공 계약을 깨지 않으며 warning으로 관측한다.
+- shadow `operation_id`는 기존 recipient user message ID를 사용해 같은 접수의 재시도를 식별한다. 별도 caller idempotency가 public contract에 들어오기 전까지 의미 중복 제거를 추론하지 않는다.
+- child completion report는 callback의 stable `spawn_id`를 operation/correlation identity로 사용한다. callback 재시도는 같은 durable report를 재사용한다.
+- completion shadow는 legacy inject/wake 전에 기록하지만 best-effort helper 내부에서 실패를 흡수한다. 따라서 callback consumption과 wake start acknowledgement 계약은 변하지 않는다.
+- delivery shadow state는 legacy 경로에서 직접 관측한 사실만 기록한다. steer 수락은 `injected_active`, runner start acknowledgement는 `started_turn`; 이들을 응답 완료로 과대해석하지 않는다.
+- settlement도 best-effort다. shadow DB 오류가 실제 delivery 성공을 실패로 바꾸거나 callback retry를 유발하지 않는다.
+- controller claim은 recipient별 oldest-due ordering과 `FOR UPDATE SKIP LOCKED`를 사용한다.
+- claim mutation은 random owner token과 server boot identity 둘 다로 fencing한다. stale worker는 renew·settle할 수 없다.
+- lease store 추가만으로 실행 authority를 이전하지 않는다. 자동 claim loop나 legacy adapter 제거는 별도 검증된 단계다.
+- controller는 한 호출당 delivery 하나만 처리한다. batch fairness와 정지는 호출자가 통제한다.
+- policy와 delivery adapter는 dependency injection으로 분리한다. 기본 adapter는 실행 대신 `needs_attention`을 반환해 무권한 소비를 막는다.
+- 재시작 시 이전 boot의 `claimed` delivery는 자동 재실행하지 않는다. 결과가 불명확한 외부 side effect의 중복 방지가 전달 완료보다 우선이며 `ambiguous_after_restart`로 격리한다.
+- pump의 startup/tick/doorbell은 모두 fenced claim API를 사용한다. timer와 WebSocket은 탐색 신호일 뿐 PostgreSQL 상태를 대신하지 않는다.
+- 기존 send RPC는 public start-ack latency 계약을 보존한다. durable acceptance 직후 delivery ID를 직접 claim하고 background run이 terminal settle하므로 caller가 전체 turn 종료를 기다리지 않는다.
+- active Pi steer는 steer 수락 시 delivery를 completed로 본다. steer된 turn의 최종 응답 lifecycle은 기존 active run/callback authority가 계속 소유한다.
+- completion report는 durable claim → legacy inject/wake acceptance → fenced completed → callback consume 순서를 지킨다. inject/wake 실패 시 callback은 미소비되어 기존 retry 복구가 가능하고, 이전 boot claim은 자동 replay 대신 격리된다.
+- startup recovery는 acceptance 후 claim 전 장애로 남은 pending/retry_wait만 재실행한다. 기존 user message/root turn을 재사용해 대화에 중복 메시지를 삽입하지 않으며, claimed 상태는 절대 자동 replay하지 않는다.

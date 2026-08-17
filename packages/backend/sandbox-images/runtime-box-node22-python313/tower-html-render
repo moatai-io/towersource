@@ -1,0 +1,156 @@
+#!/usr/bin/env bash
+# tower-html-render — deterministic high-quality HTML renderer for Project Runtime Box.
+#
+# Why this exists:
+#   Ad-hoc `chromium --screenshot` invocations often default to 1x DPR, missing
+#   paint settling, and inconsistent profile dirs. That makes otherwise-good UI
+#   artifacts look low quality during AI visual review. This wrapper gives agents
+#   one stable preset for PNG screenshots and PDF export inside /workspace.
+#
+# Usage:
+#   tower-html-render input.html output.png [--width 1440 --height 900 --scale 2 --wait-ms 1000]
+#   tower-html-render input.html output.pdf [--wait-ms 1000]
+
+set -euo pipefail
+
+usage() {
+  cat >&2 <<'EOF'
+Usage:
+  tower-html-render input.html output.png [--width 1440 --height 900 --scale 2 --wait-ms 1000]
+  tower-html-render input.html output.pdf [--wait-ms 1000]
+
+Defaults are tuned for AI visual review: 1440x900 viewport, 2x device scale,
+paint settling, isolated Chromium profile, no headers for PDFs.
+EOF
+}
+
+if [[ $# -lt 2 ]]; then
+  usage
+  exit 2
+fi
+
+INPUT="$1"
+OUTPUT="$2"
+shift 2
+
+WIDTH=1440
+HEIGHT=900
+SCALE=2
+WAIT_MS=1000
+FULL_PAGE=0
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --width)
+      WIDTH="${2:-}"; shift 2 ;;
+    --height)
+      HEIGHT="${2:-}"; shift 2 ;;
+    --scale|--device-scale-factor)
+      SCALE="${2:-}"; shift 2 ;;
+    --wait-ms|--virtual-time-budget)
+      WAIT_MS="${2:-}"; shift 2 ;;
+    --full-page)
+      FULL_PAGE=1; shift ;;
+    -h|--help)
+      usage; exit 0 ;;
+    *)
+      echo "tower-html-render: unknown option: $1" >&2
+      usage
+      exit 2 ;;
+  esac
+done
+
+if [[ ! -f "$INPUT" ]]; then
+  echo "tower-html-render: input not found: $INPUT" >&2
+  exit 1
+fi
+
+case "${OUTPUT,,}" in
+  *.png|*.jpg|*.jpeg|*.webp|*.pdf) ;;
+  *)
+    echo "tower-html-render: output must end with .png, .jpg, .jpeg, .webp, or .pdf" >&2
+    exit 2 ;;
+esac
+
+CHROME=""
+for candidate in "${CHROMIUM_PATH:-}" chromium chromium-browser google-chrome; do
+  [[ -n "$candidate" ]] || continue
+  if command -v "$candidate" >/dev/null 2>&1; then
+    CHROME="$(command -v "$candidate")"
+    break
+  elif [[ -x "$candidate" ]]; then
+    CHROME="$candidate"
+    break
+  fi
+done
+
+if [[ -z "$CHROME" ]]; then
+  echo "tower-html-render: Chromium not found" >&2
+  exit 1
+fi
+
+mkdir -p "$(dirname "$OUTPUT")"
+PROFILE_DIR="${TMPDIR:-/tmp}/tower-html-render-profile-${RANDOM}-$$"
+mkdir -p "$PROFILE_DIR"
+cleanup() { rm -rf "$PROFILE_DIR"; }
+trap cleanup EXIT
+
+FILE_URL="$(python3 - "$INPUT" <<'PY'
+import pathlib, sys
+print(pathlib.Path(sys.argv[1]).resolve().as_uri())
+PY
+)"
+
+COMMON_ARGS=(
+  "--headless=new"
+  "--disable-gpu"
+  "--no-sandbox"
+  "--disable-dev-shm-usage"
+  "--hide-scrollbars"
+  "--run-all-compositor-stages-before-draw"
+  "--user-data-dir=$PROFILE_DIR"
+  "--virtual-time-budget=$WAIT_MS"
+  "--font-render-hinting=medium"
+)
+
+if [[ "${OUTPUT,,}" == *.pdf ]]; then
+  "$CHROME" \
+    "${COMMON_ARGS[@]}" \
+    "--print-to-pdf-no-header" \
+    "--print-to-pdf=$OUTPUT" \
+    "$FILE_URL" >/tmp/tower-html-render.out 2>/tmp/tower-html-render.err || {
+      cat /tmp/tower-html-render.err >&2 || true
+      exit 1
+    }
+else
+  EXTRA_ARGS=(
+    "--window-size=${WIDTH},${HEIGHT}"
+    "--force-device-scale-factor=${SCALE}"
+    "--screenshot=$OUTPUT"
+  )
+  if [[ "$FULL_PAGE" == "1" ]]; then
+    # Chromium's native CLI does not provide true full-page screenshots. Keeping
+    # this flag accepted lets future Playwright-backed implementations preserve
+    # the same interface without breaking callers.
+    :
+  fi
+  "$CHROME" \
+    "${COMMON_ARGS[@]}" \
+    "${EXTRA_ARGS[@]}" \
+    "$FILE_URL" >/tmp/tower-html-render.out 2>/tmp/tower-html-render.err || {
+      cat /tmp/tower-html-render.err >&2 || true
+      exit 1
+    }
+fi
+
+if [[ ! -s "$OUTPUT" ]]; then
+  echo "tower-html-render: renderer produced an empty output: $OUTPUT" >&2
+  exit 1
+fi
+
+python3 - "$OUTPUT" <<'PY'
+import os, sys
+p = sys.argv[1]
+print(f"rendered={p}")
+print(f"bytes={os.path.getsize(p)}")
+PY

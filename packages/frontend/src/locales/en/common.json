@@ -1,0 +1,84 @@
+{
+  "save": "Save",
+  "cancel": "Cancel",
+  "delete": "Delete",
+  "create": "Create",
+  "remove": "Remove",
+  "retry": "Retry",
+  "send": "Send",
+  "stop": "Stop",
+  "copy": "Copy",
+  "copied": "Copied",
+  "close": "Close",
+  "search": "Search",
+  "share": "Share",
+  "edit": "Edit",
+  "rename": "Rename",
+  "confirm": "Confirm",
+  "back": "Back",
+  "add": "Add",
+  "update": "Update",
+  "on": "ON",
+  "off": "OFF",
+  "loading": "Loading...",
+  "processing": "Processing...",
+  "uploading": "Uploading...",
+  "creating": "Creating...",
+  "saving": "Saving...",
+  "generating": "Generating...",
+  "restoring": "Restoring...",
+  "somethingWentWrong": "Something went wrong",
+  "errorDetails": "Error details",
+  "error": "Error",
+  "offline": "You are offline. Please check your internet connection.",
+  "noProject": "No project",
+  "justNow": "just now",
+  "minAgo": "min ago",
+  "hrAgo": "hr ago",
+  "dAgo": "d ago",
+  "expired": "Expired",
+  "hoursRemaining": "hours remaining",
+  "minutesRemaining": "minutes remaining",
+  "you": "(you)",
+  "howItWorks": "How it works",
+  "default": "default",
+  "active": "active",
+  "none": "None",
+  "failed": "Failed",
+  "description": "Description",
+  "aiServices": {
+    "status": {
+      "active": "Published externally",
+      "review": "Preparing to publish",
+      "paused": "Paused",
+      "draft": "Preparing to publish"
+    },
+    "exposure": {
+      "disabled": "External website access disabled",
+      "password": "Password protected",
+      "loginRequired": "Login required",
+      "publicActive": "Public website active",
+      "linkActive": "Share-link website active",
+      "active": "Website preparing",
+      "review": "Preparing external deployment",
+      "paused": "Website paused",
+      "notPublished": "Not published externally yet"
+    }
+  },
+  "challenge": {
+    "statusText": {
+      "done": "Done",
+      "left": "{{count}} left"
+    },
+    "status": {
+      "resolved": "Completed",
+      "waiting": "Needs review",
+      "active": "In progress"
+    },
+    "action": {
+      "viewResult": "View the conversation with results",
+      "review": "Review and decide",
+      "continue": "Continue working"
+    }
+  }
+}

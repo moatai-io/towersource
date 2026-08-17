@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">Tower</title>
+  <desc id="desc">Tower favicon: a static shaded teal isometric stack with light and dark color modes.</desc>
+  <style>
+    :root {
+      --tower-top: #14B8A6;
+      --tower-main: #0D9488;
+      --tower-side: #115E59;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --tower-top: #5EEAD4;
+        --tower-main: #14B8A6;
+        --tower-side: #0F766E;
+      }
+    }
+  </style>
+  <g>
+    <path fill="var(--tower-top)" d="M256 50 L436 135 L256 220 L76 135Z"/>
+    <path fill="var(--tower-side)" d="M76 187 L256 272 L256 324 L76 239Z"/>
+    <path fill="var(--tower-main)" d="M256 272 L436 187 L436 239 L256 324Z"/>
+    <path fill="var(--tower-side)" d="M76 291 L256 376 L256 428 L76 343Z"/>
+    <path fill="var(--tower-main)" d="M256 376 L436 291 L436 343 L256 428Z"/>
+  </g>
+</svg>

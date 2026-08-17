@@ -1,0 +1,23 @@
+{
+  "bumpFiles": [
+    { "filename": "package.json", "type": "json" },
+    { "filename": "packages/backend/package.json", "type": "json" },
+    { "filename": "packages/frontend/package.json", "type": "json" },
+    { "filename": "packages/shared/package.json", "type": "json" }
+  ],
+  "header": "# Tower Changelog\n\nAll notable changes are generated from Conventional Commits.\nFor user-facing highlights, see `packages/frontend/src/data/changelog.ts`.\n",
+  "types": [
+    { "type": "feat",     "section": "✨ Features" },
+    { "type": "fix",      "section": "🐛 Bug Fixes" },
+    { "type": "perf",     "section": "⚡ Performance" },
+    { "type": "ops",      "section": "🛠 Ops / Infra" },
+    { "type": "docs",     "section": "📝 Docs" },
+    { "type": "refactor", "hidden": true },
+    { "type": "test",     "hidden": true },
+    { "type": "chore",    "hidden": true },
+    { "type": "style",    "hidden": true }
+  ],
+  "commitUrlFormat": "{{host}}/{{owner}}/{{repository}}/commit/{{hash}}",
+  "compareUrlFormat": "{{host}}/{{owner}}/{{repository}}/compare/{{previousTag}}...{{currentTag}}",
+  "releaseCommitMessageFormat": "chore(release): {{currentTag}}"
+}

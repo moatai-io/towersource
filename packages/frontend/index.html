@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, interactive-widget=resizes-content" />
+    <title>Tower</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="icon" type="image/png" href="/favicon-32.png" sizes="32x32" />
+    <link rel="icon" type="image/png" href="/pwa-192x192.png" sizes="192x192" />
+    <meta name="theme-color" content="#0d9488" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Tower" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
+    <link rel="preload" href="/fonts/PretendardVariable.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href="https://cdn.jsdelivr.net/gh/JetBrains/JetBrainsMono@2.304/fonts/webfonts/JetBrainsMono-Regular.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href="https://cdn.jsdelivr.net/gh/JetBrains/JetBrainsMono@2.304/fonts/webfonts/JetBrainsMono-Medium.woff2" as="font" type="font/woff2" crossorigin />
+    <style>
+      @font-face {
+        font-family: 'JetBrains Mono';
+        src: url('https://cdn.jsdelivr.net/gh/JetBrains/JetBrainsMono@2.304/fonts/webfonts/JetBrainsMono-Regular.woff2') format('woff2');
+        font-weight: 400;
+        font-style: normal;
+        font-display: swap;
+      }
+      @font-face {
+        font-family: 'JetBrains Mono';
+        src: url('https://cdn.jsdelivr.net/gh/JetBrains/JetBrainsMono@2.304/fonts/webfonts/JetBrainsMono-Medium.woff2') format('woff2');
+        font-weight: 500;
+        font-style: normal;
+        font-display: swap;
+      }
+    </style>
+  </head>
+  <body class="text-gray-100" style="font-family: 'Pretendard Variable', Pretendard, -apple-system, BlinkMacSystemFont, system-ui, Roboto, 'Helvetica Neue', sans-serif; background-color: var(--th-bg-primary);">
+    <script>
+      // Apply saved theme & font size immediately to prevent flash
+      (function() {
+        var t = localStorage.getItem('theme');
+        if (!t) t = window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+        document.documentElement.setAttribute('data-theme', t);
+        var fs = localStorage.getItem('tower:font-size');
+        if (fs) document.documentElement.setAttribute('data-font-size', fs);
+      })();
+      // PWA service worker is managed by vite-plugin-pwa (registerType: 'autoUpdate')
+      // Do NOT unregister here — it kills the PWA install prompt & offline caching
+
+      // Boot watchdog: recover once when an old service worker/runtime cache
+      // leaves the page stuck on the static Loading fallback. Healthy mounted
+      // tabs are never reloaded by this path.
+      (function() {
+        if (location.search.indexOf('reset-sw') !== -1 || location.search.indexOf('reset-client') !== -1) return;
+        var guardKey = 'tower:boot-recovery-ts';
+        var lastRecovery = parseInt(sessionStorage.getItem(guardKey) || '0', 10);
+
+        function isRecoverableBootError(value) {
+          var message = value && (value.message || value.reason && value.reason.message || String(value.reason || value)) || '';
+          return /dynamically imported module|module script|ChunkLoadError|Loading chunk|Failed to fetch/i.test(message);
+        }
+
+        function recoverOnce(reason) {
+          if (document.documentElement.hasAttribute('data-app-mounted')) return;
+          if (lastRecovery && Date.now() - lastRecovery < 60000) return;
+          lastRecovery = Date.now();
+          sessionStorage.setItem(guardKey, String(lastRecovery));
+          sessionStorage.setItem('tower:reload-reason', reason);
+
+          var cleanup = Promise.resolve();
+          if ('caches' in window) {
+            cleanup = caches.keys().then(function(keys) {
+              return Promise.all(keys.filter(function(key) {
+                return key.indexOf('js-runtime-cache') !== -1 || key.indexOf('workbox-precache') === 0;
+              }).map(function(key) { return caches.delete(key); }));
+            });
+          }
+          cleanup.catch(function() {}).then(function() {
+            var url = new URL(location.href);
+            url.searchParams.set('__tower_reload', String(Date.now()));
+            location.replace(url.toString());
+          });
+        }
+
+        window.addEventListener('error', function(event) {
+          if (isRecoverableBootError(event.error || event.message)) recoverOnce('boot-script-error');
+        });
+        window.addEventListener('unhandledrejection', function(event) {
+          if (isRecoverableBootError(event)) recoverOnce('boot-promise-error');
+        });
+        setTimeout(function() {
+          if (!document.documentElement.hasAttribute('data-app-mounted')) recoverOnce('boot-timeout');
+        }, 10000);
+      })();
+
+      // Escape hatch: if the user lands on /?reset-sw, unregister every SW and
+      // wipe every Cache, then redirect home. This is the manual recovery path
+      // for users whose old cached SW got stuck and refused to upgrade — a real
+      // observed failure mode on iOS Chrome (WKWebView) when the precache hit
+      // the WebKit Cache quota and new SW install() began failing silently.
+      // Inline so it runs even when the main bundle never loads.
+      // Usage: paste tower.tower.example.com/?reset-sw into the address bar once.
+      (function() {
+        if (location.search.indexOf('reset-sw') === -1) return;
+        if (!('serviceWorker' in navigator)) { location.replace('/'); return; }
+        navigator.serviceWorker.getRegistrations()
+          .then(function(regs) { return Promise.all(regs.map(function(r) { return r.unregister(); })); })
+          .then(function() {
+            if (!('caches' in window)) return;
+            return caches.keys().then(function(keys) {
+              return Promise.all(keys.map(function(k) { return caches.delete(k); }));
+            });
+          })
+          .then(function() { location.replace('/'); })
+          .catch(function() { location.replace('/'); });
+      })();
+    </script>
+    <div id="root">
+      <!-- Fallback shown before JS loads (or if JS fails) -->
+      <div style="min-height:100vh;display:flex;align-items:center;justify-content:center;flex-direction:column;">
+        <div style="color:#f59e0b;font-size:1.25rem;font-weight:bold;">Tower</div>
+        <div style="color:#7888a0;font-size:0.875rem;margin-top:0.5rem;">Loading...</div>
+      </div>
+    </div>
+    <noscript><div style="padding:2rem;text-align:center;color:#f59e0b;">JavaScript is required to use Tower.</div></noscript>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

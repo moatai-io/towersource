@@ -1,0 +1,640 @@
+#!/usr/bin/env python3
+"""
+build_from_yaml.py — Build a .pptx from YAML data.
+
+Usage:
+    python3 build_from_yaml.py --data data.yaml --out output.pptx [--template template.pptx]
+
+v0.1: pure code rendering (no template file needed). Each `layout` in yaml maps to a
+render_<layout>() function that draws shapes on a blank slide using theme tokens.
+v0.2 will support `--template` (user's brand .pptx).
+"""
+
+import argparse
+import sys
+import difflib
+from pathlib import Path
+
+try:
+    import yaml
+except ImportError:
+    print("ERROR: pyyaml not installed. Run: pip install pyyaml", file=sys.stderr)
+    sys.exit(2)
+
+try:
+    from pptx import Presentation
+    from pptx.util import Inches, Pt, Emu
+    from pptx.dml.color import RGBColor
+    from pptx.enum.text import PP_ALIGN, MSO_ANCHOR
+    from pptx.enum.shapes import MSO_SHAPE
+    from pptx.oxml.ns import qn
+    from lxml import etree
+except ImportError:
+    print("ERROR: python-pptx not installed. Run: pip install python-pptx", file=sys.stderr)
+    sys.exit(2)
+
+
+# ----------------------------- Theme -----------------------------
+
+DEFAULT_THEME = {
+    "primary": "1F3A68",   # 네이비
+    "accent":  "F5A623",   # 오렌지
+    "text":    "222222",
+    "muted":   "6B7280",
+    "bg":      "FFFFFF",
+    "panel":   "F5F7FA",
+    "font":    "Noto Sans CJK KR",
+}
+
+
+def hex_to_rgb(s):
+    s = s.lstrip("#")
+    return RGBColor.from_string(s)
+
+
+def normalize_theme(t):
+    out = dict(DEFAULT_THEME)
+    if t:
+        for k, v in t.items():
+            out[k] = v
+    return out
+
+
+# ----------------------------- Helpers -----------------------------
+
+SLIDE_W = Inches(13.333)   # 16:9
+SLIDE_H = Inches(7.5)
+
+
+def set_slide_size(prs):
+    prs.slide_width = SLIDE_W
+    prs.slide_height = SLIDE_H
+
+
+def add_blank_slide(prs):
+    """Use the first 'blank' layout (last in default master)."""
+    # python-pptx default master has Blank as layout index 6
+    blank = prs.slide_layouts[6]
+    return prs.slides.add_slide(blank)
+
+
+def fill_bg(slide, hex_color):
+    bg = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, 0, 0, SLIDE_W, SLIDE_H)
+    bg.fill.solid()
+    bg.fill.fore_color.rgb = hex_to_rgb(hex_color)
+    bg.line.fill.background()  # no border
+    # Send to back so other shapes draw on top
+    sp = bg._element
+    sp.getparent().remove(sp)
+    sp_tree = slide.shapes._spTree
+    sp_tree.insert(2, sp)  # right after nvGrpSpPr/grpSpPr
+    return bg
+
+
+def add_text(slide, left, top, width, height, text, *,
+             font_name="Noto Sans CJK KR", size=18, bold=False,
+             color="222222", align=None, anchor=None):
+    """Add a textbox with single-paragraph styled text."""
+    box = slide.shapes.add_textbox(left, top, width, height)
+    tf = box.text_frame
+    tf.word_wrap = True
+    if anchor is not None:
+        tf.vertical_anchor = anchor
+    p = tf.paragraphs[0]
+    if align is not None:
+        p.alignment = align
+    run = p.add_run()
+    run.text = text
+    run.font.name = font_name
+    run.font.size = Pt(size)
+    run.font.bold = bold
+    run.font.color.rgb = hex_to_rgb(color)
+    return box
+
+
+def _apply_native_bullet(paragraph, char="•", bullet_color_hex=None,
+                          marL_pt=24, indent_pt=24):
+    """Attach a native PPTX bullet to a paragraph via <a:pPr>.
+
+    Why native instead of "• " prefix in text:
+      - prefix's space width depends on next glyph (Korean vs ASCII vs digits)
+        in proportional fonts → bullets visually misalign across rows
+      - native bullet sits at marL-indent, text at marL — guaranteed alignment
+
+    marL_pt: left margin where TEXT starts (pt)
+    indent_pt: first-line indent — bullet sits at (marL - indent), text at marL.
+               Use indent == marL for hanging bullet at x=0.
+    """
+    p_elem = paragraph._p
+    pPr = p_elem.find(qn("a:pPr"))
+    if pPr is None:
+        pPr = p_elem.makeelement(qn("a:pPr"), {})
+        p_elem.insert(0, pPr)
+
+    EMU_PER_PT = 12700
+    pPr.set("marL", str(int(marL_pt * EMU_PER_PT)))
+    pPr.set("indent", str(int(-indent_pt * EMU_PER_PT)))
+
+    # Strip any existing bullet definitions
+    for tag in ("a:buNone", "a:buChar", "a:buAutoNum",
+                "a:buFont", "a:buClr", "a:buSzPct", "a:buSzPts"):
+        for el in pPr.findall(qn(tag)):
+            pPr.remove(el)
+
+    # Order in pPr children: ... buClr → buFont → buChar
+    if bullet_color_hex:
+        buClr = etree.SubElement(pPr, qn("a:buClr"))
+        srgb = etree.SubElement(buClr, qn("a:srgbClr"))
+        srgb.set("val", bullet_color_hex.lstrip("#").upper())
+    buFont = etree.SubElement(pPr, qn("a:buFont"))
+    buFont.set("typeface", "Arial")
+    buChar = etree.SubElement(pPr, qn("a:buChar"))
+    buChar.set("char", char)
+
+
+def add_bullets_box(slide, left, top, width, height, bullets, *,
+                    font_name="Noto Sans CJK KR", size=22, color="222222",
+                    bullet_color=None):
+    """Bulleted text box with native PPTX bullets (alignment-stable)."""
+    box = slide.shapes.add_textbox(left, top, width, height)
+    tf = box.text_frame
+    tf.word_wrap = True
+    for i, item in enumerate(bullets):
+        p = tf.paragraphs[0] if i == 0 else tf.add_paragraph()
+        p.alignment = PP_ALIGN.LEFT
+        run = p.add_run()
+        run.text = str(item)
+        run.font.name = font_name
+        run.font.size = Pt(size)
+        run.font.color.rgb = hex_to_rgb(color)
+        p.space_after = Pt(8)
+        _apply_native_bullet(p, char="•", bullet_color_hex=bullet_color)
+    return box
+
+
+def add_rect(slide, left, top, width, height, fill_hex, line_hex=None):
+    rect = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, left, top, width, height)
+    rect.fill.solid()
+    rect.fill.fore_color.rgb = hex_to_rgb(fill_hex)
+    if line_hex is None:
+        rect.line.fill.background()
+    else:
+        rect.line.color.rgb = hex_to_rgb(line_hex)
+        rect.line.width = Pt(0.75)
+    return rect
+
+
+# ----------------------------- Layouts -----------------------------
+
+def render_title(slide, data, theme, meta):
+    fill_bg(slide, theme["primary"])
+    # Accent bar on the left
+    add_rect(slide, Inches(0), Inches(2.6), Inches(0.4), Inches(2.3), theme["accent"])
+
+    title = data.get("title", meta.get("title", ""))
+    subtitle = data.get("subtitle", meta.get("subtitle", ""))
+    presenter = data.get("presenter", meta.get("presenter", ""))
+    date = data.get("date", meta.get("date", ""))
+
+    add_text(slide, Inches(1.0), Inches(2.5), Inches(11.5), Inches(1.3),
+             title, font_name=theme["font"], size=54, bold=True, color="FFFFFF",
+             align=PP_ALIGN.LEFT, anchor=MSO_ANCHOR.MIDDLE)
+    if subtitle:
+        add_text(slide, Inches(1.0), Inches(3.8), Inches(11.5), Inches(0.7),
+                 subtitle, font_name=theme["font"], size=24, color="C9D5E8",
+                 align=PP_ALIGN.LEFT)
+    foot = " · ".join(filter(None, [presenter, date]))
+    if foot:
+        add_text(slide, Inches(1.0), Inches(6.5), Inches(11.5), Inches(0.5),
+                 foot, font_name=theme["font"], size=14, color="9AA8C2",
+                 align=PP_ALIGN.LEFT)
+
+
+def render_section(slide, data, theme, meta):
+    fill_bg(slide, theme["bg"])
+    number = data.get("number", "")
+    title = data.get("title", "")
+    caption = data.get("caption", "")
+
+    if number:
+        add_text(slide, Inches(0.8), Inches(1.0), Inches(6.0), Inches(3.5),
+                 str(number), font_name=theme["font"], size=200, bold=True,
+                 color=theme["accent"], align=PP_ALIGN.LEFT, anchor=MSO_ANCHOR.MIDDLE)
+    add_text(slide, Inches(0.8), Inches(4.5), Inches(11.5), Inches(1.2),
+             title, font_name=theme["font"], size=44, bold=True,
+             color=theme["primary"], align=PP_ALIGN.LEFT)
+    if caption:
+        add_text(slide, Inches(0.8), Inches(5.7), Inches(11.5), Inches(0.7),
+                 caption, font_name=theme["font"], size=20, color=theme["muted"],
+                 align=PP_ALIGN.LEFT)
+
+
+def render_bullets(slide, data, theme, meta):
+    fill_bg(slide, theme["bg"])
+    title = data.get("title", "")
+    bullets = data.get("bullets", [])
+    caption = data.get("caption", "")
+
+    # Title bar
+    add_rect(slide, Inches(0.8), Inches(0.6), Inches(0.15), Inches(0.7), theme["accent"])
+    add_text(slide, Inches(1.1), Inches(0.5), Inches(11.0), Inches(0.9),
+             title, font_name=theme["font"], size=32, bold=True,
+             color=theme["primary"], align=PP_ALIGN.LEFT, anchor=MSO_ANCHOR.MIDDLE)
+    # Bullets
+    bsize = 22 if len(bullets) <= 6 else 18
+    add_bullets_box(slide, Inches(1.1), Inches(1.7), Inches(11.0), Inches(5.0),
+                    bullets, font_name=theme["font"], size=bsize, color=theme["text"],
+                    bullet_color=theme["accent"])
+    if caption:
+        add_text(slide, Inches(1.1), Inches(6.8), Inches(11.0), Inches(0.4),
+                 caption, font_name=theme["font"], size=12, color=theme["muted"],
+                 align=PP_ALIGN.LEFT)
+
+
+def render_comparison(slide, data, theme, meta):
+    fill_bg(slide, theme["bg"])
+    title = data.get("title", "")
+    columns = data.get("columns", [])
+    rows = data.get("rows", [])
+
+    add_rect(slide, Inches(0.8), Inches(0.6), Inches(0.15), Inches(0.7), theme["accent"])
+    add_text(slide, Inches(1.1), Inches(0.5), Inches(11.0), Inches(0.9),
+             title, font_name=theme["font"], size=32, bold=True,
+             color=theme["primary"], align=PP_ALIGN.LEFT, anchor=MSO_ANCHOR.MIDDLE)
+
+    if not columns or not rows:
+        return
+
+    n_cols = len(columns)
+    n_rows = len(rows) + 1  # header
+    table_left = Inches(0.8)
+    table_top = Inches(1.7)
+    table_width = Inches(11.7)
+    table_height = Inches(5.2)
+
+    # python-pptx native table
+    shape = slide.shapes.add_table(n_rows, n_cols, table_left, table_top,
+                                    table_width, table_height)
+    tbl = shape.table
+
+    # Column widths: first col 35%, rest equal
+    if n_cols >= 2:
+        tbl.columns[0].width = Inches(4.0)
+        rest = (table_width.inches - 4.0) / (n_cols - 1)
+        for j in range(1, n_cols):
+            tbl.columns[j].width = Inches(rest)
+
+    # Header row
+    for j, h in enumerate(columns):
+        cell = tbl.cell(0, j)
+        cell.fill.solid()
+        cell.fill.fore_color.rgb = hex_to_rgb(theme["primary"])
+        tf = cell.text_frame
+        p = tf.paragraphs[0]
+        p.alignment = PP_ALIGN.LEFT if j == 0 else PP_ALIGN.CENTER
+        run = p.add_run()
+        run.text = str(h)
+        run.font.name = theme["font"]
+        run.font.size = Pt(18)
+        run.font.bold = True
+        run.font.color.rgb = hex_to_rgb("FFFFFF")
+
+    # Body rows
+    for i, row in enumerate(rows, start=1):
+        for j, val in enumerate(row):
+            cell = tbl.cell(i, j)
+            cell.fill.solid()
+            cell.fill.fore_color.rgb = hex_to_rgb(theme["panel"] if i % 2 == 1 else theme["bg"])
+            tf = cell.text_frame
+            p = tf.paragraphs[0]
+            p.alignment = PP_ALIGN.LEFT if j == 0 else PP_ALIGN.CENTER
+            run = p.add_run()
+            run.text = str(val)
+            run.font.name = theme["font"]
+            run.font.size = Pt(16)
+            # Smart coloring: O = accent, X = muted
+            if j > 0 and str(val).strip() in ("O", "○", "✓"):
+                run.font.bold = True
+                run.font.color.rgb = hex_to_rgb(theme["accent"])
+            elif j > 0 and str(val).strip() in ("X", "×", "✗"):
+                run.font.color.rgb = hex_to_rgb(theme["muted"])
+            else:
+                run.font.color.rgb = hex_to_rgb(theme["text"])
+
+
+def render_closing(slide, data, theme, meta):
+    fill_bg(slide, theme["primary"])
+    add_rect(slide, Inches(0), Inches(2.6), Inches(0.4), Inches(2.3), theme["accent"])
+
+    title = data.get("title", "감사합니다")
+    bullets = data.get("bullets", [])
+    contact = data.get("contact", {}) or {}
+
+    add_text(slide, Inches(1.0), Inches(0.7), Inches(11.5), Inches(1.0),
+             title, font_name=theme["font"], size=44, bold=True, color="FFFFFF",
+             align=PP_ALIGN.LEFT, anchor=MSO_ANCHOR.MIDDLE)
+    if bullets:
+        add_bullets_box(slide, Inches(1.0), Inches(2.0), Inches(11.5), Inches(3.0),
+                        bullets, font_name=theme["font"], size=22, color="E5EDFA",
+                        bullet_color=theme["accent"])
+
+    # Contact card
+    if contact:
+        cw, ch = Inches(8.0), Inches(1.4)
+        cx, cy = Inches(1.0), Inches(5.5)
+        add_rect(slide, cx, cy, cw, ch, "FFFFFF")
+        lines = []
+        if contact.get("name"):
+            lines.append(contact["name"])
+        if contact.get("email"):
+            lines.append(contact["email"])
+        if contact.get("phone"):
+            lines.append(contact["phone"])
+        text = "\n".join(lines)
+        # Multi-line in one box: use add_paragraph
+        box = slide.shapes.add_textbox(cx + Inches(0.3), cy + Inches(0.15),
+                                       cw - Inches(0.6), ch - Inches(0.3))
+        tf = box.text_frame
+        tf.word_wrap = True
+        for i, line in enumerate(lines):
+            p = tf.paragraphs[0] if i == 0 else tf.add_paragraph()
+            run = p.add_run()
+            run.text = line
+            run.font.name = theme["font"]
+            run.font.size = Pt(16) if i > 0 else Pt(20)
+            run.font.bold = (i == 0)
+            run.font.color.rgb = hex_to_rgb(theme["primary"] if i == 0 else theme["text"])
+
+
+def _draw_title_bar(slide, theme, title):
+    """Shared header treatment for content slides: orange tab + title."""
+    add_rect(slide, Inches(0.8), Inches(0.6), Inches(0.15), Inches(0.7), theme["accent"])
+    add_text(slide, Inches(1.1), Inches(0.5), Inches(11.0), Inches(0.9),
+             title, font_name=theme["font"], size=32, bold=True,
+             color=theme["primary"], align=PP_ALIGN.LEFT, anchor=MSO_ANCHOR.MIDDLE)
+
+
+def render_kpi(slide, data, theme, meta):
+    """Big-number cards in a row. items: [{value, label, desc?}]"""
+    fill_bg(slide, theme["bg"])
+    title = data.get("title", "")
+    items = data.get("items", []) or []
+    caption = data.get("caption", "")
+
+    _draw_title_bar(slide, theme, title)
+    if not items:
+        return
+
+    n = min(len(items), 4)
+    items = items[:4]
+    # Layout area: x=0.8 to 12.5 (width 11.7)
+    gap = 0.3
+    total_w = 11.7
+    card_w = (total_w - gap * (n - 1)) / n
+    top = 2.0
+    height = 3.6
+
+    for i, it in enumerate(items):
+        x = 0.8 + i * (card_w + gap)
+        # Card background
+        add_rect(slide, Inches(x), Inches(top), Inches(card_w), Inches(height),
+                 theme["panel"])
+        # Top accent bar
+        add_rect(slide, Inches(x), Inches(top), Inches(card_w), Inches(0.12),
+                 theme["accent"])
+        # Big value
+        add_text(slide, Inches(x), Inches(top + 0.5),
+                 Inches(card_w), Inches(1.6),
+                 str(it.get("value", "")), font_name=theme["font"],
+                 size=64, bold=True, color=theme["primary"],
+                 align=PP_ALIGN.CENTER, anchor=MSO_ANCHOR.MIDDLE)
+        # Label
+        add_text(slide, Inches(x), Inches(top + 2.0),
+                 Inches(card_w), Inches(0.5),
+                 str(it.get("label", "")), font_name=theme["font"],
+                 size=18, bold=True, color=theme["text"],
+                 align=PP_ALIGN.CENTER)
+        # Description (optional)
+        desc = it.get("desc", "")
+        if desc:
+            add_text(slide, Inches(x + 0.2), Inches(top + 2.55),
+                     Inches(card_w - 0.4), Inches(0.9),
+                     str(desc), font_name=theme["font"],
+                     size=13, color=theme["muted"],
+                     align=PP_ALIGN.CENTER)
+
+    if caption:
+        add_text(slide, Inches(0.8), Inches(6.7), Inches(11.7), Inches(0.4),
+                 caption, font_name=theme["font"], size=12,
+                 color=theme["muted"], align=PP_ALIGN.LEFT)
+
+
+def render_feature_grid(slide, data, theme, meta):
+    """2x2 (or 2x3) feature cards. items: [{title, desc, num? icon?}]"""
+    fill_bg(slide, theme["bg"])
+    title = data.get("title", "")
+    items = data.get("items", []) or []
+
+    _draw_title_bar(slide, theme, title)
+    if not items:
+        return
+
+    n = min(len(items), 6)
+    items = items[:n]
+    cols = 2 if n <= 4 else 3
+    rows = (n + cols - 1) // cols
+
+    gap_x, gap_y = 0.3, 0.25
+    total_w, total_h = 11.7, 5.0
+    card_w = (total_w - gap_x * (cols - 1)) / cols
+    card_h = (total_h - gap_y * (rows - 1)) / rows
+    top0 = 1.7
+
+    for i, it in enumerate(items):
+        r, c = i // cols, i % cols
+        x = 0.8 + c * (card_w + gap_x)
+        y = top0 + r * (card_h + gap_y)
+
+        # Card with subtle panel + left accent bar
+        add_rect(slide, Inches(x), Inches(y), Inches(card_w), Inches(card_h),
+                 theme["panel"])
+        add_rect(slide, Inches(x), Inches(y), Inches(0.1), Inches(card_h),
+                 theme["accent"])
+
+        # Number badge or icon — use number for reliability
+        num = it.get("num", str(i + 1))
+        icon = it.get("icon")
+        badge_text = icon if icon else num
+        add_text(slide, Inches(x + 0.4), Inches(y + 0.3),
+                 Inches(0.8), Inches(0.8),
+                 badge_text, font_name=theme["font"], size=28, bold=True,
+                 color=theme["accent"], align=PP_ALIGN.LEFT,
+                 anchor=MSO_ANCHOR.MIDDLE)
+        # Title
+        add_text(slide, Inches(x + 1.3), Inches(y + 0.3),
+                 Inches(card_w - 1.5), Inches(0.8),
+                 str(it.get("title", "")), font_name=theme["font"],
+                 size=20, bold=True, color=theme["primary"],
+                 align=PP_ALIGN.LEFT, anchor=MSO_ANCHOR.MIDDLE)
+        # Description
+        desc = it.get("desc", "")
+        if desc:
+            add_text(slide, Inches(x + 0.4), Inches(y + 1.2),
+                     Inches(card_w - 0.6), Inches(card_h - 1.4),
+                     str(desc), font_name=theme["font"],
+                     size=14, color=theme["text"],
+                     align=PP_ALIGN.LEFT)
+
+
+def render_timeline(slide, data, theme, meta):
+    """Horizontal 3~5 phase timeline. items: [{phase, title, desc?}]"""
+    fill_bg(slide, theme["bg"])
+    title = data.get("title", "")
+    items = data.get("items", []) or []
+
+    _draw_title_bar(slide, theme, title)
+    if not items:
+        return
+
+    n = min(len(items), 5)
+    items = items[:n]
+
+    gap = 0.25
+    total_w = 11.7
+    card_w = (total_w - gap * (n - 1)) / n
+    top = 2.4
+    card_h = 3.5
+
+    # Connecting line behind everything
+    line_y = 2.5
+    add_rect(slide, Inches(0.8), Inches(line_y), Inches(total_w), Inches(0.04),
+             theme["accent"])
+
+    for i, it in enumerate(items):
+        x = 0.8 + i * (card_w + gap)
+
+        # Dot on the connecting line, centered above the card
+        dot_size = 0.3
+        dot_x = x + card_w / 2 - dot_size / 2
+        add_rect(slide, Inches(dot_x), Inches(line_y - dot_size / 2 + 0.02),
+                 Inches(dot_size), Inches(dot_size), theme["accent"])
+
+        # Card
+        add_rect(slide, Inches(x), Inches(top + 0.2),
+                 Inches(card_w), Inches(card_h - 0.2),
+                 theme["panel"])
+
+        # Phase tag
+        add_text(slide, Inches(x), Inches(top + 0.45),
+                 Inches(card_w), Inches(0.5),
+                 str(it.get("phase", "")), font_name=theme["font"],
+                 size=15, bold=True, color=theme["accent"],
+                 align=PP_ALIGN.CENTER)
+        # Title
+        add_text(slide, Inches(x + 0.2), Inches(top + 1.0),
+                 Inches(card_w - 0.4), Inches(0.7),
+                 str(it.get("title", "")), font_name=theme["font"],
+                 size=18, bold=True, color=theme["primary"],
+                 align=PP_ALIGN.CENTER)
+        # Description
+        desc = it.get("desc", "")
+        if desc:
+            add_text(slide, Inches(x + 0.25), Inches(top + 1.8),
+                     Inches(card_w - 0.5), Inches(card_h - 2.0),
+                     str(desc), font_name=theme["font"],
+                     size=13, color=theme["text"],
+                     align=PP_ALIGN.CENTER)
+
+
+# Layout dispatch table
+LAYOUTS = {
+    "title": render_title,
+    "section": render_section,
+    "bullets": render_bullets,
+    "comparison": render_comparison,
+    "kpi": render_kpi,
+    "feature_grid": render_feature_grid,
+    "timeline": render_timeline,
+    "closing": render_closing,
+}
+
+# Layouts that get a discreet page-number footer (light bg only).
+NUMBERED_LAYOUTS = {"bullets", "comparison", "kpi", "feature_grid", "timeline"}
+
+
+def add_page_footer(slide, theme, page_num, total):
+    """Tiny page indicator at bottom-right. Skipped on dark/title slides."""
+    add_text(slide, Inches(11.7), Inches(7.05), Inches(1.5), Inches(0.3),
+             f"{page_num:02d} / {total:02d}", font_name=theme["font"],
+             size=10, color=theme["muted"], align=PP_ALIGN.RIGHT)
+
+
+def render_slide(prs, slide_data, theme, meta, page_num=None, total=None):
+    layout = slide_data.get("layout")
+    if layout not in LAYOUTS:
+        # Helpful error with closest match
+        best = difflib.get_close_matches(str(layout), LAYOUTS.keys(), n=1)
+        hint = f" (did you mean '{best[0]}'?)" if best else ""
+        raise ValueError(
+            f"Unknown layout '{layout}'{hint}. "
+            f"Available: {', '.join(LAYOUTS.keys())}"
+        )
+    slide = add_blank_slide(prs)
+    LAYOUTS[layout](slide, slide_data, theme, meta)
+    if layout in NUMBERED_LAYOUTS and page_num is not None:
+        add_page_footer(slide, theme, page_num, total)
+    return slide
+
+
+# ----------------------------- Main -----------------------------
+
+def main():
+    ap = argparse.ArgumentParser(description="Build .pptx from YAML data")
+    ap.add_argument("--data", required=True, help="Path to YAML data")
+    ap.add_argument("--out", required=True, help="Output .pptx path")
+    ap.add_argument("--template", help="(v0.2) brand template .pptx — ignored in v0.1")
+    args = ap.parse_args()
+
+    data_path = Path(args.data)
+    out_path = Path(args.out)
+    if not data_path.exists():
+        print(f"ERROR: data file not found: {data_path}", file=sys.stderr)
+        sys.exit(1)
+
+    with open(data_path, encoding="utf-8") as f:
+        doc = yaml.safe_load(f)
+
+    if args.template:
+        print(f"WARNING: --template ignored in v0.1 (pure code rendering). "
+              f"Will be supported in v0.2.", file=sys.stderr)
+
+    meta = doc.get("meta", {}) or {}
+    theme = normalize_theme(doc.get("theme"))
+    slides_data = doc.get("slides", [])
+    if not slides_data:
+        print("ERROR: no slides defined in yaml", file=sys.stderr)
+        sys.exit(1)
+
+    prs = Presentation()
+    set_slide_size(prs)
+
+    total = len(slides_data)
+    layout_counts = {}
+    for i, sd in enumerate(slides_data):
+        try:
+            render_slide(prs, sd, theme, meta, page_num=i + 1, total=total)
+        except Exception as e:
+            print(f"ERROR on slide {i+1}: {e}", file=sys.stderr)
+            sys.exit(1)
+        layout_counts[sd.get("layout")] = layout_counts.get(sd.get("layout"), 0) + 1
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    prs.save(out_path)
+
+    print(f"✅ Built {len(slides_data)} slide(s) → {out_path}")
+    for layout, n in sorted(layout_counts.items()):
+        print(f"   {layout}: {n}")
+
+
+if __name__ == "__main__":
+    main()

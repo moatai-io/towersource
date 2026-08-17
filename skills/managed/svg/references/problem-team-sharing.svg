@@ -1,0 +1,247 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 600" width="800" height="600">
+  <defs>
+    <style>
+      @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&amp;display=swap');
+      text { font-family: 'Inter', system-ui, -apple-system, sans-serif; }
+    </style>
+
+    <!-- Glow filters -->
+    <filter id="cyanGlow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="4" result="blur"/>
+      <feFlood flood-color="#06B6D4" flood-opacity="0.25" result="color"/>
+      <feComposite in="color" in2="blur" operator="in" result="glow"/>
+      <feMerge><feMergeNode in="glow"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="purpleGlow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="4" result="blur"/>
+      <feFlood flood-color="#8B5CF6" flood-opacity="0.25" result="color"/>
+      <feComposite in="color" in2="blur" operator="in" result="glow"/>
+      <feMerge><feMergeNode in="glow"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="amberGlow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="4" result="blur"/>
+      <feFlood flood-color="#F59E0B" flood-opacity="0.25" result="color"/>
+      <feComposite in="color" in2="blur" operator="in" result="glow"/>
+      <feMerge><feMergeNode in="glow"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="redGlow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="5" result="blur"/>
+      <feFlood flood-color="#EF4444" flood-opacity="0.3" result="color"/>
+      <feComposite in="color" in2="blur" operator="in" result="glow"/>
+      <feMerge><feMergeNode in="glow"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <!-- ============================================================ -->
+  <!-- DEV NODES (0-2s)                                             -->
+  <!-- ============================================================ -->
+
+  <!-- Dev A (150, 130) -->
+  <g opacity="0">
+    <animate attributeName="opacity" from="0" to="1" dur="0.8s" begin="0.3s" fill="freeze" calcMode="spline" keySplines="0 0 0.2 1" keyTimes="0;1"/>
+    <!-- Person icon -->
+    <circle cx="150" cy="105" r="14" fill="none" stroke="#06B6D4" stroke-width="1.5"/>
+    <circle cx="150" cy="99" r="5" fill="none" stroke="#06B6D4" stroke-width="1.2"/>
+    <path d="M139,114 Q139,107 150,107 Q161,107 161,114" fill="none" stroke="#06B6D4" stroke-width="1.2"/>
+    <!-- Name label -->
+    <text x="150" y="136" font-size="14" font-weight="700" fill="#E0E0E0" text-anchor="middle">Dev A</text>
+  </g>
+
+  <!-- Dev B (400, 130) -->
+  <g opacity="0">
+    <animate attributeName="opacity" from="0" to="1" dur="0.8s" begin="0.8s" fill="freeze" calcMode="spline" keySplines="0 0 0.2 1" keyTimes="0;1"/>
+    <circle cx="400" cy="105" r="14" fill="none" stroke="#8B5CF6" stroke-width="1.5"/>
+    <circle cx="400" cy="99" r="5" fill="none" stroke="#8B5CF6" stroke-width="1.2"/>
+    <path d="M389,114 Q389,107 400,107 Q411,107 411,114" fill="none" stroke="#8B5CF6" stroke-width="1.2"/>
+    <text x="400" y="136" font-size="14" font-weight="700" fill="#E0E0E0" text-anchor="middle">Dev B</text>
+  </g>
+
+  <!-- Dev C (650, 130) -->
+  <g opacity="0">
+    <animate attributeName="opacity" from="0" to="1" dur="0.8s" begin="1.3s" fill="freeze" calcMode="spline" keySplines="0 0 0.2 1" keyTimes="0;1"/>
+    <circle cx="650" cy="105" r="14" fill="none" stroke="#F59E0B" stroke-width="1.5"/>
+    <circle cx="650" cy="99" r="5" fill="none" stroke="#F59E0B" stroke-width="1.2"/>
+    <path d="M639,114 Q639,107 650,107 Q661,107 661,114" fill="none" stroke="#F59E0B" stroke-width="1.2"/>
+    <text x="650" y="136" font-size="14" font-weight="700" fill="#E0E0E0" text-anchor="middle">Dev C</text>
+  </g>
+
+  <!-- ============================================================ -->
+  <!-- SKILL PILLS (2-5s) — staggered appearance                   -->
+  <!-- ============================================================ -->
+
+  <!-- Dev A Skills (cyan) — deploy, docker, test -->
+  <!-- deploy -->
+  <g opacity="0">
+    <animate attributeName="opacity" from="0" to="1" dur="0.6s" begin="2.2s" fill="freeze"/>
+    <rect x="100" y="160" width="100" height="28" rx="14" fill="#0F172A" stroke="#06B6D4" stroke-width="1.2" filter="url(#cyanGlow)"/>
+    <text x="150" y="179" font-size="12" font-weight="600" fill="#06B6D4" text-anchor="middle">deploy</text>
+    <!-- Passive float -->
+    <animateTransform attributeName="transform" type="translate" values="0,0;0,-2;0,0" dur="3.5s" begin="10s" repeatCount="indefinite"/>
+  </g>
+  <!-- docker -->
+  <g opacity="0">
+    <animate attributeName="opacity" from="0" to="1" dur="0.6s" begin="2.6s" fill="freeze"/>
+    <rect x="100" y="198" width="100" height="28" rx="14" fill="#0F172A" stroke="#06B6D4" stroke-width="1.2" filter="url(#cyanGlow)"/>
+    <text x="150" y="217" font-size="12" font-weight="600" fill="#06B6D4" text-anchor="middle">docker</text>
+    <animateTransform attributeName="transform" type="translate" values="0,0;0,-2;0,0" dur="4s" begin="10.5s" repeatCount="indefinite"/>
+  </g>
+  <!-- test -->
+  <g opacity="0">
+    <animate attributeName="opacity" from="0" to="1" dur="0.6s" begin="3s" fill="freeze"/>
+    <rect x="100" y="236" width="100" height="28" rx="14" fill="#0F172A" stroke="#06B6D4" stroke-width="1.2" filter="url(#cyanGlow)"/>
+    <text x="150" y="255" font-size="12" font-weight="600" fill="#06B6D4" text-anchor="middle">test</text>
+    <animateTransform attributeName="transform" type="translate" values="0,0;0,-2;0,0" dur="3.8s" begin="11s" repeatCount="indefinite"/>
+  </g>
+
+  <!-- Dev B Skills (purple) — tts, diagram, browser -->
+  <!-- tts -->
+  <g opacity="0">
+    <animate attributeName="opacity" from="0" to="1" dur="0.6s" begin="2.8s" fill="freeze"/>
+    <rect x="350" y="160" width="100" height="28" rx="14" fill="#0F172A" stroke="#8B5CF6" stroke-width="1.2" filter="url(#purpleGlow)"/>
+    <text x="400" y="179" font-size="12" font-weight="600" fill="#8B5CF6" text-anchor="middle">tts</text>
+    <animateTransform attributeName="transform" type="translate" values="0,0;0,-2;0,0" dur="3.6s" begin="10.2s" repeatCount="indefinite"/>
+  </g>
+  <!-- diagram -->
+  <g opacity="0">
+    <animate attributeName="opacity" from="0" to="1" dur="0.6s" begin="3.2s" fill="freeze"/>
+    <rect x="350" y="198" width="100" height="28" rx="14" fill="#0F172A" stroke="#8B5CF6" stroke-width="1.2" filter="url(#purpleGlow)"/>
+    <text x="400" y="217" font-size="12" font-weight="600" fill="#8B5CF6" text-anchor="middle">diagram</text>
+    <animateTransform attributeName="transform" type="translate" values="0,0;0,-2;0,0" dur="4.2s" begin="10.7s" repeatCount="indefinite"/>
+  </g>
+  <!-- browser -->
+  <g opacity="0">
+    <animate attributeName="opacity" from="0" to="1" dur="0.6s" begin="3.6s" fill="freeze"/>
+    <rect x="350" y="236" width="100" height="28" rx="14" fill="#0F172A" stroke="#8B5CF6" stroke-width="1.2" filter="url(#purpleGlow)"/>
+    <text x="400" y="255" font-size="12" font-weight="600" fill="#8B5CF6" text-anchor="middle">browser</text>
+    <animateTransform attributeName="transform" type="translate" values="0,0;0,-2;0,0" dur="3.9s" begin="11.2s" repeatCount="indefinite"/>
+  </g>
+
+  <!-- Dev C Skills (amber) — scrape, caption, transcode -->
+  <!-- scrape -->
+  <g opacity="0">
+    <animate attributeName="opacity" from="0" to="1" dur="0.6s" begin="3.4s" fill="freeze"/>
+    <rect x="600" y="160" width="100" height="28" rx="14" fill="#0F172A" stroke="#F59E0B" stroke-width="1.2" filter="url(#amberGlow)"/>
+    <text x="650" y="179" font-size="12" font-weight="600" fill="#F59E0B" text-anchor="middle">scrape</text>
+    <animateTransform attributeName="transform" type="translate" values="0,0;0,-2;0,0" dur="3.7s" begin="10.4s" repeatCount="indefinite"/>
+  </g>
+  <!-- caption -->
+  <g opacity="0">
+    <animate attributeName="opacity" from="0" to="1" dur="0.6s" begin="3.8s" fill="freeze"/>
+    <rect x="600" y="198" width="100" height="28" rx="14" fill="#0F172A" stroke="#F59E0B" stroke-width="1.2" filter="url(#amberGlow)"/>
+    <text x="650" y="217" font-size="12" font-weight="600" fill="#F59E0B" text-anchor="middle">caption</text>
+    <animateTransform attributeName="transform" type="translate" values="0,0;0,-2;0,0" dur="4.1s" begin="10.9s" repeatCount="indefinite"/>
+  </g>
+  <!-- transcode -->
+  <g opacity="0">
+    <animate attributeName="opacity" from="0" to="1" dur="0.6s" begin="4.2s" fill="freeze"/>
+    <rect x="600" y="236" width="100" height="28" rx="14" fill="#0F172A" stroke="#F59E0B" stroke-width="1.2" filter="url(#amberGlow)"/>
+    <text x="650" y="255" font-size="12" font-weight="600" fill="#F59E0B" text-anchor="middle">transcode</text>
+    <animateTransform attributeName="transform" type="translate" values="0,0;0,-2;0,0" dur="3.4s" begin="11.4s" repeatCount="indefinite"/>
+  </g>
+
+  <!-- ============================================================ -->
+  <!-- BLOCKED SHARING LINES + RED X MARKS (5-7s)                   -->
+  <!-- ============================================================ -->
+
+  <!-- Dotted line: Dev A → Dev B -->
+  <line x1="205" y1="120" x2="345" y2="120"
+        stroke="#EF4444" stroke-width="1.5" stroke-opacity="0"
+        stroke-dasharray="6 4">
+    <animate attributeName="stroke-opacity" from="0" to="0.5" dur="0.8s" begin="5s" fill="freeze"/>
+  </line>
+
+  <!-- Red X between A and B -->
+  <g opacity="0" filter="url(#redGlow)">
+    <animate attributeName="opacity" from="0" to="1" dur="0.5s" begin="5.5s" fill="freeze"/>
+    <circle cx="275" cy="120" r="12" fill="#1E1015" stroke="#EF4444" stroke-width="1.5"/>
+    <line x1="269" y1="114" x2="281" y2="126" stroke="#EF4444" stroke-width="2"/>
+    <line x1="281" y1="114" x2="269" y2="126" stroke="#EF4444" stroke-width="2"/>
+    <!-- Passive pulse -->
+    <animate attributeName="opacity" values="1;0.6;1" dur="2.5s" begin="10s" repeatCount="indefinite"/>
+  </g>
+
+  <!-- Dotted line: Dev B → Dev C -->
+  <line x1="455" y1="120" x2="595" y2="120"
+        stroke="#EF4444" stroke-width="1.5" stroke-opacity="0"
+        stroke-dasharray="6 4">
+    <animate attributeName="stroke-opacity" from="0" to="0.5" dur="0.8s" begin="5.5s" fill="freeze"/>
+  </line>
+
+  <!-- Red X between B and C -->
+  <g opacity="0" filter="url(#redGlow)">
+    <animate attributeName="opacity" from="0" to="1" dur="0.5s" begin="6s" fill="freeze"/>
+    <circle cx="525" cy="120" r="12" fill="#1E1015" stroke="#EF4444" stroke-width="1.5"/>
+    <line x1="519" y1="114" x2="531" y2="126" stroke="#EF4444" stroke-width="2"/>
+    <line x1="531" y1="114" x2="519" y2="126" stroke="#EF4444" stroke-width="2"/>
+    <!-- Passive pulse -->
+    <animate attributeName="opacity" values="1;0.6;1" dur="2.8s" begin="10.3s" repeatCount="indefinite"/>
+  </g>
+
+  <!-- Dotted line: Dev A → Dev C (curved below) -->
+  <path d="M150,148 Q400,155 650,148"
+        fill="none" stroke="#EF4444" stroke-width="1.5" stroke-opacity="0"
+        stroke-dasharray="6 4">
+    <animate attributeName="stroke-opacity" from="0" to="0.35" dur="0.8s" begin="6s" fill="freeze"/>
+  </path>
+
+  <!-- Red X between A and C (center of shallow curve) -->
+  <g opacity="0" filter="url(#redGlow)">
+    <animate attributeName="opacity" from="0" to="1" dur="0.5s" begin="6.5s" fill="freeze"/>
+    <circle cx="400" cy="152" r="12" fill="#1E1015" stroke="#EF4444" stroke-width="1.5"/>
+    <line x1="394" y1="146" x2="406" y2="158" stroke="#EF4444" stroke-width="2"/>
+    <line x1="406" y1="146" x2="394" y2="158" stroke="#EF4444" stroke-width="2"/>
+    <!-- Passive pulse -->
+    <animate attributeName="opacity" values="1;0.6;1" dur="3s" begin="10.6s" repeatCount="indefinite"/>
+  </g>
+
+  <!-- ============================================================ -->
+  <!-- CHAT BUBBLE (7-8s)                                           -->
+  <!-- ============================================================ -->
+
+  <g opacity="0">
+    <animate attributeName="opacity" from="0" to="1" dur="0.8s" begin="7s" fill="freeze" calcMode="spline" keySplines="0 0 0.2 1" keyTimes="0;1"/>
+    <!-- Bubble body -->
+    <rect x="475" y="290" width="220" height="38" rx="10" fill="#1E1B2E" stroke="#8B5CF6" stroke-width="1" stroke-opacity="0.6"/>
+    <!-- Bubble tail pointing left-up -->
+    <polygon points="490,290 500,290 488,278" fill="#1E1B2E" stroke="#8B5CF6" stroke-width="1" stroke-opacity="0.6"/>
+    <line x1="489" y1="290" x2="501" y2="290" stroke="#1E1B2E" stroke-width="2"/>
+    <!-- Text -->
+    <text x="585" y="314" font-size="13" font-weight="600" fill="#E0E0E0" text-anchor="middle">"Slack me that skill?"</text>
+  </g>
+
+  <!-- ============================================================ -->
+  <!-- TITLE + SUBTITLE (8-10s)                                     -->
+  <!-- ============================================================ -->
+
+  <!-- Divider line -->
+  <line x1="200" y1="380" x2="600" y2="380" stroke="#6366F1" stroke-width="1" stroke-opacity="0">
+    <animate attributeName="stroke-opacity" from="0" to="0.3" dur="0.6s" begin="8s" fill="freeze"/>
+  </line>
+
+  <!-- Title -->
+  <text x="400" y="420" font-size="22" font-weight="700" fill="#E0E0E0" text-anchor="middle" opacity="0">
+    The Problem: Siloed Teams
+    <animate attributeName="opacity" from="0" to="1" dur="0.8s" begin="8.2s" fill="freeze"/>
+  </text>
+
+  <!-- Subtitle -->
+  <text x="400" y="448" font-size="12" fill="#9CA3AF" text-anchor="middle" opacity="0">
+    Each engineer hoards skills &#x2014; no shared distribution system
+    <animate attributeName="opacity" from="0" to="0.8" dur="0.6s" begin="8.8s" fill="freeze"/>
+  </text>
+
+  <!-- Bottom stat line -->
+  <text x="400" y="540" font-size="15" font-weight="600" fill="#EF4444" text-anchor="middle" opacity="0">
+    9 skills, 3 devs, zero shared access
+    <animate attributeName="opacity" from="0" to="0.9" dur="0.6s" begin="9.2s" fill="freeze"/>
+  </text>
+
+  <!-- Vertical separator lines between dev columns (subtle) -->
+  <line x1="275" y1="85" x2="275" y2="280" stroke="#9CA3AF" stroke-width="0.5" stroke-opacity="0" stroke-dasharray="3 4">
+    <animate attributeName="stroke-opacity" from="0" to="0.2" dur="0.5s" begin="9.5s" fill="freeze"/>
+  </line>
+  <line x1="525" y1="85" x2="525" y2="280" stroke="#9CA3AF" stroke-width="0.5" stroke-opacity="0" stroke-dasharray="3 4">
+    <animate attributeName="stroke-opacity" from="0" to="0.2" dur="0.5s" begin="9.5s" fill="freeze"/>
+  </line>
+
+</svg>

@@ -1,0 +1,22 @@
+{
+  "sessions": "세션",
+  "tasks": "태스크",
+  "sessionRestored": "세션이 복원되었습니다",
+  "failedToRestore": "세션 복원 실패",
+  "permanentlyDeleted": "영구 삭제됨",
+  "failedToDelete": "삭제 실패",
+  "taskRestored": "태스크가 복원되었습니다",
+  "failedToRestoreTask": "태스크 복원 실패",
+  "searchHistory": "기록 검색...",
+  "sessionsCount": "세션 ({{count}})",
+  "tasksCount": "태스크 ({{count}})",
+  "sortByRecent": "최신순 정렬",
+  "groupByProject": "프로젝트별 그룹",
+  "noMatchingSessions": "일치하는 세션 없음",
+  "noArchivedSessions": "숨긴 세션 없음",
+  "noMatchingTasks": "일치하는 태스크 없음",
+  "noArchivedTasks": "보관된 태스크 없음",
+  "restore": "복원",
+  "deletePermanently": "영구 삭제",
+  "deleteSessionPermanentConfirm": "이 세션을 영구 삭제하면 대화 내용과 작업 기록을 복구할 수 없습니다."
+}

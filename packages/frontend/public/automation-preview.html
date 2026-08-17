@@ -1,0 +1,509 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tasks v5 — Unified</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  :root {
+    --surface-950: #0a0a0f;
+    --surface-900: #111118;
+    --surface-850: #16161f;
+    --surface-800: #1c1c27;
+    --surface-700: #2a2a38;
+    --surface-600: #3a3a4a;
+    --text-100: #f0f0f5;
+    --text-200: #d0d0da;
+    --text-300: #a0a0b0;
+    --text-400: #707080;
+    --text-500: #505060;
+    --blue-500: #3b82f6;
+    --blue-600: #2563eb;
+    --blue-400: #60a5fa;
+    --green-400: #4ade80;
+    --green-500: #22c55e;
+    --red-400: #f87171;
+    --amber-400: #fbbf24;
+  }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: var(--surface-900);
+    color: var(--text-200);
+    height: 100vh;
+    overflow: hidden;
+  }
+  .panel {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    padding: 16px 20px;
+  }
+
+  /* ── Header ── */
+  .header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px;
+    flex-shrink: 0;
+  }
+  .header-left { display: flex; align-items: center; gap: 10px; }
+  .header h2 { font-size: 16px; font-weight: 600; color: var(--text-200); }
+  .filter-select {
+    font-size: 12px;
+    background: var(--surface-800);
+    border: 1px solid var(--surface-700);
+    border-radius: 6px;
+    padding: 4px 8px;
+    color: var(--text-400);
+    outline: none;
+    cursor: pointer;
+  }
+
+  /* ── Command Bar ── */
+  .cmd-bar {
+    flex-shrink: 0;
+    margin-bottom: 14px;
+  }
+  .cmd-wrap {
+    display: flex;
+    align-items: center;
+    background: var(--surface-800);
+    border: 1.5px solid var(--surface-700);
+    border-radius: 10px;
+    padding: 3px;
+    transition: border-color 0.2s;
+  }
+  .cmd-wrap:focus-within { border-color: var(--blue-500); }
+  .cmd-icon { padding: 0 10px; color: var(--text-500); font-size: 14px; }
+  .cmd-input {
+    flex: 1;
+    background: transparent;
+    border: none;
+    outline: none;
+    color: var(--text-200);
+    font-size: 13px;
+    padding: 9px 0;
+  }
+  .cmd-input::placeholder { color: var(--text-500); }
+  .cmd-run {
+    padding: 7px 16px;
+    background: var(--blue-600);
+    color: white;
+    border: none;
+    border-radius: 7px;
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  .cmd-run:hover { background: var(--blue-500); }
+  .cmd-run:disabled { opacity: 0.25; cursor: default; }
+
+  /* Suggestions */
+  .suggs {
+    display: none;
+    flex-wrap: wrap;
+    gap: 5px;
+    margin-top: 6px;
+  }
+  .suggs.show { display: flex; }
+  .sugg {
+    padding: 3px 10px;
+    background: var(--surface-850);
+    border: 1px solid var(--surface-700);
+    border-radius: 14px;
+    font-size: 11px;
+    color: var(--text-400);
+    cursor: pointer;
+    transition: all 0.12s;
+  }
+  .sugg:hover { background: var(--surface-700); color: var(--text-200); }
+
+  /* ── Scrollable list ── */
+  .list {
+    flex: 1;
+    overflow-y: auto;
+    min-height: 0;
+  }
+  .list::-webkit-scrollbar { width: 4px; }
+  .list::-webkit-scrollbar-thumb { background: var(--surface-700); border-radius: 2px; }
+
+  /* Section label */
+  .section-label {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.7px;
+    font-weight: 600;
+    padding: 8px 10px 4px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .section-label .count {
+    font-size: 9px;
+    color: var(--text-500);
+    font-weight: 400;
+  }
+  .sl-running { color: var(--blue-400); }
+  .sl-todo { color: var(--text-400); }
+  .sl-sched { color: var(--amber-400); }
+  .sl-done { color: var(--green-400); cursor: pointer; }
+
+  /* Item */
+  .item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 9px 10px;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: background 0.1s;
+  }
+  .item:hover { background: var(--surface-850); }
+
+  .dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .d-run { background: var(--blue-400); animation: pulse 2s ease-in-out infinite; }
+  .d-todo { background: var(--text-500); }
+  .d-sched { background: var(--amber-400); }
+  .d-done { background: var(--green-400); opacity: 0.4; }
+  .d-fail { background: var(--red-400); }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(96,165,250,0.4); }
+    50% { opacity: 0.7; box-shadow: 0 0 0 4px rgba(96,165,250,0); }
+  }
+
+  .item-body { flex: 1; min-width: 0; }
+  .item-name {
+    font-size: 13px;
+    color: var(--text-200);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .item-sub {
+    font-size: 11px;
+    color: var(--text-500);
+    margin-top: 1px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .elapsed {
+    font-size: 11px;
+    color: var(--text-400);
+    font-variant-numeric: tabular-nums;
+    flex-shrink: 0;
+  }
+  .sched-badge {
+    font-size: 10px;
+    padding: 2px 7px;
+    border-radius: 10px;
+    background: rgba(251,191,36,0.08);
+    border: 1px solid rgba(251,191,36,0.15);
+    color: var(--amber-400);
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+
+  .btn-play {
+    width: 28px;
+    height: 28px;
+    border-radius: 7px;
+    border: none;
+    background: var(--blue-600);
+    color: white;
+    font-size: 10px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.15s;
+    flex-shrink: 0;
+    opacity: 0;
+  }
+  .item:hover .btn-play { opacity: 1; }
+  .btn-play:hover { background: var(--blue-500); transform: scale(1.05); }
+
+  .btn-stop {
+    font-size: 11px;
+    padding: 4px 10px;
+    border-radius: 6px;
+    border: 1px solid rgba(248,113,113,0.25);
+    background: rgba(248,113,113,0.08);
+    color: var(--red-400);
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+  .btn-stop:hover { background: rgba(248,113,113,0.15); }
+
+  .toggle {
+    width: 30px;
+    height: 16px;
+    border-radius: 8px;
+    background: var(--surface-600);
+    cursor: pointer;
+    position: relative;
+    transition: background 0.2s;
+    flex-shrink: 0;
+  }
+  .toggle.on { background: var(--green-500); }
+  .toggle::after {
+    content: '';
+    position: absolute;
+    top: 2px; left: 2px;
+    width: 12px; height: 12px;
+    border-radius: 50%;
+    background: white;
+    transition: transform 0.2s;
+  }
+  .toggle.on::after { transform: translateX(14px); }
+
+  /* Thin divider */
+  .sep { height: 1px; background: var(--surface-700); margin: 4px 10px; opacity: 0.4; }
+
+  /* Done section collapsible */
+  .done-list { transition: max-height 0.3s; overflow: hidden; }
+  .done-list.collapsed { max-height: 0 !important; }
+  .chevron {
+    display: inline-block;
+    width: 10px;
+    font-size: 8px;
+    transition: transform 0.2s;
+    color: var(--text-500);
+  }
+  .chevron.open { transform: rotate(90deg); }
+
+  /* Context menu */
+  .ctx {
+    position: fixed;
+    background: var(--surface-800);
+    border: 1px solid var(--surface-600);
+    border-radius: 10px;
+    padding: 4px;
+    min-width: 150px;
+    box-shadow: 0 8px 30px rgba(0,0,0,0.5);
+    z-index: 100;
+    display: none;
+  }
+  .ctx.show { display: block; }
+  .ctx-item {
+    display: flex; align-items: center; gap: 8px;
+    padding: 6px 10px;
+    border-radius: 6px;
+    font-size: 12px;
+    color: var(--text-300);
+    cursor: pointer;
+  }
+  .ctx-item:hover { background: var(--surface-700); color: var(--text-100); }
+  .ctx-item.danger { color: var(--red-400); }
+  .ctx-item.danger:hover { background: rgba(248,113,113,0.1); }
+  .ctx-sep { height: 1px; background: var(--surface-700); margin: 3px 8px; }
+</style>
+</head>
+<body>
+<div class="panel">
+
+  <!-- Header -->
+  <div class="header">
+    <div class="header-left">
+      <h2>Task</h2>
+      <select class="filter-select">
+        <option>All projects</option>
+        <option>Tower</option>
+        <option>Marketing</option>
+      </select>
+    </div>
+  </div>
+
+  <!-- Command Bar -->
+  <div class="cmd-bar">
+    <div class="cmd-wrap">
+      <span class="cmd-icon">⚡</span>
+      <input class="cmd-input" id="inp" placeholder="AI에게 시킬 일을 입력하세요..."
+        onfocus="showS()" oninput="onType()" />
+      <button class="cmd-run" id="runBtn" disabled onclick="doRun()">실행</button>
+    </div>
+    <div class="suggs" id="suggs">
+      <span class="sugg" onclick="fill('경쟁사 분석')">🔍 Research</span>
+      <span class="sugg" onclick="fill('주간 리포트')">📊 Report</span>
+      <span class="sugg" onclick="fill('코드 리뷰')">💻 Review</span>
+      <span class="sugg" onclick="fill('오늘 브리핑')">📋 Briefing</span>
+      <span class="sugg" onclick="fill('서버 체크')">👀 Monitor</span>
+    </div>
+  </div>
+
+  <!-- List -->
+  <div class="list">
+
+    <!-- ▸ Running -->
+    <div class="section-label sl-running">실행 중 <span class="count">2</span></div>
+
+    <div class="item" onclick="alert('→ 세션 이동')">
+      <div class="dot d-run"></div>
+      <div class="item-body">
+        <div class="item-name">경쟁사 가격 분석</div>
+        <div class="item-sub">3개 사이트 크롤링 중...</div>
+      </div>
+      <span class="elapsed">2m 34s</span>
+      <button class="btn-stop" onclick="event.stopPropagation()">Stop</button>
+    </div>
+    <div class="item" onclick="alert('→ 세션 이동')">
+      <div class="dot d-run"></div>
+      <div class="item-body">
+        <div class="item-name">Daily standup briefing</div>
+        <div class="item-sub">채널에 전송 중...</div>
+      </div>
+      <span class="elapsed">18s</span>
+      <button class="btn-stop" onclick="event.stopPropagation()">Stop</button>
+    </div>
+
+    <div class="sep"></div>
+
+    <!-- ▸ To Do (manual) -->
+    <div class="section-label sl-todo">할 일 <span class="count">3</span></div>
+
+    <div class="item" oncontextmenu="showCtx(event)">
+      <div class="dot d-todo"></div>
+      <div class="item-body">
+        <div class="item-name">안녕 테스트</div>
+        <div class="item-sub">아직 실행 안 함</div>
+      </div>
+      <button class="btn-play" onclick="event.stopPropagation(); alert('▶ 실행')">▶</button>
+    </div>
+    <div class="item" oncontextmenu="showCtx(event)">
+      <div class="dot d-todo"></div>
+      <div class="item-body">
+        <div class="item-name">Auth 모듈 리팩토링</div>
+        <div class="item-sub">아직 실행 안 함</div>
+      </div>
+      <button class="btn-play" onclick="event.stopPropagation(); alert('▶ 실행')">▶</button>
+    </div>
+    <div class="item" oncontextmenu="showCtx(event)">
+      <div class="dot d-fail"></div>
+      <div class="item-body">
+        <div class="item-name">DB 백업 체크</div>
+        <div class="item-sub" style="color: var(--red-400)">실패 — connection timeout</div>
+      </div>
+      <button class="btn-play" onclick="event.stopPropagation(); alert('▶ 재시도')">▶</button>
+    </div>
+
+    <div class="sep"></div>
+
+    <!-- ▸ Scheduled -->
+    <div class="section-label sl-sched">스케줄 <span class="count">3</span></div>
+
+    <div class="item" oncontextmenu="showCtx(event)">
+      <div class="dot d-sched"></div>
+      <div class="item-body">
+        <div class="item-name">Daily standup briefing</div>
+        <div class="item-sub">마지막: 오늘 09:00 ✓</div>
+      </div>
+      <span class="sched-badge">매일 09:00</span>
+      <div class="toggle on" onclick="event.stopPropagation(); this.classList.toggle('on')"></div>
+      <button class="btn-play" onclick="event.stopPropagation(); alert('▶ 지금 실행')">▶</button>
+    </div>
+    <div class="item" oncontextmenu="showCtx(event)">
+      <div class="dot d-sched"></div>
+      <div class="item-body">
+        <div class="item-name">Weekly report</div>
+        <div class="item-sub">마지막: 4/11 18:00 ✓</div>
+      </div>
+      <span class="sched-badge">매주 금 18:00</span>
+      <div class="toggle on" onclick="event.stopPropagation(); this.classList.toggle('on')"></div>
+      <button class="btn-play" onclick="event.stopPropagation()">▶</button>
+    </div>
+    <div class="item" oncontextmenu="showCtx(event)" style="opacity:0.45">
+      <div class="dot d-todo"></div>
+      <div class="item-body">
+        <div class="item-name">Nightly DB check</div>
+        <div class="item-sub">비활성</div>
+      </div>
+      <span class="sched-badge" style="opacity:0.5; text-decoration: line-through">매일 03:00</span>
+      <div class="toggle" onclick="event.stopPropagation(); this.classList.toggle('on')"></div>
+    </div>
+
+    <div class="sep"></div>
+
+    <!-- ▸ Done -->
+    <div class="section-label sl-done" onclick="toggleDone()">
+      <span class="chevron open" id="doneChev">▸</span> 완료 <span class="count">12</span>
+    </div>
+    <div class="done-list" id="doneList">
+      <div class="item" onclick="alert('→ 세션 보기')">
+        <div class="dot d-done"></div>
+        <div class="item-body">
+          <div class="item-name">문서 영어 번역</div>
+          <div class="item-sub">1시간 전 · 3m 12s</div>
+        </div>
+        <button class="btn-play" onclick="event.stopPropagation()">▶</button>
+      </div>
+      <div class="item" onclick="alert('→ 세션 보기')">
+        <div class="dot d-done"></div>
+        <div class="item-body">
+          <div class="item-name">PR #142 코드 리뷰</div>
+          <div class="item-sub">3시간 전 · 1m 45s</div>
+        </div>
+        <button class="btn-play" onclick="event.stopPropagation()">▶</button>
+      </div>
+      <div class="item" onclick="alert('→ 세션 보기')">
+        <div class="dot d-done"></div>
+        <div class="item-body">
+          <div class="item-name">경쟁사 가격 분석</div>
+          <div class="item-sub">어제 14:30 · 5m 22s</div>
+        </div>
+        <button class="btn-play" onclick="event.stopPropagation()">▶</button>
+      </div>
+      <div class="item" onclick="alert('→ 세션 보기')">
+        <div class="dot d-done"></div>
+        <div class="item-body">
+          <div class="item-name">Daily standup briefing</div>
+          <div class="item-sub">어제 09:00 · 28s</div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- Context menu -->
+<div class="ctx" id="ctx">
+  <div class="ctx-item" onclick="hideCtx()">▶ &nbsp;지금 실행</div>
+  <div class="ctx-item" onclick="hideCtx()">✏️ &nbsp;편집</div>
+  <div class="ctx-item" onclick="hideCtx()">⏰ &nbsp;스케줄 설정</div>
+  <div class="ctx-item" onclick="hideCtx()">📋 &nbsp;실행 기록</div>
+  <div class="ctx-sep"></div>
+  <div class="ctx-item danger" onclick="hideCtx()">🗑️ &nbsp;삭제</div>
+</div>
+
+<script>
+const inp = document.getElementById('inp');
+const runBtn = document.getElementById('runBtn');
+const suggs = document.getElementById('suggs');
+
+inp.addEventListener('input', () => { runBtn.disabled = !inp.value.trim(); });
+inp.addEventListener('keydown', e => { if (e.key==='Enter' && inp.value.trim()) doRun(); });
+
+function showS() { if (!inp.value.trim()) suggs.classList.add('show'); }
+function onType() { inp.value.trim() ? suggs.classList.remove('show') : suggs.classList.add('show'); runBtn.disabled = !inp.value.trim(); }
+function fill(t) { inp.value = t; runBtn.disabled = false; suggs.classList.remove('show'); inp.focus(); }
+function doRun() { alert('실행: "' + inp.value + '"'); inp.value = ''; runBtn.disabled = true; }
+
+function showCtx(e) { e.preventDefault(); const c = document.getElementById('ctx'); c.style.left=e.clientX+'px'; c.style.top=e.clientY+'px'; c.classList.add('show'); }
+function hideCtx() { document.getElementById('ctx').classList.remove('show'); }
+document.addEventListener('click', e => { hideCtx(); if (!e.target.closest('.cmd-bar')) suggs.classList.remove('show'); });
+
+function toggleDone() {
+  document.getElementById('doneList').classList.toggle('collapsed');
+  document.getElementById('doneChev').classList.toggle('open');
+}
+</script>
+</body>
+</html>

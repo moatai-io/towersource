@@ -1,0 +1,116 @@
+# Tower 도입 제안서 — generic 데모 (v0.2)
+# placeholder ([클라이언트명], 가격 등) 는 실 사용 시 채워넣을 것.
+# 빌드:
+#   uv run --script /workspace/.tower/skills/pptx-template/scripts/build_from_yaml.py \
+#     --data /workspace/.tower/skills/pptx-template/examples/tower-offer.yaml \
+#     --out /workspace/tower-offer.pptx
+
+meta:
+  title: "Tower 도입 제안"
+  subtitle: "[클라이언트명] / 2026 Q2"
+  presenter: "Moat AI · 전성훈"
+  date: "2026-05-01"
+
+theme:
+  primary: "1F3A68"
+  accent:  "F5A623"
+  text:    "222222"
+  muted:   "6B7280"
+  bg:      "FFFFFF"
+  panel:   "F5F7FA"
+  font:    "Noto Sans CJK KR"
+
+slides:
+  # 1. 표지
+  - layout: title
+    title: "Tower 도입 제안"
+    subtitle: "[클라이언트명]"
+
+  # 2. 섹션 01
+  - layout: section
+    number: "01"
+    title: "왜 Tower 인가"
+    caption: "팀 단위 AI 운영의 새 표준"
+
+  # 3. 한계
+  - layout: bullets
+    title: "지금의 한계"
+    bullets:
+      - "AI 도구가 흩어져 있음 — ChatGPT · Claude · Gemini 가 각각 계정/세션"
+      - "팀 컨텍스트가 매번 사라짐 — 프로젝트 정보를 매 대화마다 재입력"
+      - "보안·로그가 분산 — 누가 무엇을 물었는지 가시성 없음"
+      - "비용 통제 불가 — 부서별 사용량을 따로 추적할 수단 없음"
+      - "개인의 자동화 자산이 팀 자산이 안 됨 — 퇴사 시 사라짐"
+
+  # 4. KPI — 한 화면 임팩트
+  - layout: kpi
+    title: "Tower 가 만드는 차이"
+    items:
+      - { value: "1개",  label: "AI 진입점",   desc: "Claude · Pi · OpenAI 통합" }
+      - { value: "100%", label: "팀 가시성",   desc: "사용량 · 비용 · 권한 한 곳에서" }
+      - { value: "60+",  label: "빌트인 스킬", desc: "보고서 · 문서 · SMS · 메일" }
+      - { value: "4주",  label: "본 운영까지", desc: "셋업부터 안정화까지" }
+    caption: "* Moat AI 운영 데이터 기반 (2026 Q1)"
+
+  # 5. 핵심 기능 카드
+  - layout: feature_grid
+    title: "핵심 기능"
+    items:
+      - { num: "1", title: "통합 채팅",        desc: "Claude·Pi·OpenAI 한 화면 / 모델 핫스왑 지원" }
+      - { num: "2", title: "팀 워크스페이스",   desc: "프로젝트별 컨텍스트 자동 상속 / 멤버 간 공유" }
+      - { num: "3", title: "전용 VM",          desc: "고객 데이터가 외부로 나가지 않음 / 자체 호스팅" }
+      - { num: "4", title: "스킬 자동화",       desc: "이메일·견적서·문자·회의록까지 60+ 빌트인" }
+
+  # 6. 섹션 02
+  - layout: section
+    number: "02"
+    title: "비교"
+    caption: "ChatGPT · Claude.ai · 자체 구축 vs Tower"
+
+  # 7. 비교표
+  - layout: comparison
+    title: "ChatGPT 일반 vs Tower"
+    columns: ["항목", "ChatGPT", "Tower"]
+    rows:
+      - ["팀 컨텍스트 자동 상속",    "X",    "O"]
+      - ["프로젝트별 워크스페이스",   "X",    "O"]
+      - ["고객 데이터 격리",         "X",    "O (전용 VM)"]
+      - ["스킬·자동화",             "제한", "60+ 빌트인"]
+      - ["비용 가시성 / 관리",       "X",    "O"]
+      - ["한국어·국내 통합",         "제한", "Tiro · 알리고 · 네이버"]
+
+  # 8. 섹션 03
+  - layout: section
+    number: "03"
+    title: "도입 일정 & 투자"
+    caption: "4주 안에 본 운영"
+
+  # 9. 타임라인
+  - layout: timeline
+    title: "4주 도입 일정"
+    items:
+      - { phase: "Week 1", title: "환경 셋업",   desc: "VM · 도메인 · 인증" }
+      - { phase: "Week 2", title: "데이터 통합", desc: "기존 자료 마이그레이션" }
+      - { phase: "Week 3", title: "팀 온보딩",   desc: "교육 · 스킬 커스터마이즈" }
+      - { phase: "Week 4", title: "본 운영",     desc: "주간 회고로 안정화" }
+
+  # 10. 비용
+  - layout: bullets
+    title: "투자 비용"
+    bullets:
+      - "초기 셋업: ₩[XXX,XXX] (1회) — VM 구축 + 도메인 + 인증 + 데이터 이관"
+      - "월 운영: ₩[XXX,XXX]/월 — VM · 모니터링 · 업데이트 · 지원 포함"
+      - "추가 사용자: ₩[XX,XXX]/명/월"
+      - "모델 사용료: 실비 정산 또는 정액 옵션 선택"
+    caption: "* 자세한 견적은 별도 문서. 기업 규모/사용량에 따라 조정 가능"
+
+  # 11. 마무리
+  - layout: closing
+    title: "다음 단계"
+    bullets:
+      - "이번 주 — 30분 데모 미팅"
+      - "다음 주 — PoC 환경 셋업 (3일)"
+      - "1개월 내 — 팀 전체 본 운영"
+    contact:
+      name: "전성훈 · Moat AI"
+      email: "juliuschun@doomoolmori.com"

@@ -1,0 +1,82 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">Tower sequential layer bounce</title>
+  <desc id="desc">A Tower loading animation where each slab layer moves up and down in sequence while preserving the favicon geometry.</desc>
+  <style>
+    :root {
+      --tower-top: #5EEAD4;
+      --tower-mid: #14B8A6;
+      --tower-side: #0F766E;
+      --tower-shadow: rgba(20, 184, 166, 0.20);
+    }
+
+    svg { overflow: visible; }
+
+    .shadow {
+      transform-origin: 256px 448px;
+      animation: shadow-breathe 1.6s cubic-bezier(.45, 0, .2, 1) infinite;
+    }
+
+    .layer {
+      transform-box: fill-box;
+      transform-origin: center;
+      animation: layer-bounce 1.6s cubic-bezier(.45, 0, .2, 1) infinite;
+    }
+
+    .top-layer { animation-delay: 0s; }
+    .middle-layer { animation-delay: .16s; }
+    .bottom-layer { animation-delay: .32s; }
+
+    .top-layer .face-main { animation: top-glow 1.6s ease-in-out infinite; }
+    .middle-layer .face-main { animation: mid-glow 1.6s ease-in-out infinite .16s; }
+    .bottom-layer .face-main { animation: mid-glow 1.6s ease-in-out infinite .32s; }
+
+    @keyframes layer-bounce {
+      0%, 100% { transform: translateY(0); }
+      14% { transform: translateY(-18px); }
+      28% { transform: translateY(3px); }
+      42%, 100% { transform: translateY(0); }
+    }
+
+    @keyframes shadow-breathe {
+      0%, 100% { transform: scaleX(.94); opacity: .18; }
+      28% { transform: scaleX(.82); opacity: .12; }
+      56% { transform: scaleX(1); opacity: .20; }
+    }
+
+    @keyframes top-glow {
+      0%, 100% { fill: var(--tower-mid); }
+      14% { fill: var(--tower-top); }
+      32% { fill: var(--tower-mid); }
+    }
+
+    @keyframes mid-glow {
+      0%, 100% { fill: var(--tower-mid); }
+      14% { fill: var(--tower-top); }
+      32% { fill: var(--tower-mid); }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .shadow,
+      .layer,
+      .face-main {
+        animation: none;
+      }
+    }
+  </style>
+
+  <ellipse class="shadow" cx="256" cy="448" rx="126" ry="22" fill="var(--tower-shadow)"/>
+
+  <g class="layer top-layer">
+    <path class="face-main" fill="var(--tower-mid)" d="M256 50 L436 135 L256 220 L76 135Z"/>
+  </g>
+
+  <g class="layer middle-layer">
+    <path fill="var(--tower-side)" d="M76 187 L256 272 L256 324 L76 239Z"/>
+    <path class="face-main" fill="var(--tower-mid)" d="M256 272 L436 187 L436 239 L256 324Z"/>
+  </g>
+
+  <g class="layer bottom-layer">
+    <path fill="var(--tower-side)" d="M76 291 L256 376 L256 428 L76 343Z"/>
+    <path class="face-main" fill="var(--tower-mid)" d="M256 376 L436 291 L436 343 L256 428Z"/>
+  </g>
+</svg>

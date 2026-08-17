@@ -1,0 +1,20 @@
+{
+  "settings": "설정",
+  "mySettings": "내 설정",
+  "account": "계정",
+  "myProfile": "내 프로필",
+  "changePassword": "비밀번호 변경",
+  "view": "화면",
+  "connections": "연결",
+  "language": "언어",
+  "english": "English",
+  "korean": "한국어",
+  "appearance": "외관",
+  "theme": "테마",
+  "themeDark": "다크",
+  "themeLight": "라이트",
+  "fontSize": "글자 크기",
+  "fontSmall": "작게",
+  "fontMedium": "보통",
+  "fontLarge": "크게"
+}

@@ -1,0 +1,22 @@
+{
+  "sessions": "Sessions",
+  "tasks": "Tasks",
+  "sessionRestored": "Session restored",
+  "failedToRestore": "Failed to restore session",
+  "permanentlyDeleted": "Permanently deleted",
+  "failedToDelete": "Failed to delete",
+  "taskRestored": "Task restored",
+  "failedToRestoreTask": "Failed to restore task",
+  "searchHistory": "Search history...",
+  "sessionsCount": "Sessions ({{count}})",
+  "tasksCount": "Tasks ({{count}})",
+  "sortByRecent": "Sort by most recent",
+  "groupByProject": "Group by project",
+  "noMatchingSessions": "No matching sessions",
+  "noArchivedSessions": "No hidden sessions",
+  "noMatchingTasks": "No matching tasks",
+  "noArchivedTasks": "No archived tasks",
+  "restore": "Restore",
+  "deletePermanently": "Delete permanently",
+  "deleteSessionPermanentConfirm": "Permanently deleting this session removes its conversation and work history. This cannot be undone."
+}

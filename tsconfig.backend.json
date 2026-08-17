@@ -1,0 +1,28 @@
+{
+  "compilerOptions": {
+    "composite": true,
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "outDir": "dist/backend",
+    "rootDir": ".",
+    "declaration": true,
+    "baseUrl": ".",
+    "paths": {
+      "@tower/shared": ["packages/shared/index.ts"],
+      "zod": ["node_modules/zod"],
+      "zod/v4": ["node_modules/zod/v4"]
+    }
+  },
+  "include": [
+    "packages/backend",
+    "packages/shared"
+  ],
+  "exclude": [
+    "packages/backend/**/*.test.ts",
+    "packages/backend/scripts/migrate-sqlite-to-pg.ts"
+  ]
+}

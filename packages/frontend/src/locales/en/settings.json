@@ -1,0 +1,20 @@
+{
+  "settings": "Settings",
+  "mySettings": "My Settings",
+  "account": "Account",
+  "myProfile": "My profile",
+  "changePassword": "Change password",
+  "view": "View",
+  "connections": "Connections",
+  "language": "Language",
+  "english": "English",
+  "korean": "한국어",
+  "appearance": "Appearance",
+  "theme": "Theme",
+  "themeDark": "Dark",
+  "themeLight": "Light",
+  "fontSize": "Font Size",
+  "fontSmall": "Small",
+  "fontMedium": "Medium",
+  "fontLarge": "Large"
+}

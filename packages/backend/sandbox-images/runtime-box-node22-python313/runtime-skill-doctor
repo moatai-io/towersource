@@ -1,0 +1,326 @@
+#!/usr/bin/env python3
+"""runtime-skill-doctor — manifest-first doctor for Tower Runtime Box skills.
+
+This intentionally does NOT inspect host/global registries such as ~/.claude/skills
+or ~/tower/data/skills. Inside Project Runtime Box the source of truth is the
+project-mounted runtime asset layer:
+
+  /workspace/.tower/skills/manifest.json
+  /workspace/.tower/skills/<skill>/...
+  /workspace/skills/<project-local-skill>/...
+
+Keep dependency-free: Python stdlib only.
+"""
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+import shutil
+import sys
+from pathlib import Path
+from typing import Any
+
+DEFAULT_WORKSPACE = Path('/workspace')
+WORKSPACE = DEFAULT_WORKSPACE
+MANAGED_ROOT = WORKSPACE / '.tower' / 'skills'
+MANIFEST_PATH = MANAGED_ROOT / 'manifest.json'
+PROJECT_LOCAL_ROOT = WORKSPACE / 'skills'
+
+
+def set_workspace(path: str) -> None:
+    global WORKSPACE, MANAGED_ROOT, MANIFEST_PATH, PROJECT_LOCAL_ROOT
+    WORKSPACE = Path(path)
+    MANAGED_ROOT = WORKSPACE / '.tower' / 'skills'
+    MANIFEST_PATH = MANAGED_ROOT / 'manifest.json'
+    PROJECT_LOCAL_ROOT = WORKSPACE / 'skills'
+
+TOOL_HINTS = {
+    'html-slide': ['node', 'chromium'],
+    'mermaid-pdf': ['node', 'mmdc', 'chromium'],
+    'web-capture': ['node', 'chromium'],
+    'pptx-template': ['python3', 'libreoffice'],
+    'pptx-review': ['python3', 'libreoffice'],
+    'image-slide-gen': ['python3'],
+    'youtube-transcript': ['python3'],
+    'naver-search': ['python3'],
+    'offer-A4-html': ['chromium', 'python3'],
+}
+
+# Conservative credential hints. Manifest requiredSecrets is preferred when present;
+# this map catches older skills whose metadata has not yet been normalized.
+CREDENTIAL_HINTS = {
+    'youtube-transcript': ['APIFY_TOKEN'],
+    'naver-search': ['NAVER_CLIENT_ID', 'NAVER_CLIENT_SECRET'],
+    'image-slide-gen': ['OPENAI_API_KEY'],
+}
+
+
+def sha256(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open('rb') as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b''):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def bundle_digest(files: list[dict[str, Any]]) -> str:
+    h = hashlib.sha256()
+    normalized = sorted(files, key=lambda f: str(f.get('relativePath') or ''))
+    for f in normalized:
+        rel = str(f.get('relativePath') or '')
+        size = int(f.get('sizeBytes') or 0)
+        digest = str(f.get('sha256') or '')
+        h.update(f'{rel}\0{size}\0{digest}\n'.encode('utf-8'))
+    return 'sha256:' + h.hexdigest()
+
+
+def unescape_mount_path(value: str) -> str:
+    return (value.replace('\\040', ' ').replace('\\011', '\t')
+            .replace('\\012', '\n').replace('\\134', '\\'))
+
+
+def mount_info(path: Path) -> dict[str, Any] | None:
+    """Return the exact Linux mount record for path, if it is a mount point."""
+    try:
+        target = str(path.resolve())
+        for line in Path('/proc/self/mountinfo').read_text('utf-8').splitlines():
+            left, _, right = line.partition(' - ')
+            fields = left.split()
+            if len(fields) < 6:
+                continue
+            mount_point = unescape_mount_path(fields[4])
+            if mount_point != target:
+                continue
+            options = fields[5].split(',')
+            right_fields = right.split()
+            return {
+                'mountPoint': mount_point,
+                'readOnly': 'ro' in options,
+                'options': options,
+                'fsType': right_fields[0] if right_fields else None,
+                'source': unescape_mount_path(right_fields[1]) if len(right_fields) > 1 else None,
+            }
+    except Exception:
+        return None
+    return None
+
+
+def load_manifest() -> tuple[dict[str, Any] | None, str | None]:
+    if not MANIFEST_PATH.exists():
+        return None, f'manifest missing: {MANIFEST_PATH}'
+    try:
+        return json.loads(MANIFEST_PATH.read_text('utf-8')), None
+    except Exception as e:  # pragma: no cover - diagnostics script
+        return None, f'manifest unreadable: {e}'
+
+
+def command_exists(name: str) -> bool:
+    candidates = [name]
+    if name == 'chromium':
+        candidates = ['chromium', 'chromium-browser', 'google-chrome']
+    if name == 'libreoffice':
+        candidates = ['libreoffice', 'soffice']
+    return any(shutil.which(c) for c in candidates)
+
+
+def managed_entries(manifest: dict[str, Any] | None) -> list[dict[str, Any]]:
+    if not manifest:
+        return []
+    skills = manifest.get('skills')
+    return skills if isinstance(skills, list) else []
+
+
+def inspect_managed(entry: dict[str, Any], verify_hash: bool = False) -> dict[str, Any]:
+    name = str(entry.get('name') or '')
+    root = MANAGED_ROOT / name
+    result: dict[str, Any] = {
+        'name': name,
+        'layer': 'managed-runtime',
+        'runtimePath': str(entry.get('runtimePath') or f'/workspace/.tower/skills/{name}'),
+        'version': entry.get('version'),
+        'storageMode': entry.get('storageMode') or 'copy',
+        'fallbackMode': entry.get('fallbackMode') or 'copy',
+        'ok': True,
+        'problems': [],
+        'files': len(entry.get('files') or []),
+    }
+
+    if not name:
+        result['ok'] = False
+        result['problems'].append('missing_name')
+        return result
+    if not root.is_dir():
+        result['ok'] = False
+        result['problems'].append('missing_skill_dir')
+    if not (root / 'SKILL.md').is_file():
+        result['ok'] = False
+        result['problems'].append('missing_SKILL.md')
+    if not (root / '.tower-managed-skill').is_file():
+        # A child bind mount overlays the host control marker. This is expected
+        # for schema v3 bind-ro entries and remains a warning for copy entries.
+        if result['storageMode'] != 'bind-ro':
+            result['problems'].append('missing_managed_marker')
+
+    mount = mount_info(root)
+    result['mount'] = mount
+    if result['storageMode'] == 'bind-ro':
+        if not mount:
+            result['ok'] = False
+            result['problems'].append('bind_mount_missing')
+        elif not mount.get('readOnly'):
+            result['ok'] = False
+            result['problems'].append('bind_mount_writable')
+
+    manifest_files = entry.get('files') or []
+    missing_files = []
+    hash_mismatch = []
+    if isinstance(manifest_files, list):
+        for f in manifest_files:
+            rel = f.get('relativePath') if isinstance(f, dict) else None
+            if not rel:
+                continue
+            p = root / rel
+            if not p.is_file():
+                missing_files.append(rel)
+                continue
+            if verify_hash and f.get('sha256') and sha256(p) != f.get('sha256'):
+                hash_mismatch.append(rel)
+    if missing_files:
+        result['ok'] = False
+        result['problems'].append(f'missing_files:{len(missing_files)}')
+        result['missingFiles'] = missing_files[:20]
+    if hash_mismatch:
+        result['ok'] = False
+        result['problems'].append(f'hash_mismatch:{len(hash_mismatch)}')
+        result['hashMismatch'] = hash_mismatch[:20]
+    if verify_hash and isinstance(manifest_files, list):
+        actual_inventory = []
+        for f in manifest_files:
+            if not isinstance(f, dict) or not f.get('relativePath'):
+                continue
+            p = root / str(f['relativePath'])
+            if not p.is_file():
+                continue
+            actual_inventory.append({
+                'relativePath': f['relativePath'],
+                'sizeBytes': p.stat().st_size,
+                'sha256': sha256(p),
+            })
+        actual_bundle_digest = bundle_digest(actual_inventory)
+        result['actualBundleDigest'] = actual_bundle_digest
+        result['bundleDigestMatch'] = actual_bundle_digest == entry.get('bundleDigest')
+        if not result['bundleDigestMatch']:
+            result['ok'] = False
+            result['problems'].append('bundle_digest_mismatch')
+
+    required = list(entry.get('requiredSecrets') or [])
+    for env in CREDENTIAL_HINTS.get(name, []):
+        if env not in required:
+            required.append(env)
+    result['requiredEnv'] = required
+    result['envPresence'] = {env: ('present-redacted' if os.getenv(env) else 'missing') for env in required}
+
+    tools = TOOL_HINTS.get(name, [])
+    result['toolPresence'] = {tool: command_exists(tool) for tool in tools}
+    missing_tools = [tool for tool, ok in result['toolPresence'].items() if not ok]
+    if missing_tools:
+        result['problems'].append('missing_tools:' + ','.join(missing_tools))
+
+    return result
+
+
+def list_project_local() -> list[dict[str, Any]]:
+    if not PROJECT_LOCAL_ROOT.is_dir():
+        return []
+    out = []
+    for child in sorted(PROJECT_LOCAL_ROOT.iterdir(), key=lambda p: p.name):
+        if child.is_dir() and (child / 'SKILL.md').is_file():
+            out.append({
+                'name': child.name,
+                'layer': 'project-local',
+                'runtimePath': f'/workspace/skills/{child.name}',
+                'ok': True,
+                'files': sum(1 for p in child.rglob('*') if p.is_file()),
+            })
+    return out
+
+
+def human_report(manifest: dict[str, Any] | None, manifest_error: str | None, managed: list[dict[str, Any]], local: list[dict[str, Any]]) -> int:
+    print('=== Tower Runtime Skill doctor ===')
+    print('Source of truth: /workspace/.tower/skills/manifest.json + /workspace filesystem')
+    print('Registry lookup: disabled by design inside Runtime Box')
+    print('')
+    if manifest_error:
+        print(f'MANIFEST  MISS  {manifest_error}')
+    else:
+        print(f'MANIFEST  OK    schema={manifest.get("schemaVersion")} managedBy={manifest.get("managedBy")} generatedAt={manifest.get("generatedAt")} skills={len(managed)}')
+    print(f'PROJECT   INFO  local_skills={len(local)} root={PROJECT_LOCAL_ROOT}')
+    print('')
+
+    fail = 0
+    for row in managed:
+        status = 'OK' if row.get('ok') else 'MISS'
+        if status != 'OK':
+            fail += 1
+        env_bits = []
+        for k, v in (row.get('envPresence') or {}).items():
+            env_bits.append(f'{k}={v}')
+        tool_bits = []
+        for k, v in (row.get('toolPresence') or {}).items():
+            tool_bits.append(f'{k}={"ok" if v else "missing"}')
+        extra = []
+        if env_bits:
+            extra.append('env[' + ', '.join(env_bits) + ']')
+        if tool_bits:
+            extra.append('tools[' + ', '.join(tool_bits) + ']')
+        mount = row.get('mount')
+        if row.get('storageMode') == 'bind-ro':
+            extra.append('mount[' + ('ro' if mount and mount.get('readOnly') else 'missing/writable') + ']')
+        if row.get('problems'):
+            extra.append('problems[' + ', '.join(row['problems']) + ']')
+        print(f'{status:<7} managed {row["name"]:<24} mode={row.get("storageMode", "copy"):<7} files={row.get("files", 0):<4} ' + ' '.join(extra))
+
+    for row in local:
+        print(f'OK      local   {row["name"]:<24} files={row.get("files", 0):<4}')
+
+    print('')
+    print(f'SUMMARY managed={len(managed)} project_local={len(local)} failures={fail}')
+    return 1 if fail or manifest_error else 0
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description='Manifest-first Runtime Box skill doctor')
+    ap.add_argument('--json', action='store_true', help='print machine-readable JSON')
+    ap.add_argument('--verify-hash', action='store_true', help='verify manifest file sha256 values')
+    ap.add_argument('--workspace', default=str(DEFAULT_WORKSPACE), help='workspace root, default /workspace')
+    args = ap.parse_args()
+    set_workspace(args.workspace)
+
+    manifest, manifest_error = load_manifest()
+    managed = [inspect_managed(e, verify_hash=args.verify_hash) for e in managed_entries(manifest)]
+    local = list_project_local()
+    schema = manifest.get('schemaVersion') if manifest else None
+    schema_error = None if schema in (2, 3) else f'unsupported manifest schema: {schema}'
+    effective_error = manifest_error or schema_error
+    result = {
+        'ok': not effective_error and all(r.get('ok') for r in managed),
+        'sourceOfTruth': str(MANIFEST_PATH),
+        'schemaVersion': schema,
+        'managedBy': manifest.get('managedBy') if manifest else None,
+        'registryLookup': 'disabled',
+        'manifestError': effective_error,
+        'managedCount': len(managed),
+        'projectLocalCount': len(local),
+        'managed': managed,
+        'projectLocal': local,
+    }
+    if args.json:
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return 0 if result['ok'] else 1
+    return human_report(manifest, effective_error, managed, local)
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())

@@ -1,0 +1,329 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 600" width="800" height="600">
+  <defs>
+    <style>
+      @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap');
+      text { font-family: 'Inter', system-ui, sans-serif; }
+      .mono { font-family: 'JetBrains Mono', 'SF Mono', 'Fira Code', monospace; }
+    </style>
+
+    <!-- Glow filters -->
+    <filter id="glow-red" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="3" result="blur"/>
+      <feFlood flood-color="#EF4444" flood-opacity="0.4"/>
+      <feComposite in2="blur" operator="in"/>
+      <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="glow-purple" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="3" result="blur"/>
+      <feFlood flood-color="#8B5CF6" flood-opacity="0.3"/>
+      <feComposite in2="blur" operator="in"/>
+      <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <!-- ============================================ -->
+  <!-- DEVELOPER FIGURE (0-1s)                       -->
+  <!-- ============================================ -->
+  <g opacity="0">
+    <animate attributeName="opacity" from="0" to="1" begin="0s" dur="0.8s" fill="freeze"/>
+
+    <!-- Head -->
+    <circle cx="100" cy="258" r="20" fill="#0F172A" stroke="#8B5CF6" stroke-width="2"/>
+
+    <!-- X eyes (line-based, clean) -->
+    <line x1="88" y1="252" x2="94" y2="258" stroke="#8B5CF6" stroke-width="1.8" stroke-linecap="round"/>
+    <line x1="94" y1="252" x2="88" y2="258" stroke="#8B5CF6" stroke-width="1.8" stroke-linecap="round"/>
+    <line x1="106" y1="252" x2="112" y2="258" stroke="#8B5CF6" stroke-width="1.8" stroke-linecap="round"/>
+    <line x1="112" y1="252" x2="106" y2="258" stroke="#8B5CF6" stroke-width="1.8" stroke-linecap="round"/>
+
+    <!-- Frown -->
+    <line x1="90" y1="268" x2="110" y2="268" stroke="#8B5CF6" stroke-width="1.5" stroke-linecap="round"/>
+
+    <!-- Neck -->
+    <line x1="94" y1="278" x2="94" y2="286" stroke="#8B5CF6" stroke-width="1.8" stroke-linecap="round"/>
+    <line x1="106" y1="278" x2="106" y2="286" stroke="#8B5CF6" stroke-width="1.8" stroke-linecap="round"/>
+
+    <!-- V-collar -->
+    <path d="M94,286 L100,294 L106,286" fill="none" stroke="#8B5CF6" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+
+    <!-- Shoulders — smooth bust silhouette -->
+    <path d="M66,302 C65,293 80,286 100,284 C120,286 135,293 134,302" fill="none" stroke="#8B5CF6" stroke-width="2" stroke-linecap="round"/>
+
+    <!-- Label -->
+    <text x="100" y="340" text-anchor="middle" fill="#E0E0E0" font-size="11" font-weight="600">Developer</text>
+  </g>
+
+  <!-- ============================================ -->
+  <!-- SCATTERED FILE ICONS (0.5-3s)                 -->
+  <!-- Pop in one by one, chaotic positions          -->
+  <!-- ============================================ -->
+
+  <!-- File 1: deploy.md at (240, 80) tilted -->
+  <g opacity="0" transform="translate(240, 80) rotate(-8)">
+    <animate attributeName="opacity" from="0" to="1" begin="0.5s" dur="0.3s" fill="freeze"/>
+    <rect x="0" y="0" width="55" height="38" rx="3" fill="#0F172A" stroke="#6366F1" stroke-width="1.2"/>
+    <path d="M38,0 L38,10 L48,10" fill="none" stroke="#6366F1" stroke-width="0.8" opacity="0.5"/>
+    <text x="27" y="24" text-anchor="middle" class="mono" font-size="8" fill="#A5B4FC">deploy.md</text>
+
+  </g>
+
+  <!-- File 2: tts.md at (380, 55) tilted -->
+  <g opacity="0" transform="translate(380, 55) rotate(5)">
+    <animate attributeName="opacity" from="0" to="1" begin="0.8s" dur="0.3s" fill="freeze"/>
+    <rect x="0" y="0" width="45" height="35" rx="3" fill="#0F172A" stroke="#06B6D4" stroke-width="1.2"/>
+    <path d="M30,0 L30,8 L38,8" fill="none" stroke="#06B6D4" stroke-width="0.8" opacity="0.5"/>
+    <text x="22" y="22" text-anchor="middle" class="mono" font-size="8" fill="#67E8F9">tts.md</text>
+  </g>
+
+  <!-- File 3: diagram.md at (550, 100) tilted -->
+  <g opacity="0" transform="translate(550, 100) rotate(-12)">
+    <animate attributeName="opacity" from="0" to="1" begin="1.0s" dur="0.3s" fill="freeze"/>
+    <rect x="0" y="0" width="62" height="38" rx="3" fill="#0F172A" stroke="#10B981" stroke-width="1.2"/>
+    <path d="M45,0 L45,10 L55,10" fill="none" stroke="#10B981" stroke-width="0.8" opacity="0.5"/>
+    <text x="31" y="24" text-anchor="middle" class="mono" font-size="8" fill="#6EE7B7">diagram.md</text>
+  </g>
+
+  <!-- File 4: commit.md at (680, 65) -->
+  <g opacity="0" transform="translate(680, 65) rotate(7)">
+    <animate attributeName="opacity" from="0" to="1" begin="1.2s" dur="0.3s" fill="freeze"/>
+    <rect x="0" y="0" width="55" height="35" rx="3" fill="#0F172A" stroke="#F59E0B" stroke-width="1.2"/>
+    <path d="M38,0 L38,8 L48,8" fill="none" stroke="#F59E0B" stroke-width="0.8" opacity="0.5"/>
+    <text x="27" y="22" text-anchor="middle" class="mono" font-size="8" fill="#FCD34D">commit.md</text>
+  </g>
+
+  <!-- File 5: test.md at (300, 180) tilted -->
+  <g opacity="0" transform="translate(300, 180) rotate(-4)">
+    <animate attributeName="opacity" from="0" to="1" begin="1.4s" dur="0.3s" fill="freeze"/>
+    <rect x="0" y="0" width="45" height="35" rx="3" fill="#0F172A" stroke="#8B5CF6" stroke-width="1.2"/>
+    <text x="22" y="22" text-anchor="middle" class="mono" font-size="8" fill="#C4B5FD">test.md</text>
+  </g>
+
+  <!-- File 6: deploy.md DUPLICATE at (490, 200) grayed -->
+  <g opacity="0" transform="translate(490, 200) rotate(10)">
+    <animate attributeName="opacity" from="0" to="1" begin="1.6s" dur="0.3s" fill="freeze"/>
+    <rect x="0" y="0" width="55" height="38" rx="3" fill="#0F172A" stroke="#4B5563" stroke-width="1.2" stroke-dasharray="4,3"/>
+    <text x="27" y="24" text-anchor="middle" class="mono" font-size="8" fill="#6B7280">deploy.md</text>
+  </g>
+
+  <!-- File 7: plan_w_team.md at (630, 200) -->
+  <g opacity="0" transform="translate(630, 200) rotate(-6)">
+    <animate attributeName="opacity" from="0" to="1" begin="1.8s" dur="0.3s" fill="freeze"/>
+    <rect x="0" y="0" width="90" height="35" rx="3" fill="#0F172A" stroke="#06B6D4" stroke-width="1.2"/>
+    <text x="45" y="22" text-anchor="middle" class="mono" font-size="8" fill="#67E8F9">plan_w_team.md</text>
+  </g>
+
+  <!-- File 8: lint.md at (220, 300) grayed (outdated) -->
+  <g opacity="0" transform="translate(220, 300) rotate(3)">
+    <animate attributeName="opacity" from="0" to="1" begin="2.0s" dur="0.3s" fill="freeze"/>
+    <rect x="0" y="0" width="45" height="35" rx="3" fill="#0F172A" stroke="#4B5563" stroke-width="1.2" stroke-dasharray="4,3"/>
+    <text x="22" y="22" text-anchor="middle" class="mono" font-size="8" fill="#6B7280">lint.md</text>
+  </g>
+
+  <!-- File 9: commit.md DUPLICATE at (350, 340) -->
+  <g opacity="0" transform="translate(350, 340) rotate(-9)">
+    <animate attributeName="opacity" from="0" to="1" begin="2.1s" dur="0.3s" fill="freeze"/>
+    <rect x="0" y="0" width="55" height="35" rx="3" fill="#0F172A" stroke="#4B5563" stroke-width="1.2" stroke-dasharray="4,3"/>
+    <text x="27" y="22" text-anchor="middle" class="mono" font-size="8" fill="#6B7280">commit.md</text>
+  </g>
+
+  <!-- File 10: playwright-agent.md at (510, 320) -->
+  <g opacity="0" transform="translate(510, 320) rotate(6)">
+    <animate attributeName="opacity" from="0" to="1" begin="2.3s" dur="0.3s" fill="freeze"/>
+    <rect x="0" y="0" width="105" height="35" rx="3" fill="#0F172A" stroke="#10B981" stroke-width="1.2"/>
+    <text x="52" y="22" text-anchor="middle" class="mono" font-size="8" fill="#6EE7B7">playwright-agent.md</text>
+  </g>
+
+  <!-- File 11: review.md at (680, 340) tilted -->
+  <g opacity="0" transform="translate(680, 340) rotate(-5)">
+    <animate attributeName="opacity" from="0" to="1" begin="2.5s" dur="0.3s" fill="freeze"/>
+    <rect x="0" y="0" width="55" height="35" rx="3" fill="#0F172A" stroke="#F59E0B" stroke-width="1.2"/>
+    <text x="27" y="22" text-anchor="middle" class="mono" font-size="8" fill="#FCD34D">review.md</text>
+  </g>
+
+  <!-- File 12: tts.md DUPLICATE at (450, 420) grayed -->
+  <g opacity="0" transform="translate(450, 420) rotate(8)">
+    <animate attributeName="opacity" from="0" to="1" begin="2.7s" dur="0.3s" fill="freeze"/>
+    <rect x="0" y="0" width="45" height="35" rx="3" fill="#0F172A" stroke="#4B5563" stroke-width="1.2" stroke-dasharray="4,3"/>
+    <text x="22" y="22" text-anchor="middle" class="mono" font-size="8" fill="#6B7280">tts.md</text>
+  </g>
+
+  <!-- File 13: ci.md at (270, 430) -->
+  <g opacity="0" transform="translate(270, 430) rotate(-7)">
+    <animate attributeName="opacity" from="0" to="1" begin="2.9s" dur="0.3s" fill="freeze"/>
+    <rect x="0" y="0" width="40" height="35" rx="3" fill="#0F172A" stroke="#6366F1" stroke-width="1.2"/>
+    <text x="20" y="22" text-anchor="middle" class="mono" font-size="8" fill="#A5B4FC">ci.md</text>
+  </g>
+
+  <!-- File 14: debug.md at (620, 440) -->
+  <g opacity="0" transform="translate(620, 440) rotate(4)">
+    <animate attributeName="opacity" from="0" to="1" begin="3.0s" dur="0.3s" fill="freeze"/>
+    <rect x="0" y="0" width="52" height="35" rx="3" fill="#0F172A" stroke="#06B6D4" stroke-width="1.2"/>
+    <text x="26" y="22" text-anchor="middle" class="mono" font-size="8" fill="#67E8F9">debug.md</text>
+  </g>
+
+  <!-- ============================================ -->
+  <!-- DIRECTORY LABELS (3-5s)                       -->
+  <!-- Scattered to show chaos                       -->
+  <!-- ============================================ -->
+
+  <!-- .claude/skills/ -->
+  <g opacity="0">
+    <animate attributeName="opacity" from="0" to="1" begin="3.0s" dur="0.6s" fill="freeze"/>
+    <rect x="195" y="128" width="95" height="18" rx="3" fill="#1E293B" stroke="#374151" stroke-width="0.8"/>
+    <text x="242" y="141" text-anchor="middle" class="mono" font-size="8" fill="#9CA3AF">.claude/skills/</text>
+  </g>
+
+  <!-- ~/Desktop/ -->
+  <g opacity="0">
+    <animate attributeName="opacity" from="0" to="1" begin="3.4s" dur="0.6s" fill="freeze"/>
+    <rect x="440" y="155" width="78" height="18" rx="3" fill="#1E293B" stroke="#374151" stroke-width="0.8"/>
+    <text x="479" y="168" text-anchor="middle" class="mono" font-size="8" fill="#9CA3AF">~/Desktop/</text>
+  </g>
+
+  <!-- /tmp/ -->
+  <g opacity="0">
+    <animate attributeName="opacity" from="0" to="1" begin="3.8s" dur="0.6s" fill="freeze"/>
+    <rect x="320" y="280" width="55" height="18" rx="3" fill="#1E293B" stroke="#374151" stroke-width="0.8"/>
+    <text x="347" y="293" text-anchor="middle" class="mono" font-size="8" fill="#9CA3AF">/tmp/</text>
+  </g>
+
+  <!-- ~/projects/foo/ -->
+  <g opacity="0">
+    <animate attributeName="opacity" from="0" to="1" begin="4.2s" dur="0.6s" fill="freeze"/>
+    <rect x="580" y="280" width="105" height="18" rx="3" fill="#1E293B" stroke="#374151" stroke-width="0.8"/>
+    <text x="632" y="293" text-anchor="middle" class="mono" font-size="8" fill="#9CA3AF">~/projects/foo/</text>
+  </g>
+
+  <!-- ~/old-tools/ -->
+  <g opacity="0">
+    <animate attributeName="opacity" from="0" to="1" begin="4.6s" dur="0.6s" fill="freeze"/>
+    <rect x="380" y="395" width="82" height="18" rx="3" fill="#1E293B" stroke="#374151" stroke-width="0.8"/>
+    <text x="421" y="408" text-anchor="middle" class="mono" font-size="8" fill="#9CA3AF">~/old-tools/</text>
+  </g>
+
+  <!-- ============================================ -->
+  <!-- RED WARNING LABELS (5-7s)                     -->
+  <!-- ============================================ -->
+
+  <!-- "duplicate!" on deploy.md copy -->
+  <g opacity="0" filter="url(#glow-red)">
+    <animate attributeName="opacity" from="0" to="1" begin="5.0s" dur="0.5s" fill="freeze"/>
+    <rect x="485" y="238" width="62" height="16" rx="3" fill="#7F1D1D" stroke="#EF4444" stroke-width="0.8"/>
+    <text x="516" y="250" text-anchor="middle" font-size="8" font-weight="700" fill="#FCA5A5">duplicate!</text>
+  </g>
+
+  <!-- "duplicate!" on commit.md copy -->
+  <g opacity="0" filter="url(#glow-red)">
+    <animate attributeName="opacity" from="0" to="1" begin="5.4s" dur="0.5s" fill="freeze"/>
+    <rect x="345" y="375" width="62" height="16" rx="3" fill="#7F1D1D" stroke="#EF4444" stroke-width="0.8"/>
+    <text x="376" y="387" text-anchor="middle" font-size="8" font-weight="700" fill="#FCA5A5">duplicate!</text>
+  </g>
+
+  <!-- "outdated?" on lint.md -->
+  <g opacity="0" filter="url(#glow-red)">
+    <animate attributeName="opacity" from="0" to="1" begin="5.8s" dur="0.5s" fill="freeze"/>
+    <rect x="215" y="335" width="60" height="16" rx="3" fill="#7F1D1D" stroke="#EF4444" stroke-width="0.8"/>
+    <text x="245" y="347" text-anchor="middle" font-size="8" font-weight="700" fill="#FCA5A5">outdated?</text>
+  </g>
+
+  <!-- "which version?" on tts.md copy -->
+  <g opacity="0" filter="url(#glow-red)">
+    <animate attributeName="opacity" from="0" to="1" begin="6.2s" dur="0.5s" fill="freeze"/>
+    <rect x="430" y="455" width="82" height="16" rx="3" fill="#7F1D1D" stroke="#EF4444" stroke-width="0.8"/>
+    <text x="471" y="467" text-anchor="middle" font-size="8" font-weight="700" fill="#FCA5A5">which version?</text>
+  </g>
+
+  <!-- "duplicate!" on tts.md -->
+  <g opacity="0" filter="url(#glow-red)">
+    <animate attributeName="opacity" from="0" to="1" begin="6.5s" dur="0.5s" fill="freeze"/>
+    <rect x="370" y="42" width="62" height="16" rx="3" fill="#7F1D1D" stroke="#EF4444" stroke-width="0.8"/>
+    <text x="401" y="54" text-anchor="middle" font-size="8" font-weight="700" fill="#FCA5A5">duplicate!</text>
+  </g>
+
+  <!-- ============================================ -->
+  <!-- LARGE "?" ABOVE DEVELOPER (7-8s)              -->
+  <!-- ============================================ -->
+  <g opacity="0">
+    <animate attributeName="opacity" from="0" to="1" begin="7s" dur="0.6s" fill="freeze"/>
+    <text x="100" y="230" text-anchor="middle" font-size="50" font-weight="700" fill="#EF4444" filter="url(#glow-red)">?</text>
+    <!-- Passive pulse on the question mark -->
+    <animate attributeName="opacity" values="1;0.6;1" dur="2s" begin="10s" repeatCount="indefinite"/>
+  </g>
+
+  <!-- ============================================ -->
+  <!-- TITLE + SUBTITLE (8-10s)                      -->
+  <!-- ============================================ -->
+
+  <!-- Title -->
+  <g opacity="0">
+    <animate attributeName="opacity" from="0" to="1" begin="8s" dur="0.8s" fill="freeze"/>
+    <text x="400" y="18" text-anchor="middle" font-size="22" font-weight="700" fill="#E0E0E0">The Problem: Endless Skills Everywhere</text>
+  </g>
+
+  <!-- Subtitle -->
+  <g opacity="0">
+    <animate attributeName="opacity" from="0" to="1" begin="8.8s" dur="1s" fill="freeze"/>
+    <text x="400" y="560" text-anchor="middle" font-size="11" fill="#9CA3AF">Skills scattered across directories, devices, and projects</text>
+    <text x="400" y="578" text-anchor="middle" font-size="11" fill="#9CA3AF">no central catalog, no sync, no lifecycle</text>
+  </g>
+
+  <!-- ============================================ -->
+  <!-- PASSIVE PHASE (10-20s)                        -->
+  <!-- Files wobble, warnings pulse red              -->
+  <!-- ============================================ -->
+
+  <!-- Warning pulse overlays - pulsing red borders on duplicates -->
+  <!-- deploy.md duplicate pulse -->
+  <rect x="490" y="200" width="55" height="38" rx="3" fill="none" stroke="#EF4444" stroke-width="1.5" opacity="0" transform="rotate(10, 517, 219)">
+    <animate attributeName="opacity" values="0;0.6;0" dur="2s" begin="10s" repeatCount="indefinite"/>
+  </rect>
+
+  <!-- commit.md duplicate pulse -->
+  <rect x="350" y="340" width="55" height="35" rx="3" fill="none" stroke="#EF4444" stroke-width="1.5" opacity="0" transform="rotate(-9, 377, 357)">
+    <animate attributeName="opacity" values="0;0.6;0" dur="2.2s" begin="10.3s" repeatCount="indefinite"/>
+  </rect>
+
+  <!-- tts.md duplicate pulse -->
+  <rect x="450" y="420" width="45" height="35" rx="3" fill="none" stroke="#EF4444" stroke-width="1.5" opacity="0" transform="rotate(8, 472, 437)">
+    <animate attributeName="opacity" values="0;0.6;0" dur="1.8s" begin="10.6s" repeatCount="indefinite"/>
+  </rect>
+
+  <!-- lint.md outdated pulse -->
+  <rect x="220" y="300" width="45" height="35" rx="3" fill="none" stroke="#EF4444" stroke-width="1.5" opacity="0" transform="rotate(3, 242, 317)">
+    <animate attributeName="opacity" values="0;0.5;0" dur="2.5s" begin="10.8s" repeatCount="indefinite"/>
+  </rect>
+
+  <!-- Subtle file drift animations on active files -->
+  <!-- File 3 drift -->
+  <g opacity="0">
+    <animate attributeName="opacity" from="0" to="0.15" begin="10s" dur="1s" fill="freeze"/>
+    <rect x="552" y="102" width="62" height="38" rx="3" fill="none" stroke="#10B981" stroke-width="1">
+      <animate attributeName="x" values="552;554;550;552" dur="5s" begin="10s" repeatCount="indefinite"/>
+      <animate attributeName="y" values="102;100;104;102" dur="5s" begin="10s" repeatCount="indefinite"/>
+    </rect>
+  </g>
+
+  <!-- File 7 drift -->
+  <g opacity="0">
+    <animate attributeName="opacity" from="0" to="0.15" begin="10s" dur="1s" fill="freeze"/>
+    <rect x="652" y="202" width="55" height="35" rx="3" fill="none" stroke="#06B6D4" stroke-width="1">
+      <animate attributeName="x" values="652;650;654;652" dur="4.5s" begin="10.5s" repeatCount="indefinite"/>
+      <animate attributeName="y" values="202;204;200;202" dur="4.5s" begin="10.5s" repeatCount="indefinite"/>
+    </rect>
+  </g>
+
+  <!-- Warning text pulse overlays -->
+  <text x="516" y="250" text-anchor="middle" font-size="8" font-weight="700" fill="#EF4444" opacity="0">duplicate!
+    <animate attributeName="opacity" values="0;0.8;0" dur="2s" begin="10s" repeatCount="indefinite"/>
+  </text>
+  <text x="376" y="387" text-anchor="middle" font-size="8" font-weight="700" fill="#EF4444" opacity="0">duplicate!
+    <animate attributeName="opacity" values="0;0.8;0" dur="2.2s" begin="10.3s" repeatCount="indefinite"/>
+  </text>
+  <text x="245" y="347" text-anchor="middle" font-size="8" font-weight="700" fill="#EF4444" opacity="0">outdated?
+    <animate attributeName="opacity" values="0;0.5;0" dur="2.5s" begin="10.8s" repeatCount="indefinite"/>
+  </text>
+  <text x="471" y="467" text-anchor="middle" font-size="8" font-weight="700" fill="#EF4444" opacity="0">which version?
+    <animate attributeName="opacity" values="0;0.7;0" dur="1.8s" begin="10.6s" repeatCount="indefinite"/>
+  </text>
+
+</svg>

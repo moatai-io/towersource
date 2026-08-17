@@ -1,0 +1,10 @@
+{
+  "snapshotSaved": "스냅샷 저장됨",
+  "commitFailed": "커밋 실패",
+  "viewDiff": "차이 보기",
+  "rollback": "롤백",
+  "auto": "자동",
+  "manual": "수동",
+  "files": "파일",
+  "snapshotMessagePlaceholder": "스냅샷 메시지..."
+}

@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "name": "tower-project-compute-baseline",
+  "policy": {
+    "description": "Runtime Box와 Worker가 공통으로 보장하는 기본 작업 컴퓨터 기능",
+    "versionRule": "호환성 fixture를 통과한 더 최신 버전을 공통 기준으로 승격",
+    "projectPython": "Project별 패키지는 uv + pyproject.toml + uv.lock + .venv로 관리",
+    "projectNode": "Project별 패키지는 package.json + lock file + node_modules로 관리"
+  },
+  "commands": {
+    "core": ["bash", "git", "curl", "wget", "jq", "yq", "openssl", "tar", "gzip", "find", "sed", "awk", "grep", "rg", "fd", "rsync", "file", "less", "zip", "unzip", "xz"],
+    "languages": ["node", "npm", "npx", "pnpm", "python", "pip", "uv", "java"],
+    "build": ["gcc", "g++", "make", "pkg-config"],
+    "documents": ["pandoc", "typst", "libreoffice", "soffice", "pdftoppm", "pdfinfo", "pdftotext", "qpdf", "gs", "tesseract", "rsvg-convert"],
+    "media": ["ffmpeg", "convert", "identify"],
+    "browser": ["chromium"],
+    "publishing": ["mmdc"],
+    "tower": []
+  },
+  "optionalCommands": {
+    "runtimeBoxPublishing": ["marp", "playwright", "svgo", "tower-html-render", "runtime-skill-doctor"],
+    "connectionTools": ["gws"]
+  },
+  "pythonImports": ["PIL", "pypdf", "pdfplumber", "fitz", "openpyxl", "docx", "pptx", "reportlab", "pandas", "matplotlib", "yaml", "bs4", "lxml", "requests"],
+  "ocrLanguages": ["eng", "kor"],
+  "fontFamilies": ["Pretendard", "Noto Sans CJK KR", "NanumGothic", "Noto Color Emoji", "Inter"],
+  "versionFloors": {
+    "node": "22",
+    "python": "3.13",
+    "uv": "0.11",
+    "pandoc": "3.10",
+    "typst": "0.15",
+    "playwright": "1.61"
+  },
+  "projectLocalOnly": ["application Python libraries beyond pythonImports", "application npm packages", "database servers", "Project-specific system daemons"],
+  "operatorOnly": ["docker", "systemctl", "pm2", "kubectl", "az"]
+}

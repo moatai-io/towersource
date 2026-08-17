@@ -1,0 +1,6 @@
+{
+  "type": "module",
+  "private": true,
+  "name": "tower-frontend-design-lint-vendored-impeccable",
+  "description": "Vendored subset of pbakaus/impeccable detector for Tower frontend-design skill."
+}

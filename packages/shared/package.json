@@ -1,0 +1,14 @@
+{
+  "name": "@tower/shared",
+  "version": "1.70.29",
+  "private": true,
+  "type": "module",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "default": "./index.js"
+    }
+  }
+}

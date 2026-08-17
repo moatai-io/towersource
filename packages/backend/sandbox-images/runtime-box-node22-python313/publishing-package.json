@@ -1,0 +1,9 @@
+{
+  "name": "tower-runtime-box-publishing-tools",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Locked Node.js publishing tools for the Tower Project Runtime Box.",
+  "dependencies": {
+    "@mermaid-js/mermaid-cli": "11.16.0"
+  }
+}

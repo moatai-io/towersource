@@ -1,0 +1,17 @@
+{
+  "shareSession": "Share session",
+  "shareFile": "Share file",
+  "externalLink": "External link",
+  "internalShare": "Internal share",
+  "internalUsers": "Internal users",
+  "oneHour": "1 hour",
+  "twentyFourHours": "24 hours",
+  "sevenDays": "7 days",
+  "createAndCopy": "Create & copy link",
+  "selectUser": "Select user...",
+  "currentShares": "Current shares",
+  "shareComplete": "Share complete",
+  "shareCancelled": "Share cancelled",
+  "externalLinkWarning": "External links contain a snapshot of the conversation at the time of sharing. Future messages will not be included.",
+  "internalShareDescription": "Sharing internally lets the user see this session in their session list."
+}

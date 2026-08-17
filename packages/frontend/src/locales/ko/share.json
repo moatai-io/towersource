@@ -1,0 +1,17 @@
+{
+  "shareSession": "세션 공유",
+  "shareFile": "파일 공유",
+  "externalLink": "외부 링크",
+  "internalShare": "내부 공유",
+  "internalUsers": "내부 사용자",
+  "oneHour": "1시간",
+  "twentyFourHours": "24시간",
+  "sevenDays": "7일",
+  "createAndCopy": "링크 생성 & 복사",
+  "selectUser": "사용자 선택...",
+  "currentShares": "현재 공유 목록",
+  "shareComplete": "공유 완료",
+  "shareCancelled": "공유 취소됨",
+  "externalLinkWarning": "외부 링크는 공유 시점까지의 대화 스냅샷만 포함됩니다. 이후 대화는 반영되지 않습니다.",
+  "internalShareDescription": "내부 사용자에게 공유하면 해당 사용자의 세션 목록에서 이 세션을 볼 수 있습니다."
+}

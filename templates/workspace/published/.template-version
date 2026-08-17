@@ -1,0 +1,11 @@
+{
+  "version": "2026-03-10",
+  "features": [
+    "workspace-base",
+    "publishing-hub-v2",
+    "pretooluse-hooks"
+  ],
+  "changelog": [
+    {"date": "2026-03-10", "added": "publishing-hub-v2", "description": "Auto nginx + systemd management via Hub API"}
+  ]
+}

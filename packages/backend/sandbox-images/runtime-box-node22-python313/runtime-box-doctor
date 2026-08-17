@@ -1,0 +1,282 @@
+#!/usr/bin/env bash
+# runtime-box-doctor — quick readiness check for Tower Project Runtime Box.
+# Keep this script dependency-light: bash + command -v + tiny smoke tests only.
+
+set -u
+
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+RED='\033[0;31m'
+NC='\033[0m'
+
+ok() { echo -e "${GREEN}OK${NC}   $*"; }
+warn() { echo -e "${YELLOW}WARN${NC} $*"; }
+fail() { echo -e "${RED}MISS${NC} $*"; FAIL=1; }
+
+FAIL=0
+
+has_any() {
+  local label="$1"; shift
+  local found=""
+  for cmd in "$@"; do
+    if command -v "$cmd" >/dev/null 2>&1; then
+      found="$cmd ($(command -v "$cmd"))"
+      break
+    fi
+  done
+  if [[ -n "$found" ]]; then ok "$label: $found"; else fail "$label: none of [$*]"; fi
+}
+
+has_all() {
+  local label="$1"; shift
+  local missing=()
+  for cmd in "$@"; do
+    command -v "$cmd" >/dev/null 2>&1 || missing+=("$cmd")
+  done
+  if [[ ${#missing[@]} -eq 0 ]]; then ok "$label: $*"; else fail "$label missing: ${missing[*]}"; fi
+}
+
+check_python_imports() {
+  local label="$1"; shift
+  local imports="$*"
+  if python - <<PY >/dev/null 2>&1
+mods = '''$imports'''.split()
+for mod in mods:
+    __import__(mod)
+PY
+  then
+    ok "$label: $imports"
+  else
+    fail "$label imports failed: $imports"
+  fi
+}
+
+check_tesseract_langs() {
+  if ! command -v tesseract >/dev/null 2>&1; then
+    fail "OCR: tesseract missing"
+    return
+  fi
+  local langs
+  langs="$(tesseract --list-langs 2>/dev/null || true)"
+  if grep -qx 'eng' <<<"$langs" && grep -qx 'kor' <<<"$langs"; then
+    ok "OCR languages: eng kor"
+  else
+    warn "OCR languages incomplete; expected eng+kor, got: $(tr '\n' ' ' <<<"$langs")"
+  fi
+}
+
+find_chromium() {
+  for cmd in chromium chromium-browser google-chrome; do
+    if command -v "$cmd" >/dev/null 2>&1; then command -v "$cmd"; return 0; fi
+  done
+  return 1
+}
+
+check_chromium_smoke() {
+  local chrome=""
+  chrome="$(find_chromium || true)"
+  if [[ -z "$chrome" ]]; then
+    fail "Browser: chromium/chromium-browser/google-chrome missing"
+    return
+  fi
+  if "$chrome" --headless --no-sandbox --disable-gpu --dump-dom 'data:text/html,<html>ok</html>' >/dev/null 2>&1; then
+    ok "Browser smoke: $chrome headless works"
+  else
+    warn "Browser found ($chrome) but headless smoke failed"
+  fi
+}
+
+check_playwright_smoke() {
+  local chrome=""
+  chrome="$(find_chromium || true)"
+  if [[ -z "$chrome" ]]; then
+    fail "Playwright smoke: chromium missing"
+    return
+  fi
+  if node - "$chrome" <<'NODE' >/dev/null 2>&1
+const { chromium } = require('playwright-core');
+const executablePath = process.argv[2];
+(async () => {
+  const browser = await chromium.launch({ executablePath, headless: true, args: ['--no-sandbox', '--disable-gpu'] });
+  const page = await browser.newPage({ viewport: { width: 640, height: 360 } });
+  await page.goto('data:text/html,<html><body><h1>ok</h1></body></html>');
+  const text = await page.locator('body').innerText();
+  if (!text.includes('ok')) throw new Error('unexpected page text');
+  await browser.close();
+})().catch(err => { console.error(err); process.exit(1); });
+NODE
+  then
+    ok "Playwright smoke: playwright-core + $chrome works"
+  else
+    fail "Playwright smoke: playwright-core + $chrome failed"
+  fi
+}
+
+check_html_render_smoke() {
+  if ! command -v tower-html-render >/dev/null 2>&1; then
+    fail "HTML render wrapper: tower-html-render missing"
+    return
+  fi
+  local dir="${TMPDIR:-/tmp}/tower-html-render-doctor-$$"
+  mkdir -p "$dir"
+  cat > "$dir/smoke.html" <<'HTML'
+<!doctype html><html lang="ko"><meta charset="utf-8"><style>
+body{margin:0;font-family:Inter,'Noto Sans CJK KR','Noto Sans KR','Nanum Gothic',sans-serif;background:#10151f;color:#f8fafc}.card{width:720px;margin:48px auto;padding:32px;border-radius:28px;background:linear-gradient(135deg,#22304a,#111827);box-shadow:0 24px 80px rgba(0,0,0,.35)}h1{font-size:44px;letter-spacing:-.04em;margin:0 0 12px}p{font-size:22px;line-height:1.55;margin:0;color:#cbd5e1}
+</style><body><section class="card"><h1>렌더링 품질 점검</h1><p>한글 폰트, 2x 스케일, Chromium headless smoke.</p></section></body></html>
+HTML
+  if tower-html-render "$dir/smoke.html" "$dir/smoke.png" --width 900 --height 540 --scale 2 --wait-ms 500 >/dev/null 2>&1 && [[ -s "$dir/smoke.png" ]]; then
+    ok "HTML render wrapper: tower-html-render smoke works"
+  else
+    warn "HTML render wrapper found but smoke render failed"
+  fi
+  rm -rf "$dir"
+}
+
+check_publishing_toolchain() {
+  local typst_expected="0.15.0"
+  local pandoc_expected="3.10"
+  local mermaid_expected="11.16.0"
+
+  if ! command -v typst >/dev/null 2>&1; then
+    fail "Publishing toolchain: typst missing"
+  elif [[ "$(typst --version 2>/dev/null | awk '{print $2}')" == "$typst_expected" ]]; then
+    ok "Publishing toolchain: Typst $typst_expected"
+  else
+    fail "Publishing toolchain: expected Typst $typst_expected, got $(typst --version 2>/dev/null || true)"
+  fi
+
+  if ! command -v pandoc >/dev/null 2>&1; then
+    fail "Publishing toolchain: pandoc missing"
+  elif [[ "$(pandoc --version 2>/dev/null | head -1 | awk '{print $2}')" == "$pandoc_expected" ]]; then
+    ok "Publishing toolchain: Pandoc $pandoc_expected"
+  else
+    fail "Publishing toolchain: expected Pandoc $pandoc_expected, got $(pandoc --version 2>/dev/null | head -1 || true)"
+  fi
+
+  if ! command -v mmdc >/dev/null 2>&1; then
+    fail "Publishing toolchain: mmdc missing"
+  elif [[ "$(mmdc --version 2>/dev/null)" == "$mermaid_expected" ]]; then
+    ok "Publishing toolchain: Mermaid CLI $mermaid_expected"
+  else
+    fail "Publishing toolchain: expected Mermaid CLI $mermaid_expected, got $(mmdc --version 2>/dev/null || true)"
+  fi
+}
+
+check_typst_smoke() {
+  if ! command -v typst >/dev/null 2>&1; then
+    fail "Typst smoke: typst missing"
+    return
+  fi
+  local dir="${TMPDIR:-/tmp}/tower-typst-doctor-$$"
+  mkdir -p "$dir"
+  cat > "$dir/smoke.typ" <<'TYP'
+#set page(paper: "a4")
+#set text(font: ("Pretendard", "Noto Sans CJK KR"), lang: "ko")
+= 출판 도구 점검
+한국어 본문과 *굵은 글씨*를 PDF로 조판합니다.
+TYP
+  if typst compile --root "$dir" "$dir/smoke.typ" "$dir/smoke.pdf" >/dev/null 2>&1 \
+    && [[ -s "$dir/smoke.pdf" ]] \
+    && pdftotext "$dir/smoke.pdf" - 2>/dev/null | grep -q '한국어 본문'; then
+    ok "Typst smoke: Korean A4 PDF compiles and extracts text"
+  else
+    fail "Typst smoke: Korean A4 PDF compile/text extraction failed"
+  fi
+  rm -rf "$dir"
+}
+
+check_mermaid_smoke() {
+  if ! command -v mmdc >/dev/null 2>&1; then
+    fail "Mermaid render smoke: mmdc missing"
+    return
+  fi
+  local chrome=""
+  chrome="$(find_chromium || true)"
+  if [[ -z "$chrome" ]]; then
+    fail "Mermaid render smoke: chromium missing"
+    return
+  fi
+  local dir="${TMPDIR:-/tmp}/tower-mermaid-doctor-$$"
+  mkdir -p "$dir"
+  cat > "$dir/smoke.mmd" <<'MMD'
+flowchart LR
+  A["Mermaid smoke"] --> B["SVG rendered"]
+MMD
+  cat > "$dir/puppeteer.json" <<JSON
+{"executablePath":"$chrome","args":["--no-sandbox","--disable-gpu","--disable-dev-shm-usage"]}
+JSON
+  if PUPPETEER_EXECUTABLE_PATH="$chrome" mmdc -p "$dir/puppeteer.json" -i "$dir/smoke.mmd" -o "$dir/smoke.svg" -b white >/dev/null 2>&1 \
+    && [[ -s "$dir/smoke.svg" ]] \
+    && grep -q '<svg' "$dir/smoke.svg"; then
+    ok "Mermaid render smoke: mmdc + $chrome renders SVG"
+  else
+    fail "Mermaid render smoke: mmdc failed to render SVG with $chrome"
+  fi
+  rm -rf "$dir"
+}
+
+check_fonts() {
+  if ! command -v fc-list >/dev/null 2>&1; then
+    warn "Fonts: fc-list missing"
+    return
+  fi
+  local count
+  count="$(fc-list :lang=ko 2>/dev/null | wc -l | tr -d ' ')"
+  if [[ "${count:-0}" -gt 0 ]]; then ok "Korean fonts: $count faces"; else fail "Korean fonts: none detected"; fi
+
+  # Keep this list aligned with scripts/fleet/ensure-rendering-baseline.sh.
+  # These are the safe HTML/PDF rendering baseline families shared by host VM
+  # pdf_export/pdf_view and Runtime Box preview/capture flows.
+  local required=("Pretendard" "Noto Sans CJK KR" "NanumGothic" "Noto Color Emoji")
+  local missing=()
+  for family in "${required[@]}"; do
+    local matched
+    matched="$(fc-match "$family" 2>/dev/null || true)"
+    case "$family" in
+      "Pretendard")          grep -Eqi 'Pretendard' <<<"$matched" || missing+=("$family => ${matched:-none}") ;;
+      "Noto Sans CJK KR")    grep -Eqi 'NotoSansCJK|Noto Sans CJK KR' <<<"$matched" || missing+=("$family => ${matched:-none}") ;;
+      "NanumGothic")        grep -Eqi 'NanumGothic|Nanum Gothic|Nanum' <<<"$matched" || missing+=("$family => ${matched:-none}") ;;
+      "Noto Color Emoji")   grep -Eqi 'NotoColorEmoji|Noto Color Emoji' <<<"$matched" || missing+=("$family => ${matched:-none}") ;;
+    esac
+  done
+  if [[ ${#missing[@]} -eq 0 ]]; then ok "Render font baseline: ${required[*]}"; else fail "Render font baseline missing: ${missing[*]}"; fi
+
+  local inter_match
+  inter_match="$(fc-match Inter 2>/dev/null || true)"
+  if grep -qi 'Inter' <<<"$inter_match"; then ok "Latin UI font: Inter"; else warn "Latin UI font missing: Inter"; fi
+}
+
+echo "=== Tower Runtime Box doctor ==="
+
+has_all "Core shell/dev" bash git jq curl wget openssl tar gzip find sed awk grep
+has_any "ripgrep" rg ripgrep
+has_any "fd" fd fdfind
+has_any "yq" yq
+has_all "Archive utilities" zip unzip xz
+has_all "Languages" node npm npx pnpm python pip uv
+has_all "Build basics" gcc make pkg-config
+has_all "PDF tools" pdftoppm pdfinfo pdftotext qpdf gs
+has_any "ImageMagick" magick convert identify
+has_all "Office/docs" libreoffice soffice pandoc typst
+has_all "Media" ffmpeg
+has_any "SVG rasterizer" rsvg-convert
+has_any "Marp CLI" marp
+has_any "Mermaid CLI" mmdc
+check_publishing_toolchain
+check_typst_smoke
+check_chromium_smoke
+check_playwright_smoke
+check_html_render_smoke
+check_mermaid_smoke
+check_tesseract_langs
+check_fonts
+check_python_imports "Python docs/data" PIL pypdf pdfplumber fitz openpyxl docx pptx reportlab pandas matplotlib yaml bs4 lxml requests
+
+if [[ "$FAIL" == "1" ]]; then
+  echo ""
+  fail "Runtime Box readiness has missing required tools"
+  exit 1
+fi
+
+echo ""
+ok "Runtime Box readiness looks good"

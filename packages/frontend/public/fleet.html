@@ -1,0 +1,437 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Fleet Dashboard — Tower</title>
+<style>
+  :root {
+    --bg: #0a0a0f;
+    --card: #12121a;
+    --border: #1e1e2e;
+    --text: #e0e0e8;
+    --dim: #888;
+    --accent: #60a5fa;
+    --green: #34d399;
+    --yellow: #fbbf24;
+    --red: #f87171;
+    --radius: 10px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    padding: 24px;
+    min-height: 100vh;
+  }
+  h1 { font-size: 1.5rem; font-weight: 600; margin-bottom: 8px; }
+  .subtitle { color: var(--dim); margin-bottom: 24px; font-size: 0.9rem; }
+
+  .toolbar {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 24px;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+  button {
+    background: var(--card);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 8px 16px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.85rem;
+    transition: all 0.15s;
+  }
+  button:hover { border-color: var(--accent); color: var(--accent); }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  button.primary { background: var(--accent); color: #000; border-color: var(--accent); font-weight: 600; }
+  button.primary:hover { opacity: 0.9; }
+  .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid var(--dim); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.6s linear infinite; margin-right: 6px; vertical-align: middle; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
+    gap: 16px;
+    margin-bottom: 24px;
+  }
+
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px;
+    transition: border-color 0.2s;
+  }
+  .card:hover { border-color: #2a2a3e; }
+  .card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 16px;
+  }
+  .card-header h2 { font-size: 1.1rem; font-weight: 600; }
+  .badge {
+    display: inline-block;
+    padding: 2px 10px;
+    border-radius: 12px;
+    font-size: 0.75rem;
+    font-weight: 600;
+  }
+  .badge.online { background: rgba(52,211,153,0.15); color: var(--green); }
+  .badge.offline { background: rgba(248,113,113,0.15); color: var(--red); }
+  .badge.warn { background: rgba(251,191,36,0.15); color: var(--yellow); }
+
+  .metrics {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+  .metric {
+    display: flex;
+    justify-content: space-between;
+    padding: 6px 0;
+    border-bottom: 1px solid var(--border);
+    font-size: 0.85rem;
+  }
+  .metric-label { color: var(--dim); }
+  .metric-value { font-weight: 500; font-variant-numeric: tabular-nums; }
+
+  .bar-container {
+    background: var(--border);
+    border-radius: 4px;
+    height: 6px;
+    margin-top: 4px;
+    overflow: hidden;
+  }
+  .bar-fill { height: 100%; border-radius: 4px; transition: width 0.5s; }
+
+  .actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 16px;
+    flex-wrap: wrap;
+  }
+  .actions button { font-size: 0.8rem; padding: 5px 12px; }
+
+  .detail-panel {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px;
+    margin-top: 16px;
+    display: none;
+  }
+  .detail-panel.active { display: block; }
+  .detail-panel h3 { font-size: 1rem; margin-bottom: 12px; }
+  .detail-panel pre {
+    background: #0d0d15;
+    padding: 12px;
+    border-radius: 6px;
+    font-size: 0.82rem;
+    overflow-x: auto;
+    max-height: 400px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    word-break: break-all;
+    color: var(--dim);
+    line-height: 1.5;
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.85rem;
+  }
+  th { text-align: left; color: var(--dim); font-weight: 500; padding: 8px; border-bottom: 1px solid var(--border); }
+  td { padding: 8px; border-bottom: 1px solid var(--border); }
+  .check { color: var(--green); }
+  .cross { color: var(--red); }
+  .warn-text { color: var(--yellow); }
+
+  .timestamp { color: var(--dim); font-size: 0.8rem; }
+  .domain { color: var(--accent); text-decoration: none; }
+  .domain:hover { text-decoration: underline; }
+
+  @media (max-width: 600px) {
+    .grid { grid-template-columns: 1fr; }
+    .metrics { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<h1>Fleet Dashboard</h1>
+<p class="subtitle">Tower Managed Service — Self-hosted server Status</p>
+
+<div class="toolbar">
+  <button class="primary" onclick="loadStatus()" id="refreshBtn">Refresh All</button>
+  <span class="timestamp" id="lastUpdated"></span>
+</div>
+
+<div class="grid" id="fleetGrid">
+  <div class="card" style="text-align:center; color:var(--dim); padding:40px;">
+    Click "Refresh All" to load fleet status
+  </div>
+</div>
+
+<div class="detail-panel" id="detailPanel">
+  <div style="display:flex; justify-content:space-between; align-items:center;">
+    <h3 id="detailTitle">Details</h3>
+    <button onclick="closeDetail()">Close</button>
+  </div>
+  <div id="detailContent"></div>
+</div>
+
+<script>
+const API_BASE = '/api/admin/fleet';
+
+function getHeaders() {
+  const token = localStorage.getItem('token');
+  return {
+    'Authorization': `Bearer ${token}`,
+    'Content-Type': 'application/json',
+  };
+}
+
+async function apiGet(path) {
+  const res = await fetch(API_BASE + path, { headers: getHeaders() });
+  if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`);
+  return res.json();
+}
+
+async function apiPost(path, body) {
+  const res = await fetch(API_BASE + path, {
+    method: 'POST',
+    headers: getHeaders(),
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`);
+  return res.json();
+}
+
+function barColor(pct) {
+  const n = parseInt(pct);
+  if (n >= 80) return 'var(--red)';
+  if (n >= 60) return 'var(--yellow)';
+  return 'var(--green)';
+}
+
+function memPct(used, total) {
+  const u = parseInt(used), t = parseInt(total);
+  return t ? Math.round(u / t * 100) : 0;
+}
+
+async function loadStatus() {
+  const btn = document.getElementById('refreshBtn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span>Loading...';
+
+  try {
+    const data = await apiGet('/status');
+    renderFleet(data);
+    document.getElementById('lastUpdated').textContent = 'Updated: ' + new Date().toLocaleTimeString('ko-KR');
+  } catch (err) {
+    document.getElementById('fleetGrid').innerHTML = `
+      <div class="card" style="color:var(--red); padding:20px;">
+        Error: ${err.message}<br><small>Are you logged in as admin?</small>
+      </div>`;
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = 'Refresh All';
+  }
+}
+
+function renderFleet(vms) {
+  const grid = document.getElementById('fleetGrid');
+  grid.innerHTML = vms.map(vm => {
+    const online = vm.reachable && vm.pm2?.status === 'online';
+    const diskPct = vm.disk?.pct || '?';
+    const mPct = vm.memory ? memPct(vm.memory.used, vm.memory.total) : 0;
+    const sslDate = vm.ssl_expires ? new Date(vm.ssl_expires) : null;
+    const sslDays = sslDate ? Math.ceil((sslDate - Date.now()) / 86400000) : null;
+    const sslBadge = sslDays !== null
+      ? (sslDays < 14 ? 'warn' : '')
+      : '';
+
+    return `
+    <div class="card">
+      <div class="card-header">
+        <div>
+          <h2>${vm.team_name || vm.customer}</h2>
+          <a href="https://${vm.domain}" target="_blank" class="domain">${vm.domain}</a>
+        </div>
+        <span class="badge ${online ? 'online' : 'offline'}">${online ? 'Online' : vm.reachable ? 'Degraded' : 'Offline'}</span>
+      </div>
+
+      ${vm.reachable ? `
+      <div class="metrics">
+        <div class="metric">
+          <span class="metric-label">PM2</span>
+          <span class="metric-value">${vm.pm2?.status || 'N/A'} ${vm.pm2?.uptime ? '(' + vm.pm2.uptime + ')' : ''}</span>
+        </div>
+        <div class="metric">
+          <span class="metric-label">Version</span>
+          <span class="metric-value">${vm.git_rev || '?'} <span class="timestamp">${vm.git_date?.split(' ')[0] || ''}</span></span>
+        </div>
+        <div class="metric" style="grid-column: span 2;">
+          <span class="metric-label">Disk ${diskPct}</span>
+          <span class="metric-value">${vm.disk?.used || '?'} / ${vm.disk?.total || '?'}</span>
+        </div>
+        <div style="grid-column: span 2;">
+          <div class="bar-container"><div class="bar-fill" style="width:${diskPct};background:${barColor(diskPct)}"></div></div>
+        </div>
+        <div class="metric" style="grid-column: span 2;">
+          <span class="metric-label">Memory ${mPct}%</span>
+          <span class="metric-value">${vm.memory?.used || '?'} / ${vm.memory?.total || '?'}</span>
+        </div>
+        <div style="grid-column: span 2;">
+          <div class="bar-container"><div class="bar-fill" style="width:${mPct}%;background:${barColor(mPct+'%')}" ></div></div>
+        </div>
+        <div class="metric">
+          <span class="metric-label">CPU Load</span>
+          <span class="metric-value">${vm.load || '?'}</span>
+        </div>
+        <div class="metric">
+          <span class="metric-label">Port 32364</span>
+          <span class="metric-value">${vm.port_listening ? '<span class="check">listening</span>' : '<span class="cross">closed</span>'}</span>
+        </div>
+        <div class="metric">
+          <span class="metric-label">Skills</span>
+          <span class="metric-value">${vm.skill_count ?? '?'}</span>
+        </div>
+        <div class="metric">
+          <span class="metric-label">Projects</span>
+          <span class="metric-value">${vm.project_count ?? '?'}</span>
+        </div>
+        <div class="metric">
+          <span class="metric-label">SSL</span>
+          <span class="metric-value ${sslBadge}">${sslDays !== null ? sslDays + 'd left' : '?'}</span>
+        </div>
+        <div class="metric">
+          <span class="metric-label">Workspace</span>
+          <span class="metric-value">${vm.workspace_ok ? '<span class="check">OK</span>' : '<span class="warn-text">Incomplete</span>'}</span>
+        </div>
+      </div>
+      ` : `
+      <div style="color:var(--red); padding: 12px 0; font-size:0.9rem;">
+        ${vm.error || 'Unreachable'}
+      </div>
+      `}
+
+      <div class="actions">
+        <button onclick="showWorkspace('${vm.customer}')">Workspace</button>
+        <button onclick="showLogs('${vm.customer}')">Logs</button>
+        <button onclick="showExec('${vm.customer}')">SSH</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+async function showWorkspace(customer) {
+  openDetail(`Workspace — ${customer}`, '<span class="spinner"></span> Checking...');
+  try {
+    const data = await apiGet(`/${customer}/workspace`);
+    let html = '<table><tr><th>Item</th><th>Status</th></tr>';
+
+    const rootItems = [
+      ['AGENTS.md', data.root.agents_md],
+      ['Placeholder', data.root.placeholder === '0' || data.root.placeholder === 0],
+      ['principles.md', data.root.principles],
+      ['codify.md', data.root.codify],
+      ['decisions/', data.root.decisions],
+      ['docs/', data.root.docs],
+      ['guide/', data.root.guide],
+      ['Guide files', parseInt(data.root.guide_files) >= 3],
+      ['Guide ref in AGENTS.md', parseInt(data.root.guide_ref) > 0],
+    ];
+    rootItems.forEach(([name, ok]) => {
+      html += `<tr><td>${name}</td><td>${ok ? '<span class="check">OK</span>' : '<span class="cross">Missing</span>'}</td></tr>`;
+    });
+    html += '</table>';
+
+    if (data.projects.length) {
+      html += '<h3 style="margin-top:16px;">Projects</h3><table><tr><th>Project</th><th>AGENTS.md</th><th>Legacy CLAUDE.md</th><th>.project/</th><th>progress.md</th><th>decisions/</th></tr>'; 
+      data.projects.forEach(p => {
+        const agentsStatus = p.agents_md === true ? '<span class="check">OK</span>'
+          : p.agents_md === 'template-only' ? '<span class="warn-text">Template</span>'
+          : '<span class="cross">Missing</span>';
+        html += `<tr>
+          <td>${p.name}</td>
+          <td>${agentsStatus}</td>
+          <td>${p.legacy_claude_md ? '<span class="warn-text">Present</span>' : '<span class="check">None</span>'}</td>
+          <td>${p.project_dir ? '<span class="check">OK</span>' : '<span class="cross">No</span>'}</td>
+          <td>${p.progress_md ? '<span class="check">OK</span>' : '<span class="cross">No</span>'}</td>
+          <td>${p.decisions_dir ? '<span class="check">OK</span>' : '<span class="cross">No</span>'}</td>
+        </tr>`;
+      });
+      html += '</table>';
+    }
+    openDetail(`Workspace — ${customer}`, html);
+  } catch (err) {
+    openDetail(`Workspace — ${customer}`, `<span class="cross">${err.message}</span>`);
+  }
+}
+
+async function showLogs(customer) {
+  openDetail(`Logs — ${customer}`, '<span class="spinner"></span> Fetching...');
+  try {
+    const data = await apiGet(`/${customer}/logs?lines=50`);
+    openDetail(`Logs — ${customer}`, `<pre>${escapeHtml(data.logs)}</pre>`);
+  } catch (err) {
+    openDetail(`Logs — ${customer}`, `<span class="cross">${err.message}</span>`);
+  }
+}
+
+function showExec(customer) {
+  // SECURITY (TWR-03, 2026-04-28): UI disabled. Server returns 503 unless
+  // FLEET_EXEC_ENABLED=true is set. For emergency ops, use direct SSH.
+  // Pending command-catalog redesign (medium-term).
+  openDetail(`SSH — ${customer}`, `
+    <div style="background:#3a2a1a; border:1px solid #6a4a2a; color:#ffb060; padding:10px 12px; border-radius:6px; margin-bottom:12px; font-size:13px;">
+      ⚠️ <strong>Remote exec disabled (TWR-03).</strong>
+      Use direct SSH for emergency ops. Re-enable via <code>FLEET_EXEC_ENABLED=true</code> only when strictly necessary.
+    </div>
+    <div style="display:flex; gap:8px; margin-bottom:12px;">
+      <input id="sshCmd" type="text" disabled placeholder="(disabled — see banner above)" style="flex:1; background:var(--bg); border:1px solid var(--border); color:var(--dim); padding:8px 12px; border-radius:6px; font-family:monospace; opacity:0.5;">
+      <button disabled class="primary" style="opacity:0.5; cursor:not-allowed;">Run</button>
+    </div>
+    <pre id="sshOutput" style="min-height:100px; color:var(--dim);">Disabled.</pre>
+  `);
+}
+
+async function runExec(customer) {
+  const cmd = document.getElementById('sshCmd')?.value;
+  if (!cmd) return;
+  document.getElementById('sshOutput').innerHTML = '<span class="spinner"></span> Executing...';
+  try {
+    const data = await apiPost(`/${customer}/exec`, { command: cmd });
+    document.getElementById('sshOutput').textContent = data.output || '(no output)';
+  } catch (err) {
+    document.getElementById('sshOutput').innerHTML = `<span class="cross">${err.message}</span>`;
+  }
+}
+
+function openDetail(title, html) {
+  document.getElementById('detailTitle').textContent = title;
+  document.getElementById('detailContent').innerHTML = html;
+  document.getElementById('detailPanel').classList.add('active');
+  document.getElementById('detailPanel').scrollIntoView({ behavior: 'smooth' });
+}
+
+function closeDetail() {
+  document.getElementById('detailPanel').classList.remove('active');
+}
+
+function escapeHtml(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// Auto-load on page open
+loadStatus();
+</script>
+</body>
+</html>

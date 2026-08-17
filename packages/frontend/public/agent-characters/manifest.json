@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "canonicalLocation": "packages/frontend/public/agent-characters",
+  "storagePolicy": "Product-ready WebP assets live here under source control. Database records store only stable character IDs in project.agent.face; generated PNG originals and experimental galleries are not runtime dependencies.",
+  "characters": [
+    { "id": "core-talent", "label": "AI 인재 파트너", "group": "core", "file": "core-talent.webp", "listCrop": { "scale": 1.28, "x": 50, "y": 35 }, "listAccent": "#6f8f86" },
+    { "id": "core-editor", "label": "콘텐츠 편집자", "group": "core", "file": "core-editor.webp", "listCrop": { "scale": 1.32, "x": 50, "y": 34 }, "listAccent": "#9b755e" },
+    { "id": "core-engineer", "label": "제품 엔지니어", "group": "core", "file": "core-engineer.webp", "listCrop": { "scale": 1.34, "x": 50, "y": 33 }, "listAccent": "#607f78" },
+    { "id": "korean-diverse-1", "label": "트렌드 리서처", "group": "korean", "file": "korean-diverse-1.webp", "listCrop": { "scale": 1.35, "x": 50, "y": 34 }, "listAccent": "#6e83a1" },
+    { "id": "korean-diverse-5", "label": "AI 프로토타이퍼", "group": "korean", "file": "korean-diverse-5.webp", "listCrop": { "scale": 1.34, "x": 50, "y": 34 }, "listAccent": "#8e7194" },
+    { "id": "korean-diverse-9", "label": "고객 성공 담당자", "group": "korean", "file": "korean-diverse-9.webp", "listCrop": { "scale": 1.34, "x": 50, "y": 34 }, "listAccent": "#9b6f58" },
+    { "id": "korean-diverse-2", "label": "현장 운영 매니저", "group": "korean", "file": "korean-diverse-2.webp", "listCrop": { "scale": 1.36, "x": 50, "y": 33 }, "listAccent": "#778574" },
+    { "id": "korean-diverse-6", "label": "데이터 저널리스트", "group": "korean", "file": "korean-diverse-6.webp", "listCrop": { "scale": 1.35, "x": 50, "y": 34 }, "listAccent": "#547d7d" },
+    { "id": "korean-diverse-8", "label": "법무·계약 검토자", "group": "korean", "file": "korean-diverse-8.webp", "listCrop": { "scale": 1.42, "x": 50, "y": 32 }, "listAccent": "#92706c" },
+    { "id": "korean-diverse-3", "label": "재무·리스크 책임자", "group": "korean", "file": "korean-diverse-3.webp", "listCrop": { "scale": 1.35, "x": 50, "y": 34 }, "listAccent": "#8b6c78" },
+    { "id": "korean-diverse-4", "label": "브랜드 디렉터", "group": "korean", "file": "korean-diverse-4.webp", "listCrop": { "scale": 1.36, "x": 50, "y": 33 }, "listAccent": "#8a765f" },
+    { "id": "korean-diverse-7", "label": "제조 현장 전문가", "group": "korean", "file": "korean-diverse-7.webp", "listCrop": { "scale": 1.36, "x": 50, "y": 33 }, "listAccent": "#947448" },
+    { "id": "korean-diverse-10", "label": "교육·퍼실리테이션 리드", "group": "korean", "file": "korean-diverse-10.webp", "listCrop": { "scale": 1.38, "x": 50, "y": 33 }, "listAccent": "#8f6575" }
+  ]
+}

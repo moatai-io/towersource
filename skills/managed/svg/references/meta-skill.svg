@@ -1,0 +1,245 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 600" width="800" height="600">
+  <defs>
+    <!-- Glow filters -->
+    <filter id="glowIndigo" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="6" result="blur"/>
+      <feFlood flood-color="#6366F1" flood-opacity="0.5" result="color"/>
+      <feComposite in="color" in2="blur" operator="in" result="glow"/>
+      <feMerge><feMergeNode in="glow"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="glowAmber" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="5" result="blur"/>
+      <feFlood flood-color="#F59E0B" flood-opacity="0.6" result="color"/>
+      <feComposite in="color" in2="blur" operator="in" result="glow"/>
+      <feMerge><feMergeNode in="glow"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="glowPurple" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="4" result="blur"/>
+      <feFlood flood-color="#8B5CF6" flood-opacity="0.4" result="color"/>
+      <feComposite in="color" in2="blur" operator="in" result="glow"/>
+      <feMerge><feMergeNode in="glow"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="shadowSoft" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="3" result="blur"/>
+      <feFlood flood-color="#000000" flood-opacity="0.3" result="color"/>
+      <feComposite in="color" in2="blur" operator="in" result="shadow"/>
+      <feMerge><feMergeNode in="shadow"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+
+    <!-- Clip path for key turning -->
+    <clipPath id="keyClip">
+      <rect x="270" y="260" width="60" height="80"/>
+    </clipPath>
+  </defs>
+
+  <!-- ========== LIBRARY CARD (left side) ========== -->
+  <g opacity="0">
+    <animate attributeName="opacity" values="0;0;1;1" keyTimes="0;0.01;0.1;1" dur="20s" fill="freeze"/>
+
+    <!-- Card background -->
+    <rect x="60" y="260" width="160" height="80" rx="12" fill="none" stroke="#6366F1" stroke-width="2" filter="url(#glowIndigo)">
+      <!-- Passive glow pulse -->
+      <animate attributeName="stroke-opacity" values="1;0.5;1" dur="3s" begin="10s" repeatCount="indefinite"/>
+    </rect>
+    <rect x="60" y="260" width="160" height="80" rx="12" fill="#6366F1" opacity="0.1"/>
+
+    <!-- Card text -->
+    <text x="140" y="296" text-anchor="middle" font-family="Inter, system-ui, sans-serif" font-size="11" font-weight="700" fill="#E0E0E0" letter-spacing="1.5">THE</text>
+    <text x="140" y="314" text-anchor="middle" font-family="Inter, system-ui, sans-serif" font-size="14" font-weight="700" fill="#6366F1" letter-spacing="2">LIBRARY</text>
+
+    <!-- Card draw-in animation (stroke) -->
+    <rect x="60" y="260" width="160" height="80" rx="12" fill="none" stroke="#6366F1" stroke-width="2" stroke-dasharray="480" stroke-dashoffset="480">
+      <animate attributeName="stroke-dashoffset" values="480;0" dur="1.5s" fill="freeze" calcMode="spline" keySplines="0.4 0 0.2 1"/>
+    </rect>
+  </g>
+
+  <!-- ========== CONNECTION LINE: Library to Lock ========== -->
+  <line x1="220" y1="300" x2="285" y2="300" stroke="#4B5563" stroke-width="1.5" stroke-dasharray="65" stroke-dashoffset="65" opacity="0.6">
+    <animate attributeName="stroke-dashoffset" values="65;65;0;0" keyTimes="0;0.08;0.12;1" dur="20s" fill="freeze"/>
+  </line>
+
+  <!-- ========== LOCK/KEY ICON (center) ========== -->
+  <g opacity="0">
+    <animate attributeName="opacity" values="0;0;1;1" keyTimes="0;0.08;0.12;1" dur="20s" fill="freeze"/>
+
+    <!-- Lock body -->
+    <rect x="285" y="290" width="30" height="24" rx="4" fill="none" stroke="#F59E0B" stroke-width="2"/>
+    <rect x="285" y="290" width="30" height="24" rx="4" fill="#F59E0B" opacity="0.1"/>
+
+    <!-- Single shackle that starts closed and animates open at 2.8s -->
+    <path d="M 293,290 L 293,280 A 7,7 0 0 1 307,280 L 307,290" fill="none" stroke="#F59E0B" stroke-width="2.5" stroke-linecap="round">
+      <animateTransform attributeName="transform" type="rotate" values="0 293 290;-30 293 290" dur="0.6s" begin="2.8s" fill="freeze" calcMode="spline" keySplines="0.4 0 0.2 1"/>
+    </path>
+
+    <!-- Keyhole -->
+    <circle cx="300" cy="300" r="3" fill="#F59E0B" opacity="0.8"/>
+    <rect x="299" y="300" width="2" height="6" rx="1" fill="#F59E0B" opacity="0.8"/>
+
+    <!-- Unlock glow effect -->
+    <circle cx="300" cy="300" r="0" fill="none" stroke="#F59E0B" stroke-width="1" opacity="0">
+      <animate attributeName="r" values="0;30;40" keyTimes="0;0.5;1" dur="0.8s" begin="2.5s" fill="freeze"/>
+      <animate attributeName="opacity" values="0;0.6;0" keyTimes="0;0.3;1" dur="0.8s" begin="2.5s" fill="freeze"/>
+    </circle>
+    <circle cx="300" cy="300" r="0" fill="none" stroke="#F59E0B" stroke-width="0.5" opacity="0">
+      <animate attributeName="r" values="0;45;55" keyTimes="0;0.5;1" dur="1s" begin="2.7s" fill="freeze"/>
+      <animate attributeName="opacity" values="0;0.3;0" keyTimes="0;0.3;1" dur="1s" begin="2.7s" fill="freeze"/>
+    </circle>
+
+    <!-- Passive wobble on lock -->
+    <animateTransform attributeName="transform" type="rotate" values="0 300 300;2 300 300;0 300 300;-2 300 300;0 300 300" dur="4s" begin="10s" repeatCount="indefinite"/>
+
+    <!-- Lock glow filter (applied to whole group) -->
+    <animate attributeName="filter" values=";url(#glowAmber)" dur="0.001s" begin="2.5s" fill="freeze"/>
+  </g>
+
+  <!-- ========== CONNECTION LINES: Lock to Category Nodes ========== -->
+  <g opacity="0">
+    <animate attributeName="opacity" from="0" to="0.5" begin="3.5s" dur="0.5s" fill="freeze"/>
+    <line x1="320" y1="300" x2="395" y2="150" stroke="#10B981" stroke-width="1"/>
+    <line x1="320" y1="300" x2="395" y2="300" stroke="#8B5CF6" stroke-width="1"/>
+    <line x1="320" y1="300" x2="395" y2="450" stroke="#F59E0B" stroke-width="1"/>
+  </g>
+
+  <!-- ========== CATEGORY NODES ========== -->
+
+  <!-- Skills node (emerald) -->
+  <g opacity="0">
+    <animate attributeName="opacity" from="0" to="1" begin="3.8s" dur="0.5s" fill="freeze"/>
+    <rect x="395" y="130" width="90" height="40" rx="8" fill="#0F172A" stroke="#10B981" stroke-width="2"/>
+    <rect x="395" y="130" width="90" height="40" rx="8" fill="#10B981" opacity="0.1"/>
+    <text x="440" y="156" text-anchor="middle" font-family="Inter, system-ui, sans-serif" font-size="13" font-weight="700" fill="#6EE7B7">Skills</text>
+  </g>
+
+  <!-- Agents node (purple) -->
+  <g opacity="0">
+    <animate attributeName="opacity" from="0" to="1" begin="4.1s" dur="0.5s" fill="freeze"/>
+    <rect x="395" y="280" width="90" height="40" rx="8" fill="#0F172A" stroke="#8B5CF6" stroke-width="2"/>
+    <rect x="395" y="280" width="90" height="40" rx="8" fill="#8B5CF6" opacity="0.1"/>
+    <text x="440" y="306" text-anchor="middle" font-family="Inter, system-ui, sans-serif" font-size="13" font-weight="700" fill="#C4B5FD">Agents</text>
+  </g>
+
+  <!-- Prompts node (amber) -->
+  <g opacity="0">
+    <animate attributeName="opacity" from="0" to="1" begin="4.4s" dur="0.5s" fill="freeze"/>
+    <rect x="395" y="430" width="90" height="40" rx="8" fill="#0F172A" stroke="#F59E0B" stroke-width="2"/>
+    <rect x="395" y="430" width="90" height="40" rx="8" fill="#F59E0B" opacity="0.1"/>
+    <text x="440" y="456" text-anchor="middle" font-family="Inter, system-ui, sans-serif" font-size="13" font-weight="700" fill="#FCD34D">Prompts</text>
+  </g>
+
+  <!-- ========== CONNECTION LINES: Category Nodes to Examples ========== -->
+  <g opacity="0">
+    <animate attributeName="opacity" from="0" to="0.4" begin="5s" dur="0.5s" fill="freeze"/>
+    <!-- Skills branches -->
+    <line x1="485" y1="140" x2="560" y2="104" stroke="#10B981" stroke-width="0.8"/>
+    <line x1="485" y1="150" x2="560" y2="149" stroke="#10B981" stroke-width="0.8"/>
+    <line x1="485" y1="160" x2="560" y2="194" stroke="#10B981" stroke-width="0.8"/>
+    <!-- Agents branches -->
+    <line x1="485" y1="290" x2="560" y2="254" stroke="#8B5CF6" stroke-width="0.8"/>
+    <line x1="485" y1="300" x2="560" y2="299" stroke="#8B5CF6" stroke-width="0.8"/>
+    <line x1="485" y1="310" x2="560" y2="344" stroke="#8B5CF6" stroke-width="0.8"/>
+    <!-- Prompts branches -->
+    <line x1="485" y1="440" x2="560" y2="404" stroke="#F59E0B" stroke-width="0.8"/>
+    <line x1="485" y1="450" x2="560" y2="449" stroke="#F59E0B" stroke-width="0.8"/>
+    <line x1="485" y1="460" x2="560" y2="494" stroke="#F59E0B" stroke-width="0.8"/>
+  </g>
+
+  <!-- ========== EXAMPLE CARDS ========== -->
+
+  <!-- Skills: deploy.md -->
+  <g opacity="0">
+    <animate attributeName="opacity" from="0" to="1" begin="5.2s" dur="0.4s" fill="freeze"/>
+    <rect x="560" y="88" width="130" height="32" rx="8" fill="#0F172A" stroke="#10B981" stroke-width="1.5"/>
+    <rect x="560" y="88" width="130" height="32" rx="8" fill="#10B981" opacity="0.08"/>
+    <text x="625" y="109" text-anchor="middle" font-family="Inter, system-ui, sans-serif" font-size="11" font-weight="600" fill="#E0E0E0">deploy.md</text>
+    <animateTransform attributeName="transform" type="translate" values="0,0;0,-2;0,0;0,2;0,0" dur="4s" begin="10s" repeatCount="indefinite"/>
+  </g>
+
+  <!-- Skills: test-runner.md -->
+  <g opacity="0">
+    <animate attributeName="opacity" from="0" to="1" begin="5.5s" dur="0.4s" fill="freeze"/>
+    <rect x="560" y="133" width="130" height="32" rx="8" fill="#0F172A" stroke="#10B981" stroke-width="1.5"/>
+    <rect x="560" y="133" width="130" height="32" rx="8" fill="#10B981" opacity="0.08"/>
+    <text x="625" y="154" text-anchor="middle" font-family="Inter, system-ui, sans-serif" font-size="11" font-weight="600" fill="#E0E0E0">test-runner.md</text>
+    <animateTransform attributeName="transform" type="translate" values="0,0;0,2;0,0;0,-2;0,0" dur="4.3s" begin="10.3s" repeatCount="indefinite"/>
+  </g>
+
+  <!-- Skills: docker-build.md -->
+  <g opacity="0">
+    <animate attributeName="opacity" from="0" to="1" begin="5.8s" dur="0.4s" fill="freeze"/>
+    <rect x="560" y="178" width="130" height="32" rx="8" fill="#0F172A" stroke="#10B981" stroke-width="1.5"/>
+    <rect x="560" y="178" width="130" height="32" rx="8" fill="#10B981" opacity="0.08"/>
+    <text x="625" y="199" text-anchor="middle" font-family="Inter, system-ui, sans-serif" font-size="11" font-weight="600" fill="#E0E0E0">docker-build.md</text>
+    <animateTransform attributeName="transform" type="translate" values="0,0;0,-2;0,0;0,2;0,0" dur="3.8s" begin="10.6s" repeatCount="indefinite"/>
+  </g>
+
+  <!-- Agents: browser-auto.md -->
+  <g opacity="0">
+    <animate attributeName="opacity" from="0" to="1" begin="5.4s" dur="0.4s" fill="freeze"/>
+    <rect x="560" y="238" width="130" height="32" rx="8" fill="#0F172A" stroke="#8B5CF6" stroke-width="1.5"/>
+    <rect x="560" y="238" width="130" height="32" rx="8" fill="#8B5CF6" opacity="0.08"/>
+    <text x="625" y="259" text-anchor="middle" font-family="Inter, system-ui, sans-serif" font-size="11" font-weight="600" fill="#E0E0E0">browser-auto.md</text>
+    <animateTransform attributeName="transform" type="translate" values="0,0;0,2;0,0;0,-2;0,0" dur="4.2s" begin="10.9s" repeatCount="indefinite"/>
+  </g>
+
+  <!-- Agents: code-review.md -->
+  <g opacity="0">
+    <animate attributeName="opacity" from="0" to="1" begin="5.7s" dur="0.4s" fill="freeze"/>
+    <rect x="560" y="283" width="130" height="32" rx="8" fill="#0F172A" stroke="#8B5CF6" stroke-width="1.5"/>
+    <rect x="560" y="283" width="130" height="32" rx="8" fill="#8B5CF6" opacity="0.08"/>
+    <text x="625" y="304" text-anchor="middle" font-family="Inter, system-ui, sans-serif" font-size="11" font-weight="600" fill="#E0E0E0">code-review.md</text>
+    <animateTransform attributeName="transform" type="translate" values="0,0;0,-2;0,0;0,2;0,0" dur="3.6s" begin="11.2s" repeatCount="indefinite"/>
+  </g>
+
+  <!-- Agents: transcribe.md -->
+  <g opacity="0">
+    <animate attributeName="opacity" from="0" to="1" begin="6.0s" dur="0.4s" fill="freeze"/>
+    <rect x="560" y="328" width="130" height="32" rx="8" fill="#0F172A" stroke="#8B5CF6" stroke-width="1.5"/>
+    <rect x="560" y="328" width="130" height="32" rx="8" fill="#8B5CF6" opacity="0.08"/>
+    <text x="625" y="349" text-anchor="middle" font-family="Inter, system-ui, sans-serif" font-size="11" font-weight="600" fill="#E0E0E0">transcribe.md</text>
+    <animateTransform attributeName="transform" type="translate" values="0,0;0,2;0,0;0,-2;0,0" dur="4.4s" begin="11.5s" repeatCount="indefinite"/>
+  </g>
+
+  <!-- Prompts: tts-speak.md -->
+  <g opacity="0">
+    <animate attributeName="opacity" from="0" to="1" begin="5.6s" dur="0.4s" fill="freeze"/>
+    <rect x="560" y="388" width="130" height="32" rx="8" fill="#0F172A" stroke="#F59E0B" stroke-width="1.5"/>
+    <rect x="560" y="388" width="130" height="32" rx="8" fill="#F59E0B" opacity="0.08"/>
+    <text x="625" y="409" text-anchor="middle" font-family="Inter, system-ui, sans-serif" font-size="11" font-weight="600" fill="#E0E0E0">tts-speak.md</text>
+    <animateTransform attributeName="transform" type="translate" values="0,0;0,-2;0,0;0,2;0,0" dur="3.9s" begin="11.8s" repeatCount="indefinite"/>
+  </g>
+
+  <!-- Prompts: diagram.md -->
+  <g opacity="0">
+    <animate attributeName="opacity" from="0" to="1" begin="5.9s" dur="0.4s" fill="freeze"/>
+    <rect x="560" y="433" width="130" height="32" rx="8" fill="#0F172A" stroke="#F59E0B" stroke-width="1.5"/>
+    <rect x="560" y="433" width="130" height="32" rx="8" fill="#F59E0B" opacity="0.08"/>
+    <text x="625" y="454" text-anchor="middle" font-family="Inter, system-ui, sans-serif" font-size="11" font-weight="600" fill="#E0E0E0">diagram.md</text>
+    <animateTransform attributeName="transform" type="translate" values="0,0;0,2;0,0;0,-2;0,0" dur="4.1s" begin="12.1s" repeatCount="indefinite"/>
+  </g>
+
+  <!-- Prompts: image-gen.md -->
+  <g opacity="0">
+    <animate attributeName="opacity" from="0" to="1" begin="6.2s" dur="0.4s" fill="freeze"/>
+    <rect x="560" y="478" width="130" height="32" rx="8" fill="#0F172A" stroke="#F59E0B" stroke-width="1.5"/>
+    <rect x="560" y="478" width="130" height="32" rx="8" fill="#F59E0B" opacity="0.08"/>
+    <text x="625" y="499" text-anchor="middle" font-family="Inter, system-ui, sans-serif" font-size="11" font-weight="600" fill="#E0E0E0">image-gen.md</text>
+    <animateTransform attributeName="transform" type="translate" values="0,0;0,-2;0,0;0,2;0,0" dur="3.7s" begin="12.4s" repeatCount="indefinite"/>
+  </g>
+
+  <!-- ========== TITLE ========== -->
+  <text x="400" y="35" text-anchor="middle" font-family="Inter, system-ui, sans-serif" font-size="24" font-weight="700" fill="#E0E0E0" opacity="0">
+    The Library Meta-Skill
+    <animate attributeName="opacity" from="0" to="1" begin="7s" dur="0.6s" fill="freeze"/>
+  </text>
+
+  <!-- Decorative line under title -->
+  <line x1="320" y1="45" x2="480" y2="45" stroke="#8B5CF6" stroke-width="1" opacity="0">
+    <animate attributeName="opacity" from="0" to="0.5" begin="7s" dur="0.6s" fill="freeze"/>
+  </line>
+
+  <!-- ========== SUBTITLE ========== -->
+  <text x="400" y="560" text-anchor="middle" font-family="Inter, system-ui, sans-serif" font-size="14" font-style="italic" fill="#9CA3AF" opacity="0">
+    One skill to unlock them all
+    <animate attributeName="opacity" from="0" to="1" begin="7.5s" dur="0.5s" fill="freeze"/>
+  </text>
+</svg>
