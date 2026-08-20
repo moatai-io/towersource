@@ -22,12 +22,14 @@ describe('OSS first-run inference setup', () => {
 
   it('continues into first teammate creation only after the creator listener is ready', () => {
     const gate = app.slice(app.indexOf('if (firstRunInferenceSetup && token)'), app.indexOf('\n\n  return (', app.indexOf('if (firstRunInferenceSetup && token)')));
-    const listenerIndex = app.indexOf("window.addEventListener('tower-start-agent-academy', handler)");
+    const creatorIndex = app.indexOf('const openAgentAcademy = useCallback(() => {');
     const handoffEffectIndex = app.indexOf('if (!openFirstTeammateAfterSetup) return;');
     expect(gate).toContain("localStorage.removeItem('tower:firstRunInferenceSetup')");
     expect(gate).toContain('setOpenFirstTeammateAfterSetup(true)');
-    expect(handoffEffectIndex).toBeGreaterThan(listenerIndex);
-    expect(app.slice(handoffEffectIndex, handoffEffectIndex + 500)).toContain("new CustomEvent('tower-start-agent-academy')");
+    expect(creatorIndex).toBeGreaterThan(-1);
+    expect(handoffEffectIndex).toBeGreaterThan(creatorIndex);
+    expect(app.slice(handoffEffectIndex, handoffEffectIndex + 500)).toContain('openAgentAcademy()');
+    expect(app).toContain("window.addEventListener('tower-start-agent-academy', openAgentAcademy)");
     expect(app).toContain("{ split: 'right', name: t('newAiTeammate') }");
   });
 

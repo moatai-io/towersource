@@ -1920,42 +1920,41 @@ function App() {
     };
   }, [createSessionInDb, setActiveSessionId, clearMessages, setActiveSession, sendMessage]);
 
+  const openAgentAcademy = useCallback(() => {
+    const draft = buildInitialAgentAcademyDraft();
+    const projectState = useProjectStore.getState();
+    const sessionState = useSessionStore.getState();
+    const activeProjectId = sessionState.sessions.find((session) => session.id === sessionState.activeSessionId)?.projectId;
+    const sourceProject = projectState.projects.find((project) => project.id === activeProjectId && !project.archived)
+      || projectState.projects.find((project) => !project.archived && project.systemKey !== 'ai-talent-team');
+    // Any accessible active Project can carry the server-side approval intent.
+    // The legacy AI Talent Team seed Project is not required for teammate creation.
+    draft.sourceProjectId = sourceProject?.id;
+    useAgentDraftStore.getState().setDraft(draft);
+    const mobileHiring = sessionState.isMobile;
+    useFileStore.getState().openTab(
+      'agent-drafts/new-agent.agent-draft.json',
+      JSON.stringify(draft, null, 2),
+      'agent-draft',
+      undefined,
+      { split: 'right', name: t('newAiTeammate') },
+    );
+    // The creator is a file-backed workflow. Leave the Team Home workspace so
+    // its activeView branch cannot keep rendering over the newly opened draft.
+    sessionState.setActiveView('chat');
+    if (mobileHiring) sessionState.openMobileContext(false);
+  }, [t]);
+
   useEffect(() => {
-    const handler = async () => {
-      const draft = buildInitialAgentAcademyDraft();
-      const projectState = useProjectStore.getState();
-      const sessionState = useSessionStore.getState();
-      const activeProjectId = sessionState.sessions.find((session) => session.id === sessionState.activeSessionId)?.projectId;
-      const sourceProject = projectState.projects.find((project) => project.id === activeProjectId && !project.archived)
-        || projectState.projects.find((project) => !project.archived && project.systemKey !== 'ai-talent-team');
-      // Any accessible active Project can carry the server-side approval intent.
-      // The legacy AI Talent Team seed Project is not required for teammate creation.
-      draft.sourceProjectId = sourceProject?.id;
-      useAgentDraftStore.getState().setDraft(draft);
-      const mobileHiring = useSessionStore.getState().isMobile;
-      useFileStore.getState().openTab(
-        'agent-drafts/new-agent.agent-draft.json',
-        JSON.stringify(draft, null, 2),
-        'agent-draft',
-        undefined,
-        { split: 'right', name: t('newAiTeammate') },
-      );
-      // The creator is a file-backed workflow. Leave the Team Home workspace so
-      // its activeView branch cannot keep rendering over the newly opened draft.
-      useSessionStore.getState().setActiveView('chat');
-      if (mobileHiring) useSessionStore.getState().openMobileContext(false);
-    };
-    window.addEventListener('tower-start-agent-academy', handler);
-    return () => window.removeEventListener('tower-start-agent-academy', handler);
-  }, []);
+    window.addEventListener('tower-start-agent-academy', openAgentAcademy);
+    return () => window.removeEventListener('tower-start-agent-academy', openAgentAcademy);
+  }, [openAgentAcademy]);
 
   useEffect(() => {
     if (!openFirstTeammateAfterSetup) return;
-    // This effect is declared after the Agent Academy listener effect so the
-    // first-run handoff cannot dispatch before the creator is ready.
-    window.dispatchEvent(new CustomEvent('tower-start-agent-academy'));
+    openAgentAcademy();
     setOpenFirstTeammateAfterSetup(false);
-  }, [openFirstTeammateAfterSetup]);
+  }, [openAgentAcademy, openFirstTeammateAfterSetup]);
 
   useEffect(() => {
     const handler = () => {
