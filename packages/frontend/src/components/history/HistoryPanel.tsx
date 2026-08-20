@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
+import i18n from '../../i18n';
 import { useSessionStore, type SessionMeta } from '../../stores/session-store';
 import { useProjectStore } from '../../stores/project-store';
 import { type TaskMeta } from '../../stores/kanban-store';
@@ -27,17 +28,18 @@ function relativeTime(dateStr: string): string {
   if (isNaN(then)) return '';
   const diff = now - then;
   const mins = Math.floor(diff / 60000);
-  if (mins < 1) return 'just now';
-  if (mins < 60) return `${mins}m`;
+  if (mins < 1) return i18n.t('justNow', { ns: 'history' });
+  if (mins < 60) return i18n.t('minutesAgo', { ns: 'history', count: mins });
   const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours}h`;
+  if (hours < 24) return i18n.t('hoursAgo', { ns: 'history', count: hours });
   const days = Math.floor(hours / 24);
-  if (days < 30) return `${days}d`;
+  if (days < 30) return i18n.t('daysAgo', { ns: 'history', count: days });
   const months = Math.floor(days / 30);
-  return `${months}mo`;
+  return i18n.t('monthsAgo', { ns: 'history', count: months });
 }
 
 function StatusBadge({ status }: { status: string }) {
+  const { t } = useTranslation('history');
   const colors: Record<string, string> = {
     done: 'tone-pill tone-success',
     failed: 'bg-red-500/15 text-red-400',
@@ -46,7 +48,7 @@ function StatusBadge({ status }: { status: string }) {
   };
   return (
     <span className={`text-[11px] font-medium px-1 py-px rounded ${colors[status] || colors.todo}`}>
-      {status === 'in_progress' ? 'wip' : status}
+      {t(`status.${status}`, { defaultValue: status })}
     </span>
   );
 }
@@ -172,7 +174,7 @@ export function HistoryPanel() {
       const mostRecent = list[0]?.updatedAt ? new Date(list[0].updatedAt).getTime() : 0;
       sorted.push({
         projectId: pid,
-        name: pid ? (projectMap.get(pid) || 'Unknown project') : 'No project',
+        name: pid ? (projectMap.get(pid) || t('unknownProject')) : t('noProject'),
         sessions: list,
         mostRecent,
       });
@@ -180,7 +182,7 @@ export function HistoryPanel() {
     // Most recently-touched group first
     sorted.sort((a, b) => b.mostRecent - a.mostRecent);
     return sorted;
-  }, [filteredSessions, projectMap]);
+  }, [filteredSessions, projectMap, t]);
 
   // Flat list sorted by most-recent first (for "Recent" view).
   // API returns updated_at DESC already, but sort defensively in case the
@@ -205,8 +207,8 @@ export function HistoryPanel() {
   // tell where a session came from without the group header.
   const renderSessionRow = (session: ArchivedSession, showProjectBadge: boolean) => {
     const projectLabel = session.projectId
-      ? (projectMap.get(session.projectId) || 'Unknown project')
-      : 'No project';
+      ? (projectMap.get(session.projectId) || t('unknownProject'))
+      : t('noProject');
     return (
       <div
         key={session.id}
@@ -303,7 +305,7 @@ export function HistoryPanel() {
                 }`}
                 title={t('sortByRecent')}
               >
-                Recent
+                {t('recent')}
               </button>
               <button
                 onClick={() => setViewMode('grouped')}
@@ -314,7 +316,7 @@ export function HistoryPanel() {
                 }`}
                 title={t('groupByProject')}
               >
-                By project
+                {t('byProject')}
               </button>
             </div>
           )}

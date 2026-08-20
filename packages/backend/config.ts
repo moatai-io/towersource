@@ -133,8 +133,22 @@ export interface ModelInfo {
   contextWindow?: number;
 }
 
-/** Centralized model config — read from backend/models.json */
-const MODELS_JSON_PATH = path.join(PROJECT_ROOT, 'packages', 'backend', 'models.json');
+/**
+ * Per-VM model registry resolution.
+ * - TOWER_MODELS_PATH: explicit operator override
+ * - data/models.json: writable VM-local registry managed by Admin/setup
+ * - packages/backend/models.json: packaged/operator fallback
+ */
+const PACKAGED_MODELS_JSON_PATH = path.join(PROJECT_ROOT, 'packages', 'backend', 'models.json');
+const VM_MODELS_JSON_PATH = process.env.TOWER_MODELS_PATH
+  ? path.resolve(process.env.TOWER_MODELS_PATH)
+  : path.join(process.env.TOWER_DATA_DIR || process.env.DATA_DIR || path.join(PROJECT_ROOT, 'data'), 'models.json');
+
+export function getModelsConfigPath(): string {
+  if (process.env.TOWER_MODELS_PATH) return VM_MODELS_JSON_PATH;
+  if (fs.existsSync(VM_MODELS_JSON_PATH)) return VM_MODELS_JSON_PATH;
+  return PACKAGED_MODELS_JSON_PATH;
+}
 
 export interface ModelDefaults {
   session: string;
@@ -191,6 +205,7 @@ interface ModelsFile {
   local?: Array<{ id: string; name: string; badge?: string; enabled: boolean; contextWindow?: number }>;
   defaults?: ModelDefaults;
   modelPolicies?: ModelPolicyConfig;
+  inferenceProviders?: Record<string, { baseUrl: string; secretName: string; configuredAt: string }>;
 }
 
 /** Exported so pi-engine.ts can register custom models from the same source. */
@@ -198,14 +213,17 @@ export type { PiModelEntry };
 
 export function loadModelsFile(): ModelsFile {
   try {
-    return JSON.parse(fs.readFileSync(MODELS_JSON_PATH, 'utf8'));
+    return JSON.parse(fs.readFileSync(getModelsConfigPath(), 'utf8'));
   } catch {
     return { claude: [], pi: [] };
   }
 }
 
 export function saveModelsFile(data: ModelsFile): void {
-  fs.writeFileSync(MODELS_JSON_PATH, JSON.stringify(data, null, 2) + '\n', 'utf8');
+  // Admin writes always create/update the VM-local registry. Packaged defaults
+  // remain immutable so upgrades cannot overwrite a self-hosted VM's choices.
+  fs.mkdirSync(path.dirname(VM_MODELS_JSON_PATH), { recursive: true });
+  fs.writeFileSync(VM_MODELS_JSON_PATH, JSON.stringify(data, null, 2) + '\n', { encoding: 'utf8', mode: 0o600 });
 }
 
 export function isAgentFirstEnabledForVm(role: string | undefined, flag: string | undefined): boolean {
@@ -314,7 +332,10 @@ export const RETIRED_PI_SESSION_MODEL_IDS = new Set([
   'litellm/codex-lb-gpt-5.5',
   'litellm/smartest',
   'litellm/smart',
+  // Utility/emergency routes must never become sticky ordinary chat defaults.
+  'litellm-responses/mini',
   'azure-openai-responses/gpt-5.4',
+  'azure-openai-responses-eastus2/gpt-5.5',
 ]);
 
 const DEFAULT_MODEL_DEFAULTS: ModelDefaults = {
@@ -415,25 +436,15 @@ function resolvePublicUrl(): string {
 }
 
 export function resolveSharePublicUrl(publicUrl: string): string {
-  if (!publicUrl) return '';
-
-  // Moat internal operator VM has multiple aliases. Shareable user links should
-  // use the canonical production host, not the legacy desk redirect alias.
-  // Dev keeps desk-dev.tower.example.com so OAuth/dev URLs still point at the dev app.
-  // Self-hosted servers keep their own PUBLIC_URL (e.g. https://demo-org.tower.example.com).
-  try {
-    const u = new URL(publicUrl);
-    if (u.hostname === 'desk.tower.example.com') {
-      return `${u.protocol}//tower.tower.example.com`;
-    }
-  } catch {
-    return publicUrl;
-  }
-
+  // OSS has no knowledge of an operator's canonical domain or aliases.
+  // Deployments that need a distinct share host must set SHARE_PUBLIC_URL.
   return publicUrl;
 }
 
 const resolvedPublicUrl = resolvePublicUrl();
+const resolvedSharePublicUrl = process.env.SHARE_PUBLIC_URL
+  ? normalizePublicUrl(process.env.SHARE_PUBLIC_URL)
+  : resolveSharePublicUrl(resolvedPublicUrl);
 
 export const config = {
   port: parseInt(process.env.PORT || '32354'),
@@ -546,7 +557,7 @@ export const config = {
   // Public URL — used for generating shareable links (e.g. https://your-domain.example.com)
   // If not set, share links use window.location.origin (fallback, can be wrong domain)
   publicUrl: resolvedPublicUrl,
-  sharePublicUrl: resolveSharePublicUrl(resolvedPublicUrl),
+  sharePublicUrl: resolvedSharePublicUrl,
 
   // Browser/PWA Web Push. VAPID keys are required for real OS-level push;
   // without them the API reports configured=false and the UI stays disabled.

@@ -1,4 +1,6 @@
 import React from 'react';
+import { useTranslation } from 'react-i18next';
+import i18n from '../../i18n';
 import { notifyApprovalCardsChanged } from '../../stores/approval-store';
 
 type ApprovalStatus = 'pending' | 'approved' | 'changes_requested' | 'rejected' | 'cancelled' | 'stale';
@@ -36,19 +38,16 @@ interface ApprovalCardDetail extends ApprovalCardSummary {
   events?: Array<{ id: string; type: string; actorUserId?: number | null; payload?: Record<string, unknown>; createdAt: string }>;
 }
 
-const STATUS_COPY: Record<ApprovalStatus, { label: string; tone: string }> = {
-  pending: { label: '승인 대기', tone: 'tone-warning' },
-  approved: { label: '승인됨', tone: 'tone-success' },
-  changes_requested: { label: '수정 요청', tone: 'tone-info' },
-  rejected: { label: '반려됨', tone: 'tone-danger' },
-  cancelled: { label: '취소됨', tone: 'tone-muted' },
-  stale: { label: '재제출 필요', tone: 'tone-warning' },
-};
-const RESOLUTION_COPY: Record<ApprovalResolution, { label: string; pending: string }> = {
-  approved: { label: '승인', pending: '승인하는 중…' },
-  changes_requested: { label: '수정 요청', pending: '요청하는 중…' },
-  rejected: { label: '반려', pending: '반려하는 중…' },
-};
+function statusCopy(status: ApprovalStatus): { label: string; tone: string } {
+  const tones: Record<ApprovalStatus, string> = {
+    pending: 'tone-warning', approved: 'tone-success', changes_requested: 'tone-info',
+    rejected: 'tone-danger', cancelled: 'tone-muted', stale: 'tone-warning',
+  };
+  return { label: i18n.t(`approvalInbox.status.${status}`, { ns: 'common' }), tone: tones[status] };
+}
+function resolutionCopy(resolution: ApprovalResolution, pending: boolean): string {
+  return i18n.t(`approvalInbox.resolution.${resolution}.${pending ? 'pending' : 'label'}`, { ns: 'common' });
+}
 
 function authHeaders(json = false): HeadersInit {
   const token = localStorage.getItem('token');
@@ -56,11 +55,11 @@ function authHeaders(json = false): HeadersInit {
 }
 function formatTime(value: string): string {
   const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString('ko-KR', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString(i18n.resolvedLanguage || i18n.language, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
 function errorMessage(value: unknown, fallback: string): string {
-  if (value instanceof DOMException && value.name === 'AbortError') return '요청 시간이 초과되었습니다. 잠시 후 다시 시도해 주세요.';
-  if (value instanceof TypeError && /failed to fetch/i.test(value.message)) return '승인함 연결이 잠시 끊겼습니다. 자동으로 다시 시도했지만 불러오지 못했습니다.';
+  if (value instanceof DOMException && value.name === 'AbortError') return i18n.t('approvalInbox.error.timeout', { ns: 'common' });
+  if (value instanceof TypeError && /failed to fetch/i.test(value.message)) return i18n.t('approvalInbox.error.connection', { ns: 'common' });
   if (value instanceof Error && value.message) return value.message;
   return fallback;
 }
@@ -91,7 +90,7 @@ function payloadString(attachment: ApprovalAttachment, key: string): string | nu
 }
 function attachmentLabel(attachment: ApprovalAttachment): string {
   if (attachment.label) return attachment.label;
-  return ({ markdown: '메모', file: '파일', link: '링크', session: 'Session', run: 'Run' } as const)[attachment.type];
+  return i18n.t(`approvalInbox.attachment.${attachment.type}`, { ns: 'common' });
 }
 function attachmentIsActionable(attachment: ApprovalAttachment): boolean {
   return (attachment.type === 'file' && !!payloadString(attachment, 'path'))
@@ -100,11 +99,12 @@ function attachmentIsActionable(attachment: ApprovalAttachment): boolean {
 }
 
 function StatusPill({ status }: { status: ApprovalStatus }) {
-  const copy = STATUS_COPY[status];
+  const copy = statusCopy(status);
   return <span className={`tone-pill shrink-0 px-2 py-0.5 text-[11px] ${copy.tone}`}>{copy.label}</span>;
 }
 
 export function ApprovalInbox({ initialCards }: { initialCards?: ApprovalCardSummary[] } = {}) {
+  const { t } = useTranslation('common');
   const [box, setBox] = React.useState<ApprovalBox>('assigned');
   const [cards, setCards] = React.useState<ApprovalCardSummary[]>(initialCards || []);
   const [selectedId, setSelectedId] = React.useState<string | null>(initialCards?.[0]?.id || null);
@@ -134,11 +134,11 @@ export function ApprovalInbox({ initialCards }: { initialCards?: ApprovalCardSum
       setCards(nextCards);
       setSelectedId((current) => current && nextCards.some((card) => card.id === current) ? current : nextCards[0]?.id || null);
     } catch (err: unknown) {
-      setError(errorMessage(err, '승인 요청을 불러오지 못했습니다.'));
+      setError(errorMessage(err, t('approvalInbox.error.listLoad')));
     } finally {
       setListLoading(false);
     }
-  }, [box]);
+  }, [box, t]);
 
   React.useEffect(() => {
     if (initialCards === undefined) void load();
@@ -153,10 +153,10 @@ export function ApprovalInbox({ initialCards }: { initialCards?: ApprovalCardSum
     void approvalFetch(`/api/approval-cards/${selectedId}`, { headers: authHeaders(), signal: controller.signal })
       .then(async (res) => { if (!res.ok) throw new Error(await res.text()); return await res.json(); })
       .then((data) => { if (!controller.signal.aborted) setDetail(data); })
-      .catch((err: unknown) => { if (!controller.signal.aborted) setError(errorMessage(err, '승인 요청 상세를 불러오지 못했습니다.')); })
+      .catch((err: unknown) => { if (!controller.signal.aborted) setError(errorMessage(err, t('approvalInbox.error.detailLoad'))); })
       .finally(() => { if (!controller.signal.aborted) setDetailLoading(false); });
     return () => controller.abort();
-  }, [selectedId]);
+  }, [selectedId, t]);
 
   React.useEffect(() => {
     if (initialCards !== undefined) return;
@@ -174,13 +174,13 @@ export function ApprovalInbox({ initialCards }: { initialCards?: ApprovalCardSum
         method: 'POST', headers: authHeaders(true), body: JSON.stringify({ resolution, commentMd: comment }),
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || '처리에 실패했습니다.');
+      if (!res.ok) throw new Error(data.error || t('approvalInbox.error.resolve'));
       setDetail(data);
       setComment('');
       notifyApprovalCardsChanged();
       await load();
     } catch (err: unknown) {
-      setError(errorMessage(err, '처리에 실패했습니다.'));
+      setError(errorMessage(err, t('approvalInbox.error.resolve')));
     } finally {
       setResolving(null);
     }
@@ -203,10 +203,10 @@ export function ApprovalInbox({ initialCards }: { initialCards?: ApprovalCardSum
       <div className="flex flex-col gap-3 border-b border-surface-800 bg-surface-950/45 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0">
           <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-primary-300/80">Approval Cards</div>
-          <h2 id="approval-inbox-title" className="mt-0.5 text-[17px] font-semibold text-surface-100">결과 제출·승인함</h2>
-          <p className="mt-1 max-w-2xl text-[12px] leading-5 text-surface-500">AI 팀원이나 사람이 공식 제출한 결과를 검토합니다. 일반 질문은 이곳에 들어오지 않습니다.</p>
+          <h2 id="approval-inbox-title" className="mt-0.5 text-[17px] font-semibold text-surface-100">{t('approvalInbox.title')}</h2>
+          <p className="mt-1 max-w-2xl text-[12px] leading-5 text-surface-500">{t('approvalInbox.description')}</p>
         </div>
-        <div role="tablist" aria-label="승인 요청함" className="grid grid-cols-2 rounded-lg border border-surface-700 bg-surface-900 p-1">
+        <div role="tablist" aria-label={t('approvalInbox.tabsLabel')} className="grid grid-cols-2 rounded-lg border border-surface-700 bg-surface-900 p-1">
           {(['assigned', 'sent'] as const).map((value) => (
             <button
               key={value}
@@ -215,20 +215,20 @@ export function ApprovalInbox({ initialCards }: { initialCards?: ApprovalCardSum
               onClick={() => setBox(value)}
               className={`rounded-md px-3 py-1.5 text-[12px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/60 ${box === value ? 'bg-primary-600 text-white' : 'text-surface-500 hover:bg-surface-800 hover:text-surface-200'}`}
             >
-              {value === 'assigned' ? '내 승인 필요' : '보낸 요청'}
+              {value === 'assigned' ? t('approvalInbox.assigned') : t('approvalInbox.sent')}
             </button>
           ))}
         </div>
       </div>
 
-      {error && <div role="alert" className="flex items-start justify-between gap-3 border-b border-red-400/20 bg-red-500/10 px-4 py-2.5 text-[12px] text-red-200"><span>{error}</span><button onClick={() => { setError(null); void load(); }} className="shrink-0 font-semibold underline underline-offset-2">다시 시도</button></div>}
+      {error && <div role="alert" className="flex items-start justify-between gap-3 border-b border-red-400/20 bg-red-500/10 px-4 py-2.5 text-[12px] text-red-200"><span>{error}</span><button onClick={() => { setError(null); void load(); }} className="shrink-0 font-semibold underline underline-offset-2">{t('approvalInbox.retry')}</button></div>}
 
       <div className="grid min-h-[300px] lg:grid-cols-[minmax(260px,0.78fr)_minmax(0,1.35fr)]">
-        <div aria-label={box === 'assigned' ? '내 승인 요청 목록' : '보낸 승인 요청 목록'} className="max-h-[360px] overflow-y-auto border-b border-surface-800 lg:max-h-[560px] lg:border-b-0 lg:border-r">
+        <div aria-label={box === 'assigned' ? t('approvalInbox.assignedList') : t('approvalInbox.sentList')} className="max-h-[360px] overflow-y-auto border-b border-surface-800 lg:max-h-[560px] lg:border-b-0 lg:border-r">
           {listLoading && cards.length === 0 ? (
             <div aria-live="polite" className="space-y-2 p-4">{[0, 1, 2].map((key) => <div key={key} className="h-14 animate-pulse rounded-lg bg-surface-800/70" />)}</div>
           ) : cards.length === 0 ? (
-            <div className="grid min-h-40 place-items-center p-6 text-center"><div><div className="text-[13px] font-medium text-surface-300">{box === 'assigned' ? '처리할 승인 요청이 없습니다.' : '보낸 승인 요청이 없습니다.'}</div><p className="mt-1 text-[12px] leading-5 text-surface-600">새 결과가 제출되면 이 목록에 표시됩니다.</p></div></div>
+            <div className="grid min-h-40 place-items-center p-6 text-center"><div><div className="text-[13px] font-medium text-surface-300">{box === 'assigned' ? t('approvalInbox.emptyAssigned') : t('approvalInbox.emptySent')}</div><p className="mt-1 text-[12px] leading-5 text-surface-600">{t('approvalInbox.emptyDescription')}</p></div></div>
           ) : cards.map((card) => (
             <button
               key={card.id}
@@ -237,7 +237,7 @@ export function ApprovalInbox({ initialCards }: { initialCards?: ApprovalCardSum
               className={`block w-full border-b border-surface-800 px-4 py-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary-500/60 ${selectedId === card.id ? 'bg-primary-500/10' : 'hover:bg-surface-800/35'}`}
             >
               <div className="flex items-start justify-between gap-3"><span className="line-clamp-2 text-[13px] font-semibold leading-5 text-surface-100">{card.title}</span><StatusPill status={card.status} /></div>
-              <div className="mt-1.5 text-[11px] text-surface-600">{card.submitterType === 'workspace_agent' ? 'AI 팀원 제출' : '사람이 보낸 요청'} · rev {card.currentRevisionNo} · {formatTime(card.updatedAt)}</div>
+              <div className="mt-1.5 text-[11px] text-surface-600">{card.submitterType === 'workspace_agent' ? t('approvalInbox.agentSubmission') : t('approvalInbox.humanRequest')} · rev {card.currentRevisionNo} · {formatTime(card.updatedAt)}</div>
             </button>
           ))}
         </div>
@@ -246,18 +246,18 @@ export function ApprovalInbox({ initialCards }: { initialCards?: ApprovalCardSum
           {detailLoading ? (
             <div aria-live="polite" className="space-y-3"><div className="h-6 w-2/3 animate-pulse rounded bg-surface-800" /><div className="h-32 animate-pulse rounded-lg bg-surface-800/70" /></div>
           ) : !detail ? (
-            <div className="grid min-h-48 place-items-center text-center text-[13px] text-surface-500">승인 요청을 선택하면 검토 내용이 표시됩니다.</div>
+            <div className="grid min-h-48 place-items-center text-center text-[13px] text-surface-500">{t('approvalInbox.selectRequest')}</div>
           ) : (
             <div>
               <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between"><div className="min-w-0"><div className="text-[11px] text-surface-600">rev {detail.currentRevisionNo} · {formatTime(detail.updatedAt)}</div><h3 className="mt-1 text-wrap-balance text-[18px] font-semibold leading-7 text-surface-100">{detail.title}</h3></div><StatusPill status={detail.status} /></div>
 
-              <div className="mt-4 border-y border-surface-800 py-4"><div className="whitespace-pre-wrap text-[13px] leading-6 text-surface-200">{detail.revision?.summaryMd}</div>{detail.revision?.recommendationMd && <div className="mt-4 border-t border-surface-800 pt-3"><div className="text-[11px] font-semibold text-primary-300">추천</div><div className="mt-1 whitespace-pre-wrap text-[12px] leading-5 text-surface-300">{detail.revision.recommendationMd}</div></div>}<div className="mt-4 border-t border-surface-800 pt-3"><div className="text-[11px] font-semibold text-amber-300">승인하면</div><div className="mt-1 whitespace-pre-wrap text-[12px] leading-5 text-surface-300">{detail.revision?.consequenceMd}</div></div></div>
+              <div className="mt-4 border-y border-surface-800 py-4"><div className="whitespace-pre-wrap text-[13px] leading-6 text-surface-200">{detail.revision?.summaryMd}</div>{detail.revision?.recommendationMd && <div className="mt-4 border-t border-surface-800 pt-3"><div className="text-[11px] font-semibold text-primary-300">{t('approvalInbox.recommendation')}</div><div className="mt-1 whitespace-pre-wrap text-[12px] leading-5 text-surface-300">{detail.revision.recommendationMd}</div></div>}<div className="mt-4 border-t border-surface-800 pt-3"><div className="text-[11px] font-semibold text-amber-300">{t('approvalInbox.consequence')}</div><div className="mt-1 whitespace-pre-wrap text-[12px] leading-5 text-surface-300">{detail.revision?.consequenceMd}</div></div></div>
 
-              {(detail.attachments || []).length > 0 && <div className="mt-4"><div className="mb-2 text-[11px] font-semibold text-surface-500">검토 자료 · Viewer에서 근거 확인</div><div className="flex flex-wrap gap-2">{detail.attachments!.map((attachment) => attachmentIsActionable(attachment) ? <button key={attachment.id} onClick={() => openAttachment(attachment)} className="tone-action tone-muted rounded-md border px-2.5 py-1.5 text-[11px] font-medium transition-colors hover:tone-info focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/60">{attachmentLabel(attachment)}</button> : <span key={attachment.id} className="tone-pill tone-muted px-2.5 py-1 text-[11px]">{attachmentLabel(attachment)} · 카드 본문</span>)}</div></div>}
+              {(detail.attachments || []).length > 0 && <div className="mt-4"><div className="mb-2 text-[11px] font-semibold text-surface-500">{t('approvalInbox.reviewMaterials')}</div><div className="flex flex-wrap gap-2">{detail.attachments!.map((attachment) => attachmentIsActionable(attachment) ? <button key={attachment.id} onClick={() => openAttachment(attachment)} className="tone-action tone-muted rounded-md border px-2.5 py-1.5 text-[11px] font-medium transition-colors hover:tone-info focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/60">{attachmentLabel(attachment)}</button> : <span key={attachment.id} className="tone-pill tone-muted px-2.5 py-1 text-[11px]">{attachmentLabel(attachment)} · {t('approvalInbox.cardBody')}</span>)}</div></div>}
 
-              {detail.status === 'approved' && <div className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-emerald-500/20 bg-emerald-500/8 p-3"><div><div className="text-[12px] font-semibold text-emerald-200">검토가 완료된 결과입니다</div><p className="mt-1 text-[11px] leading-5 text-surface-500">승인은 배포 실행과 별개입니다. AI 서비스에서 배포 버전과 채널을 다시 확인합니다.</p></div><button type="button" onClick={openAIServiceHome} className="rounded-md border border-primary-400/30 bg-primary-500/10 px-3 py-2 text-[12px] font-semibold text-primary-300 hover:bg-primary-500/15">AI 서비스로 이동</button></div>}
+              {detail.status === 'approved' && <div className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-emerald-500/20 bg-emerald-500/8 p-3"><div><div className="text-[12px] font-semibold text-emerald-200">{t('approvalInbox.reviewComplete')}</div><p className="mt-1 text-[11px] leading-5 text-surface-500">{t('approvalInbox.approvalNotDeployment')}</p></div><button type="button" onClick={openAIServiceHome} className="rounded-md border border-primary-400/30 bg-primary-500/10 px-3 py-2 text-[12px] font-semibold text-primary-300 hover:bg-primary-500/15">{t('approvalInbox.openAiServices')}</button></div>}
 
-              {box === 'assigned' && detail.status === 'pending' && <div className="mt-5 rounded-lg border border-surface-800 bg-surface-950/40 p-3"><label htmlFor={`approval-comment-${detail.id}`} className="text-[12px] font-medium text-surface-300">검토 의견 <span className="font-normal text-surface-600">수정 요청·반려 시 권장</span></label><textarea id={`approval-comment-${detail.id}`} value={comment} onChange={(event) => setComment(event.target.value)} placeholder="판단 근거나 수정할 내용을 남겨주세요." className="mt-2 min-h-20 w-full resize-y rounded-md border border-surface-700 bg-surface-950 px-3 py-2 text-[12px] leading-5 text-surface-200 outline-none placeholder:text-surface-650 focus:border-primary-500/60 focus:ring-2 focus:ring-primary-500/15"/><div className="mt-3 flex flex-wrap gap-2"><button disabled={!!resolving} onClick={() => void resolve('approved')} className="tone-action tone-success rounded-md border px-3 py-2 text-[12px] font-semibold transition-opacity disabled:cursor-wait disabled:opacity-60">{resolving === 'approved' ? RESOLUTION_COPY.approved.pending : RESOLUTION_COPY.approved.label}</button><button disabled={!!resolving} onClick={() => void resolve('changes_requested')} className="tone-action tone-warning rounded-md border px-3 py-2 text-[12px] font-semibold transition-opacity disabled:cursor-wait disabled:opacity-60">{resolving === 'changes_requested' ? RESOLUTION_COPY.changes_requested.pending : RESOLUTION_COPY.changes_requested.label}</button><button disabled={!!resolving} onClick={() => void resolve('rejected')} className="tone-action tone-danger rounded-md border px-3 py-2 text-[12px] font-semibold transition-opacity disabled:cursor-wait disabled:opacity-60">{resolving === 'rejected' ? RESOLUTION_COPY.rejected.pending : RESOLUTION_COPY.rejected.label}</button>{detail.sourceSessionId && <button disabled={!!resolving} onClick={() => window.dispatchEvent(new CustomEvent('kanban-select-session', { detail: { sessionId: detail.sourceSessionId } }))} className="rounded-md border border-surface-700 px-3 py-2 text-[12px] font-medium text-surface-300 transition-colors hover:border-primary-500/40 hover:text-primary-200 disabled:opacity-60">Session에서 검토</button>}</div></div>}
+              {box === 'assigned' && detail.status === 'pending' && <div className="mt-5 rounded-lg border border-surface-800 bg-surface-950/40 p-3"><label htmlFor={`approval-comment-${detail.id}`} className="text-[12px] font-medium text-surface-300">{t('approvalInbox.reviewComment')} <span className="font-normal text-surface-600">{t('approvalInbox.commentRecommended')}</span></label><textarea id={`approval-comment-${detail.id}`} value={comment} onChange={(event) => setComment(event.target.value)} placeholder={t('approvalInbox.commentPlaceholder')} className="mt-2 min-h-20 w-full resize-y rounded-md border border-surface-700 bg-surface-950 px-3 py-2 text-[12px] leading-5 text-surface-200 outline-none placeholder:text-surface-650 focus:border-primary-500/60 focus:ring-2 focus:ring-primary-500/15"/><div className="mt-3 flex flex-wrap gap-2"><button disabled={!!resolving} onClick={() => void resolve('approved')} className="tone-action tone-success rounded-md border px-3 py-2 text-[12px] font-semibold transition-opacity disabled:cursor-wait disabled:opacity-60">{resolutionCopy('approved', resolving === 'approved')}</button><button disabled={!!resolving} onClick={() => void resolve('changes_requested')} className="tone-action tone-warning rounded-md border px-3 py-2 text-[12px] font-semibold transition-opacity disabled:cursor-wait disabled:opacity-60">{resolutionCopy('changes_requested', resolving === 'changes_requested')}</button><button disabled={!!resolving} onClick={() => void resolve('rejected')} className="tone-action tone-danger rounded-md border px-3 py-2 text-[12px] font-semibold transition-opacity disabled:cursor-wait disabled:opacity-60">{resolutionCopy('rejected', resolving === 'rejected')}</button>{detail.sourceSessionId && <button disabled={!!resolving} onClick={() => window.dispatchEvent(new CustomEvent('kanban-select-session', { detail: { sessionId: detail.sourceSessionId } }))} className="rounded-md border border-surface-700 px-3 py-2 text-[12px] font-medium text-surface-300 transition-colors hover:border-primary-500/40 hover:text-primary-200 disabled:opacity-60">{t('approvalInbox.reviewInSession')}</button>}</div></div>}
             </div>
           )}
         </div>

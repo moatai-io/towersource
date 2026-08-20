@@ -90,7 +90,7 @@ describe('Sidebar realtime performance source contracts', () => {
     expect(src).not.toContain("{ key: 'pinned', label: 'PIN', title: '고정한 AI'");
     expect(src).not.toContain("{ key: 'newest', label: 'NEW', title: '최근 사용한 AI'");
     expect(src).toContain('sidebar-agent-nav-expanded:v1');
-    expect(src).toContain("aria-label={agentNavExpanded ? 'AI 이름 목록 접기' : 'AI 이름 목록 펼치기'}");
+    expect(src).toContain("aria-label={agentNavExpanded ? t('collapseAiNameList') : t('expandAiNameList')}");
     expect(src).toContain('transition-[width] duration-200 ease-out motion-reduce:transition-none');
     expect(src).toContain('scrollbar-none min-h-0 w-40 flex-1 overflow-y-auto');
     expect(src).toContain('<div className="w-40 shrink-0">');
@@ -149,7 +149,7 @@ describe('Sidebar realtime performance source contracts', () => {
     expect(src).toContain('body: JSON.stringify({ projectId, label })');
     expect(src).not.toContain('body: JSON.stringify({ projectId, name: label })');
     expect(src).toContain("t('addDeckButton')");
-    expect(src).toContain("'temp': t ? t('defaultDeck') : '기본'");
+    expect(src).toContain("'temp': t ? t('defaultDeck') : 'Default'");
   });
 
   it('gives the shared project menu keyboard semantics and focus recovery', () => {

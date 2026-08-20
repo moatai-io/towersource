@@ -22,9 +22,9 @@ describe("FilesWorkspace folder row drop", () => {
   });
 
   it("shows the exact target folder instead of a full-screen-only selection", () => {
-    expect(source).toContain("이 폴더에 놓기");
+    expect(source).toContain("t('workspace.dropInThisFolder')");
     expect(source).toContain("ring-2 ring-inset ring-primary-500/70");
-    expect(source).toContain("`${entry.name} 폴더에 파일 놓기`");
+    expect(source).toContain("t('workspace.dropFilesOnFolder', { name: entry.name })");
   });
 
   it("uploads to an explicit target and refreshes the affected tree", () => {

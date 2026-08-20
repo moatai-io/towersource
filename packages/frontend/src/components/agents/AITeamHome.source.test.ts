@@ -18,7 +18,7 @@ describe('existing-user AI Team home', () => {
     expect(home).toContain('agent?.displayName?.trim() || project.name');
     expect(home).toContain('project.description?.trim()');
     expect(home).toContain('AgentIdentityAvatar');
-    expect(home).toContain('AI 팀원');
+    expect(home).toContain("t('aiTeammateCount')");
     expect(home).not.toContain('Primary AI 팀원');
   });
 
@@ -26,19 +26,19 @@ describe('existing-user AI Team home', () => {
     expect(home).toContain("project.systemKey === 'ai-talent-team'");
     expect(home).toContain("project.systemKey !== 'ai-talent-team'");
     expect(home).toContain("new CustomEvent('tower-start-agent-academy')");
-    expect(home).toContain('Tower 사용·자동화 상담하기');
+    expect(home).toContain("t('aiTeamHelper')");
     expect(home).toContain('onNewSession(helper.id)');
     expect(home).not.toContain('AI 인재팀');
-    expect(home).toContain('새 AI 팀원');
-    expect(home).toContain('작업 공간 · {project.name}');
+    expect(home).toContain("t('newAiTeammate')");
+    expect(home).toContain("{t('workspace')} · {project.name}");
     expect(header).not.toContain('label={t(\'newProject\')}');
     expect(header).not.toContain('label="새 에이전트"');
   });
 
   it('uses visible sessions and offers teammate-home and recent-conversation actions', () => {
     expect(home).not.toContain('/api/sessions');
-    expect(home).toContain('최근 대화');
-    expect(home).toContain('AI 팀원 홈 열기');
+    expect(home).toContain("t('recentConversation')");
+    expect(home).toContain("t('openTeammateHome'");
     expect(home).toContain('onOpenProjectHome(project)');
   });
 

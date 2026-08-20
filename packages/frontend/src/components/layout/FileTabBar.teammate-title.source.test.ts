@@ -15,7 +15,7 @@ describe('chat tab session title', () => {
     expect(source).not.toContain('project?.agent?.displayName || project?.name');
     expect(source).not.toContain('{teammateName}</span>');
     expect(source).not.toContain('shrink-0 text-surface-600">·</span>');
-    expect(source).toContain("{name ?? '채팅'}</span>");
+    expect(source).toContain("{name ?? t('chatTabFallback')}</span>");
   });
 
   it('keeps touch-sized mobile tabs without adding a second title line', () => {

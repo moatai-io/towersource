@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import ReactMarkdown from 'react-markdown';
 import rehypeHighlight from 'rehype-highlight';
 import type { SkillMeta, SkillReadiness } from '@tower/shared';
@@ -51,6 +52,7 @@ interface FilterDef {
  *      workspace/projects/tower/published/skill-ui-v2-87fa8f/index.html (V2 catalog prototype)
  */
 export function SkillsBrowserV2({ onSwitchToV1: _onSwitchToV1 }: { onSwitchToV1: () => void }) {
+  const { t } = useTranslation('skills');
   const setOpen = useSettingsStore((s) => s.setSkillsBrowserOpen);
   const [skills, setSkills] = useState<SkillMeta[]>([]);
   const [readinessBySkill, setReadinessBySkill] = useState<Map<string, SkillReadiness>>(new Map());
@@ -103,7 +105,7 @@ export function SkillsBrowserV2({ onSwitchToV1: _onSwitchToV1 }: { onSwitchToV1:
       if (!projectResponse.ok && activeProjectId) {
         skillsResponse = await fetch(`${API}/skills`, { headers: hdrs });
         if (skillsResponse.ok) {
-          setLoadError('선택한 프로젝트의 스킬은 불러오지 못해 팀 공용 카탈로그만 표시합니다.');
+          setLoadError(t('projectSkillsFallback'));
         }
       }
       if (!skillsResponse.ok) throw new Error(`skill catalog request failed: ${skillsResponse.status}`);
@@ -115,11 +117,11 @@ export function SkillsBrowserV2({ onSwitchToV1: _onSwitchToV1 }: { onSwitchToV1:
     } catch {
       setSkills([]);
       setReadinessBySkill(new Map());
-      setLoadError('스킬 카탈로그를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.');
+      setLoadError(t('catalogLoadFailed'));
     } finally {
       setLoading(false);
     }
-  }, [activeProjectId, hdrs]);
+  }, [activeProjectId, hdrs, t]);
 
   const loadDetail = useCallback(async (id: string) => {
     const r = await fetch(`${API}/skills/${id}`, { headers: hdrs });
@@ -136,18 +138,18 @@ export function SkillsBrowserV2({ onSwitchToV1: _onSwitchToV1 }: { onSwitchToV1:
     });
     if (!r.ok) {
       const err = await r.json().catch(() => ({}));
-      toastError(err.error || '회사 공용 등록에 실패했습니다.');
+      toastError(err.error || t('shareCompanyFailed'));
       return;
     }
     const result = await r.json();
-    toastSuccess(result.created ? '회사 공용 스킬로 등록했습니다.' : '이미 회사 공용 스킬에 등록되어 있습니다.');
+    toastSuccess(result.created ? t('shareCompanyCreated') : t('shareCompanyExists'));
     await loadSkills();
-  }, [hdrs, loadSkills, selected]);
+  }, [hdrs, loadSkills, selected, t]);
 
   const copySkill = useCallback(async () => {
     if (!selected) return;
     if (!activeProjectId) {
-      toastError('프로젝트에 연결된 세션에서만 프로젝트 스킬 사본을 만들 수 있습니다.');
+      toastError(t('copyRequiresProject'));
       return;
     }
     const name = selected.name.trim();
@@ -167,7 +169,7 @@ export function SkillsBrowserV2({ onSwitchToV1: _onSwitchToV1 }: { onSwitchToV1:
     });
     if (!r.ok) {
       const err = await r.json().catch(() => ({}));
-      toastError(err.error || '프로젝트 스킬 사본 생성에 실패했습니다. 같은 이름의 스킬이 이미 있을 수 있습니다.');
+      toastError(err.error || t('copyProjectSkillFailed'));
       return;
     }
     const copied = await r.json();
@@ -175,7 +177,7 @@ export function SkillsBrowserV2({ onSwitchToV1: _onSwitchToV1 }: { onSwitchToV1:
     setCatalogFilter('mine');
     setView('catalog');
     await loadDetail(copied.id);
-  }, [activeProjectId, hdrs, loadDetail, loadSkills, selected]);
+  }, [activeProjectId, hdrs, loadDetail, loadSkills, selected, t]);
 
   /**
    * 프로젝트 스킬 생성 — project-native filesystem source.
@@ -189,9 +191,9 @@ export function SkillsBrowserV2({ onSwitchToV1: _onSwitchToV1 }: { onSwitchToV1:
     const category = form.category.trim() || 'general';
     const body = form.content.trim().startsWith('---')
       ? form.content.trim()
-      : `---\nname: ${name}\ndescription: ${description}\nversion: 1.0.0\ntags: [${category}]\n---\n\n# /${name}\n\n${form.content.trim() || description || '여기에 스킬 본문을 작성하세요.'}\n`;
+      : `---\nname: ${name}\ndescription: ${description}\nversion: 1.0.0\ntags: [${category}]\n---\n\n# /${name}\n\n${form.content.trim() || description || t('defaultSkillBody')}\n`;
     if (!activeProjectId) {
-      toastError('프로젝트에 연결된 세션에서만 프로젝트 스킬을 만들 수 있습니다.');
+      toastError(t('createRequiresProject'));
       return null;
     }
     const r = await fetch(`${API}/skills`, {
@@ -209,7 +211,7 @@ export function SkillsBrowserV2({ onSwitchToV1: _onSwitchToV1 }: { onSwitchToV1:
     });
     if (!r.ok) {
       const err = await r.json().catch(() => ({}));
-      toastError(err.error || '프로젝트 스킬 생성에 실패했습니다.');
+      toastError(err.error || t('createProjectSkillFailed'));
       return null;
     }
     const created = await r.json();
@@ -218,14 +220,14 @@ export function SkillsBrowserV2({ onSwitchToV1: _onSwitchToV1 }: { onSwitchToV1:
     setView('catalog');
     if (created?.id) await loadDetail(created.id);
     return created?.id ?? null;
-  }, [activeProjectId, hdrs, loadDetail, loadSkills]);
+  }, [activeProjectId, hdrs, loadDetail, loadSkills, t]);
 
   // ── 필터 정의 (catalog) ────────────────────────────────────────────────
   const filterDefs = useMemo<FilterDef[]>(() => ([
-    { key: 'ready', label: '바로 사용 가능', test: s => readinessBySkill.get(s.name)?.ready !== false },
-    { key: 'needs', label: '준비 필요', test: s => readinessBySkill.get(s.name)?.ready === false },
-    { key: 'shared', label: '공용', test: s => s.scope === 'company' || s.scope === 'project' },
-  ]), [readinessBySkill]);
+    { key: 'ready', label: t('readyNow'), test: s => readinessBySkill.get(s.name)?.ready !== false },
+    { key: 'needs', label: t('needsSetup'), test: s => readinessBySkill.get(s.name)?.ready === false },
+    { key: 'shared', label: t('shared'), test: s => s.scope === 'company' || s.scope === 'project' },
+  ]), [readinessBySkill, t]);
 
   // ── catalog 의 visible set (search + filter + tier + hidden + origin) ────
   const visibleCatalogSkills = useMemo(() => {
@@ -353,14 +355,15 @@ function Header(props: {
   onCreate: () => void;
   onClose: () => void;
 }) {
+  const { t } = useTranslation('skills');
   return (
     <div className="flex items-center justify-between px-5 py-3 border-b border-surface-800 bg-surface-900 shrink-0">
       <div className="flex items-center gap-2.5 min-w-0">
         {props.view === 'dashboard' && (
           <button onClick={props.onBackToCatalog}
             className="flex items-center gap-1 px-2 py-1 text-[13px] rounded-md border border-surface-700 text-surface-300 hover:text-surface-100 hover:border-surface-600 hover:bg-surface-800 transition-colors"
-            title="스킬 목록으로 돌아가기">
-            ← 스킬 목록
+            title={t('backToSkillList')}>
+            ← {t('skillList')}
           </button>
         )}
         <div className="w-7 h-7 rounded-lg bg-violet-600/20 border border-violet-500/30 flex items-center justify-center">
@@ -370,34 +373,34 @@ function Header(props: {
         </div>
         <div className="min-w-0">
           <div className="flex items-center gap-2">
-            <h2 className="text-[17px] font-bold text-surface-100">Skill Catalog</h2>
+            <h2 className="text-[17px] font-bold text-surface-100">{t('skillsMarket')}</h2>
             <span className="text-[12px] px-1.5 py-0.5 rounded bg-violet-500/15 text-violet-700 dark:text-violet-300 border border-violet-500/30 font-mono uppercase tracking-wider">V2</span>
             {props.view === 'catalog' && props.catalogFilter !== 'all' && (
               <span className="text-[12px] px-1.5 py-0.5 rounded bg-surface-800 border border-surface-700 text-surface-100">
-                {originLabel(props.catalogFilter)}
+                {originLabel(props.catalogFilter, t)}
               </span>
             )}
           </div>
           <div className="text-[12px] text-surface-500">
             {props.view === 'catalog'
-              ? `${props.resultCount ?? 0} / ${props.total} · 바로 사용 가능 ${props.activeCount}`
-              : `${props.total}개 · 바로 사용 가능 ${props.activeCount}`}
+              ? t('catalogResultSummary', { result: props.resultCount ?? 0, total: props.total, active: props.activeCount })
+              : t('catalogTotalSummary', { total: props.total, active: props.activeCount })}
           </div>
         </div>
       </div>
       <div className="flex items-center gap-2">
         <button onClick={props.onCreate}
           className="px-2.5 py-1 text-[13px] rounded-md border border-sky-500/40 text-sky-700 dark:text-sky-300 bg-sky-500/10 hover:bg-sky-500/15 transition-colors font-medium"
-          title="현재 프로젝트에 스킬 만들기">
-          ＋ 프로젝트 스킬
+          title={t('createSkillInCurrentProject')}>
+          ＋ {t('projectSkill')}
         </button>
         {props.view === 'catalog' && props.isAdmin && (
           <>
             <button onClick={props.onToggleAllTiers} className={topButtonClass(props.showAllTiers)}>
-              {props.showAllTiers ? '🔓 전체 tier' : '🔒 team만'}
+              {props.showAllTiers ? t('showAllTiers') : t('teamTierOnly')}
             </button>
             <button onClick={props.onToggleHidden} className={topButtonClass(props.showHidden)}>
-              {props.showHidden ? '👁 hidden 표시' : '👁‍🗨 hidden 숨김'}
+              {props.showHidden ? t('showHidden') : t('hideHidden')}
             </button>
           </>
         )}
@@ -419,6 +422,7 @@ function DashboardView({ skills, currentUserName, loading, onOpenCatalog, onCrea
   onOpenCatalog: (filter: CatalogFilter, drawerId?: string) => void;
   onCreate: () => void;
 }) {
+  const { t } = useTranslation('skills');
   const part = useMemo(() => partitionByOrigin(skills, currentUserName), [skills, currentUserName]);
   const newly = useMemo(() => newlyAdded(skills, 6), [skills]);
   const popular = useMemo(() => peerPopular(skills, 6), [skills]);
@@ -426,7 +430,7 @@ function DashboardView({ skills, currentUserName, loading, onOpenCatalog, onCrea
   const categoryStats = useMemo(() => categoryCounts(skills), [skills]);
 
   if (loading) {
-    return <main className="flex-1 flex items-center justify-center"><EmptyState title="능력 대시보드 불러오는 중…" /></main>;
+    return <main className="flex-1 flex items-center justify-center"><EmptyState title={t('dashboardLoading')} /></main>;
   }
 
   return (
@@ -437,8 +441,8 @@ function DashboardView({ skills, currentUserName, loading, onOpenCatalog, onCrea
         <div className="flex items-center gap-5">
           <RingProgress value={activeCount} total={Math.max(skills.length, 1)} />
           <div className="flex-1 min-w-0">
-            <div className="text-[14px] text-gray-400 mb-0.5">카탈로그에 등록된 Skill</div>
-            <h2 className="text-[22px] font-bold text-gray-100 mb-2.5">{skills.length}개의 Skill을 탐색할 수 있어요</h2>
+            <div className="text-[14px] text-gray-400 mb-0.5">{t('registeredSkills')}</div>
+            <h2 className="text-[22px] font-bold text-gray-100 mb-2.5">{t('skillsAvailable', { count: skills.length })}</h2>
             <div className="flex flex-wrap gap-1.5">
               {categoryStats.slice(0, 6).map(([cat, on, total]) => (
                 <div key={cat} className="px-2.5 py-1 text-[13px] rounded-full bg-surface-800/60 border border-surface-700">
@@ -451,9 +455,9 @@ function DashboardView({ skills, currentUserName, loading, onOpenCatalog, onCrea
           <button
             onClick={onCreate}
             className="shrink-0 self-stretch px-4 flex flex-col items-center justify-center gap-1 rounded-xl border border-sky-500/30 bg-sky-500/5 text-sky-700 dark:text-sky-300 hover:bg-sky-500/10 hover:border-sky-500/50 transition-colors"
-            title="현재 프로젝트에 스킬 만들기">
+            title={t('createSkillInCurrentProject')}>
             <span className="text-3xl leading-none">＋</span>
-            <span className="text-[13px] font-medium whitespace-nowrap">프로젝트 스킬 만들기</span>
+            <span className="text-[13px] font-medium whitespace-nowrap">{t('createProjectSkill')}</span>
           </button>
         </div>
       </section>
@@ -461,8 +465,8 @@ function DashboardView({ skills, currentUserName, loading, onOpenCatalog, onCrea
       {/* 이번 주 새로 추가됨 */}
       {newly.length > 0 && (
         <DashboardRow
-          title={<><span className="tone-warning tone-text">🆕</span> 이번 주 새로 추가됨</>}
-          hint={`최근 일주일 새로 추가된 ${newly.length}개`}
+          title={<><span className="tone-warning tone-text">🆕</span> {t('newThisWeek')}</>}
+          hint={t('newLastWeekCount', { count: newly.length })}
           items={newly.slice(0, 3)}
           accent="warning"
           onCardOpen={(id) => onOpenCatalog('all', id)}
@@ -472,8 +476,8 @@ function DashboardView({ skills, currentUserName, loading, onOpenCatalog, onCrea
       {/* 동료가 자주 쓰는 */}
       {popular.length > 0 && (
         <DashboardRow
-          title={<>🔥 동료가 자주 쓰는</>}
-          hint="이번 주 팀에서 활발히 사용 중"
+          title={<>🔥 {t('popularWithTeammates')}</>}
+          hint={t('activeInTeamThisWeek')}
           items={popular.slice(0, 3)}
           accent="success"
           onCardOpen={(id) => onOpenCatalog('all', id)}
@@ -484,8 +488,8 @@ function DashboardView({ skills, currentUserName, loading, onOpenCatalog, onCrea
       <section className="mb-6">
         <div className="flex items-center mb-3 px-1">
           <h3 className="text-[16px] font-semibold text-gray-200 flex items-center gap-2">
-            🗂 출처별 모아보기
-            <span className="text-[13px] text-gray-500 font-normal">— 어디서 온 능력인지</span>
+            🗂 {t('browseByOrigin')}
+            <span className="text-[13px] text-gray-500 font-normal">— {t('originExplanation')}</span>
           </h3>
         </div>
         <div className="grid grid-cols-3 gap-3">
@@ -500,9 +504,9 @@ function DashboardView({ skills, currentUserName, loading, onOpenCatalog, onCrea
         <button
           onClick={() => onOpenCatalog('all')}
           className="px-5 py-2.5 text-[15px] rounded-lg border border-surface-700 text-gray-300 hover:text-gray-100 hover:border-surface-600 transition-colors">
-          → 전체 카탈로그 ({skills.length}) 보기
+          → {t('viewFullCatalog', { count: skills.length })}
         </button>
-        <div className="text-[12px] text-gray-600 mt-2">검색 · 필터 · 세부 메타</div>
+        <div className="text-[12px] text-gray-600 mt-2">{t('catalogToolsHint')}</div>
       </div>
     </main>
   );
@@ -537,6 +541,7 @@ function CuratedCard({ skill, accent, onOpen }: {
   accent: 'warning' | 'success';
   onOpen: (id: string) => void;
 }) {
+  const { t } = useTranslation('skills');
   const active = isSkillActive(skill);
   const tone = accent === 'warning' ? 'tone-warning' : 'tone-success';
   const borderActive = `${tone} tone-border hover:opacity-90`;
@@ -550,7 +555,7 @@ function CuratedCard({ skill, accent, onOpen }: {
         <div className={`w-9 h-9 rounded-lg tone-pill ${tone} flex items-center justify-center text-lg shrink-0`}>
           {emojiForSkill(skill)}
         </div>
-        <span className={`rounded-full border px-2 py-0.5 text-[11px] ${active ? 'border-emerald-500/30 text-emerald-700 dark:text-emerald-300' : 'border-surface-700 text-surface-500'}`}>{active ? '카탈로그' : '선택형'}</span>
+        <span className={`rounded-full border px-2 py-0.5 text-[11px] ${active ? 'border-emerald-500/30 text-emerald-700 dark:text-emerald-300' : 'border-surface-700 text-surface-500'}`}>{active ? t('catalog') : t('optional')}</span>
       </div>
       <div className="font-mono text-[15px] text-gray-100 mb-1 truncate"><span className="text-violet-400/60">/</span>{skill.name}</div>
       <p className="text-[13px] text-gray-400 leading-relaxed line-clamp-2">{skill.description}</p>
@@ -563,6 +568,7 @@ function OriginCard({ origin, skills, onOpenCatalog }: {
   skills: SkillMeta[];
   onOpenCatalog: (filter: CatalogFilter, drawerId?: string) => void;
 }) {
+  const { t } = useTranslation('skills');
   const total = skills.length;
   const on = skills.filter(isSkillActive).length;
   const meta = ORIGIN_META[origin];
@@ -575,17 +581,17 @@ function OriginCard({ origin, skills, onOpenCatalog }: {
           <div className={`w-7 h-7 rounded-lg flex items-center justify-center text-[15px] ${meta.iconBg} border ${meta.iconBorder}`}>
             {meta.emoji}
           </div>
-          <div className="text-[14px] font-semibold text-gray-200">{meta.label}</div>
+          <div className="text-[14px] font-semibold text-gray-200">{t(meta.labelKey)}</div>
         </div>
         <div className="text-right">
           <div className={`text-[20px] font-bold leading-none ${meta.numberColor}`}>{total}</div>
-          <div className="text-[11px] text-gray-600 mt-0.5">{on} 기본 노출</div>
+          <div className="text-[11px] text-gray-600 mt-0.5">{t('defaultVisibleCount', { count: on })}</div>
         </div>
       </div>
-      <p className="text-[12px] text-gray-500 mb-3">{meta.subtitle}</p>
+      <p className="text-[12px] text-gray-500 mb-3">{t(meta.subtitleKey)}</p>
 
       {previewSkills.length === 0 ? (
-        <div className="text-[13px] text-gray-600 mb-3 italic">아직 없음</div>
+        <div className="text-[13px] text-gray-600 mb-3 italic">{t('noneYet')}</div>
       ) : (
         <div className="space-y-1.5 text-[13px] font-mono mb-3">
           {previewSkills.map(s => (
@@ -605,7 +611,7 @@ function OriginCard({ origin, skills, onOpenCatalog }: {
         onClick={() => onOpenCatalog(origin)}
         className={`text-[13px] ${meta.linkColor} hover:underline`}
       >
-        → {total}개 전체
+        → {t('viewAllCount', { count: total })}
       </button>
     </div>
   );
@@ -662,6 +668,7 @@ function CatalogView({ skills, allSkills, search, setSearch, filterDefs, activeF
   loadError: string | null;
   onRetry: () => void;
 }) {
+  const { t } = useTranslation('skills');
   const active = skills.filter((skill) => readinessBySkill.get(skill.name)?.ready !== false);
   const inactive = skills.filter((skill) => readinessBySkill.get(skill.name)?.ready === false);
 
@@ -675,7 +682,7 @@ function CatalogView({ skills, allSkills, search, setSearch, filterDefs, activeF
           <input
             value={search}
             onChange={e => setSearch(e.target.value)}
-            placeholder="스킬 이름·설명·카테고리 검색…"
+            placeholder={t('catalogSearchPlaceholder')}
             className="w-full bg-surface-950/80 border border-surface-700 rounded-lg pl-10 pr-3 py-2 text-[15px] text-surface-100 placeholder-surface-600 focus:border-violet-500/50 focus:outline-none"
           />
         </div>
@@ -684,9 +691,9 @@ function CatalogView({ skills, allSkills, search, setSearch, filterDefs, activeF
             value={activeProjectId ?? ''}
             onChange={(e) => onProjectChange(e.target.value || null)}
             className="min-w-[220px] rounded-lg border border-surface-700 bg-surface-950/80 px-3 py-1.5 text-[13px] text-surface-100 outline-none focus:border-primary-500/60"
-            title="스킬을 볼 프로젝트 선택"
+            title={t('selectProjectForSkills')}
           >
-            <option value="">프로젝트 없음 · 공용만</option>
+            <option value="">{t('noProjectSharedOnly')}</option>
             {projects.filter(p => !p.archived).map(project => (
               <option key={project.id} value={project.id}>{project.name}</option>
             ))}
@@ -709,18 +716,18 @@ function CatalogView({ skills, allSkills, search, setSearch, filterDefs, activeF
         <SkillStructureSummary skills={allSkills} activeProjectName={activeProjectName} readinessBySkill={readinessBySkill} />
         {loadError && <CatalogLoadNotice message={loadError} onRetry={onRetry} />}
         {loading ? (
-          <EmptyState title="스킬을 불러오는 중…" />
+          <EmptyState title={t('skillsLoading')} />
         ) : skills.length === 0 ? (
           loadError ? (
-            <EmptyState title="카탈로그를 표시할 수 없습니다" hint="다시 시도해도 계속 비어 있으면 스킬 소스와 프로젝트 접근 권한을 확인해 주세요." />
+            <EmptyState title={t('catalogUnavailable')} hint={t('catalogUnavailableHint')} />
           ) : (
-            <EmptyState title="조건에 맞는 스킬이 없습니다" hint="검색어 또는 필터를 줄여보세요." />
+            <EmptyState title={t('noMatchingSkills')} hint={t('reduceFiltersHint')} />
           )
         ) : (
           <div className="space-y-6 pb-10">
-            <SkillListSection title="현재 프로젝트 · 바로 사용 가능" hint="이 팀원의 설정에서 사용 여부를 정할 수 있는 스킬" skills={active} compact={drawerOpen}
+            <SkillListSection title={t('currentProjectReady')} hint={t('teammateSettingsHint')} skills={active} compact={drawerOpen}
               selectedId={selectedId} currentUserName={currentUserName} readinessBySkill={readinessBySkill} onOpen={onOpen} />
-            <SkillListSection title="준비 필요" hint="연결, 권한 또는 실행환경 준비가 필요한 대상" skills={inactive} muted compact={drawerOpen}
+            <SkillListSection title={t('needsSetup')} hint={t('needsSetupHint')} skills={inactive} muted compact={drawerOpen}
               selectedId={selectedId} currentUserName={currentUserName} readinessBySkill={readinessBySkill} onOpen={onOpen} />
 
           </div>
@@ -761,17 +768,18 @@ function SortBar({ sortMode, setSortMode }: {
   sortMode: SkillSortMode;
   setSortMode: React.Dispatch<React.SetStateAction<SkillSortMode>>;
 }) {
+  const { t } = useTranslation('skills');
   return (
     <div className="flex items-center gap-1.5 text-[12px] text-surface-500">
-      <span>정렬</span>
+      <span>{t('sort')}</span>
       <button
         onClick={() => setSortMode('recent')}
         className={`px-2.5 py-1 text-[13px] rounded-full border transition-colors ${sortMode === 'recent' ? 'bg-primary-500/15 border-primary-500/45 text-primary-700 dark:text-primary-200' : 'bg-surface-800/50 border-surface-700 text-surface-500 hover:border-surface-600 hover:text-surface-100'}`}
-      >최근 활용순</button>
+      >{t('sortRecentUsage')}</button>
       <button
         onClick={() => setSortMode('name')}
         className={`px-2.5 py-1 text-[13px] rounded-full border transition-colors ${sortMode === 'name' ? 'bg-primary-500/15 border-primary-500/45 text-primary-700 dark:text-primary-200' : 'bg-surface-800/50 border-surface-700 text-surface-500 hover:border-surface-600 hover:text-surface-100'}`}
-      >이름순</button>
+      >{t('sortName')}</button>
     </div>
   );
 }
@@ -781,23 +789,24 @@ function SkillStructureSummary({ skills, activeProjectName, readinessBySkill }: 
   activeProjectName: string | null;
   readinessBySkill: Map<string, SkillReadiness>;
 }) {
+  const { t } = useTranslation('skills');
   const projectCount = skills.filter(skill => skill.scope === 'project').length;
   const sharedCount = skills.filter(skill => skill.scope === 'company').length;
   const usableCount = skills.filter(skill => readinessBySkill.get(skill.name)?.ready !== false).length;
   return (
-    <section className="mb-4 overflow-hidden rounded-xl border border-surface-800 bg-surface-900/70 shadow-sm" aria-label="현재 스킬 구조">
+    <section className="mb-4 overflow-hidden rounded-xl border border-surface-800 bg-surface-900/70 shadow-sm" aria-label={t('currentSkillStructure')}>
       <div className="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center">
         <div className="min-w-0 sm:w-[240px]">
-          <div className="text-[12px] font-semibold uppercase tracking-wider text-surface-500">현재 스킬 구조</div>
-          <div className="mt-1 truncate text-[14px] font-semibold text-surface-100">{activeProjectName || '프로젝트 없음'}</div>
-          <p className="mt-1 text-[12px] leading-relaxed text-surface-500">프로젝트와 팀의 스킬을 모아, 실제 사용 가능한 상태로 좁힙니다.</p>
+          <div className="text-[12px] font-semibold uppercase tracking-wider text-surface-500">{t('currentSkillStructure')}</div>
+          <div className="mt-1 truncate text-[14px] font-semibold text-surface-100">{activeProjectName || t('noProject')}</div>
+          <p className="mt-1 text-[12px] leading-relaxed text-surface-500">{t('skillStructureDescription')}</p>
         </div>
         <div className="grid min-w-0 flex-1 grid-cols-[1fr_auto_1fr_auto_1fr] items-stretch gap-2">
-          <StructureStep label="프로젝트 스킬" value={projectCount} detail="이 프로젝트 전용" tone="sky" />
-          <StructureOperator label="더하기" symbol="+" />
-          <StructureStep label="팀 공용 스킬" value={sharedCount} detail="teamskills 카탈로그" tone="amber" />
-          <StructureOperator label="필터링" symbol="→" />
-          <StructureStep label="지금 사용 가능" value={usableCount} detail="연결 · 실행환경 준비" tone="green" />
+          <StructureStep label={t('projectSkill')} value={projectCount} detail={t('projectOnly')} tone="sky" />
+          <StructureOperator label={t('add')} symbol="+" />
+          <StructureStep label={t('teamSharedSkills')} value={sharedCount} detail={t('teamskillsCatalog')} tone="amber" />
+          <StructureOperator label={t('filtering')} symbol="→" />
+          <StructureStep label={t('readyNow')} value={usableCount} detail={t('connectionRuntimeReady')} tone="green" />
         </div>
       </div>
     </section>
@@ -826,10 +835,11 @@ function StructureOperator({ label, symbol }: { label: string; symbol: string })
 }
 
 function CatalogLoadNotice({ message, onRetry }: { message: string; onRetry: () => void }) {
+  const { t } = useTranslation('skills');
   return (
     <div role="status" className="mb-4 flex items-center justify-between gap-3 rounded-lg border border-amber-500/30 bg-amber-500/8 px-3 py-2 text-[13px] text-amber-900 dark:text-amber-200">
       <span>{message}</span>
-      <button onClick={onRetry} className="shrink-0 rounded-md border border-amber-500/35 px-2.5 py-1 font-semibold hover:bg-amber-500/10">다시 불러오기</button>
+      <button onClick={onRetry} className="shrink-0 rounded-md border border-amber-500/35 px-2.5 py-1 font-semibold hover:bg-amber-500/10">{t('retryLoad')}</button>
     </div>
   );
 }
@@ -845,6 +855,7 @@ function SkillListSection({ title, hint, skills, muted, compact, selectedId, cur
   readinessBySkill: Map<string, SkillReadiness>;
   onOpen: (id: string) => void;
 }) {
+  const { t } = useTranslation('skills');
   if (skills.length === 0) return null;
   return (
     <section>
@@ -855,11 +866,11 @@ function SkillListSection({ title, hint, skills, muted, compact, selectedId, cur
       </div>
       <div className="overflow-hidden rounded-xl border border-surface-800 bg-surface-900/70 shadow-sm">
         <div className={`${skillListGridClass(compact)} gap-3 px-3 py-2 border-b border-surface-800 text-[11.5px] uppercase tracking-wider text-surface-500`}>
-          <span>스킬</span>
-          {!compact && <span>설명</span>}
-          <span>공유</span>
-          {!compact && <span>최근 활용 (30일)</span>}
-          <span className="text-right">상태</span>
+          <span>{t('skillsTab')}</span>
+          {!compact && <span>{t('description')}</span>}
+          <span>{t('shared')}</span>
+          {!compact && <span>{t('recentUsage30Days')}</span>}
+          <span className="text-right">{t('status')}</span>
         </div>
         {skills.map(s => (
           <SkillListRow
@@ -885,6 +896,7 @@ function SkillListRow({ skill, origin, selected, compact, readiness, onOpen }: {
   readiness?: SkillReadiness;
   onOpen: (id: string) => void;
 }) {
+  const { t } = useTranslation('skills');
   const active = readiness?.ready !== false;
   const meta = ORIGIN_META[origin];
   return (
@@ -900,13 +912,13 @@ function SkillListRow({ skill, origin, selected, compact, readiness, onOpen }: {
           {emojiForSkill(skill)}
         </span>
         <span className="font-mono text-[14px] text-surface-100 truncate"><span className="text-primary-500">/</span>{skill.name}</span>
-        {skill.risk?.level === 'high' && <span className="text-[12px] text-red-400/90 shrink-0" title="고위험">⚠</span>}
+        {skill.risk?.level === 'high' && <span className="text-[12px] text-red-400/90 shrink-0" title={t('highRisk')}>⚠</span>}
       </div>
       {!compact && <p className={`text-[13px] text-surface-300 truncate ${active ? '' : 'opacity-70'}`}>{skill.description}</p>}
-      <span className={`justify-self-start text-[11.5px] px-1.5 py-0.5 rounded border ${meta.tone} ${meta.chip}`}>{compact ? meta.emoji : meta.label}</span>
+      <span className={`justify-self-start text-[11.5px] px-1.5 py-0.5 rounded border ${meta.tone} ${meta.chip}`}>{compact ? meta.emoji : t(meta.labelKey)}</span>
       {!compact && <span className="text-[12.5px] text-surface-500 truncate">{recentUsageLabel(skill)}</span>}
       <span className="justify-self-end flex items-center gap-2">
-        {readiness ? <ReadinessBadge readiness={readiness} /> : <Badge tone="green">사용 가능</Badge>}
+        {readiness ? <ReadinessBadge readiness={readiness} /> : <Badge tone="green">{t('available')}</Badge>}
       </span>
     </button>
   );
@@ -938,6 +950,7 @@ function SkillDetailContent({ skill, isActive, onBack, onCopy, onShareCompany, r
   onShareCompany: () => void;
   readiness?: SkillReadiness;
 }) {
+  const { t } = useTranslation('skills');
   const [mode, setMode] = useState<DetailMode>('preview');
   const fileOptions = useMemo(() => selectableSkillFiles(skill.files), [skill.files]);
   const [selectedFile, setSelectedFile] = useState('SKILL.md');
@@ -976,8 +989,8 @@ function SkillDetailContent({ skill, isActive, onBack, onCopy, onShareCompany, r
       <div className="shrink-0 p-5 border-b border-surface-800 bg-surface-900">
         <div className="flex items-start justify-between gap-3 mb-3">
           <div className="min-w-0 flex items-start gap-3">
-            <button onClick={onBack} className="mt-1 px-3 py-1.5 text-[14px] rounded-lg border border-surface-700 text-surface-300 hover:bg-surface-800 transition-colors shrink-0" aria-label="목록으로 돌아가기">
-              ← 목록
+            <button onClick={onBack} className="mt-1 px-3 py-1.5 text-[14px] rounded-lg border border-surface-700 text-surface-300 hover:bg-surface-800 transition-colors shrink-0" aria-label={t('backToList')}>
+              ← {t('list')}
             </button>
             <div className="min-w-0">
               <h3 className="text-2xl font-bold text-surface-100 flex items-center gap-1 min-w-0">
@@ -988,7 +1001,7 @@ function SkillDetailContent({ skill, isActive, onBack, onCopy, onShareCompany, r
             </div>
           </div>
           <div className="shrink-0">
-            <span className={`rounded-full border px-2.5 py-1 text-[12px] font-semibold ${isActive ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-800 dark:text-emerald-200' : 'border-amber-500/30 bg-amber-500/10 text-amber-900 dark:text-amber-200'}`}>{isActive ? '바로 사용 가능' : '준비 필요'}</span>
+            <span className={`rounded-full border px-2.5 py-1 text-[12px] font-semibold ${isActive ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-800 dark:text-emerald-200' : 'border-amber-500/30 bg-amber-500/10 text-amber-900 dark:text-amber-200'}`}>{isActive ? t('readyNow') : t('needsSetup')}</span>
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-1.5">
@@ -996,7 +1009,7 @@ function SkillDetailContent({ skill, isActive, onBack, onCopy, onShareCompany, r
           <Badge>{skill.category || 'general'}</Badge>
           {skill.visibility && <VisibilityBadge visibility={skill.visibility} />}
           {isMineOnly(skill) && <Badge tone="sky">{(skill.access || []).join(', ')}</Badge>}
-          {skill.risk?.level === 'high' && <Badge tone="red">⚠ 고위험</Badge>}
+          {skill.risk?.level === 'high' && <Badge tone="red">⚠ {t('highRisk')}</Badge>}
           {readiness && <ReadinessBadge readiness={readiness} />}
         </div>
       </div>
@@ -1010,18 +1023,18 @@ function SkillDetailContent({ skill, isActive, onBack, onCopy, onShareCompany, r
           >
             {fileOptions.map(f => <option key={f} value={f}>{fileIcon(f)} {f}</option>)}
           </select>
-          <div className="text-[12px] text-gray-600 flex-1">{skillFileCountLabel(skill.files)}</div>
+          <div className="text-[12px] text-gray-600 flex-1">{skillFileCountLabel(skill.files, t)}</div>
           <div className="shrink-0 rounded-lg bg-surface-800 border border-surface-700 p-1 flex items-center gap-1">
             <button
               onClick={() => setMode('preview')}
               disabled={!previewable}
               className={`px-2.5 py-1 text-[13px] rounded-md transition-colors ${mode === 'preview' ? 'bg-surface-700 text-surface-100' : 'text-surface-500 hover:text-surface-300 disabled:opacity-30 disabled:hover:text-surface-500'}`}
-              title="렌더링 보기"
+              title={t('renderedView')}
             >👁 Preview</button>
             <button
               onClick={() => setMode('code')}
               className={`px-2.5 py-1 text-[13px] rounded-md transition-colors ${mode === 'code' ? 'bg-surface-700 text-surface-100' : 'text-surface-500 hover:text-surface-300'}`}
-              title="원문 보기"
+              title={t('sourceView')}
             >{'</>'} Code</button>
           </div>
         </div>
@@ -1034,21 +1047,21 @@ function SkillDetailContent({ skill, isActive, onBack, onCopy, onShareCompany, r
           />
           <div className="bg-surface-950/40 border border-surface-700 rounded-xl overflow-hidden min-h-[56vh] shadow-sm">
             {fileLoading ? (
-              <div className="h-48 flex items-center justify-center text-[14px] text-gray-500">파일을 불러오는 중…</div>
+              <div className="h-48 flex items-center justify-center text-[14px] text-gray-500">{t('fileLoading')}</div>
             ) : fileContent?.binary ? (
               <div className="h-48 flex flex-col items-center justify-center text-center text-gray-500">
                 <div className="text-3xl mb-2">{fileIcon(selectedFile)}</div>
-                <div className="text-[14px] text-gray-400">미리볼 수 없는 바이너리 파일입니다.</div>
-                <div className="text-[12px] mt-1">{formatBytes(fileContent.size)} · Code 보기로 메타만 확인 가능</div>
+                <div className="text-[14px] text-gray-400">{t('binaryPreviewUnavailable')}</div>
+                <div className="text-[12px] mt-1">{t('binaryMetadataOnly', { size: formatBytes(fileContent.size) })}</div>
               </div>
             ) : mode === 'preview' && previewable ? (
               <div className="p-8 prose prose-invert max-w-none prose-headings:text-surface-100 prose-h1:text-4xl prose-h2:text-2xl prose-p:text-surface-300 prose-p:leading-8 prose-li:text-surface-300 prose-li:leading-8 prose-code:text-primary-300 prose-code:bg-surface-900 prose-code:px-1 prose-code:rounded prose-pre:bg-surface-950 prose-pre:border prose-pre:border-surface-700 text-[16px]">
                 <ReactMarkdown remarkPlugins={[remarkGfmPlugin]} rehypePlugins={[rehypeHighlight]}>
-                  {stripFrontmatter(displayContent) || '_표시할 내용이 없습니다._'}
+                  {stripFrontmatter(displayContent) || t('noContentMarkdown')}
                 </ReactMarkdown>
               </div>
             ) : (
-              <pre className="m-0 p-5 text-[13px] leading-6 text-surface-300 overflow-auto max-h-[68vh] font-mono whitespace-pre-wrap"><code>{displayContent || (fileContent?.binary ? '바이너리 파일입니다.' : '표시할 내용이 없습니다.')}</code></pre>
+              <pre className="m-0 p-5 text-[13px] leading-6 text-surface-300 overflow-auto max-h-[68vh] font-mono whitespace-pre-wrap"><code>{displayContent || (fileContent?.binary ? t('binaryFile') : t('noContent'))}</code></pre>
             )}
           </div>
         </div>
@@ -1059,16 +1072,16 @@ function SkillDetailContent({ skill, isActive, onBack, onCopy, onShareCompany, r
       <div className="shrink-0 px-5 py-3 border-t border-surface-800 bg-surface-900 flex items-center gap-2">
         {skill.scope === 'project' && (
           <button onClick={onShareCompany} className="px-3 py-1.5 text-[14px] rounded-md bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/20 transition-colors">
-            회사 공용으로 등록
+            {t('shareWithCompany')}
           </button>
         )}
         {(skill.scope === 'company' || skill.visibility === 'public') && (
           <button onClick={onCopy} className="px-3 py-1.5 text-[14px] rounded-md bg-sky-500/10 border border-sky-500/30 text-sky-300 hover:bg-sky-500/20 transition-colors">
-            프로젝트 사본 만들기
+            {t('createProjectCopy')}
           </button>
         )}
         <div className="flex-1" />
-        <span className="text-[12px] text-gray-600">편집/삭제는 레거시 편집 화면에서 유지</span>
+        <span className="text-[12px] text-gray-600">{t('legacyEditNotice')}</span>
       </div>
     </main>
   );
@@ -1079,11 +1092,12 @@ function SkillFileNavigator({ files, selectedFile, onSelectFile }: {
   selectedFile: string;
   onSelectFile: (file: string) => void;
 }) {
+  const { t } = useTranslation('skills');
   const items = normalizeSkillFiles(files);
   return (
     <aside className="rounded-xl border border-surface-700 bg-surface-900/70 overflow-hidden max-h-[68vh] flex flex-col w-full">
       <div className="px-3 py-2 border-b border-surface-800 text-[12px] font-semibold uppercase tracking-wider text-surface-500">
-        파일
+        {t('files')}
       </div>
       <div className="overflow-y-auto p-1.5 scrollbar-thin">
         {items.map(item => item.kind === 'folder' ? (
@@ -1158,10 +1172,10 @@ function selectableSkillFiles(files?: string[]): string[] {
   return normalizeSkillFiles(files).filter((item): item is SkillFileNavItem & { kind: 'file' } => item.kind === 'file').map(item => item.path);
 }
 
-function skillFileCountLabel(files?: string[]): string {
+function skillFileCountLabel(files: string[] | undefined, t: (key: string, options?: Record<string, unknown>) => string): string {
   const selectable = selectableSkillFiles(files);
   const raw = files?.length ?? selectable.length;
-  return raw === selectable.length ? `${selectable.length}개 파일` : `${selectable.length}개 파일 · 폴더 포함 ${raw}개`;
+  return raw === selectable.length ? t('fileCount', { count: selectable.length }) : t('fileCountWithFolders', { count: selectable.length, raw });
 }
 
 function stripFrontmatter(content: string): string {
@@ -1189,15 +1203,16 @@ function formatBytes(size?: number): string {
 }
 
 function MetaGrid({ skill }: { skill: SkillDetail }) {
+  const { t } = useTranslation('skills');
   const items: [string, string][] = [
-    ['구분', userFacingSkillOrigin(skill)],
-    ['노출', skill.visibility || 'default'],
-    ['접근', (skill.access || ['everyone']).join(', ')],
-    ['소유', skill.ownership || skill.scope],
-    ['작성자', skill.createdByName || '—'],
-    ['프로젝트', skill.projectName || '—'],
-    ['갱신', safeDate(skill.updatedAt)],
-    ['위험', skill.risk?.level || 'low'],
+    [t('metaType'), userFacingSkillOrigin(skill, t)],
+    [t('metaVisibility'), skill.visibility || 'default'],
+    [t('metaAccess'), (skill.access || ['everyone']).join(', ')],
+    [t('metaOwner'), skill.ownership || skill.scope],
+    [t('metaAuthor'), skill.createdByName || '—'],
+    [t('metaProject'), skill.projectName || '—'],
+    [t('metaUpdated'), safeDate(skill.updatedAt)],
+    [t('metaRisk'), skill.risk?.level || 'low'],
     ...(skill.bundleDigest ? [['Bundle digest', skill.bundleDigest] as [string, string]] : []),
     ...(skill.sourceCommit ? [['Source commit', skill.sourceCommit] as [string, string]] : []),
   ];
@@ -1259,7 +1274,7 @@ function skillSort(a: SkillMeta, b: SkillMeta, mode: SkillSortMode = 'recent'): 
 }
 
 function recentUsageLabel(skill: SkillMeta): string {
-  return `${getRecentUsageCount(skill)}회`;
+  return String(getRecentUsageCount(skill));
 }
 
 function getRecentUsageCount(skill: SkillMeta): number {
@@ -1355,19 +1370,20 @@ function emojiForSkill(s: SkillMeta): string {
   return '⚡';
 }
 
-function originLabel(o: CatalogFilter): string {
-  if (o === 'all') return '전체';
-  return ORIGIN_META[o].label;
+function originLabel(o: CatalogFilter, t: (key: string) => string): string {
+  if (o === 'all') return t('all');
+  return t(ORIGIN_META[o].labelKey);
 }
 
-function userFacingSkillOrigin(skill: SkillMeta): string {
-  if (skill.scope === 'project') return '현재 프로젝트 스킬';
-  if (skill.origin === 'tower' || skill.ownership === 'system' || skill.source === 'bundled') return 'Tower 제공 스킬';
-  return '팀 공용 스킬';
+
+function userFacingSkillOrigin(skill: SkillMeta, t: (key: string) => string): string {
+  if (skill.scope === 'project') return t('originProject');
+  if (skill.origin === 'tower' || skill.ownership === 'system' || skill.source === 'bundled') return t('originTower');
+  return t('originCompany');
 }
 
 const ORIGIN_META: Record<OriginKey, {
-  label: string; emoji: string; subtitle: string;
+  labelKey: string; emoji: string; subtitleKey: string;
   tone: string;
   border: string; borderHover: string;
   iconBg: string; iconBorder: string;
@@ -1375,9 +1391,9 @@ const ORIGIN_META: Record<OriginKey, {
   chip: string;
 }> = {
   tower: {
-    label: 'Tower 제공 스킬',
+    labelKey: 'originTower',
     emoji: '⚡',
-    subtitle: 'Tower가 기본 제공하고 업데이트하는 스킬',
+    subtitleKey: 'originTowerSubtitle',
     tone: 'tone-info',
     border: 'border-violet-500/25',
     borderHover: 'hover:border-violet-500/45',
@@ -1388,9 +1404,9 @@ const ORIGIN_META: Record<OriginKey, {
     chip: 'bg-violet-500/10 text-violet-700 dark:text-violet-300 border-violet-500/30',
   },
   company: {
-    label: '팀 공용 스킬',
+    labelKey: 'originCompany',
     emoji: '🏢',
-    subtitle: '팀이 함께 검증하고 공유하는 스킬',
+    subtitleKey: 'originCompanySubtitle',
     tone: 'tone-warning',
     border: 'tone-border',
     borderHover: 'hover:opacity-90',
@@ -1401,9 +1417,9 @@ const ORIGIN_META: Record<OriginKey, {
     chip: 'tone-pill tone-warning',
   },
   mine: {
-    label: '현재 프로젝트 스킬',
+    labelKey: 'originProject',
     emoji: '✋',
-    subtitle: '이 프로젝트에서 만들고 바로 쓰는 스킬',
+    subtitleKey: 'originProjectSubtitle',
     tone: 'tone-info',
     border: 'border-sky-500/25',
     borderHover: 'hover:border-sky-500/45',
@@ -1417,25 +1433,27 @@ const ORIGIN_META: Record<OriginKey, {
 
 // ── Badges (보존) ──────────────────────────────────────────────────────
 function ScopeBadge({ scope }: { scope: SkillMeta['scope'] }) {
+  const { t } = useTranslation('skills');
   const cls = scope === 'personal'
     ? 'tone-info'
     : scope === 'project'
       ? 'tone-success'
       : 'tone-warning';
-  const label = scope === 'personal' ? '개인' : scope === 'project' ? '현재 프로젝트' : '팀 공용';
+  const label = scope === 'personal' ? t('scopePersonal') : scope === 'project' ? t('originProject') : t('originCompany');
   return <span className={`tone-pill shrink-0 text-[11.5px] px-1.5 py-0.5 rounded ${cls}`}>{label}</span>;
 }
 
 function ReadinessBadge({ readiness, compact = false }: { readiness: SkillReadiness; compact?: boolean }) {
+  const { t } = useTranslation('skills');
   if (readiness.ready) {
-    return compact ? null : <Badge tone="green">바로 사용 가능</Badge>;
+    return compact ? null : <Badge tone="green">{t('readyNow')}</Badge>;
   }
   const credentialMissing = readiness.missing.length > 0;
-  const label = credentialMissing ? '연결 필요' : '실행환경 준비 필요';
+  const label = credentialMissing ? t('connectionRequired') : t('runtimeSetupRequired');
   const detail = credentialMissing
     ? readiness.missing.join(', ')
-    : readiness.requirementNotes?.join(' · ') || '필요한 실행환경을 확인하세요.';
-  return <Badge tone="amber"><span title={detail}>{compact ? '준비 필요' : label}</span></Badge>;
+    : readiness.requirementNotes?.join(' · ') || t('checkRuntimeRequirements');
+  return <Badge tone="amber"><span title={detail}>{compact ? t('needsSetup') : label}</span></Badge>;
 }
 
 function Badge({ children, tone = 'gray' }: { children: React.ReactNode; tone?: 'gray' | 'sky' | 'red' | 'green' | 'amber' }) {
@@ -1452,11 +1470,12 @@ function Badge({ children, tone = 'gray' }: { children: React.ReactNode; tone?: 
 }
 
 function VisibilityBadge({ visibility }: { visibility: NonNullable<SkillMeta['visibility']> }) {
+  const { t } = useTranslation('skills');
   const tone = visibility === 'default' ? 'tone-success' :
     visibility === 'public' ? 'tone-info' :
     visibility === 'private' ? 'tone-warning' :
     'tone-muted';
-  const label = visibility === 'default' || visibility === 'public' ? '공용' : visibility === 'private' ? '비공개' : visibility;
+  const label = visibility === 'default' || visibility === 'public' ? t('shared') : visibility === 'private' ? t('private') : visibility;
   return <span className={`tone-pill text-[11.5px] px-1.5 py-0.5 rounded ${tone}`}>{label}</span>;
 }
 
@@ -1469,6 +1488,7 @@ function CreateProjectSkillModal({ onClose, onCreate }: {
   onClose: () => void;
   onCreate: (form: { name: string; description: string; category: string; content: string }) => Promise<string | null>;
 }) {
+  const { t } = useTranslation('skills');
   const [form, setForm] = useState({ name: '', description: '', category: '', content: '' });
   const [busy, setBusy] = useState(false);
   const nameValid = /^[a-z0-9][a-z0-9-]{0,63}$/.test(form.name.trim()) && !form.name.trim().endsWith('-') && !form.name.trim().includes('--');
@@ -1488,10 +1508,10 @@ function CreateProjectSkillModal({ onClose, onCreate }: {
         <div className="flex items-center justify-between px-5 py-3 border-b border-surface-800">
           <div className="flex items-center gap-2">
             <span className="text-sky-700 dark:text-sky-300 text-lg">✋</span>
-            <h3 className="text-[16px] font-bold text-surface-100">프로젝트 스킬 만들기</h3>
-            <span className="text-[12px] px-1.5 py-0.5 rounded bg-sky-500/10 text-sky-700 dark:text-sky-300 border border-sky-500/30">프로젝트 사용</span>
+            <h3 className="text-[16px] font-bold text-surface-100">{t('createProjectSkill')}</h3>
+            <span className="text-[12px] px-1.5 py-0.5 rounded bg-sky-500/10 text-sky-700 dark:text-sky-300 border border-sky-500/30">{t('projectUse')}</span>
           </div>
-          <button onClick={onClose} className="p-1.5 text-gray-500 hover:text-gray-300 hover:bg-surface-800 rounded-lg transition-colors" aria-label="닫기">
+          <button onClick={onClose} className="p-1.5 text-gray-500 hover:text-gray-300 hover:bg-surface-800 rounded-lg transition-colors" aria-label={t('close')}>
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
             </svg>
@@ -1500,7 +1520,7 @@ function CreateProjectSkillModal({ onClose, onCreate }: {
 
         <div className="p-5 space-y-3.5">
           <div>
-            <label className="block text-[13px] text-gray-400 mb-1">스킬 이름 <span className="text-gray-600">(소문자·숫자·하이픈)</span></label>
+            <label className="block text-[13px] text-gray-400 mb-1">{t('skillName')} <span className="text-gray-600">{t('skillNameFormat')}</span></label>
             <div className="flex items-center gap-1.5">
               <span className="text-violet-400/60 font-mono text-[16px]">/</span>
               <input
@@ -1512,22 +1532,22 @@ function CreateProjectSkillModal({ onClose, onCreate }: {
               />
             </div>
             {form.name.trim() && !nameValid && (
-              <p className="tone-warning tone-text text-[12px] opacity-80 mt-1">소문자/숫자로 시작, 소문자·숫자·단일 하이픈만 사용하세요. 하이픈으로 끝나거나 연속 하이픈은 안 됩니다.</p>
+              <p className="tone-warning tone-text text-[12px] opacity-80 mt-1">{t('skillNameValidation')}</p>
             )}
           </div>
 
           <div>
-            <label className="block text-[13px] text-gray-400 mb-1">한 줄 설명 <span className="text-gray-600">(이 스킬이 무슨 일을 하나)</span></label>
+            <label className="block text-[13px] text-gray-400 mb-1">{t('shortDescription')} <span className="text-gray-600">{t('descriptionHint')}</span></label>
             <input
               value={form.description}
               onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
-              placeholder="YouTube URL을 transcript 분석 브리프로 바꾼다."
+              placeholder={t('descriptionExample')}
               className="w-full bg-surface-800/60 border border-surface-700 rounded-lg px-3 py-2 text-[15px] text-gray-200 placeholder-gray-600 focus:border-sky-500/50 focus:outline-none"
             />
           </div>
 
           <div>
-            <label className="block text-[13px] text-gray-400 mb-1">카테고리 <span className="text-gray-600">(선택)</span></label>
+            <label className="block text-[13px] text-gray-400 mb-1">{t('metaCategory')} <span className="text-gray-600">{t('optionalField')}</span></label>
             <input
               value={form.category}
               onChange={e => setForm(f => ({ ...f, category: e.target.value }))}
@@ -1537,24 +1557,23 @@ function CreateProjectSkillModal({ onClose, onCreate }: {
           </div>
 
           <div>
-            <label className="block text-[13px] text-gray-400 mb-1">본문 초안 <span className="text-gray-600">(비우면 최소 SKILL.md 자동 생성)</span></label>
+            <label className="block text-[13px] text-gray-400 mb-1">{t('contentDraft')} <span className="text-gray-600">{t('contentDraftHint')}</span></label>
             <textarea
               value={form.content}
               onChange={e => setForm(f => ({ ...f, content: e.target.value }))}
               rows={5}
-              placeholder="언제 이 스킬을 쓰는지, 어떻게 동작하는지 자유롭게…"
+              placeholder={t('contentDraftPlaceholder')}
               className="w-full bg-surface-800/60 border border-surface-700 rounded-lg px-3 py-2 text-[14px] text-gray-200 placeholder-gray-600 font-mono resize-y focus:border-sky-500/50 focus:outline-none"
             />
           </div>
 
           <p className="text-[12px] text-gray-500 leading-relaxed bg-surface-800/40 border border-surface-700 rounded-lg px-3 py-2">
-            현재 프로젝트의 <span className="text-sky-700 dark:text-sky-300 font-mono">skills/{form.name.trim() || '스킬이름'}/SKILL.md</span>로 저장됩니다. 저장 후 다음 요청부터 <span className="text-sky-700 dark:text-sky-300 font-mono">/{form.name.trim() || '스킬이름'}</span> 후보로 사용할 수 있어요.
-            스크립트·시크릿·여러 파일이 필요하면 같은 스킬 폴더 안에 추가하세요.
+            {t('savedInCurrentProject')} <span className="text-sky-700 dark:text-sky-300 font-mono">skills/{form.name.trim() || t('skillNameFallback')}/SKILL.md</span>. {t('availableFromNextRequest')} <span className="text-sky-700 dark:text-sky-300 font-mono">/{form.name.trim() || t('skillNameFallback')}</span>. {t('additionalFilesHint')}
           </p>
         </div>
 
         <div className="px-5 py-3 border-t border-surface-800 flex items-center justify-end gap-2">
-          <button onClick={onClose} className="px-4 py-2 text-[14px] text-gray-400 hover:text-gray-200">취소</button>
+          <button onClick={onClose} className="px-4 py-2 text-[14px] text-gray-400 hover:text-gray-200">{t('cancel')}</button>
           <button
             onClick={submit}
             disabled={!nameValid || busy}
@@ -1563,7 +1582,7 @@ function CreateProjectSkillModal({ onClose, onCreate }: {
                 ? 'bg-sky-600 text-white hover:bg-sky-500'
                 : 'bg-surface-700 text-gray-500 cursor-not-allowed'
             }`}>
-            {busy ? '만드는 중…' : '＋ 프로젝트 스킬 만들기'}
+            {busy ? t('creating') : `＋ ${t('createProjectSkill')}`}
           </button>
         </div>
       </div>

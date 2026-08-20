@@ -1,4 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import i18n from '../../i18n';
 import { toastError } from '../../utils/toast';
 
 interface PersonalTodo {
@@ -12,7 +14,7 @@ interface PersonalTodo {
 }
 
 function formatDate(value: string): string {
-  return new Intl.DateTimeFormat('ko-KR', { year: 'numeric', month: 'short', day: 'numeric' }).format(new Date(value));
+  return new Intl.DateTimeFormat(i18n.resolvedLanguage || i18n.language, { year: 'numeric', month: 'short', day: 'numeric' }).format(new Date(value));
 }
 
 function authHeaders(json = false): Record<string, string> {
@@ -25,6 +27,7 @@ function authHeaders(json = false): Record<string, string> {
 
 /** Interactive user-owned My Todo list rendered inside the Viewer Pane. */
 export function MyTodoView() {
+  const { t } = useTranslation('common');
   const [todos, setTodos] = useState<PersonalTodo[]>([]);
   const [loading, setLoading] = useState(true);
   const [newTitle, setNewTitle] = useState('');
@@ -35,14 +38,14 @@ export function MyTodoView() {
     try {
       const res = await fetch('/api/personal-space/todos', { headers: authHeaders() });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || `내 할 일을 불러오지 못했습니다 (${res.status})`);
+      if (!res.ok) throw new Error(data.error || t('myTodo.error.loadWithStatus', { status: res.status }));
       setTodos(Array.isArray(data.todos) ? data.todos : []);
     } catch (error) {
-      toastError(error instanceof Error ? error.message : '내 할 일을 불러오지 못했습니다');
+      toastError(error instanceof Error ? error.message : t('myTodo.error.load'));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -58,11 +61,11 @@ export function MyTodoView() {
         method: 'POST', headers: authHeaders(true), body: JSON.stringify({ title }),
       });
       const todo = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(todo.error || `내 할 일을 추가하지 못했습니다 (${res.status})`);
+      if (!res.ok) throw new Error(todo.error || t('myTodo.error.addWithStatus', { status: res.status }));
       setTodos((current) => [todo, ...current]);
       setNewTitle('');
     } catch (error) {
-      toastError(error instanceof Error ? error.message : '내 할 일을 추가하지 못했습니다');
+      toastError(error instanceof Error ? error.message : t('myTodo.error.add'));
     } finally {
       setAdding(false);
     }
@@ -76,11 +79,11 @@ export function MyTodoView() {
         method: 'PATCH', headers: authHeaders(true), body: JSON.stringify({ completed }),
       });
       const updated = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(updated.error || `상태를 바꾸지 못했습니다 (${res.status})`);
+      if (!res.ok) throw new Error(updated.error || t('myTodo.error.toggleWithStatus', { status: res.status }));
       setTodos((current) => current.map((item) => item.id === todo.id ? updated : item));
     } catch (error) {
       setTodos((current) => current.map((item) => item.id === todo.id ? todo : item));
-      toastError(error instanceof Error ? error.message : '상태를 바꾸지 못했습니다');
+      toastError(error instanceof Error ? error.message : t('myTodo.error.toggle'));
     }
   };
 
@@ -89,11 +92,11 @@ export function MyTodoView() {
       <div className="mx-auto max-w-2xl">
         <div className="flex items-end justify-between gap-3">
           <div>
-            <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-primary-300">My Todo</div>
-            <h1 className="mt-1 text-xl font-bold">내 할 일</h1>
-            <p className="mt-1 text-[13px] text-surface-500">체크하면 완료 항목으로 내려갑니다.</p>
+            <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-primary-300">{t('myTodo.eyebrow')}</div>
+            <h1 className="mt-1 text-xl font-bold">{t('myTodo.title')}</h1>
+            <p className="mt-1 text-[13px] text-surface-500">{t('myTodo.description')}</p>
           </div>
-          <span className="rounded-full border border-surface-700 bg-surface-900 px-2.5 py-1 text-[12px] text-surface-400">남은 일 {openItems.length}</span>
+          <span className="rounded-full border border-surface-700 bg-surface-900 px-2.5 py-1 text-[12px] text-surface-400">{t('myTodo.remaining', { count: openItems.length })}</span>
         </div>
 
         <div className="mt-5 flex gap-2">
@@ -101,27 +104,27 @@ export function MyTodoView() {
             value={newTitle}
             onChange={(event) => setNewTitle(event.target.value)}
             onKeyDown={(event) => { if (event.key === 'Enter') void addTodo(); }}
-            placeholder="새 할 일을 입력하세요"
+            placeholder={t('myTodo.placeholder')}
             className="h-10 min-w-0 flex-1 rounded-lg border border-surface-700 bg-surface-900 px-3 text-sm outline-none placeholder:text-surface-500 focus:border-primary-500 focus:ring-2 focus:ring-primary-500/15"
           />
-          <button type="button" onClick={() => { void addTodo(); }} disabled={!newTitle.trim() || adding} className="h-10 rounded-lg bg-primary-500 px-4 text-sm font-semibold text-white hover:bg-primary-400 disabled:cursor-not-allowed disabled:opacity-40">추가</button>
+          <button type="button" onClick={() => { void addTodo(); }} disabled={!newTitle.trim() || adding} className="h-10 rounded-lg bg-primary-500 px-4 text-sm font-semibold text-white hover:bg-primary-400 disabled:cursor-not-allowed disabled:opacity-40">{t('myTodo.add')}</button>
         </div>
 
         <div className="mt-5 space-y-1">
           {loading ? (
-            <div className="py-12 text-center text-sm text-surface-500">내 할 일을 불러오는 중…</div>
+            <div className="py-12 text-center text-sm text-surface-500">{t('myTodo.loading')}</div>
           ) : openItems.length === 0 ? (
-            <div className="rounded-xl border border-dashed border-surface-700 px-4 py-10 text-center text-sm text-surface-500">남은 할 일이 없습니다.</div>
+            <div className="rounded-xl border border-dashed border-surface-700 px-4 py-10 text-center text-sm text-surface-500">{t('myTodo.empty')}</div>
           ) : openItems.map((todo) => (
-            <TodoRow key={todo.id} todo={todo} onToggle={toggleTodo} />
+            <TodoRow key={todo.id} todo={todo} onToggle={toggleTodo} t={t} />
           ))}
         </div>
 
         {completedItems.length > 0 && (
           <details className="mt-7" open>
-            <summary className="cursor-pointer select-none text-[13px] font-semibold text-surface-500 hover:text-surface-300">완료됨 {completedItems.length}개</summary>
+            <summary className="cursor-pointer select-none text-[13px] font-semibold text-surface-500 hover:text-surface-300">{t('myTodo.completed', { count: completedItems.length })}</summary>
             <div className="mt-2 space-y-1 border-t border-surface-800 pt-2">
-              {completedItems.map((todo) => <TodoRow key={todo.id} todo={todo} onToggle={toggleTodo} />)}
+              {completedItems.map((todo) => <TodoRow key={todo.id} todo={todo} onToggle={toggleTodo} t={t} />)}
             </div>
           </details>
         )}
@@ -130,13 +133,13 @@ export function MyTodoView() {
   );
 }
 
-function TodoRow({ todo, onToggle }: { todo: PersonalTodo; onToggle: (todo: PersonalTodo) => Promise<void> }) {
+function TodoRow({ todo, onToggle, t }: { todo: PersonalTodo; onToggle: (todo: PersonalTodo) => Promise<void>; t: (key: string, options?: Record<string, unknown>) => string }) {
   return (
     <label className={`group flex cursor-pointer items-start gap-3 rounded-lg px-3 py-2.5 transition hover:bg-surface-900 ${todo.completed ? 'opacity-65' : ''}`}>
       <input type="checkbox" checked={todo.completed} onChange={() => { void onToggle(todo); }} className="mt-0.5 h-4 w-4 shrink-0 accent-primary-500" />
       <span className="min-w-0 flex-1">
         <span className={`block text-[14px] leading-5 ${todo.completed ? 'text-surface-500 line-through' : 'text-surface-200'}`}>{todo.title}</span>
-        <span className="mt-1 block text-[11px] text-surface-600">등록 {formatDate(todo.createdAt)}{todo.completedAt ? ` · 완료 ${formatDate(todo.completedAt)}` : ''}</span>
+        <span className="mt-1 block text-[11px] text-surface-600">{t('myTodo.created', { date: formatDate(todo.createdAt) })}{todo.completedAt ? ` · ${t('myTodo.completedAt', { date: formatDate(todo.completedAt) })}` : ''}</span>
       </span>
     </label>
   );

@@ -84,36 +84,36 @@ async function fetchJson<T>(url: string, opts?: RequestInit): Promise<T> {
 
 export function jobTypeLabel(type: string, t: (key: string, opts?: any) => string): string {
   switch (type) {
-    case 'ai_prompt': return t('jobTypeAi', { defaultValue: 'AI' });
-    case 'webhook': return t('jobTypeWebhook', { defaultValue: '웹훅' });
-    case 'shell': return t('jobTypeShell', { defaultValue: '셸' });
-    case 'script': return t('jobTypeScript', { defaultValue: '스크립트' });
-    case 'monitor': return t('jobTypeMonitor', { defaultValue: '모니터' });
+    case 'ai_prompt': return t('jobTypeAi');
+    case 'webhook': return t('jobTypeWebhook');
+    case 'shell': return t('jobTypeShell');
+    case 'script': return t('jobTypeScript');
+    case 'monitor': return t('jobTypeMonitor');
     default: return type;
   }
 }
 
 export function triggerLabel(a: Automation, t: (key: string, opts?: any) => string): string {
-  if (a.triggerType === 'manual') return t('manual', { defaultValue: '수동' });
-  if (a.triggerType === 'once') return a.onceAt ? new Date(a.onceAt).toLocaleString() : t('once', { defaultValue: '한 번만' });
-  if (!a.cronConfig) return t('cron', { defaultValue: '크론' });
+  if (a.triggerType === 'manual') return t('manual');
+  if (a.triggerType === 'once') return a.onceAt ? new Date(a.onceAt).toLocaleString() : t('once');
+  if (!a.cronConfig) return t('cron');
 
   const c = a.cronConfig as IntervalCronConfig;
   const pad = (n: number) => String(n).padStart(2, '0');
   const time = `${pad(c.hour ?? 9)}:${pad(c.minute ?? 0)}`;
   switch (c.type) {
-    case 'daily': return `${t('daily', { defaultValue: '매일' })} ${time}`;
-    case 'weekdays': return `${t('weekdays', { defaultValue: '평일' })} ${time}`;
+    case 'daily': return `${t('daily')} ${time}`;
+    case 'weekdays': return `${t('weekdays')} ${time}`;
     case 'weekly': {
       const days = [t('sun'), t('mon'), t('tue'), t('wed'), t('thu'), t('fri'), t('sat')];
-      return `${t('weekly', { defaultValue: '매주' })} ${days[c.day ?? 1]} ${time}`;
+      return `${t('weekly')} ${days[c.day ?? 1]} ${time}`;
     }
     case 'interval': {
       const minutes = c.minutes ?? (c.hours ?? 1) * 60;
       if (minutes % 60 === 0) return t('intervalHours', { count: minutes / 60 });
       return t('intervalMinutes', { count: minutes });
     }
-    default: return t('cron', { defaultValue: '크론' });
+    default: return t('cron');
   }
 }
 
@@ -131,20 +131,20 @@ function relativeTime(dateStr: string | null): string {
 }
 
 function dayLabel(dateStr: string | null, t: (key: string, opts?: any) => string): string {
-  if (!dateStr) return t('unscheduled', { defaultValue: '예약 없음' });
+  if (!dateStr) return t('unscheduled');
   const d = new Date(dateStr);
   const today = new Date();
   const start = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
   const target = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
   const days = Math.round((target - start) / 86400000);
-  if (days === 0) return t('today', { defaultValue: '오늘' });
-  if (days === 1) return t('tomorrow', { defaultValue: '내일' });
-  if (days > 1 && days < 7) return t('thisWeek', { defaultValue: '이번 주' });
+  if (days === 0) return t('today');
+  if (days === 1) return t('tomorrow');
+  if (days > 1 && days < 7) return t('thisWeek');
   return d.toLocaleDateString();
 }
 
-function timeLabel(dateStr: string | null): { main: string; sub: string } {
-  if (!dateStr) return { main: '-', sub: '예약 없음' };
+function timeLabel(dateStr: string | null, t: (key: string, opts?: any) => string): { main: string; sub: string } {
+  if (!dateStr) return { main: '-', sub: t('unscheduled') };
   const d = new Date(dateStr);
   return {
     main: d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
@@ -152,11 +152,11 @@ function timeLabel(dateStr: string | null): { main: string; sub: string } {
   };
 }
 
-function statusBadge(a: Automation): { text: string; cls: string } {
-  if (!a.enabled) return { text: '꺼짐', cls: 'tone-muted' };
-  if (a.status === 'running') return { text: '실행 중', cls: 'tone-info' };
-  if (a.lastStatus === 'failed' || a.status === 'failed') return { text: '실패', cls: 'tone-danger' };
-  return { text: '정상', cls: 'tone-success' };
+function statusBadge(a: Automation, t: (key: string, opts?: any) => string): { text: string; cls: string } {
+  if (!a.enabled) return { text: t('statusOff'), cls: 'tone-muted' };
+  if (a.status === 'running') return { text: t('statusRunning'), cls: 'tone-info' };
+  if (a.lastStatus === 'failed' || a.status === 'failed') return { text: t('statusFailed'), cls: 'tone-danger' };
+  return { text: t('statusHealthy'), cls: 'tone-success' };
 }
 
 function normalizeWorkspacePath(pathValue: string, projectRoot?: string | null): string | null {
@@ -191,14 +191,14 @@ function ScheduleOverview({ jobs, allJobs, upcomingJobs, registeredJobs, project
   const recentJobs = [...registeredJobs].slice(0, 4);
   const primaryJob = failedJobs[0] || upcomingJobs[0] || recentJobs[0] || null;
   const statCards = [
-    { label: '켜진 자동화', value: enabledJobs.length, tone: 'text-teal-700 dark:text-primary-200', helper: '현재 작동 중인 자동화' },
-    { label: '실행 예정', value: upcomingJobs.length, tone: 'text-slate-950 dark:text-surface-100', helper: '다가오는 실행' },
-    { label: '실행 중', value: runningJobs.length, tone: 'text-blue-700 dark:text-blue-200', helper: '지금 처리 중' },
-    { label: '확인 필요', value: failedJobs.length, tone: failedJobs.length ? 'text-red-700 dark:text-red-200' : 'text-emerald-700 dark:text-emerald-200', helper: '실패/문제 상태' },
+    { label: t('enabledAutomations'), value: enabledJobs.length, tone: 'text-teal-700 dark:text-primary-200', helper: t('enabledAutomationsHelp') },
+    { label: t('scheduledRuns'), value: upcomingJobs.length, tone: 'text-slate-950 dark:text-surface-100', helper: t('scheduledRunsHelp') },
+    { label: t('runningNow'), value: runningJobs.length, tone: 'text-blue-700 dark:text-blue-200', helper: t('runningNowHelp') },
+    { label: t('needsAttention'), value: failedJobs.length, tone: failedJobs.length ? 'text-red-700 dark:text-red-200' : 'text-emerald-700 dark:text-emerald-200', helper: t('needsAttentionHelp') },
   ];
   const projectSummaries = Array.from(allJobs.reduce((map, job) => {
     const key = job.projectId || 'system';
-    const label = job.projectId ? (projectById.get(job.projectId)?.name || 'Unknown project') : t('systemJobs', { defaultValue: '시스템' });
+    const label = job.projectId ? (projectById.get(job.projectId)?.name || 'Unknown project') : t('systemJobs');
     const current = map.get(key) || { key, label, total: 0, enabled: 0, failed: 0 };
     current.total += 1;
     if (job.enabled) current.enabled += 1;
@@ -210,9 +210,9 @@ function ScheduleOverview({ jobs, allJobs, upcomingJobs, registeredJobs, project
   const hiddenProjectCount = Math.max(0, projectSummaries.length - visibleProjectSummaries.length);
 
   const requestExamples = [
-    { title: '시간·조건 바꾸기', body: '“10시를 10시 10분으로”, “3번 실패하면 알려줘”', action: primaryJob ? () => onOpenAiThread(primaryJob) : onCreate, tone: 'primary' },
-    { title: '사건이 있을 때만 맡기기', body: '“5분마다 확인하고, 새 결과가 있을 때만 AI에게 조사시켜줘”', action: onCreate, tone: 'plain' },
-    { title: '스킬도 자동화하기', body: '“task-automation으로 이 프로젝트에서 매일 회의 준비 스킬을 실행해줘”', action: onCreate, tone: 'plain' },
+    { title: t('exampleChangeTimeTitle'), body: t('exampleChangeTimeBody'), action: primaryJob ? () => onOpenAiThread(primaryJob) : onCreate, tone: 'primary' },
+    { title: t('exampleEventOnlyTitle'), body: t('exampleEventOnlyBody'), action: onCreate, tone: 'plain' },
+    { title: t('exampleAutomateSkillTitle'), body: t('exampleAutomateSkillBody'), action: onCreate, tone: 'plain' },
   ];
 
   return (
@@ -220,24 +220,21 @@ function ScheduleOverview({ jobs, allJobs, upcomingJobs, registeredJobs, project
       <div className="rounded-3xl border border-teal-200 bg-white p-5 shadow-sm dark:border-surface-800 dark:bg-surface-900/65">
         <div className="space-y-4">
           <div className="max-w-3xl">
-            <div className="text-[12px] font-bold uppercase tracking-[0.16em] text-teal-700 dark:text-primary-300">자동화 홈</div>
-            <h2 className="mt-1 text-xl font-bold text-slate-950 dark:text-surface-100">자동화를 만들고, 살펴보고, 조정합니다</h2>
-            <p className="mt-2 text-[14px] leading-6 text-slate-600 dark:text-surface-400">
-              자동화는 “언제/무엇을 확인할지/어떤 일이 생기면 AI에게 맡길지”를 정한 작업 단위입니다.
-              왼쪽 목록은 다가오는 실행과 최근 등록순으로 바꿔 볼 수 있고, 프로젝트별 현황은 아래에서 확인합니다.
-            </p>
+            <div className="text-[12px] font-bold uppercase tracking-[0.16em] text-teal-700 dark:text-primary-300">{t('homeEyebrow')}</div>
+            <h2 className="mt-1 text-xl font-bold text-slate-950 dark:text-surface-100">{t('homeTitle')}</h2>
+            <p className="mt-2 text-[14px] leading-6 text-slate-600 dark:text-surface-400">{t('homeDescription')}</p>
           </div>
 
           <div className="grid gap-2 sm:grid-cols-2 xl:max-w-3xl">
             {primaryJob && (
               <button onClick={() => onOpenAiThread(primaryJob)} className="rounded-2xl bg-teal-700 px-4 py-3 text-left text-white shadow-sm hover:bg-teal-600 dark:bg-primary-500 dark:hover:bg-primary-400">
-                <div className="text-[14px] font-bold">대화로 수정하기</div>
+                <div className="text-[14px] font-bold">{t('editByConversation')}</div>
                 <div className="mt-1 truncate text-[12px] text-white/80">{primaryJob.name}</div>
               </button>
             )}
             <button onClick={onCreate} className="rounded-2xl border border-teal-300 bg-teal-50 px-4 py-3 text-left text-teal-950 hover:bg-teal-100 dark:border-primary-500/30 dark:bg-surface-900 dark:text-primary-100 dark:hover:bg-primary-500/10">
-              <div className="text-[14px] font-bold">새 자동화 만들기</div>
-              <div className="mt-1 text-[12px] text-teal-700 dark:text-primary-200/80">프로젝트 세션의 <code className="font-semibold">/{'task-automation'}</code>으로도 만들 수 있습니다</div>
+              <div className="text-[14px] font-bold">{t('createAutomation')}</div>
+              <div className="mt-1 text-[12px] text-teal-700 dark:text-primary-200/80">{t('createFromProjectSession')}</div>
             </button>
           </div>
 
@@ -257,26 +254,26 @@ function ScheduleOverview({ jobs, allJobs, upcomingJobs, registeredJobs, project
         <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-surface-800 dark:bg-surface-900/50">
           <div className="mb-3 flex items-center justify-between gap-3">
             <div>
-              <div className="text-[12px] font-bold uppercase tracking-wider text-slate-500 dark:text-surface-500">프로젝트로 좁혀 보기</div>
-              <div className="mt-1 text-[12px] text-slate-500 dark:text-surface-500">문제가 있거나 자동화가 많은 프로젝트부터 표시합니다.</div>
+              <div className="text-[12px] font-bold uppercase tracking-wider text-slate-500 dark:text-surface-500">{t('filterByProject')}</div>
+              <div className="mt-1 text-[12px] text-slate-500 dark:text-surface-500">{t('filterByProjectHelp')}</div>
             </div>
-            <div className="text-[12px] text-slate-500 dark:text-surface-500">필터</div>
+            <div className="text-[12px] text-slate-500 dark:text-surface-500">{t('filter')}</div>
           </div>
-          {projectSummaries.length === 0 ? <div className="py-6 text-center text-[13px] text-slate-500 dark:text-surface-500">아직 자동화가 없습니다.</div> : (
+          {projectSummaries.length === 0 ? <div className="py-6 text-center text-[13px] text-slate-500 dark:text-surface-500">{t('empty')}</div> : (
             <div className="space-y-3">
               <div className="flex flex-wrap gap-2">
-                <button onClick={() => onProjectFilterChange('all')} className={`rounded-full border px-3 py-1.5 text-[12px] font-semibold ${selectedProjectFilter === 'all' ? 'border-teal-400 bg-teal-50 text-teal-800 dark:border-primary-400/60 dark:bg-primary-500/15 dark:text-primary-100' : 'border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100 dark:border-surface-800 dark:bg-surface-850 dark:text-surface-300 dark:hover:border-surface-700'}`}>전체</button>
+                <button onClick={() => onProjectFilterChange('all')} className={`rounded-full border px-3 py-1.5 text-[12px] font-semibold ${selectedProjectFilter === 'all' ? 'border-teal-400 bg-teal-50 text-teal-800 dark:border-primary-400/60 dark:bg-primary-500/15 dark:text-primary-100' : 'border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100 dark:border-surface-800 dark:bg-surface-850 dark:text-surface-300 dark:hover:border-surface-700'}`}>{t('all')}</button>
                 {visibleProjectSummaries.map((project) => (
                   <button key={project.key} onClick={() => onProjectFilterChange(project.key)} className={`rounded-full border px-3 py-1.5 text-[12px] font-semibold ${selectedProjectFilter === project.key ? 'border-teal-400 bg-teal-50 text-teal-800 dark:border-primary-400/60 dark:bg-primary-500/15 dark:text-primary-100' : 'border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100 dark:border-surface-800 dark:bg-surface-850 dark:text-surface-300 dark:hover:border-surface-700'}`}>
                     <span>{project.label}</span>
                     <span className="ml-1 text-slate-400 dark:text-surface-500">{project.total}</span>
-                    {project.failed > 0 && <span className="ml-1 text-red-600 dark:text-red-300">확인 {project.failed}</span>}
+                    {project.failed > 0 && <span className="ml-1 text-red-600 dark:text-red-300">{t('attentionCount', { count: project.failed })}</span>}
                   </button>
                 ))}
               </div>
               {hiddenProjectCount > 0 && (
                 <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-3 py-2 text-[12px] leading-5 text-slate-500 dark:border-surface-800 dark:bg-surface-850/40 dark:text-surface-500">
-                  여기서는 상위 {visibleProjectSummaries.length}개만 보여줍니다. 나머지 {hiddenProjectCount}개는 우측 상단 프로젝트 필터에서 선택해 볼 수 있습니다.
+                  {t('projectLimitNotice', { visible: visibleProjectSummaries.length, hidden: hiddenProjectCount })}
                 </div>
               )}
             </div>
@@ -285,12 +282,12 @@ function ScheduleOverview({ jobs, allJobs, upcomingJobs, registeredJobs, project
 
         <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-surface-800 dark:bg-surface-900/50">
           <div className="mb-3 flex items-center justify-between gap-3">
-            <div className="text-[12px] font-bold uppercase tracking-wider text-slate-500 dark:text-surface-500">최근 자동화</div>
-            <div className="text-[12px] text-slate-500 dark:text-surface-500">등록/수정 기준</div>
+            <div className="text-[12px] font-bold uppercase tracking-wider text-slate-500 dark:text-surface-500">{t('recentAutomations')}</div>
+            <div className="text-[12px] text-slate-500 dark:text-surface-500">{t('recentSortHelp')}</div>
           </div>
           <div className="space-y-2">
             {recentJobs.map((job) => {
-              const projectName = job.projectId ? projectById.get(job.projectId)?.name : t('systemJobs', { defaultValue: '시스템' });
+              const projectName = job.projectId ? projectById.get(job.projectId)?.name : t('systemJobs');
               return (
                 <button key={job.id} onClick={() => onSelect(job)} className="w-full rounded-xl border border-slate-200 bg-slate-50 p-3 text-left hover:border-teal-300 hover:bg-teal-50 dark:border-surface-800 dark:bg-surface-850/60 dark:hover:border-primary-500/40 dark:hover:bg-primary-500/10">
                   <div className="flex items-center justify-between gap-3">
@@ -298,7 +295,7 @@ function ScheduleOverview({ jobs, allJobs, upcomingJobs, registeredJobs, project
                       <div className="truncate text-[13px] font-semibold text-slate-950 dark:text-surface-100">{job.name}</div>
                       <div className="mt-1 text-[12px] text-slate-500 dark:text-surface-500">{projectName || '-'} · {triggerLabel(job, t)}</div>
                     </div>
-                    <span className={`tone-pill shrink-0 rounded px-1.5 py-0.5 text-[11px] ${statusBadge(job).cls}`}>{statusBadge(job).text}</span>
+                    <span className={`tone-pill shrink-0 rounded px-1.5 py-0.5 text-[11px] ${statusBadge(job, t).cls}`}>{statusBadge(job, t).text}</span>
                   </div>
                 </button>
               );
@@ -308,11 +305,11 @@ function ScheduleOverview({ jobs, allJobs, upcomingJobs, registeredJobs, project
       </div>
 
       <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-surface-800 dark:bg-surface-900/50">
-        <div className="mb-3 text-[12px] font-bold uppercase tracking-wider text-slate-500 dark:text-surface-500">이렇게 요청할 수 있어요</div>
+        <div className="mb-3 text-[12px] font-bold uppercase tracking-wider text-slate-500 dark:text-surface-500">{t('requestExamples')}</div>
         <div className="grid gap-2 xl:grid-cols-3">
             {failedJobs.length > 0 && failedJobs.slice(0, 1).map((job) => (
               <button key={job.id} onClick={() => onOpenAiThread(job)} className="w-full rounded-xl border border-red-200 bg-red-50 p-3 text-left text-red-900 hover:bg-red-100 dark:border-red-500/25 dark:bg-red-500/10 dark:text-red-100 dark:hover:bg-red-500/15">
-                <div className="text-[13px] font-semibold">먼저 확인할 일: 실패 조건 점검</div>
+                <div className="text-[13px] font-semibold">{t('failedConditionReview')}</div>
                 <div className="mt-1 truncate text-[12px] text-red-700 dark:text-red-200/80">{job.name}</div>
               </button>
             ))}
@@ -354,15 +351,15 @@ export function ProcessMapPreview({ map, loading, onReload, playbackActive = fal
     return map.nodes.map((node, index) => ({
       ...node,
       status: (index < currentIndex ? 'completed' : index === currentIndex ? 'running' : 'pending') as ProcessNodeStatus,
-      summary: index === currentIndex ? node.summary || '실행 중인 단계입니다.' : node.summary,
+      summary: index === currentIndex ? node.summary || i18n.t('processRunningSummary', { ns: 'schedule' }) : node.summary,
     }));
   }, [map, playbackActive]);
 
   if (loading) {
-    return <div className="text-[13px] text-surface-500">진행 상태를 불러오는 중…</div>;
+    return <div className="text-[13px] text-surface-500">{i18n.t('processLoading', { ns: 'schedule' })}</div>;
   }
   if (!map) {
-    return <div className="text-[13px] text-surface-500">아직 표시할 진행 상태가 없습니다. 실행 이력이 생기면 자동으로 표시됩니다.</div>;
+    return <div className="text-[13px] text-surface-500">{i18n.t('processEmpty', { ns: 'schedule' })}</div>;
   }
 
   const doneCount = nodes.filter((node) => node.status === 'completed').length;
@@ -375,16 +372,16 @@ export function ProcessMapPreview({ map, loading, onReload, playbackActive = fal
         <div className="min-w-0">
           <div className="text-[13px] font-semibold text-surface-200">{map.title}</div>
           <div className="mt-0.5 text-[12px] text-surface-500">
-            {hasProblem ? '확인이 필요한 실행입니다' : `${doneCount}/${nodes.length} 단계 완료`}
-            {currentNode ? ` · 현재: ${currentNode.label}` : ''}
+            {hasProblem ? i18n.t('processNeedsAttention', { ns: 'schedule' }) : i18n.t('processCompleted', { ns: 'schedule', done: doneCount, total: nodes.length })}
+            {currentNode ? ` · ${i18n.t('processCurrent', { ns: 'schedule', label: currentNode.label })}` : ''}
           </div>
         </div>
-        <button type="button" onClick={onReload} className="shrink-0 rounded-md bg-surface-800 px-2 py-1 text-[12px] font-semibold text-surface-300 hover:bg-surface-700">새로고침</button>
+        <button type="button" onClick={onReload} className="shrink-0 rounded-md bg-surface-800 px-2 py-1 text-[12px] font-semibold text-surface-300 hover:bg-surface-700">{i18n.t('refresh', { ns: 'schedule' })}</button>
       </div>
 
       <div className="rounded-2xl border border-surface-800 bg-surface-950/35 p-3">
         {nodes.length === 0 ? (
-          <div className="text-[13px] text-surface-500">표시할 단계가 없습니다.</div>
+          <div className="text-[13px] text-surface-500">{i18n.t('processNoSteps', { ns: 'schedule' })}</div>
         ) : (
           <ol className="space-y-2">
             {nodes.map((node) => {
@@ -555,61 +552,63 @@ function parseChatEditRequest(text: string, job: Automation): Partial<Automation
 
 function summarizeUpdate(updates: Partial<Automation>, t: (key: string, opts?: any) => string): string {
   const parts: string[] = [];
-  if (updates.name) parts.push(`이름: ${updates.name}`);
-  if (updates.description) parts.push(`설명: ${updates.description}`);
+  if (updates.name) parts.push(t('updateName', { value: updates.name }));
+  if (updates.description) parts.push(t('updateDescription', { value: updates.description }));
   if (updates.triggerType) {
     const pseudo = { triggerType: updates.triggerType, cronConfig: updates.cronConfig || null, onceAt: updates.onceAt || null } as Automation;
-    parts.push(`스케줄: ${triggerLabel(pseudo, t)}`);
+    parts.push(t('updateSchedule', { value: triggerLabel(pseudo, t) }));
   }
   return parts.join(' · ');
 }
 
-const SCHEDULE_SAMPLES: ScheduleSample[] = [
+function scheduleSamples(t: (key: string, opts?: any) => string): ScheduleSample[] {
+  return [
   {
     id: 'daily-briefing',
-    title: '매일 아침 브리핑',
-    description: '프로젝트의 어제 작업, 오늘 할 일, 위험 신호를 요약합니다.',
+    title: t('sampleDailyTitle'),
+    description: t('sampleDailyDescription'),
     form: {
-      name: '매일 아침 브리핑',
-      description: '매일 아침 프로젝트의 어제 작업, 오늘 할 일, 위험 신호를 요약합니다.',
-      prompt: '이 프로젝트의 어제 작업, 오늘 할 일, 막힌 점, 주의할 위험 신호를 간결하게 요약해줘.',
+      name: t('sampleDailyTitle'),
+      description: t('sampleDailyDescription'),
+      prompt: t('sampleDailyPrompt'),
       triggerType: 'cron', cronType: 'weekdays', hour: '9', minute: '0',
     },
   },
   {
     id: 'weekly-review',
-    title: '주간 회고 정리',
-    description: '매주 금요일 진행 상황과 다음 주 우선순위를 정리합니다.',
+    title: t('sampleWeeklyTitle'),
+    description: t('sampleWeeklyDescription'),
     form: {
-      name: '주간 회고 정리',
-      description: '매주 금요일 프로젝트 진행 상황, 배운 점, 다음 주 우선순위를 정리합니다.',
-      prompt: '이번 주 프로젝트 진행 상황, 완료한 일, 남은 일, 배운 점, 다음 주 우선순위를 정리해줘.',
+      name: t('sampleWeeklyTitle'),
+      description: t('sampleWeeklyDescription'),
+      prompt: t('sampleWeeklyPrompt'),
       triggerType: 'cron', cronType: 'weekly', day: '5', hour: '17', minute: '0',
     },
   },
   {
     id: 'decision-index',
-    title: '결정문서 INDEX 갱신',
-    description: '새 결정문서를 반영해 INDEX를 최신 상태로 유지합니다.',
+    title: t('sampleDecisionTitle'),
+    description: t('sampleDecisionDescription'),
     form: {
-      name: '결정문서 INDEX 갱신',
-      description: '새 결정문서를 반영해 결정문서 INDEX를 최신 상태로 유지합니다.',
-      prompt: '/decisions-distill 을 실행해서 결정문서 INDEX를 갱신하고 미분류 결정을 보고해줘.',
+      name: t('sampleDecisionTitle'),
+      description: t('sampleDecisionDescription'),
+      prompt: t('sampleDecisionPrompt'),
       triggerType: 'cron', cronType: 'daily', hour: '3', minute: '0',
     },
   },
   {
     id: 'health-check',
-    title: '서비스 상태 점검',
-    description: '정기적으로 서비스 상태를 확인하고 이상 징후를 요약합니다.',
+    title: t('sampleHealthTitle'),
+    description: t('sampleHealthDescription'),
     form: {
-      name: '서비스 상태 점검',
-      description: '정기적으로 서비스 상태를 확인하고 이상 징후를 요약합니다.',
-      prompt: '이 프로젝트의 주요 서비스 상태, 최근 오류, 주의할 로그를 점검하고 이상 징후를 요약해줘.',
+      name: t('sampleHealthTitle'),
+      description: t('sampleHealthDescription'),
+      prompt: t('sampleHealthPrompt'),
       triggerType: 'cron', cronType: 'interval', intervalMinutes: '60',
     },
   },
-];
+  ];
+}
 
 export function SchedulePanel() {
   const { t } = useTranslation('schedule');
@@ -790,7 +789,7 @@ export function SchedulePanel() {
       store.setPendingQuestion(null);
       store.setOpen(true);
     } catch (err: any) {
-      setError(err.message || 'AI thread를 열지 못했습니다.');
+      setError(err.message || t('aiThreadOpenFailed'));
     }
   };
 
@@ -800,7 +799,7 @@ export function SchedulePanel() {
 
   const handleToggle = async (job: Automation) => {
     const enabled = !job.enabled;
-    const ok = await confirm({ title: enabled ? '자동화 켜기' : '자동화 일시정지', message: enabled ? '이 자동화의 예약 실행을 다시 시작할까요?' : '이 자동화의 예약 실행을 일시정지할까요?', confirmLabel: enabled ? '켜기' : '일시정지' });
+    const ok = await confirm({ title: enabled ? t('enableConfirmTitle', { ns: 'automation' }) : t('pauseConfirmTitle', { ns: 'automation' }), message: enabled ? t('enableConfirmMessage', { ns: 'automation' }) : t('pauseConfirmMessage', { ns: 'automation' }), confirmLabel: enabled ? t('enableAction', { ns: 'automation' }) : t('pauseAction', { ns: 'automation' }) });
     if (!ok) return;
     try {
       await fetchJson(`${API}/${job.id}/enabled`, { method: 'POST', body: JSON.stringify({ enabled, confirmed: true }) });
@@ -838,7 +837,7 @@ export function SchedulePanel() {
   };
 
   const handleSaveEdit = async (_job: Automation) => {
-    setError('자동화 설정 변경은 자동화 대화 또는 Workbench에서 변경 검토본을 만든 뒤 적용해 주세요.');
+    setError(t('editRequiresReview'));
   };
 
   const openCreate = () => {
@@ -856,15 +855,15 @@ export function SchedulePanel() {
   const handleCreate = async () => {
     const userRequest = [createForm.name, createForm.description, createForm.prompt].filter(Boolean).join('\n');
     if (!userRequest.trim()) {
-      setError(t('scheduleRequestRequired', { defaultValue: '어떤 스케줄을 만들지 한 줄 이상 적어주세요.' }));
+      setError(t('scheduleRequestRequired'));
       return;
     }
     const projectName = createForm.projectId === 'system'
-      ? t('systemJobs', { defaultValue: '시스템' })
+      ? t('systemJobs')
       : projects.find((p) => p.id === createForm.projectId)?.name || createForm.projectId;
-    const prompt = `/task-schedule\n\n스케줄 등록을 시작해줘.\n\n중요: 바로 등록하지 말고, 먼저 사용자에게 필요한 질문을 해서 의도를 확인해. 특히 다음을 확인해:\n- 무엇을 실행할지\n- 왜/무슨 목적으로 실행할지(description)\n- 어느 프로젝트에서 실행할지\n- 언제/얼마나 자주 실행할지\n- 실행 결과를 어디에 남길지\n- 위험한 작업인지, 확인이 필요한지\n\n프로젝트 후보: ${projectName}\n사용자가 시작한 요청:\n${userRequest}\n\n질문은 한 번에 너무 많이 하지 말고, 스케줄 생성을 마칠 수 있을 만큼만 단계적으로 물어봐.`;
+    const prompt = t('scheduleWizardPrompt', { project: projectName, request: userRequest });
     window.dispatchEvent(new CustomEvent('tower-start-schedule-wizard', {
-      detail: { projectId: createForm.projectId === 'system' ? null : createForm.projectId, prompt, sessionName: '스케줄 등록', label: '스케줄' },
+      detail: { projectId: createForm.projectId === 'system' ? null : createForm.projectId, prompt, sessionName: t('scheduleWizardSessionName'), label: t('scheduleWizardLabel') },
     }));
     setCreating(false);
   };
@@ -875,19 +874,19 @@ export function SchedulePanel() {
   const selectedDefinition = selectedJob?.definitionJson || {};
   const selectedCommand = typeof selectedDefinition.command === 'string' ? selectedDefinition.command : (typeof selectedDefinition.script === 'string' ? selectedDefinition.script : '');
   const groupedUpcoming = currentList.reduce<Array<{ label: string; jobs: Automation[] }>>((groups, job) => {
-    const label = view === 'upcoming' ? dayLabel(job.nextRunAt, t) : t('recentlyConfigured', { defaultValue: '최근 등록 / 수정순' });
+    const label = view === 'upcoming' ? dayLabel(job.nextRunAt, t) : t('recentlyConfigured');
     const found = groups.find((g) => g.label === label);
     if (found) found.jobs.push(job); else groups.push({ label, jobs: [job] });
     return groups;
   }, []);
 
   const renderJobRow = (job: Automation) => {
-    const badge = statusBadge(job);
+    const badge = statusBadge(job, t);
     const project = job.projectId ? projectById.get(job.projectId) : null;
-    const projectName = project?.name || (job.scopeType === 'system' ? t('systemJobs', { defaultValue: '시스템' }) : t('noProject', { defaultValue: '프로젝트 없음' }));
+    const projectName = project?.name || (job.scopeType === 'system' ? t('systemJobs') : t('noProject'));
     const configUpdatedAt = job.configUpdatedAt || job.createdAt;
     const time = view === 'upcoming'
-      ? timeLabel(job.nextRunAt)
+      ? timeLabel(job.nextRunAt, t)
       : { main: new Date(configUpdatedAt).toLocaleDateString(), sub: `${relativeTime(configUpdatedAt)}` };
     const description = (job.description || job.prompt || '').trim();
     return (
@@ -915,16 +914,16 @@ export function SchedulePanel() {
               type="button"
               onClick={(e) => { e.stopPropagation(); void handleToggle(job); }}
               className={`relative inline-flex h-4 w-7 items-center rounded-full transition ${job.enabled ? 'bg-primary-500' : 'bg-surface-650'}`}
-              aria-label={job.enabled ? t('disable', { defaultValue: '끄기' }) : t('enable', { defaultValue: '켜기' })}
+              aria-label={job.enabled ? t('disable') : t('enable')}
               aria-pressed={job.enabled}
             >
               <span className={`inline-block h-3 w-3 rounded-full bg-white transition ${job.enabled ? 'translate-x-3.5' : 'translate-x-0.5'}`} />
             </button>
             <button disabled={runningNowIds.has(job.id)} onClick={() => handleRunNow(job)} className="min-h-[32px] rounded-lg bg-surface-800 px-2 py-1.5 text-[12px] font-semibold text-surface-200 hover:bg-primary-500 hover:text-white disabled:opacity-50 disabled:cursor-not-allowed">
-              {runningNowIds.has(job.id) ? t('running', { defaultValue: '실행 중…' }) : t('runNow')}
+              {runningNowIds.has(job.id) ? t('running') : t('runNow')}
             </button>
             <button onClick={() => void openAutomationAiThread(job)} className="min-h-[32px] rounded-lg border border-teal-300 bg-teal-50 px-2 py-1.5 text-[12px] font-semibold text-teal-800 hover:bg-teal-100 dark:border-primary-500/30 dark:bg-primary-500/10 dark:text-primary-100 dark:hover:bg-primary-500/20">
-              조정
+              {t('adjust')}
             </button>
           </div>
         </div>
@@ -938,8 +937,8 @@ export function SchedulePanel() {
         <div className="flex items-center gap-2">
           <span className="text-xl">⏰</span>
           <div>
-            <h1 className="text-base font-bold text-gray-100">자동화</h1>
-            <p className="text-[13px] text-surface-500">예약 실행, 조건 감지, AI 작업 자동화</p>
+            <h1 className="text-base font-bold text-gray-100">{t('title')}</h1>
+            <p className="text-[13px] text-surface-500">{t('subtitle')}</p>
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -948,24 +947,24 @@ export function SchedulePanel() {
             onClick={() => selectedJob && openJobTab(selectedJob)}
             disabled={!selectedJob}
             className="rounded-full border border-surface-700 bg-surface-850 px-2.5 py-1 text-[12px] font-bold text-surface-400 transition hover:text-surface-100 disabled:cursor-not-allowed disabled:opacity-45"
-            title="선택한 스케줄의 고급 점검 화면 열기"
+            title={t('advancedCheckTitle')}
           >
-            고급 점검 ↗
+            {t('advancedCheck')} ↗
           </button>
           <select value={projectFilter} onChange={(e) => setProjectFilter(e.target.value)} className="bg-surface-850 border border-surface-700 rounded-lg px-2 py-1.5 text-[13px] text-surface-200">
-            <option value="all">{t('allProjects', { defaultValue: '전체 프로젝트' })}</option>
-            <option value="system">{t('systemJobs', { defaultValue: '시스템' })}</option>
+            <option value="all">{t('allProjects')}</option>
+            <option value="system">{t('systemJobs')}</option>
             {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
           </select>
-          <button onClick={openCreate} className="px-3.5 py-2 rounded-lg bg-primary-500 text-white text-[13px] font-semibold hover:bg-primary-400" title={t('createHint', { defaultValue: '대화에서 “매일 실행해줘”라고 요청해 만들 수 있습니다' })}>
-            + 새 자동화
+          <button onClick={openCreate} className="px-3.5 py-2 rounded-lg bg-primary-500 text-white text-[13px] font-semibold hover:bg-primary-400" title={t('createHint')}>
+            + {t('create')}
           </button>
         </div>
       </div>
 
       {error && (
         <div className="mx-4 mt-2 px-3 py-1.5 text-[12px] text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg">
-          {error}<button onClick={() => setError(null)} className="ml-2 underline">{t('dismiss', { defaultValue: '닫기' })}</button>
+          {error}<button onClick={() => setError(null)} className="ml-2 underline">{t('dismiss')}</button>
         </div>
       )}
 
@@ -973,14 +972,14 @@ export function SchedulePanel() {
         <div className="mx-5 mt-4 rounded-2xl border border-primary-500/25 bg-surface-900/95 p-4 shadow-xl shadow-black/20">
           <div className="flex items-start justify-between gap-3 mb-4">
             <div>
-              <h2 className="text-base font-bold text-gray-100">{t('createSchedule', { defaultValue: '새 스케줄 만들기' })}</h2>
-              <p className="mt-1 text-[13px] text-surface-500">{t('createScheduleHelp', { defaultValue: '샘플을 골라 시작하거나 직접 이름, 설명, 실행 시간을 채워주세요.' })}</p>
+              <h2 className="text-base font-bold text-gray-100">{t('createSchedule')}</h2>
+              <p className="mt-1 text-[13px] text-surface-500">{t('createScheduleHelp')}</p>
             </div>
-            <button onClick={() => setCreating(false)} className="rounded-lg bg-surface-800 px-3 py-1.5 text-[13px] font-semibold text-surface-300 hover:bg-surface-700">{t('closeEdit', { defaultValue: '닫기' })}</button>
+            <button onClick={() => setCreating(false)} className="rounded-lg bg-surface-800 px-3 py-1.5 text-[13px] font-semibold text-surface-300 hover:bg-surface-700">{t('closeEdit')}</button>
           </div>
 
           <div className="mb-4 grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
-            {SCHEDULE_SAMPLES.map((sample) => (
+            {scheduleSamples(t).map((sample) => (
               <button key={sample.id} onClick={() => applySample(sample)} className="rounded-xl border border-surface-750 bg-surface-850/70 p-3 text-left hover:border-primary-500/40 hover:bg-primary-500/10">
                 <div className="text-[14px] font-semibold text-gray-100">{sample.title}</div>
                 <div className="mt-1 line-clamp-2 text-[12px] leading-4 text-surface-500">{sample.description}</div>
@@ -990,27 +989,27 @@ export function SchedulePanel() {
 
           <div className="grid grid-cols-1 gap-3 lg:grid-cols-[240px_1fr]">
             <label className="block text-[13px] text-surface-400 space-y-1.5">
-              <span>{t('project', { defaultValue: '프로젝트' })}</span>
+              <span>{t('project')}</span>
               <select value={createForm.projectId} onChange={(e) => setCreateForm({ ...createForm, projectId: e.target.value })} className="w-full bg-surface-950/80 border border-surface-700 rounded-lg px-2 py-2 text-[14px] text-surface-100">
-                <option value="system">{t('systemJobs', { defaultValue: '시스템' })}</option>
+                <option value="system">{t('systemJobs')}</option>
                 {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
               </select>
             </label>
             <label className="block text-[13px] text-surface-400 space-y-1.5">
-              <span>{t('agenticRequest', { defaultValue: 'AI에게 맡길 요청' })}</span>
+              <span>{t('agenticRequest')}</span>
               <textarea
                 value={[createForm.name, createForm.description, createForm.prompt].filter(Boolean).join('\n')}
                 onChange={(e) => setCreateForm({ ...createForm, name: '', description: '', prompt: e.target.value })}
                 rows={5}
-                placeholder={t('agenticRequestPlaceholder', { defaultValue: '예: 이 프로젝트에서 매일 아침 어제 작업과 오늘 할 일을 요약하는 스케줄을 만들고 싶어' })}
+                placeholder={t('agenticRequestPlaceholder')}
                 className="w-full bg-surface-950/80 border border-surface-700 rounded-lg px-3 py-2 text-[14px] text-surface-100 placeholder:text-surface-600 resize-none"
               />
             </label>
           </div>
 
           <div className="mt-4 flex justify-end gap-2">
-            <button disabled={saving} onClick={() => setCreating(false)} className="px-3 py-2 rounded-lg bg-surface-800 text-surface-300 text-[13px] font-semibold hover:bg-surface-700">{t('cancel', { defaultValue: '취소' })}</button>
-            <button disabled={saving || ![createForm.name, createForm.description, createForm.prompt].filter(Boolean).join('\n').trim()} onClick={handleCreate} className="px-4 py-2 rounded-lg bg-primary-500 text-white text-[13px] font-semibold hover:bg-primary-400 disabled:opacity-50">{t('startScheduleWizard', { defaultValue: 'AI와 만들기' })}</button>
+            <button disabled={saving} onClick={() => setCreating(false)} className="px-3 py-2 rounded-lg bg-surface-800 text-surface-300 text-[13px] font-semibold hover:bg-surface-700">{t('cancel')}</button>
+            <button disabled={saving || ![createForm.name, createForm.description, createForm.prompt].filter(Boolean).join('\n').trim()} onClick={handleCreate} className="px-4 py-2 rounded-lg bg-primary-500 text-white text-[13px] font-semibold hover:bg-primary-400 disabled:opacity-50">{t('startScheduleWizard')}</button>
           </div>
         </div>
       )}
@@ -1021,10 +1020,10 @@ export function SchedulePanel() {
           <div className="px-5 pt-4">
             <div className="inline-flex p-0.5 rounded-lg bg-surface-850 border border-surface-750">
               <button onClick={() => setView('upcoming')} className={`px-3 py-1.5 rounded-md text-[13px] font-semibold ${view === 'upcoming' ? 'bg-surface-700 text-white' : 'text-surface-500 hover:text-surface-200'}`}>
-                다가오는 실행
+                {t('upcomingExecutions')}
               </button>
               <button onClick={() => setView('registered')} className={`px-3 py-1.5 rounded-md text-[13px] font-semibold ${view === 'registered' ? 'bg-surface-700 text-white' : 'text-surface-500 hover:text-surface-200'}`}>
-                최근 등록/수정
+                {t('recentlyRegistered')}
               </button>
             </div>
           </div>
@@ -1052,8 +1051,8 @@ export function SchedulePanel() {
 
         <button
           type="button"
-          aria-label="스케줄 목록 폭 조절"
-          title="드래그해서 목록 폭 조절"
+          aria-label={t('resizeList')}
+          title={t('resizeListHelp')}
           onPointerDown={startListResize}
           className="absolute bottom-0 top-0 z-10 -ml-1 hidden w-3 cursor-col-resize border-l border-primary-500/30 bg-primary-500/5 transition hover:border-primary-400 hover:bg-primary-400/10 lg:block"
           style={{ left: listWidth }}
@@ -1083,12 +1082,12 @@ export function SchedulePanel() {
                   <div className="min-w-0">
                     <h2 className="truncate text-base font-bold text-gray-100 leading-5">{selectedJob.name}</h2>
                     <p className="mt-1 text-[13px] text-surface-500 leading-4">
-                      {triggerLabel(selectedJob, t)} · {jobTypeLabel(selectedJob.jobType, t)} · {selectedJob.projectId ? projectById.get(selectedJob.projectId)?.name : t('systemJobs', { defaultValue: '시스템' })}
+                      {triggerLabel(selectedJob, t)} · {jobTypeLabel(selectedJob.jobType, t)} · {selectedJob.projectId ? projectById.get(selectedJob.projectId)?.name : t('systemJobs')}
                     </p>
                   </div>
                   <div className="shrink-0 flex items-center gap-2">
-                    <span className={`tone-pill text-[12px] px-1.5 py-0.5 rounded ${statusBadge(selectedJob).cls}`}>{statusBadge(selectedJob).text}</span>
-                    <button onClick={() => handleToggle(selectedJob)} className={`relative inline-flex h-5 w-9 items-center rounded-full transition ${selectedJob.enabled ? 'bg-primary-500' : 'bg-surface-650'}`} aria-pressed={selectedJob.enabled} aria-label={selectedJob.enabled ? t('disable', { defaultValue: '끄기' }) : t('enable', { defaultValue: '켜기' })}>
+                    <span className={`tone-pill text-[12px] px-1.5 py-0.5 rounded ${statusBadge(selectedJob, t).cls}`}>{statusBadge(selectedJob, t).text}</span>
+                    <button onClick={() => handleToggle(selectedJob)} className={`relative inline-flex h-5 w-9 items-center rounded-full transition ${selectedJob.enabled ? 'bg-primary-500' : 'bg-surface-650'}`} aria-pressed={selectedJob.enabled} aria-label={selectedJob.enabled ? t('disable') : t('enable')}>
                       <span className={`inline-block h-4 w-4 rounded-full bg-white transition ${selectedJob.enabled ? 'translate-x-4' : 'translate-x-0.5'}`} />
                     </button>
                   </div>
@@ -1096,101 +1095,101 @@ export function SchedulePanel() {
               </div>
 
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                <button disabled={runningNowIds.has(selectedJob.id)} onClick={() => handleRunNow(selectedJob)} className="min-h-[40px] px-2 py-2 text-[14px] font-semibold rounded-lg bg-primary-500 text-white hover:bg-primary-400 disabled:opacity-50 disabled:cursor-not-allowed">{runningNowIds.has(selectedJob.id) ? t('running', { defaultValue: '실행 중…' }) : `▶ ${t('runNow')}`}</button>
-                <button onClick={() => setEditing((v) => !v)} className="min-h-[40px] px-2 py-2 text-[14px] font-semibold rounded-lg bg-surface-800 text-surface-200 hover:bg-surface-750">{editing ? t('closeEdit', { defaultValue: '닫기' }) : t('edit', { defaultValue: '설정' })}</button>
-                <button onClick={() => void openAutomationAiThread(selectedJob)} className="min-h-[40px] px-2 py-2 text-[14px] font-semibold rounded-lg bg-surface-800 text-surface-200 hover:bg-surface-750">대화로 조정</button>
+                <button disabled={runningNowIds.has(selectedJob.id)} onClick={() => handleRunNow(selectedJob)} className="min-h-[40px] px-2 py-2 text-[14px] font-semibold rounded-lg bg-primary-500 text-white hover:bg-primary-400 disabled:opacity-50 disabled:cursor-not-allowed">{runningNowIds.has(selectedJob.id) ? t('running') : `▶ ${t('runNow')}`}</button>
+                <button onClick={() => setEditing((v) => !v)} className="min-h-[40px] px-2 py-2 text-[14px] font-semibold rounded-lg bg-surface-800 text-surface-200 hover:bg-surface-750">{editing ? t('closeEdit') : t('edit')}</button>
+                <button onClick={() => void openAutomationAiThread(selectedJob)} className="min-h-[40px] px-2 py-2 text-[14px] font-semibold rounded-lg bg-surface-800 text-surface-200 hover:bg-surface-750">{t('adjustByConversation')}</button>
                 <button onClick={() => handleDelete(selectedJob)} className="min-h-[40px] px-2 py-2 text-[14px] font-semibold rounded-lg bg-red-500/10 text-red-300 hover:bg-red-500/20">{t('delete')}</button>
               </div>
 
               {editing && editForm && (
                 <div className="border border-primary-500/30 rounded-xl p-4 bg-primary-500/10 space-y-3">
                   <div className="flex items-center justify-between gap-2">
-                    <div className="text-[13px] font-semibold text-gray-100">{t('editSettings', { defaultValue: '설정 바꾸기' })}</div>
-                    <button onClick={() => selectedJob && setEditForm(editFormFromJob(selectedJob))} className="text-[12px] text-surface-400 hover:text-white">{t('reset', { defaultValue: '되돌리기' })}</button>
+                    <div className="text-[13px] font-semibold text-gray-100">{t('editSettings')}</div>
+                    <button onClick={() => selectedJob && setEditForm(editFormFromJob(selectedJob))} className="text-[12px] text-surface-400 hover:text-white">{t('reset')}</button>
                   </div>
                   <label className="block text-[13px] text-surface-400 space-y-1.5">
-                    <span>{t('name', { defaultValue: '이름' })}</span>
+                    <span>{t('name')}</span>
                     <input value={editForm.name} onChange={(e) => setEditForm({ ...editForm, name: e.target.value })} className="w-full bg-surface-950/80 border border-surface-700 rounded-lg px-3 py-2 text-[14px] text-surface-100" />
                   </label>
                   <label className="block text-[13px] text-surface-400 space-y-1.5">
-                    <span>{t('description', { defaultValue: '설명' })}</span>
+                    <span>{t('description')}</span>
                     <textarea value={editForm.description} onChange={(e) => setEditForm({ ...editForm, description: e.target.value })} rows={3} className="w-full bg-surface-950/80 border border-surface-700 rounded-lg px-3 py-2 text-[14px] text-surface-100 resize-none" />
                   </label>
                   <label className="block text-[13px] text-surface-400 space-y-1.5">
-                    <span>{t('prompt', { defaultValue: '실행 프롬프트' })}</span>
+                    <span>{t('prompt')}</span>
                     <textarea value={editForm.prompt} onChange={(e) => setEditForm({ ...editForm, prompt: e.target.value })} rows={4} className="w-full bg-surface-950/80 border border-surface-700 rounded-lg px-3 py-2 text-[14px] text-surface-100 resize-none" />
                   </label>
                   <div className="grid grid-cols-2 gap-2.5">
                     <label className="block text-[13px] text-surface-400 space-y-1.5">
-                      <span>{t('trigger', { defaultValue: '실행 방식' })}</span>
+                      <span>{t('trigger')}</span>
                       <select value={editForm.triggerType} onChange={(e) => setEditForm({ ...editForm, triggerType: e.target.value as AutomationTrigger })} className="w-full bg-surface-950/80 border border-surface-700 rounded-lg px-2 py-2 text-[14px] text-surface-100">
-                        <option value="manual">{t('manual', { defaultValue: '수동' })}</option>
-                        <option value="cron">{t('repeat', { defaultValue: '반복' })}</option>
-                        <option value="once">{t('once', { defaultValue: '한 번만' })}</option>
+                        <option value="manual">{t('manual')}</option>
+                        <option value="cron">{t('repeat')}</option>
+                        <option value="once">{t('once')}</option>
                       </select>
                     </label>
                     {editForm.triggerType === 'cron' && (
                       <label className="block text-[13px] text-surface-400 space-y-1.5">
-                        <span>{t('repeatRule', { defaultValue: '반복 규칙' })}</span>
+                        <span>{t('repeatRule')}</span>
                         <select value={editForm.cronType} onChange={(e) => setEditForm({ ...editForm, cronType: e.target.value as AutomationCronConfig['type'] })} className="w-full bg-surface-950/80 border border-surface-700 rounded-lg px-2 py-2 text-[14px] text-surface-100">
-                          <option value="daily">{t('daily', { defaultValue: '매일' })}</option>
-                          <option value="weekdays">{t('weekdays', { defaultValue: '평일' })}</option>
-                          <option value="weekly">{t('weekly', { defaultValue: '매주' })}</option>
-                          <option value="interval">{t('interval', { defaultValue: '간격' })}</option>
+                          <option value="daily">{t('daily')}</option>
+                          <option value="weekdays">{t('weekdays')}</option>
+                          <option value="weekly">{t('weekly')}</option>
+                          <option value="interval">{t('interval')}</option>
                         </select>
                       </label>
                     )}
                   </div>
                   {editForm.triggerType === 'cron' && editForm.cronType !== 'interval' && (
                     <div className="grid grid-cols-3 gap-2.5">
-                      {editForm.cronType === 'weekly' && <label className="block text-[13px] text-surface-400 space-y-1.5"><span>{t('day', { defaultValue: '요일' })}</span><select value={editForm.day} onChange={(e) => setEditForm({ ...editForm, day: e.target.value })} className="w-full bg-surface-950/80 border border-surface-700 rounded-lg px-2 py-2 text-[14px] text-surface-100"><option value="0">일</option><option value="1">월</option><option value="2">화</option><option value="3">수</option><option value="4">목</option><option value="5">금</option><option value="6">토</option></select></label>}
-                      <label className="block text-[13px] text-surface-400 space-y-1.5"><span>{t('hour', { defaultValue: '시' })}</span><input type="number" min="0" max="23" value={editForm.hour} onChange={(e) => setEditForm({ ...editForm, hour: e.target.value })} className="w-full bg-surface-950/80 border border-surface-700 rounded-lg px-2 py-2 text-[14px] text-surface-100" /></label>
-                      <label className="block text-[13px] text-surface-400 space-y-1.5"><span>{t('minute', { defaultValue: '분' })}</span><input type="number" min="0" max="59" value={editForm.minute} onChange={(e) => setEditForm({ ...editForm, minute: e.target.value })} className="w-full bg-surface-950/80 border border-surface-700 rounded-lg px-2 py-2 text-[14px] text-surface-100" /></label>
+                      {editForm.cronType === 'weekly' && <label className="block text-[13px] text-surface-400 space-y-1.5"><span>{t('day')}</span><select value={editForm.day} onChange={(e) => setEditForm({ ...editForm, day: e.target.value })} className="w-full bg-surface-950/80 border border-surface-700 rounded-lg px-2 py-2 text-[14px] text-surface-100"><option value="0">{t('sun')}</option><option value="1">{t('mon')}</option><option value="2">{t('tue')}</option><option value="3">{t('wed')}</option><option value="4">{t('thu')}</option><option value="5">{t('fri')}</option><option value="6">{t('sat')}</option></select></label>}
+                      <label className="block text-[13px] text-surface-400 space-y-1.5"><span>{t('hour')}</span><input type="number" min="0" max="23" value={editForm.hour} onChange={(e) => setEditForm({ ...editForm, hour: e.target.value })} className="w-full bg-surface-950/80 border border-surface-700 rounded-lg px-2 py-2 text-[14px] text-surface-100" /></label>
+                      <label className="block text-[13px] text-surface-400 space-y-1.5"><span>{t('minute')}</span><input type="number" min="0" max="59" value={editForm.minute} onChange={(e) => setEditForm({ ...editForm, minute: e.target.value })} className="w-full bg-surface-950/80 border border-surface-700 rounded-lg px-2 py-2 text-[14px] text-surface-100" /></label>
                     </div>
                   )}
-                  {editForm.triggerType === 'cron' && editForm.cronType === 'interval' && <label className="block text-[13px] text-surface-400 space-y-1.5"><span>{t('intervalMinutes', { defaultValue: '반복 간격(분)' })}</span><input type="number" min="1" value={editForm.intervalMinutes} onChange={(e) => setEditForm({ ...editForm, intervalMinutes: e.target.value })} className="w-full bg-surface-950/80 border border-surface-700 rounded-lg px-2 py-2 text-[14px] text-surface-100" /></label>}
-                  {editForm.triggerType === 'once' && <label className="block text-[13px] text-surface-400 space-y-1.5"><span>{t('onceAt', { defaultValue: '실행 시각' })}</span><input type="datetime-local" value={editForm.onceAt} onChange={(e) => setEditForm({ ...editForm, onceAt: e.target.value })} className="w-full bg-surface-950/80 border border-surface-700 rounded-lg px-2 py-2 text-[14px] text-surface-100" /></label>}
-                  <label className="block text-[13px] text-surface-400 space-y-1.5"><span>{t('timeoutSeconds', { defaultValue: '제한 시간(초)' })}</span><input type="number" min="1" placeholder={t('defaultTimeout', { defaultValue: '기본값' })} value={editForm.timeoutSeconds} onChange={(e) => setEditForm({ ...editForm, timeoutSeconds: e.target.value })} className="w-full bg-surface-950/80 border border-surface-700 rounded-lg px-2 py-2 text-[14px] text-surface-100" /></label>
+                  {editForm.triggerType === 'cron' && editForm.cronType === 'interval' && <label className="block text-[13px] text-surface-400 space-y-1.5"><span>{t('intervalMinutes')}</span><input type="number" min="1" value={editForm.intervalMinutes} onChange={(e) => setEditForm({ ...editForm, intervalMinutes: e.target.value })} className="w-full bg-surface-950/80 border border-surface-700 rounded-lg px-2 py-2 text-[14px] text-surface-100" /></label>}
+                  {editForm.triggerType === 'once' && <label className="block text-[13px] text-surface-400 space-y-1.5"><span>{t('onceAt')}</span><input type="datetime-local" value={editForm.onceAt} onChange={(e) => setEditForm({ ...editForm, onceAt: e.target.value })} className="w-full bg-surface-950/80 border border-surface-700 rounded-lg px-2 py-2 text-[14px] text-surface-100" /></label>}
+                  <label className="block text-[13px] text-surface-400 space-y-1.5"><span>{t('timeoutSeconds')}</span><input type="number" min="1" placeholder={t('defaultTimeout')} value={editForm.timeoutSeconds} onChange={(e) => setEditForm({ ...editForm, timeoutSeconds: e.target.value })} className="w-full bg-surface-950/80 border border-surface-700 rounded-lg px-2 py-2 text-[14px] text-surface-100" /></label>
                   <div className="flex gap-2 pt-1">
-                    <button disabled={saving} onClick={() => handleSaveEdit(selectedJob)} className="flex-1 px-3 py-2 rounded-lg bg-primary-500 text-white text-[13px] font-semibold hover:bg-primary-400 disabled:opacity-50">{saving ? t('saving', { defaultValue: '저장 중…' }) : t('save', { defaultValue: '저장' })}</button>
-                    <button disabled={saving} onClick={() => setEditing(false)} className="px-3 py-2 rounded-lg bg-surface-800 text-surface-300 text-[13px] font-semibold hover:bg-surface-700">{t('cancel', { defaultValue: '취소' })}</button>
+                    <button disabled={saving} onClick={() => handleSaveEdit(selectedJob)} className="flex-1 px-3 py-2 rounded-lg bg-primary-500 text-white text-[13px] font-semibold hover:bg-primary-400 disabled:opacity-50">{saving ? t('saving') : t('save')}</button>
+                    <button disabled={saving} onClick={() => setEditing(false)} className="px-3 py-2 rounded-lg bg-surface-800 text-surface-300 text-[13px] font-semibold hover:bg-surface-700">{t('cancel')}</button>
                   </div>
                 </div>
               )}
 
               <div className="grid grid-cols-2 gap-3 max-xl:grid-cols-1">
                 <div className="border border-surface-800 rounded-xl p-3 bg-surface-900/50">
-                  <div className="text-[12px] uppercase tracking-wider font-bold text-surface-500 mb-2">{t('description', { defaultValue: '설명' })}</div>
+                  <div className="text-[12px] uppercase tracking-wider font-bold text-surface-500 mb-2">{t('description')}</div>
                   <p className="text-[13px] leading-4 text-surface-300 whitespace-pre-wrap line-clamp-4">
-                    {(selectedJob.description || selectedJob.prompt || t('noDescription', { defaultValue: '설명이 없습니다. 만들 때 목적이나 기대 결과를 적어두면 여기에 표시됩니다.' }))}
+                    {(selectedJob.description || selectedJob.prompt || t('noDescription'))}
                   </p>
                 </div>
                 <div className="border border-surface-800 rounded-xl p-3 bg-surface-900/50">
-                  <div className="text-[12px] uppercase tracking-wider font-bold text-surface-500 mb-2">{t('details', { defaultValue: '실행 규칙' })}</div>
+                  <div className="text-[12px] uppercase tracking-wider font-bold text-surface-500 mb-2">{t('details')}</div>
                   <dl className="grid grid-cols-2 gap-x-3 gap-y-1.5 text-[13px]">
-                    <dt className="text-surface-500">{t('nextRun', { defaultValue: '다음' })}</dt><dd className="text-surface-200 text-right truncate">{selectedJob.nextRunAt ? new Date(selectedJob.nextRunAt).toLocaleString() : '-'}</dd>
-                    <dt className="text-surface-500">{t('schedule', { defaultValue: '규칙' })}</dt><dd className="text-surface-200 text-right truncate">{triggerLabel(selectedJob, t)}</dd>
-                    <dt className="text-surface-500">{t('runs', { defaultValue: '실행' })}</dt><dd className="text-surface-200 text-right">{selectedJob.runCount}</dd>
-                    <dt className="text-surface-500">{t('risk', { defaultValue: '위험도' })}</dt><dd className="text-surface-200 text-right">{selectedJob.riskLevel}</dd>
+                    <dt className="text-surface-500">{t('nextRun')}</dt><dd className="text-surface-200 text-right truncate">{selectedJob.nextRunAt ? new Date(selectedJob.nextRunAt).toLocaleString() : '-'}</dd>
+                    <dt className="text-surface-500">{t('schedule')}</dt><dd className="text-surface-200 text-right truncate">{triggerLabel(selectedJob, t)}</dd>
+                    <dt className="text-surface-500">{t('runs')}</dt><dd className="text-surface-200 text-right">{selectedJob.runCount}</dd>
+                    <dt className="text-surface-500">{t('risk')}</dt><dd className="text-surface-200 text-right">{selectedJob.riskLevel}</dd>
                   </dl>
                 </div>
               </div>
 
               <div className="border border-surface-800 rounded-xl p-3 bg-surface-900/50">
-                <div className="text-[12px] uppercase tracking-wider font-bold text-surface-500 mb-2">{t('origin', { defaultValue: '생성 정보' })}</div>
+                <div className="text-[12px] uppercase tracking-wider font-bold text-surface-500 mb-2">{t('origin')}</div>
                 <dl className="grid grid-cols-2 gap-x-3 gap-y-1.5 text-[13px]">
-                  <dt className="text-surface-500">{t('project', { defaultValue: '프로젝트' })}</dt><dd className="text-surface-200 text-right truncate">{selectedJob.projectId ? projectById.get(selectedJob.projectId)?.name : t('systemJobs', { defaultValue: '시스템' })}</dd>
-                  <dt className="text-surface-500">{t('creator', { defaultValue: '만든 사람' })}</dt><dd className="text-surface-200 text-right truncate">{selectedJob.creatorName || `user ${selectedJob.userId}`}</dd>
-                  <dt className="text-surface-500">{t('created', { defaultValue: '생성' })}</dt><dd className="text-surface-200 text-right truncate">{new Date(selectedJob.createdAt).toLocaleString()}</dd>
-                  <dt className="text-surface-500">설정 변경</dt><dd className="text-surface-200 text-right truncate">{new Date(selectedJob.configUpdatedAt || selectedJob.updatedAt).toLocaleString()}</dd>
-                  <dt className="text-surface-500">마지막 실행</dt><dd className="text-surface-200 text-right truncate">{selectedJob.lastRunAt ? new Date(selectedJob.lastRunAt).toLocaleString() : '-'}</dd>
-                  {selectedJob.createdBySessionId && <><dt className="text-surface-500">{t('sourceSession', { defaultValue: '생성 세션' })}</dt><dd className="text-surface-200 text-right truncate">{selectedJob.createdBySessionId.slice(0, 8)}</dd></>}
+                  <dt className="text-surface-500">{t('project')}</dt><dd className="text-surface-200 text-right truncate">{selectedJob.projectId ? projectById.get(selectedJob.projectId)?.name : t('systemJobs')}</dd>
+                  <dt className="text-surface-500">{t('creator')}</dt><dd className="text-surface-200 text-right truncate">{selectedJob.creatorName || `user ${selectedJob.userId}`}</dd>
+                  <dt className="text-surface-500">{t('created')}</dt><dd className="text-surface-200 text-right truncate">{new Date(selectedJob.createdAt).toLocaleString()}</dd>
+                  <dt className="text-surface-500">{t('configChanged')}</dt><dd className="text-surface-200 text-right truncate">{new Date(selectedJob.configUpdatedAt || selectedJob.updatedAt).toLocaleString()}</dd>
+                  <dt className="text-surface-500">{t('lastExecuted')}</dt><dd className="text-surface-200 text-right truncate">{selectedJob.lastRunAt ? new Date(selectedJob.lastRunAt).toLocaleString() : '-'}</dd>
+                  {selectedJob.createdBySessionId && <><dt className="text-surface-500">{t('sourceSession')}</dt><dd className="text-surface-200 text-right truncate">{selectedJob.createdBySessionId.slice(0, 8)}</dd></>}
                 </dl>
               </div>
 
               {(selectedCommand || selectedRelatedFiles.length > 0) && (
                 <div className="border border-surface-800 rounded-xl p-3 bg-surface-900/50">
-                  <div className="text-[12px] uppercase tracking-wider font-bold text-surface-500 mb-2">{t('relatedFiles', { defaultValue: '관련 파일 / 실행 내용' })}</div>
+                  <div className="text-[12px] uppercase tracking-wider font-bold text-surface-500 mb-2">{t('relatedFiles')}</div>
                   {selectedCommand && <code className="block mb-2 rounded-lg bg-black/25 px-2 py-1.5 text-[12px] leading-4 text-surface-300 line-clamp-3">{selectedCommand}</code>}
                   {selectedRelatedFiles.length > 0 && <div className="flex flex-wrap gap-1.5">
                     {selectedRelatedFiles.map((file) => <button key={file} onClick={() => openTowerFile(file)} title={file} className="max-w-full truncate rounded-md border border-surface-700 bg-surface-850 px-2 py-1 text-[12px] text-primary-300 hover:border-primary-500/60">{file.split('/').pop() || file}</button>)}
@@ -1205,7 +1204,7 @@ export function SchedulePanel() {
                     {runs.map((run) => (
                       <div key={run.id} className="text-[13px] border-b border-surface-800 last:border-b-0 pb-2 last:pb-0">
                         <div className="flex items-center justify-between gap-2">
-                          <button type="button" onClick={() => selectedJob && loadProcessMap(selectedJob.id, run.id)} className={`${run.status === 'success' ? 'tone-success tone-text' : 'tone-danger tone-text'} hover:underline`}>{run.status === 'success' ? '성공' : run.status === 'failed' ? '실패' : run.status}</button>
+                          <button type="button" onClick={() => selectedJob && loadProcessMap(selectedJob.id, run.id)} className={`${run.status === 'success' ? 'tone-success tone-text' : 'tone-danger tone-text'} hover:underline`}>{run.status === 'success' ? t('success') : run.status === 'failed' ? t('failed', { ns: 'common' }) : run.status}</button>
                           <span className="text-surface-500">{new Date(run.ranAt).toLocaleString()} · {duration(run)}</span>
                         </div>
                         {run.error && <div className="mt-1 text-red-300">{run.error}</div>}
@@ -1216,7 +1215,7 @@ export function SchedulePanel() {
               </div>
 
               <div className="border border-surface-800 rounded-xl p-3 bg-surface-900/50">
-                <div className="text-[12px] uppercase tracking-wider font-bold text-surface-500 mb-2">진행 상태</div>
+                <div className="text-[12px] uppercase tracking-wider font-bold text-surface-500 mb-2">{t('progressStatus')}</div>
                 <ProcessMapPreview
                   map={processMap}
                   loading={processMapLoading}

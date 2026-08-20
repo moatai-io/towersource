@@ -65,6 +65,7 @@ import { isUserFacingSessionFile } from '../services/session/session-file-filter
 import { executeWorkbenchRequest, type WorkbenchExecutionRequest } from '../services/runtime-box/workbench-execution-broker.js';
 import { resolveWorkbenchDeploymentId, selectPersistedWorkbenchExecutionProvider } from '../services/runtime-box/workbench-execution-provider-selector.js';
 import { resolveRemoteWorkbenchCredentialEnv } from '../services/runtime-box/workbench-remote-credential-resolution.js';
+import { resolveOperatorExecution } from '../services/runtime-box/workbench-operator-execution.js';
 import { getProjectComputeDeploymentBinding, getProjectComputeSettings } from '../services/runtime-box/workbench-project-compute-settings.js';
 import { cancelWorkbenchJob, getWorkbenchJob, listWorkbenchJobs } from '../services/runtime-box/workbench-job-registry.js';
 import { requestLocalWorkbenchJobCancel } from '../services/runtime-box/workbench-job-runner.js';
@@ -91,7 +92,7 @@ const EnvSchema = Type.Record(Type.String(), Type.String(), {
 
 const WorkbenchExecuteParams = Type.Object({
   command: Type.String({ minLength: 1, maxLength: 2000, description: 'Command or process to run in the shared Agent Workbench.' }),
-  cwd: Type.Optional(Type.String({ description: 'Working directory inside /workspace.' })),
+  cwd: Type.Optional(Type.String({ description: 'Working directory. Project users use /workspace; Organization Admins may use allowlisted Tower source or organization workspace host paths through Operator Runtime.' })),
   lifecycle: Type.Optional(Type.Union([
     Type.Literal('auto'), Type.Literal('foreground'), Type.Literal('job'), Type.Literal('service'),
   ], { description: 'Default auto. Tower classifies command vs bounded job vs managed service.' })),
@@ -621,19 +622,25 @@ export function createRuntimeBoxPiTools(ctx: RuntimeBoxToolContext & { workbench
   const workbenchExecuteTool: ToolDefinition = {
     name: 'bash',
     label: 'Bash',
-    description: `Run a shell command in the persistent working computer for project "${projectLabel}". Commands start in /workspace; files, project dependencies, Jobs, and Services persist across Sessions.`,
-    promptSnippet: 'Use bash naturally for Project commands, package installation, tests, builds, scripts, and servers. Tower routes it to the execution authority already assigned to this Project.',
+    description: `Run a shell command in the persistent working computer for project "${projectLabel}". Commands start in /workspace; Organization Admins can also target allowlisted Tower source and organization workspace paths through Operator Runtime.`,
+    promptSnippet: 'Use bash naturally for Project commands, package installation, tests, builds, scripts, and servers. Organization Admin host paths are routed to the credential-free Operator Runtime; Tower routes ordinary commands to the Project authority.',
     promptGuidelines: [
       'Use one outcome-oriented request; Tower classifies foreground, job, or service.',
       'Risky command patterns fail closed in this unified path.',
       'Long bounded commands return a durable Job handle that can outlive this Session.',
       'Servers and watchers become managed Services with tracked logs, ports, TTL, and stop controls.',
       'Install and combine project-scoped CLI tools freely when safe.',
-      'Treat /workspace as the Project root. Do not assume access to Tower control-plane files, other Projects, or host credentials.',
+      'Treat /workspace as the Project root. Only Organization Admins may target allowlisted Tower source or organization workspace host paths; this never grants Credential values or unbounded host access.',
     ],
     parameters: WorkbenchExecuteParams,
     async execute(_toolCallId: string, params: WorkbenchExecutionRequest) {
       try {
+        const operatorResolution = resolveOperatorExecution({
+          request: params,
+          actorRole: ctx.userRole,
+          projectRoot: ctx.projectRoot,
+        });
+        const routedParams = operatorResolution.request;
         const deploymentId = resolveWorkbenchDeploymentId();
         const deploymentBinding = await getProjectComputeDeploymentBinding(ctx.projectId, deploymentId).catch(error => {
           if (error instanceof Error && error.message.includes('relation "project_compute_deployment_bindings" does not exist')) return undefined;
@@ -649,20 +656,20 @@ export function createRuntimeBoxPiTools(ctx: RuntimeBoxToolContext & { workbench
           projectId: ctx.projectId,
           actorUserId: Number(ctx.userId),
           projectRoot: ctx.projectRoot,
-          defaultWorkerId: computeSettings?.defaultWorkerId ?? undefined,
-          workstationMode: computeSettings?.workstationMode,
-          authorityMode: computeSettings?.authorityMode,
+          defaultWorkerId: operatorResolution.operatorPlane ? undefined : computeSettings?.defaultWorkerId ?? undefined,
+          workstationMode: operatorResolution.operatorPlane ? true : computeSettings?.workstationMode,
+          authorityMode: operatorResolution.operatorPlane ? 'operator-plane' : computeSettings?.authorityMode,
           actorRole: ctx.userRole,
           deploymentId,
-          request: params,
+          request: routedParams,
         });
-        const request = provider.kind === 'remote-worker'
+        const request = provider.kind === 'remote-worker' && operatorResolution.credentialMode !== 'none'
           ? (await resolveRemoteWorkbenchCredentialEnv({
             projectId: ctx.projectId,
             userId: Number(ctx.userId),
-            request: params,
+            request: routedParams,
           })).request
-          : params;
+          : { ...routedParams, env: routedParams.env ? { ...routedParams.env } : undefined };
         const result = await executeWorkbenchRequest({
           request,
           context: { projectId: ctx.projectId, userId: ctx.userId, sessionId: ctx.sessionId },

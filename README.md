@@ -1,348 +1,522 @@
-> ⚠️ **This repository is going private on 2026-04-27.**
-> See [#9](https://github.com/juliuschun/tower/issues/9) for details.
-> Last public commit is tagged [`v1.0-last-oss`](https://github.com/juliuschun/tower/releases/tag/v1.0-last-oss).
-
 # Tower
 
-> **The AI command center your whole team can share.**
-> Claude Code + agents + a real file system, served as a web app — so your non-developers use it too.
+> **Tower is not an agent harness only for developers. It is a Business OS for people who want to run every part of a company with AI.**
+
+Create agents, give each one independent computing, and deploy them to employees, customers, or external users. Connect research, documents, data, sales, operations, publishing, and automation inside one self-hosted workspace.
+
+Over the last five months, Tower has been refined through real work with customer teams, one operational detail at a time. We hope it helps every business skip the long process of building an internal agent harness from scratch and begin with an AI operating system of its own.
 
 [![License](https://img.shields.io/badge/license-Apache_2.0-blue.svg)](LICENSE)
 [![Status](https://img.shields.io/badge/status-research_alpha-orange)]()
-[![Last commit](https://img.shields.io/github/last-commit/juliuschun/tower)](https://github.com/juliuschun/tower/commits)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.x-blue)](package.json)
 
 🌐 [English](README.md) · [한국어](README.ko.md) · [Install](INSTALL.md) · [Architecture](docs/tower-guide/architecture.md)
 
 <p align="center">
-  <img src="capture-chat.png" alt="Tower — every AI conversation, shared like Google Docs" width="720" />
+  <img src="capture-chat.png" alt="Tower shared AI workspace" width="760" />
 </p>
 
-The strongest organization is one where 100% of the team works with AI — not just developers, not just power users, everyone. The barrier has never been AI itself. It's the terminal, the CLI, the setup, the isolation. Tower removes that barrier.
+---
 
-Every conversation with AI, shared by the whole team like a Google Doc. One file system. One memory. One place where your entire company's AI work happens — visible, searchable, and building on itself.
+## Build an agent. Give it a computer. Put it to work.
 
-*In production. $20K revenue in first 2 weeks.*
+Tower brings four capabilities together:
 
-<p align="center">
-  <img src="diagram-tower.png" alt="Tower — team members contribute, knowledge compounds, everyone benefits" width="560" />
-</p>
+### Create and deploy AI agents
+
+Define an agent’s role, promise, instructions, tools, authority, and first mission. Deploy it as an internal AI teammate, a customer-facing AI service, or a controlled experience for external collaborators. Users can access the agent through the browser while you retain control over its behavior and resources.
+
+### Give every agent independent computing
+
+A real agent needs more than a chat window. Each Tower agent operates from an accountable workspace with its own project files, execution context, memory, tools, credentials, and policy boundaries. It can produce artifacts, run commands, use connected services, and continue work across sessions without mixing one agent’s operating context with another’s.
+
+### Run Tower on your own infrastructure
+
+Install Tower on your computer, workstation, or organization server. Keep project files, execution, credentials, and operating records inside infrastructure you control. Start locally, then move to a dedicated server when the team is ready.
+
+### Connect the LLMs you choose
+
+Tower is not tied to one model vendor. Connect supported cloud providers, model routers, OpenAI-compatible endpoints, or models served inside your own environment. Choose the model path that fits each agent’s work, cost, privacy, and reliability requirements.
 
 ---
 
 ## Contents
 
-- [The Problem](#the-problem-ai-is-personal-work-is-not)
-- [The Solution](#the-solution-share-ai-like-google-docs)
-- [Run Any Code. No CLI Needed.](#run-any-code-no-cli-needed)
-- [Channel AI & Proactive Agent](#channel-ai--proactive-agent)
-- [Automations & Agent Board](#automations--agent-board)
-- [Publishing & Deploy Engine](#publishing--deploy-engine)
-- [Skills Create Skills](#skills-create-skills)
-- [Multi-Engine AI](#multi-engine-ai)
-- [How Tower Differs](#how-tower-differs)
-- [Tech Stack](#tech-stack)
-- [Changelog](#changelog)
-- [Get Started](#get-started)
-- [Status & Roadmap](#status--roadmap)
+- [Build an agent. Give it a computer. Put it to work.](#build-an-agent-give-it-a-computer-put-it-to-work)
+- [From a developer harness to a Business OS](#from-a-developer-harness-to-a-business-os)
+- [Why Tower exists](#why-tower-exists)
+- [What Tower is](#what-tower-is)
+- [Who should try Tower](#who-should-try-tower)
+- [What Tower gives a team](#what-tower-gives-a-team)
+- [Why I built Tower](#why-i-built-tower)
+- [How Tower is different](#how-tower-is-different)
+- [Architecture at a glance](#architecture-at-a-glance)
+- [Feature map](#feature-map)
+- [Tech stack](#tech-stack)
+- [Quick start](#quick-start)
+- [Repository layout](#repository-layout)
+- [Status](#status)
+- [Contributing](#contributing)
+- [License](#license)
 
 ---
 
-## The Problem: AI Is Personal. Work Is Not.
+## From a developer harness to a Business OS
 
-ChatGPT. Claude Code. Copilot. They're all powerful — and they're all trapped on one person's screen.
+Powerful coding agents changed how developers work. A high-agency harness that can read files, run commands, connect tools, and verify results can do far more than a chat window.
 
-- Conversations scatter across individual accounts
-- What AI learns in one session dies when the session ends
-- The same questions get asked over and over by different people
-- Non-developers can't even get past the terminal
+But a business is made of more than code.
 
-Even Claude Code — the most capable coding agent — lives in a single terminal. One person benefits. The team doesn't.
-
-You can hand everyone an AI subscription. That doesn't make you an AI-augmented organization. It makes you a collection of individuals using AI alone.
-
----
-
-## The Solution: Share AI Like Google Docs
-
-### Shared Conversations
-
-Every AI conversation is visible to the team. Who asked what. What AI answered. What decisions were made. Organized by project — your company's AI work at a glance.
-
-No more "what did Claude say about that?" — just look. Any session can be turned into a **public share link** when you want to show it outside the team.
-
-### One File System, One Memory
-
-One server. One shared file system. One memory that persists across people and time.
-
-What one person teaches AI on Monday, a new hire uses on Friday. Three layers of memory — session, project, and team — so nothing learned is ever lost.
-
-Version control happens automatically. Every change is committed, browsable, and rollbackable. It looks and feels like file management — not Git. **Zero CLI knowledge required.**
-
-### Partitioned by Team
-
-Marketing doesn't see engineering's code. Engineering doesn't see HR's documents. But when they need to collaborate, the walls come down.
-
-Projects, departments, teams, individuals — partition however your organization works. Four permission levels (`admin` / `operator` / `member` / `viewer`) with folder-level isolation (`allowed_path`).
-
+```text
+market and customer research
++ proposals and reports
++ data and spreadsheets
++ sales and customer operations
++ meetings and follow-through
++ content and publishing
++ operational checks and recurring automation
 ```
-workspace/
-├── projects/
-│   ├── marketing-site/
-│   │   └── AGENTS.md    ← "Brand voice is casual. Use Next.js."
-│   ├── api-backend/
-│   │   └── AGENTS.md    ← "Use Go. Follow company style guide."
-│   └── onboarding-docs/
-│       └── AGENTS.md    ← "Write for non-technical readers."
-└── decisions/            ← Team decision records
+
+To use AI across all of this work, business users need more than a powerful harness. People must be able to work from the web and mobile. Files and conversations must continue within the right work context. Every agent needs independent execution. Credentials and authority need safe boundaries, important actions need human approval, and successful work needs to become organizational records and reusable skills.
+
+Tower was built to bring that entire system together as a Business OS.
+
+```text
+a high-agency agent harness
+→ a workspace for every part of the business
+→ independently executing AI teammates
+→ organizational authority, records, and automation
+→ an AI operating system the business owns
 ```
 
 ---
 
-## Run Any Code. No CLI Needed.
+## Why Tower exists
+
+Building an internal agent harness requires far more than connecting a model API.
+
+- How should workspaces be separated across agents and projects?
+- How can each agent receive a real computer and runtime safely?
+- How should employees access it from the web and mobile?
+- How should files, credentials, tools, authority, and approvals be governed?
+- How do repeated operations become skills and automations?
+- Where should results, decisions, failures, and follow-up work be recorded?
+- How can internal agents and customer-facing AI services run in the same system?
+
+These questions look small in a demo. They determine whether AI can survive contact with real operations.
+
+Over the last five months, Tower has been applied to real customer work and refined around these details. Creating documents, preparing meetings, handing off files, checking authority, continuing interrupted work, and deploying external services repeatedly exposed small points of friction. Those points became product capabilities and operating rules.
+
+> **Tower exists so every business does not have to rebuild this foundation. Start from a field-tested base and move directly to creating the AI teammates and automations your organization needs.**
+
+---
+
+## What Tower is
+
+**Tower is a self-hosted platform for creating, operating, and deploying AI agents with their own accountable computing environments.**
+
+Create an agent, assign its role and operating policy, connect the models and services it needs, and give it an independent workspace where it can execute real work. Then deploy it to your internal team, a customer, or an external audience while preserving the agent’s files, memory, authority, and audit trail.
+
+> **Move from doing every task yourself to directing AI teammates — together.**
+
+Tower is not a model provider, a terminal wrapper, or another general-purpose chat UI. It is the organizational layer around AI work: who an agent is, what it is responsible for, what it can access, when it must ask for approval, where its work is recorded, and how a successful workflow becomes reusable.
+
+Tower does not treat an agent as a mascot or a thin prompt wrapper. In Tower, an agent is a work system:
+
+```text
+role and promise
++ operating instructions
++ project files and sources
++ tools and credentials
++ runtime execution environment
++ approval and authority policy
++ memory, sessions, decisions, and artifacts
++ reusable skills and automations
+```
+
+---
+
+## Who should try Tower
+
+Tower is not primarily a developer tool. It is for people who want AI to become part of how a business actually operates.
+
+Good fits:
+
+- Solo business owners and operators using AI across research, sales, documents, data, operations, and content
+- Startups and small teams that must operate many business functions with few people
+- Organizations that need shared internal AI teammates and an automation foundation across departments
+- AI transformation teams that want to begin from a field-tested base instead of developing an internal agent harness from scratch
+- Self-hosted organizations that need control over files, credentials, runtime, and audit records
+- Teams that want to operate internal agents and customer-facing AI services in the same system
+
+Tower is probably not the right first tool if you only need a simple chatbot, a single-user coding CLI, or a fully managed SaaS with no self-hosting responsibility.
+
+---
+
+## What Tower gives a team
+
+### 1. Deploy agents to employees, customers, and external users
+
+An agent built in Tower does not have to remain inside its creator’s private session. It can serve an internal team, become a customer-facing AI service, or support external collaborators through a controlled browser experience.
+
+- Give each agent a clear identity, responsibility, and operating promise
+- Bind deployment to a versioned agent profile and approved capabilities
+- Choose what users can see, upload, request, or invoke
+- Publish updated behavior without losing the record of earlier versions
+- Keep external access separate from the private operator workspace
+
+### 2. Independent computing for every agent
+
+Each agent can have its own accountable work environment rather than sharing one undifferentiated chat context.
+
+- Dedicated project files and generated artifacts
+- Runtime execution for commands, code, documents, and data
+- Agent-specific memory, sessions, instructions, and decisions
+- Scoped tools, Connections, credentials, and approval rules
+- Persistent work that can continue and report back across sessions
+
+This isolation is what lets an agent do substantive work while keeping its responsibility and access boundaries understandable.
+
+### 3. Shared AI workspaces
+
+Every project has its own files, conversations, instructions, artifacts, and AI context. A project can represent a department, client, product, research area, or one primary AI teammate’s workcell.
+
+- Shared sessions instead of isolated personal chats
+- Project files and generated artifacts in one place
+- `AGENTS.md` for project-specific instructions
+- Searchable conversation and work history
+- Permission boundaries for users, projects, paths, and roles
 
 <p align="center">
-  <img src="diagram-access.png" alt="Tower — messages from any device become real work" width="640" />
+  <img src="diagram-tower.png" alt="Tower turns AI work into shared organizational memory" width="640" />
 </p>
 
-Tower runs on your server. AI doesn't just chat — it executes. Write code, create files, deploy apps, run analyses. The full power of a development environment, accessible through a browser.
+### 4. Real execution, not just chat
 
-Your marketing lead can ask AI to build a landing page. Your ops manager can automate a report. Your intern can run a data analysis. None of them need to know what a terminal is.
+Tower agents can work against an actual project workspace. They can read and write files, run commands, analyze data, generate reports, build sites, inspect PDFs, create slides, and validate their own work.
 
----
-
-## Channel AI & Proactive Agent
-
-Most AI tools wait for you to ask. Tower's AI lives inside the team — in the chat, in the flow of work.
-
-- **`@ai` — resident channel partner.** Drop `@ai` in any team channel. It reads the last messages, understands the project context (`AGENTS.md`), and replies in-thread. Multi-turn, not one-shot. The team sees the exchange.
-- **`@task` — hand work off.** Turn a message into a running task without leaving the channel.
-- **AI Side Panel.** Private AI thread alongside any channel. The AI already has the channel's context — ask it something privately, then share the answer back when it's ready.
-- **Proactive Agent.** AI initiates conversations, not just reactive Q&A. It surfaces what needs attention (failed builds, stuck tasks, upcoming deadlines) in the **Inbox** with card-based UX.
-- **Session sharing.** Publish any conversation to a public link — light-mode chat UI, rendered visuals, attachments intact.
-
----
-
-## Automations & Agent Board
+That means a marketing lead can ask for a landing page, an operator can ask for a recurring report, and an engineer can ask for a code change — all through the same browser-based workspace.
 
 <p align="center">
-  <img src="capture-board.png" alt="Tower — Agent Board with autonomous task execution" width="720" />
+  <img src="diagram-access.png" alt="Tower makes server-side AI execution available through a browser" width="680" />
 </p>
 
-**Agent Board (Kanban).** Create a task. AI executes it. Tasks create tasks. "Plan our product launch" spawns market research, competitor analysis, pricing, and timeline — each running autonomously.
+### 5. Agent-first project model
 
-**Unified Automations.** Tasks and schedules merged into one model. Run once, run on a cron, run when triggered by an event. Three modes:
+Tower is moving from “AI chats inside projects” toward **AI teammates with accountable workspaces**.
 
-- **Spawn** — new session per run (clean context)
-- **Inject** — append to an existing session (keep context)
-- **Channel** — post result back to a team channel
+Each primary agent can have:
 
-Your weekly reports, morning stand-up digests, and recurring market scans write themselves.
+- A visible profile: name, role, promise, and operating instruction
+- Authority and tool policy
+- Harness/runtime binding
+- First mission and ROI expectations
+- Versioned profile updates
+- Session snapshots that preserve historical behavior
 
----
+This makes agent creation feel less like filling out settings and more like staffing a role: What is this agent responsible for? What can it access? What should it ask a human to approve? What is the first useful mission?
 
-## Publishing & Deploy Engine
+### 6. Skills that preserve how the team works
+
+A good AI interaction should not disappear after the session ends. Tower’s skill system lets teams turn repeated workflows into reusable playbooks.
+
+Examples:
+
+- “Review this proposal like our best sales operator”
+- “Convert Markdown to a publication-grade PDF”
+- “Prepare for this meeting using the relevant files and prior notes”
+- “Analyze this spreadsheet and surface risks, formulas, and totals”
+- “Generate a frontend component and remove the usual AI-design artifacts”
+
+Skills can be scoped to the organization, a project, or a user. When a skill needs a credential, Tower routes that through Connections instead of asking the model to see secrets.
+
+### 7. Credentials and Connections without leaking secrets
+
+Agents often need access to real systems: Google Workspace, GitHub, APIs, publishing targets, or internal services. Tower separates the user-facing Connection from the secret material behind it.
+
+- Credentials live in a vault-backed flow
+- Secrets are injected only into eligible runtime commands
+- The AI sees status and capability, not raw values
+- Project grants, runtime materialization, and provider verification are tracked separately
+- High-risk or external actions can require human approval
+
+### 8. Automations and persistent workers
+
+Tower supports one-off sessions, recurring schedules, channel-style interactions, and persistent AI workers.
+
+Use it for:
+
+- Daily or weekly briefings
+- Market or system monitoring
+- Long-running research
+- Follow-up tasks that keep context
+- Agent workers that report back to a supervisor session
 
 <p align="center">
-  <img src="capture-publish.png" alt="Tower — Publishing Hub" width="720" />
+  <img src="capture-board.png" alt="Tower agent board and task execution" width="760" />
 </p>
 
-**Publishing Hub.** Turn any AI-generated artifact into a live site. Drop files into `workspace/published/sites/<name>/` and they're served at `<name>.<yourdomain>` — no nginx edit, no DNS dance.
+### 9. Publishing from the workspace
 
-**Deploy Engine.** Code type auto-detected:
+AI work often ends as something people need to open: a static page, report, dashboard, proposal, or generated artifact. Tower includes a publishing path so generated outputs can move from workspace files to shareable URLs without a separate deployment ritual.
 
-- Static sites → **Cloudflare Pages** (global CDN, ~2s deploy)
-- Dynamic apps → **Azure Container Apps** (scale-to-zero, ACR build, auto-generated Dockerfile)
-- One API call. Zero config. Cloudflare DNS binding is automated.
-
-**REST API:** `POST /api/deploy`, `GET /api/deploy/list`, `DELETE /api/deploy/:type/:name`.
+<p align="center">
+  <img src="capture-publish.png" alt="Tower publishing hub" width="760" />
+</p>
 
 ---
 
-## Skills Create Skills
+## Why I built Tower
 
-When AI works with your whole team — connected to one file system and one shared memory — something compounds.
+Tower began as an attempt to build the most capable agent environment I could use for my own work.
 
-A one-off task becomes a reusable skill. That skill creates another skill. Your team's AI gets better every day, automatically.
+Starting from the Pi coding agent, I wanted to configure a high-agency harness myself — choosing the models, tools, prompts, skills, and execution patterns instead of being limited to a fixed chat experience or a predefined agent builder. I wanted an environment that could work with real files and code, accept new tools, and keep evolving around the job. That freedom felt essential to getting the best performance from an agent.
 
-**Example:** Someone creates a quote generator → it spawns a proposal skill → which evolves into a contract skill. Each one built on the last, available to everyone.
+But using a powerful harness alone was not enough. **I wanted my teammates to use the same best-in-class harness through the web and mobile, without rebuilding my development environment.** It needed to become a team structure: people working from anywhere, sharing context and operating rules, and assigning work to AI teammates without every person becoming a terminal expert.
 
-**50+ skills ship out of the box** — brainstorming, debugging, code review, planning, UI/UX design, research, document generation, presentation decks, Google Workspace (Gmail/Calendar/Drive/Sheets), SMS, web capture, remote browser, kanban, SQL from natural language, and more.
+I also wanted to give every agent more than a chat session. I wanted to give it **an actual independent computer** — its own files and runtime, tools and credentials, memory and authority boundaries — so it could keep running the many automations a business needs across research, documents, code, publishing, monitoring, and recurring operations.
 
-Three scopes (company / project / personal) with a **Skills Market** UI and per-user on/off toggles. Skills that need credentials (OAuth, API keys) get a guided **Connections** flow — the team-wide credential never touches the LLM.
+That made the product shape clear:
 
----
+```text
+a high-agency agent harness
++ a shared web and mobile workspace
++ an independent computer and work context for every agent
++ the models, tools, and credentials you choose
++ business automation and persistent execution
+= Tower
+```
 
-## And Also
+Most AI products solve one part of this experience well:
 
-**Mobile.** Responsive browser UI. Long-press context menus, touch-optimized scroll, auto-login for remote browser (Neko). Full server compute behind your phone.
+- **Chat products** make models easy to access, but offer limited control over the agent harness and rarely give each agent an independent environment for persistent execution.
+- **Agent builders** make prompts and tools easier to assemble and deploy, but the freedom to change the harness beyond their abstractions — or give an agent a complete working computer — varies widely.
+- **Coding agents** provide powerful tool use and computer access, but are commonly centered on one technical user and that user’s local environment.
+- **Workflow automation tools** repeat defined processes reliably, but broader work that requires context, tool choice, and exception handling needs an agent layer around the workflow.
+- **Managed AI services** reduce operational work, but require the organization to accept someone else’s infrastructure, model choices, and control boundary.
 
-**File Sharing.** Internal team sharing + time-limited external links. No separate file service.
+Tower connects those strengths in a team platform. It aims to preserve the power and freedom of a deeply configurable harness, make it available through the web and mobile, give every agent independent computing, and run it on infrastructure and models you choose.
 
-**Search Everything.** Files, conversations, tasks, Git history — PostgreSQL `pg_trgm` GIN full-text search (Korean + English) across your entire AI workspace.
+The goal is not to reserve meaningful AI leverage for large organizations. It is to help **solo businesses and small teams build their own AI team and automation foundation, execute at a speed that once required a much larger organization, and move ahead.**
 
-**Usage Dashboard.** Daily turn line chart, per-project concentration heatmap, real turn counts in sidebar. See where AI time is actually going.
-
-**Bilingual.** Full Korean / English UI (`i18n`) with consistent terms across product.
-
-**Fleet Management.** Operating Tower for multiple customers? One control plane manages many VMs — publishing gateway, skill profiles (`standalone` / `managed` / `full`), 2-layer backup (local + offsite Azure Blob), live connectivity UI.
-
----
-
-## Multi-Engine AI
-
-Tower isn't locked to one AI provider. The Engine abstraction layer lets you run multiple AI backends side by side:
-
-| Engine | Provider | Billing | Models |
-|--------|----------|---------|--------|
-| **Claude Code** | Anthropic Agent SDK | Max subscription ($200/mo) | Opus 4.8, Sonnet, Haiku |
-| **Pi Agent** | Pi SDK via OpenRouter | Pay-per-token | Any OpenRouter model: Claude, GPT, Gemini, Grok, Kimi, MiniMax… |
-| **Local LLM** | OpenAI-compatible endpoint | Your hardware | Any locally-hosted model |
-
-Switch models mid-conversation. Compare outputs across providers. Start with Claude Max, add OpenRouter models when you need them. Remove any engine by deleting one file.
-
-Configure available models in `packages/backend/engines/pi-models.json` — no code changes needed.
+That is the difference Tower is trying to make real.
 
 ---
 
-## How Tower Differs
+## How Tower is different
 
-| | **Tower** | Claude Code CLI | OpenWebUI / LibreChat |
+| Capability | Tower | Chat UI only | Agent builder | Coding agent CLI |
 |---|:---:|:---:|:---:|
-| Team-visible conversations | ✓ | — | partial |
-| Real file system + Git auto-commit | ✓ | ✓ | — |
-| Runs code / deploys apps | ✓ | ✓ | — |
-| Shared memory across people | ✓ | — | — |
-| Non-developers can use it | ✓ | — | ✓ |
-| Channel AI (`@ai` / `@task`) | ✓ | — | — |
-| Proactive agent (AI initiates) | ✓ | — | — |
-| Multi-engine (Claude + Pi + Local) | ✓ | Claude only | multi-provider |
-| Kanban + cron automations | ✓ | — | — |
-| Publishing + deploy pipeline | ✓ | — | — |
-| Self-hosted | ✓ | ✓ | ✓ |
+| Team-visible AI work history | ✓ | partial | partial | — |
+| Project files and artifacts | ✓ | limited | varies | local only |
+| Real command and runtime execution | ✓ | — | limited/varies | ✓ |
+| Browser access for the whole team | ✓ | ✓ | ✓ | — |
+| Project-specific operating instructions | ✓ | limited | ✓ | ✓ |
+| Credential and Connection governance | ✓ | limited | varies | local/manual |
+| Human approval points for external actions | ✓ | limited | varies | manual |
+| Reusable skills/playbooks | ✓ | partial | ✓ | local/manual |
+| Persistent workers and scheduled AI jobs | ✓ | limited | varies | — |
+| Publishing generated artifacts | ✓ | — | varies | manual |
+| Deploy one agent to internal or external users | ✓ | limited | ✓ | manual |
+| Independent workspace and runtime per agent | ✓ | — | limited/varies | manual |
+| Bring your own model endpoints | ✓ | varies | varies | varies |
+| Self-hosted organizational boundary | ✓ | varies | uncommon | ✓ |
 
-**Short version:** OpenWebUI gives a team chat UI for LLMs. Claude Code gives one developer a terminal agent with real file access. Tower is what you get when you put the second one behind the first one — and add the team plumbing (memory, partitions, automations, publishing) on top.
-
----
-
-## Tech Stack
-
-| Layer | Technology |
-|-------|------------|
-| **Frontend** | React 18 · TypeScript · Vite 6 · Zustand · Tailwind CSS 4 · Virtuoso |
-| **Backend** | Express · TypeScript · WebSocket · PM2 |
-| **Storage** | PostgreSQL 18 (single primary DB) · `pg_trgm` GIN indexes for search · `pgvector` for embeddings |
-| **AI Engines** | `@anthropic-ai/claude-agent-sdk` (Opus 4.8) · `@mariozechner/pi-coding-agent` via OpenRouter · local LLM via OpenAI-compat endpoint · MCP protocol · 50+ skills |
-| **Auth** | JWT · bcrypt · Role-based (`admin` / `operator` / `member` / `viewer`) · folder-level `allowed_path` |
-| **Monorepo** | `packages/backend` · `packages/frontend` · `packages/shared` |
+**Short version:** chat products make models accessible and agent tools make them capable. Tower makes that capability shared, governable, and cumulative for an organization.
 
 ---
 
-## Changelog
+## Architecture at a glance
 
-### 4/20 — Task Agent Guardrails + Channel AI Polish
-- **Channel AI carries project context** — `@ai` in a team chat sees the project's `AGENTS.md` and recent messages automatically
-- **Auto-named AI threads** — the first turn picks a readable name
-- **Task agent inherits team discipline** — architecture checks, decision-log, and commit rules injected into every task
-- **Unified CWD → project mapping** — tasks and sessions always surface their working directory
-- **Project create dedup** — rapid submit no longer creates duplicate folders
+Tower sits between the team’s real work and the model layer. It is not just a prompt UI and not just an execution sandbox; it is the operating layer that connects work context, agent harnesses, permissions, runtime, credentials, and records.
 
-### 4/17–18 — Opus 4.7, Channel AI 2.0, Prefix Caching, Self-hosted VM Infra
-- **Claude Opus 4.7** upgrade with effort pipeline (low / med / high reasoning budget)
-- **`@ai` becomes a resident channel partner** — multi-turn threads instead of one-shot replies
-- **System-prompt prefix caching** — split prompt for Anthropic cache; room context moved to user prompt
-- **Richer visuals in chat** — inline `svg` block + `html-sandbox` (JSON / aspect modes), Linear-style Mermaid redesign
-- **Session-scoped write guard** — AI can't create orphan project folders
-- **Neko remote browser auto-install** for self-hosted VMs, gateway status endpoint, live fleet UI
-- **2-layer backup architecture** — local snapshots + offsite Azure Blob (own server + self-hosted VMs)
-- **Skill library single-source** — manifest-driven reconciliation, legacy `install-skills.sh` removed
+```mermaid
+flowchart TB
+    Work["Real work and missions<br/>research · analysis · writing · code · operations · review"]
+    Modes["Work modes<br/>chat · cases · projects · workflows · schedules · workers"]
+    Harness["Agent brain and harness<br/>plan · use tools · execute · verify · ask for approval"]
+    Tower["Tower workspace<br/>projects · permissions · memory · skills · credentials · audit"]
+    Runtime["Execution layer<br/>files · shell · APIs · browser · publishing · storage"]
+    Models["Model layer<br/>cloud providers · model routers · local and enterprise endpoints"]
 
-### 4/13–15 — Automations, Fleet, Shared Sessions, i18n
-- **Automations system** — tasks and schedules unified into one model (`spawn` / `inject` / `channel` modes)
-- **Unified Kanban** — 2-column layout with schedule integration, AM/PM picker, visible run button
-- **Session sharing** — shareable public link, light-mode chat UI, HTML rendering, attachments preserved
-- **Fleet management** — manage multiple self-hosted servers from one control plane + publishing gateway
-- **Cloudflare DNS automation** — one command binds a subdomain to a published site
-- **Korean / English bilingual UI** — full i18n with consistent terms (Inbox = 완료, Task = 태스크)
-- **Skill credentials + Connections UI** — Google OAuth for gmail/gws skills, Skill Readiness view
-- **Tower Guide wiki** — in-repo architecture · skills · visual formats · operations docs
+    Work -->|goals and acceptance criteria| Modes
+    Modes -->|task state and context| Harness
+    Harness -->|policy-bound actions| Tower
+    Tower -->|scoped runtime access| Runtime
+    Runtime -->|allowed model calls| Models
+    Models -->|reasoning and generation| Runtime
+    Runtime -->|tool results| Tower
+    Tower -->|records, artifacts, approvals| Modes
+    Modes -->|progress and deliverables| Work
+```
 
-### 4/10–12 — Proactive Agent, Usage Dashboard, Realtime
-- **Proactive Agent** — AI initiates conversations, Bell → Inbox flow, card-based UX
-- **Usage dashboard** — daily turn line chart, per-project concentration heatmap, real turn counts in sidebar
-- **Local LLM engine** — third engine alongside Claude and Pi
-- **Session-scoped model selector** — picking a model only affects that session
-- **Realtime sync** — WS event handlers for project / room / session / notification fan-out
-- **PPTX preview** via LibreOffice → PDF (safer than client-side rendering)
+### Core building blocks
 
-### 4/6 — Deploy Engine
-- Auto-detect code type (static vs dynamic) and deploy to the right platform
-- Static sites → Cloudflare Pages (global CDN, ~2s deploy)
-- Dynamic apps → Azure Container Apps (scale-to-zero, ACR build, auto Dockerfile)
-- REST API: `POST /api/deploy`, `GET /api/deploy/list`, `DELETE /api/deploy/:type/:name`
-- Manifest schema extended with `deploy_target`, `external_url`, `last_deployed_at`
-
-### 3/17 — AI Side Panel & Unified Visibility
-- AI Side Panel for channels — private AI threads alongside team chat
-- Channel context injection — AI reads recent 30 messages automatically
-- Share-to-channel — post AI answers back to the team
-- Unified visibility model — `private` / `project` session scoping
-
-### 3/16 — Monorepo + Channel AI (`@ai` / `@task`)
-- `packages/backend`, `packages/frontend`, `packages/shared` structure with `@tower/shared`
-- `@ai` inline quick reply and `@task` full task execution from channels
-- Admin default model config per context (`session` / `ai_reply` / `ai_task`)
-
-### 3/14–15 — Multi-Engine Architecture + 3-Tier Skills
-- Engine abstraction (Claude + Pi) — Pi Agent SDK via OpenRouter, any model
-- DB-backed skill management (company / project / personal scope) + Skills Market UI
-- Pi models configurable via `pi-models.json`; hot-swap within a session
-
-### 3/13 — Dynamic Visual
-- Mermaid · charts (Recharts) · KaTeX · datatable · timeline · treemap · mindmap · gallery · diff · terminal · comparison
-- `RichContent` component with code-split lazy loading
-
-### Earlier
-- **SQLite → PostgreSQL full migration** — single primary DB; `better-sqlite3` dependency removed
-- Agent Board (Kanban) with autonomous task execution
-- File sharing (internal + external links)
-- Full-text search (`pg_trgm` GIN indexes for Korean + English)
-- Publishing Hub — one-click deploy from AI artifacts
-- Git auto-commit + browsable history
-- Role-based auth with folder-level `allowed_path`
+| Layer | What it does |
+|---|---|
+| **Frontend** | Browser workspace for chat, projects, admin, files, skills, usage, publishing, and agent surfaces |
+| **Backend API** | Express/TypeScript services, auth, project/session management, agent orchestration, automations, publishing, credentials |
+| **Project workspace** | Files, generated artifacts, instructions, decisions, and project-local runtime context |
+| **Agent runtime** | Shell/tool execution with policy checks, credential materialization, output capture, and validation loops |
+| **Memory and records** | Session history, project context, decisions, summaries, task runs, schedules, and audit-relevant events |
+| **Skills** | Reusable workflow instructions with project/organization visibility and tool-specific contracts |
+| **Connections** | User-facing service integrations backed by vault-managed credentials and provider verification |
 
 ---
 
-## Get Started
+## Feature map
+
+### Collaboration
+
+- Project-scoped sessions
+- Shared conversation history
+- File-backed artifacts
+- Channel-style AI interactions
+- User roles and project membership
+- Project-local instructions through `AGENTS.md`
+
+### Agent operations
+
+- Primary agent profiles
+- Persistent support agents
+- Worker/task reports back to supervisor sessions
+- Approval-aware tool policies
+- Runtime and harness binding
+- Session snapshots for stable historical behavior
+
+### Runtime and tools
+
+- Project shell execution
+- File read/write/edit operations
+- PDF, spreadsheet, CAD, and image-aware analysis tools
+- Web search/fetch and web capture flows
+- Publishing and PDF export pipelines
+- Static artifact presentation in the workspace viewer
+
+### Knowledge and reuse
+
+- Skills registry and skill materialization
+- Conversation and memory search
+- Project decisions and handoff artifacts
+- Reusable report, slide, PDF, DOCX, spreadsheet, and research workflows
+
+### Governance
+
+- JWT auth and role checks
+- Project and path boundaries
+- Credential Vault and Connections
+- Runtime credential materialization checks
+- Human approval for sensitive actions
+- OSS export and secret-scanning helpers
+
+---
+
+## Tech stack
+
+| Area | Technology |
+|---|---|
+| Frontend | React 18 · TypeScript · Vite · Zustand · Tailwind CSS |
+| Backend | Node.js · Express · TypeScript · WebSocket |
+| Database | PostgreSQL with search-oriented indexes and structured service tables |
+| Agent engines | Pluggable agent runtimes with cloud, routed, and OpenAI-compatible model paths |
+| Runtime | Project workspaces, shell execution, file tools, publishing/PDF/browser helpers |
+| Testing | Vitest · Playwright · TypeScript typechecks · source-contract tests |
+| Packaging | npm workspaces · Nix deployment support for production-like installs |
+
+---
+
+## Quick start
+
+> Tower is research-alpha software. Run it in a controlled environment first, review `.env.example`, and do not connect production credentials until you understand the runtime and permission model.
 
 ```bash
-git clone https://github.com/juliuschun/tower.git
+git clone https://github.com/moatai-io/towersource.git tower
 cd tower
-bash setup.sh    # installs everything, asks you a few questions
-npm run dev      # → http://localhost:32354
+npm install
+cp .env.example .env
+npm run dev
 ```
 
-See **[INSTALL.md](INSTALL.md)** for details — Ubuntu prerequisites, Claude CLI auth, Pi/OpenRouter setup, PostgreSQL 18, Azure VM deployment, Cloudflare tunnel, troubleshooting, and security checklist.
+Default local ports:
+
+- Frontend: `http://localhost:32354`
+- Backend: `http://localhost:32355`
+
+Useful commands:
+
+```bash
+npm run typecheck
+npm test
+npm run build
+npm run preflight
+```
+
+See [INSTALL.md](INSTALL.md) for full setup notes.
 
 ---
 
-## Status & Roadmap
+## Repository layout
 
-### Status: Research Alpha
+```text
+packages/
+  backend/      # API, services, agent orchestration, runtime, credentials, publishing
+  frontend/     # React workspace UI
+  shared/       # shared types and utilities
+skills/         # managed and project-visible skill definitions
+scripts/        # development, validation, and self-host helpers
+docs/           # architecture and guide materials
+```
 
-We use this every day in production. It works — and it's not finished.
+Project workspaces and runtime-generated files should live outside the tracked source tree or in ignored workspace paths. Do not commit credentials, customer data, generated runtime state, or local environment files.
 
-Some features are still rough around the edges. New capabilities ship continuously. This is an active research project building toward a clear destination: **100% AI-augmented teams.**
+---
 
-### Roadmap (near-term)
+## Status
 
-- **Multi-user workspace isolation (Phase 8)** — full per-user sandboxing on the backend
-- **SSO / SAML** for enterprise directories
-- **Heartbeat Phase 2** — persisted cost dashboard, @-mention notifications, alert rules
-- **Team-level memory** — explicit team-scope layer on top of session/project memory
-- **Native mobile shell** (under consideration)
+Tower is in **research alpha**. The product is actively evolving toward an agent-first self-hosted workspace for teams.
 
-Feedback and contributions are welcome — [open an issue](https://github.com/juliuschun/tower/issues) or submit a PR.
+What is solid enough to explore:
+
+- Shared project/session workspace
+- File-backed AI work
+- Skills and reusable workflows
+- Agent orchestration patterns
+- Runtime execution with guardrails
+- Publishing and artifact generation
+- Credential/Connection separation
+
+What should be treated carefully:
+
+- Production hardening
+- Organization-specific security review
+- External actions and credential grants
+- Long-running worker behavior
+- Multi-tenant deployment assumptions
+- Public internet exposure
+
+If you deploy Tower, treat it like an application that can run code and touch files. Put it behind your organization’s normal controls.
+
+---
+
+## Contributing
+
+Contributions are welcome, especially in these areas:
+
+- Safer self-host installation paths
+- Runtime isolation and permission hardening
+- Clearer agent/skill authoring workflows
+- Better admin and observability surfaces
+- Documentation and examples for real team use cases
+- Tests that capture safety and source-contract expectations
+
+Before contributing:
+
+1. Read [AGENTS.md](AGENTS.md) for repository safety and public-source boundaries.
+2. Run the relevant tests and `npm run typecheck`.
+3. Avoid committing secrets, private deployment details, real customer records, generated state, or local workspace artifacts.
+
+---
 
 ## License
 
-[Apache License 2.0](LICENSE)
+Tower is licensed under the [Apache License 2.0](LICENSE).

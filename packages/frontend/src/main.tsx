@@ -3,6 +3,7 @@ import ReactDOM from 'react-dom/client';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import './i18n'; // i18n initialization — must be imported before App
 import './index.css';
+import { isAllowedDevHost } from './config/dev-hosts';
 import { DialogProvider } from './hooks/useDialog';
 
 const App = React.lazy(() => import('./App'));
@@ -14,7 +15,7 @@ const PublicAIServiceChat = React.lazy(() => import('./features/ai-services/Publ
 const VoiceLabPage = React.lazy(() => import('./features/voice-lab/VoiceLabPage').then((module) => ({ default: module.VoiceLabPage })));
 
 async function resetStaleDevServiceWorker(): Promise<void> {
-  if (!['desk-dev.tower.example.com', 'app.localhost'].includes(window.location.hostname)) return;
+  if (!isAllowedDevHost(window.location.hostname)) return;
   const marker = 'tower:dev-sw-cleared:v1';
   if (sessionStorage.getItem(marker) === 'done') return;
   let changed = false;

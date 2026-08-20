@@ -15,8 +15,8 @@ describe('project retirement UI source contract', () => {
   });
 
   it('explains that conversations and files are preserved', () => {
-    expect(source).toContain("confirmLabel: '에이전트 폐기'");
-    expect(source).toContain('대화와 프로젝트 파일은 그대로 보존됩니다.');
-    expect(source).toContain('관리자가 복구하거나 별도 관리 화면에서 영구 삭제할 수 있습니다.');
+    expect(source).toContain("confirmLabel: t('archiveAgentConfirm')");
+    expect(source).toContain("t('archiveAgentDetail')");
+    expect(source).toContain("t('archiveAgentMessage', { detail })");
   });
 });

@@ -83,7 +83,7 @@ describe('Pi session_transcript_read tool', () => {
     expect(output).not.toContain('old-');
   });
 
-  it('supports role filtering and older-page cursors', async () => {
+  it('uses a 20-message page by default and supports older-page cursors', async () => {
     canAccessSessionMock.mockResolvedValueOnce({ allowed: true });
     getMessagesPaginatedMock.mockResolvedValueOnce({
       messages: [
@@ -97,7 +97,7 @@ describe('Pi session_transcript_read tool', () => {
     const tool = createSessionTranscriptReadTool({ userId: 8, userRole: 'member' });
     const result = await tool.execute('call-2', { session_id: 'session-2', roles: ['assistant'], before: 'cursor-1' });
 
-    expect(getMessagesPaginatedMock).toHaveBeenCalledWith('session-2', { limit: 100, before: 'cursor-1' });
+    expect(getMessagesPaginatedMock).toHaveBeenCalledWith('session-2', { limit: 20, before: 'cursor-1' });
     expect(result.content[0].text).toContain('AI 문장');
     expect(result.content[0].text).not.toContain('사용자 문장');
   });

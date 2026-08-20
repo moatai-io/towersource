@@ -26,7 +26,7 @@
 ## Quick Start (3 commands)
 
 ```bash
-git clone https://github.com/juliuschun/tower.git
+git clone https://github.com/moatai-io/towersource.git tower
 cd tower
 bash setup.sh
 ```
@@ -67,17 +67,18 @@ PI_ENABLED=true
 DEFAULT_ENGINE=pi
 CLAUDE_ENABLED=false
 
-# Configure at least one routed provider
-# LITELLM_BASE_URL=https://<router>/
-# LITELLM_API_KEY=...
-# or OPENROUTER_API_KEY=sk-or-v1-...
+# Configure at least one provider
+# Recommended: OPENROUTER_API_KEY=sk-or-v1-...
+# Or an OpenAI-compatible Responses endpoint:
+# OPENAI_RESPONSES_BASE_URL=https://api.openai.com/v1
+# OPENAI_RESPONSES_API_KEY=sk-...
 ```
 
 Claude Code CLI is now an **archived break-glass fallback**. Install/authenticate it only if you explicitly need to test the old Claude engine path, then set both `CLAUDE_ENABLED=true` and `TOWER_ENABLE_ARCHIVED_CLAUDE_ENGINE=true`.
 
 ### 3. Pi Agent Engine / AI Router
 
-Tower supports multiple AI engines simultaneously. Pi Agent is built on the [Pi coding agent SDK](https://github.com/nicobailon/pi-coding-agent) and routes each model request to whichever provider you've configured — **Azure OpenAI**, **OpenRouter**, or **OpenAI direct**.
+Tower supports multiple AI engines simultaneously. Pi Agent is built on the [Pi coding agent SDK](https://github.com/badlogic/pi-mono) and routes requests to **OpenRouter** by default or to any endpoint implementing the OpenAI Responses API.
 
 ```bash
 # Add to .env:
@@ -86,32 +87,26 @@ PI_ENABLED=true
 # Optional: make Pi the default engine for new sessions
 # DEFAULT_ENGINE=pi
 
-# Configure the provider(s) you actually use. You don't need all three.
+# Recommended: OpenRouter — get a key at https://openrouter.ai/keys
+OPENROUTER_API_KEY=sk-or-v1-...
 
-# ‣ Azure OpenAI (enterprise-friendly, private endpoints, data residency)
-# AZURE_OPENAI_API_KEY=...
-# AZURE_OPENAI_BASE_URL=https://<resource>.openai.azure.com/openai
-# AZURE_OPENAI_API_VERSION=2025-03-01-preview
-# AZURE_OPENAI_DEPLOYMENT_NAME_MAP=gpt-5.4=gpt-54-tower,gpt-5.4-mini=gpt-54-mini-tower
+# Alternative: OpenAI-compatible Responses endpoint
+# OPENAI_RESPONSES_BASE_URL=https://api.openai.com/v1
+# OPENAI_RESPONSES_API_KEY=sk-...
 
-# ‣ OpenRouter (50+ models, pay-per-token)  — get key at https://openrouter.ai/keys
-# OPENROUTER_API_KEY=sk-or-v1-...
-
-# ‣ OpenAI direct
-# OPENAI_API_KEY=sk-...
+# Verify that the configured provider matches the default model
+npm run provider:doctor
 ```
 
 #### Configure Available Models
 
-Edit `packages/backend/engines/pi-models.json` to add/remove models — no code changes needed. Each entry picks its provider:
+Each VM keeps its writable model registry in `data/models.json`. `setup.sh` creates it once from `packages/backend/models.public.json`; upgrades do not overwrite it. You can also set `TOWER_MODELS_PATH` to an external config volume. Each entry picks its provider:
 
 ```json
 {
-  "models": [
-    { "provider": "azure-openai-responses", "modelId": "gpt-5.4", "name": "GPT-5.4 (Azure)", "badge": "AZ" },
-    { "provider": "openrouter", "modelId": "anthropic/claude-sonnet-4.6", "name": "Sonnet 4.6", "badge": "OR" },
-    { "provider": "openrouter", "modelId": "google/gemini-3.1-pro-preview", "name": "Gemini 3.1 Pro", "badge": "OR" },
-    { "provider": "openai", "modelId": "gpt-4.1", "name": "GPT-4.1", "badge": "OAI" }
+  "pi": [
+    { "provider": "openrouter", "modelId": "openrouter/auto", "name": "OpenRouter Auto", "badge": "OR", "enabled": true, "api": "openai-completions" },
+    { "provider": "openai-responses-compatible", "modelId": "default", "name": "OpenAI-compatible Responses", "badge": "API", "enabled": true, "api": "openai-responses" }
   ]
 }
 ```
@@ -131,11 +126,11 @@ TOWER_ENABLE_ARCHIVED_CLAUDE_ENGINE=false
 PI_ENABLED=true
 DEFAULT_ENGINE=pi
 
-# Configure at least one Pi provider (see section 3 above). Example with Azure OpenAI:
-AZURE_OPENAI_API_KEY=...
-AZURE_OPENAI_BASE_URL=https://<resource>.openai.azure.com/openai
-AZURE_OPENAI_API_VERSION=2025-03-01-preview
-AZURE_OPENAI_DEPLOYMENT_NAME_MAP=gpt-5.4=gpt-54-tower
+# Configure at least one Pi provider (see section 3 above).
+OPENROUTER_API_KEY=sk-or-v1-...
+
+# Then verify readiness:
+npm run provider:doctor
 ```
 
 When `CLAUDE_ENABLED=false`:
@@ -145,12 +140,10 @@ When `CLAUDE_ENABLED=false`:
 - Quick-replies (`@ai`) and `@task` run on the Pi engine automatically.
 - The Claude CLI is never invoked, so no `~/.claude/.credentials.json` is needed.
 
-**Reference deployment**: `demo-server.tower.example.com` runs this configuration. See `workspace/decisions/2026-04-21-demo-server-pi-only-deployment.md`.
-
 ### 4. Clone & Install
 
 ```bash
-git clone https://github.com/juliuschun/tower.git
+git clone https://github.com/moatai-io/towersource.git tower
 cd tower
 npm install
 ```
@@ -434,7 +427,7 @@ bash scripts/azure/deploy-e2e.sh \
   --vm-name <customer> \
   --admin-user toweradmin \
   --size Standard_B2ms \
-  --repo-url https://github.com/juliuschun/tower.git \
+  --repo-url https://github.com/moatai-io/towersource.git \
   --domain <customer>.tower.example.com \
   --ssl-mode letsencrypt-wildcard \
   --certbot-email support@example.com \
@@ -551,7 +544,7 @@ curl -s -i --http1.1 \
 # → Should return HTTP/1.1 101
 
 # Pi / AI Router configured
-grep -E '^(PI_ENABLED|DEFAULT_ENGINE|CLAUDE_ENABLED|TOWER_ENABLE_ARCHIVED_CLAUDE_ENGINE|LITELLM_|OPENROUTER_API_KEY)=' .env
+grep -E '^(PI_ENABLED|DEFAULT_ENGINE|CLAUDE_ENABLED|TOWER_ENABLE_ARCHIVED_CLAUDE_ENGINE|OPENROUTER_|OPENAI_RESPONSES_)=' .env
 ```
 
 ---
@@ -620,8 +613,8 @@ grep PI_ENABLED .env
 grep OPENROUTER_API_KEY .env
 # → Should have a value starting with sk-or-v1-
 
-# Verify pi-models.json is valid
-node -e "console.log(JSON.parse(require('fs').readFileSync('packages/backend/engines/pi-models.json','utf8')))"
+# Verify models.json is valid
+node -e "console.log(JSON.parse(require('fs').readFileSync(process.env.TOWER_MODELS_PATH || 'data/models.json','utf8')))"
 
 # Restart server after changing .env
 ```
@@ -640,7 +633,7 @@ curl https://openrouter.ai/api/v1/models \
 
 ```bash
 # Check Pi / AI Router env
-grep -E '^(PI_ENABLED|DEFAULT_ENGINE|CLAUDE_ENABLED|TOWER_ENABLE_ARCHIVED_CLAUDE_ENGINE|LITELLM_|OPENROUTER_API_KEY)=' .env
+grep -E '^(PI_ENABLED|DEFAULT_ENGINE|CLAUDE_ENABLED|TOWER_ENABLE_ARCHIVED_CLAUDE_ENGINE|OPENROUTER_|OPENAI_RESPONSES_)=' .env
 # Archived Claude break-glass only:
 # claude --version && claude auth status
 ```

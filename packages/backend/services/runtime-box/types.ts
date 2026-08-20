@@ -146,6 +146,14 @@ export interface ExecResult {
  */
 export interface RuntimeContext {
   runtime: 'project-runtime-box' | 'workbench-worker';
+  /** AI-facing native Workstation contract. Project scope is a default working convention, not a filesystem sandbox. */
+  workstation?: {
+    shell: 'native';
+    persistent_home: boolean;
+    host_tools: 'available';
+    default_scope: 'current-project';
+    guidance: string;
+  };
   project_id: string;
   project_name: string;
   cwd: string;

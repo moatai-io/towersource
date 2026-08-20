@@ -39,7 +39,7 @@ describe('Workspace Apps confirmed publish contract', () => {
     expect(home).not.toContain('window.confirm');
     expect(home).toContain('expectedBeforeHash: publishPreview.beforeHash');
     expect(home).toContain('previewHash: publishPreview.previewHash');
-    expect(builderPanel).toContain('확인하고 화면에 반영');
-    expect(builderPanel).toContain('반영 완료');
+    expect(builderPanel).toContain("workspaceApps.builder.publish");
+    expect(builderPanel).toContain("workspaceApps.builder.publishedId");
   });
 });

@@ -36,7 +36,6 @@ const URL_VIEWS: ReadonlyArray<ActiveView> = [
   'kanban',
   'history',
   'rooms',
-  'workspaceApps',
   'inbox',
   'work',
   'schedules',

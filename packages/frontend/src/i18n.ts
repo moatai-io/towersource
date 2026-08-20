@@ -77,13 +77,27 @@ export const resources = {
   },
 } as const;
 
-// Detect saved language or fall back to browser language
-function getInitialLanguage(): string {
+export type SupportedLanguage = 'en' | 'ko';
+
+function isSupportedLanguage(value: unknown): value is SupportedLanguage {
+  return value === 'en' || value === 'ko';
+}
+
+/**
+ * Language priority: explicit user choice → VM runtime default → OSS default.
+ * Managed VMs can set TOWER_DEFAULT_LANGUAGE=ko without changing the public build.
+ */
+export function resolveInitialLanguage(saved: unknown, configured: unknown): SupportedLanguage {
+  if (isSupportedLanguage(saved)) return saved;
+  return isSupportedLanguage(configured) ? configured : 'en';
+}
+
+export function getInitialLanguage(): SupportedLanguage {
   const saved = typeof localStorage !== 'undefined' ? localStorage.getItem('tower:lang') : null;
-  if (saved === 'ko' || saved === 'en') return saved;
-  // Check browser language
-  const browserLang = typeof navigator !== 'undefined' ? navigator.language.toLowerCase() : 'en';
-  return browserLang.startsWith('ko') ? 'ko' : 'en';
+  const configured = typeof window !== 'undefined'
+    ? window.__TOWER_RUNTIME_CONFIG__?.defaultLanguage
+    : undefined;
+  return resolveInitialLanguage(saved, configured);
 }
 
 i18n.use(initReactI18next).init({

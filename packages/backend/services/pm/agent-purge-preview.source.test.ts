@@ -24,9 +24,9 @@ describe('Agent purge preview source contract', () => {
   it('shows both admin and operator the lifecycle tab without an apply action', () => {
     expect(ui).toContain("'agents'");
     expect(ui).toContain("new Set(['users', 'agents', 'runtime', 'credentials'])");
-    expect(ui).toContain('영구 삭제 영향 보기');
-    expect(ui).toContain('영구 삭제 영향 보기');
-    expect(ui).toContain('확인을 위해 에이전트 이름');
+    expect(ui).toContain("t('permanentDeleteImpact')");
+    expect(ui).toContain("t('permanentDeletionImpact')");
+    expect(ui).toContain("t('confirmAgentNamePrefix')");
     expect(ui).toContain('/purge/apply');
   });
 });

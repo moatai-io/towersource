@@ -13,9 +13,9 @@ describe('Automation Workbench revision intent UX', () => {
   });
 
   it('shows risk, exact proposal hash, expiry, warnings, and explicit confirmation', () => {
-    expect(source).toContain('검토 해시: {changeIntent.proposalHash}');
-    expect(source).toContain('위험도 {changeIntent.riskLevel}');
-    expect(source).toContain("title: highRisk ? '고위험 자동화 변경 적용'");
+    expect(source).toContain("{t('reviewHash')}: {changeIntent.proposalHash}");
+    expect(source).toContain("t('pendingApply', { risk: changeIntent.riskLevel })");
+    expect(source).toContain("title: highRisk ? t('applyHighRiskTitle') : t('applyTitle')");
     expect(source).toContain('confirmedHighRisk: highRisk');
   });
 
@@ -24,6 +24,6 @@ describe('Automation Workbench revision intent UX', () => {
     expect(source).toContain("intent.status === 'applying'");
     expect(source).toContain('const reconcileChangeIntent = async');
     expect(source).toContain('change-intents/${intent.id}/reconcile');
-    expect(source).toContain('변경을 다시 실행하지는 않습니다');
+    expect(source).toContain("message: t('reconcileConfirm')");
   });
 });

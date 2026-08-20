@@ -8,9 +8,9 @@ const parser = readFileSync(new URL('../../utils/message-parser.ts', import.meta
 
 describe('TodoWrite user-facing terminology', () => {
   it('calls TodoWrite progress 진행 단계 in Korean UI', () => {
-    expect(bubble).toContain('>진행 단계</span>');
-    expect(bubble).toContain('이전 진행 단계');
-    expect(card).toContain('>진행 단계</div>');
+    expect(bubble).toContain("i18n.t('chat:workSteps')");
+    expect(bubble).toContain("i18n.t('chat:previousWorkSteps')");
+    expect(card).toContain("i18n.t('chat:workSteps')");
     expect(ko).toContain('"todowrite": "진행 단계"');
     expect(ko).toContain('"todo": "진행 단계를 정리하고 있습니다"');
   });

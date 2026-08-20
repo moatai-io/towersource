@@ -12,7 +12,7 @@ describe('App Personal Space Viewer integration', () => {
     expect(source).toContain("setContextPanelTab('write')");
     expect(source).not.toContain('<PersonalNotePicker');
     expect(source).not.toContain('>\n                        노트\n');
-    expect(source).toContain("aria-label={splitTabId ? 'Viewer 다시 열기' : '빈 개인 노트 만들기'}");
+    expect(source).toContain("aria-label={splitTabId ? t('layout:reopenViewer') : t('layout:createBlankPersonalNote')}");
     expect(source).toContain("split: 'right'");
     expect(source).toContain('/personal-space/files/rename');
     expect(source).toContain('renameOpenTabPath(uri, nextUri');

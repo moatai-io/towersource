@@ -13,12 +13,12 @@ const app = fs.readFileSync(
 
 describe("AI employee bootstrap card", () => {
   it("asks only for a face, name, and expected expertise before creation", () => {
-    expect(source).toContain("새 AI 동료");
-    expect(source).toContain("얼굴 고르기");
+    expect(source).toContain("t('agentCreation.newAiTeammate')");
+    expect(source).toContain("t('agentCreation.chooseFace')");
     expect(source).not.toContain("얼굴 바꾸기");
-    expect(source).toContain("이름");
-    expect(source).toContain("기대하는 전문성");
-    expect(source).toContain("AI 동료 생성하기");
+    expect(source).toContain("t('agentCreation.name')");
+    expect(source).toContain("t('agentCreation.expectedExpertise')");
+    expect(source).toContain("t('agentCreation.create')");
     expect(source).toContain("startChat(session.id)");
     expect(source).not.toContain("합류시키고 첫 출근 열기");
     expect(source).not.toContain("첫 출근 대화 열기");
@@ -40,7 +40,7 @@ describe("AI employee bootstrap card", () => {
     expect(source).toContain(
       "if (sessionStore.isMobile) sessionStore.finishMobileContextInChat()",
     );
-    expect(source).toContain("첫 대화 다시 열기");
+    expect(source).toContain("t('agentCreation.reopenConversation')");
     expect(source).toContain("expectedExpertise: expertise");
     expect(source).toContain("draft?.sourceProjectId || sessions.find");
     expect(app).toContain("draft.sourceProjectId = sourceProject?.id");
@@ -53,7 +53,7 @@ describe("AI employee bootstrap card", () => {
   it("opens the minimal creator directly without starting a helper conversation", () => {
     expect(app).toContain("draft.sourceProjectId = sourceProject?.id");
     expect(app).toContain(
-      "mobileHiring ? { split: 'right', name: '새 AI 동료' } : { name: '새 AI 동료' }",
+      "mobileHiring ? { split: 'right', name: t('newAiTeammate') } : { name: t('newAiTeammate') }",
     );
     expect(app).not.toContain("AI talent team seed project is unavailable");
     expect(app).not.toContain("createSessionInDb('AI 인재팀과 새 직원 찾기'");

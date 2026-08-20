@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+fail() { printf 'tower-workbench-worker-heartbeat: %s\n' "$*" >&2; exit 1; }
+app_root="${TOWER_APP_ROOT:-$(dirname "$(dirname "$(realpath "$0")")")}"; app_root="$(realpath "$app_root")"
+entrypoint="$app_root/lib/tower/dist/backend/packages/backend/scripts/local-workbench-worker-heartbeat.js"
+[[ -f "$entrypoint" ]] || fail "missing heartbeat entrypoint: $entrypoint"
+for name in TOWER_LOCAL_WORKER_ID TOWER_LOCAL_WORKER_BASE_URL TOWER_LOCAL_WORKER_CONTROL_PLANE_URL TOWER_LOCAL_WORKER_IDENTITY_FILE TOWER_LOCAL_WORKER_PROJECT_IDS; do
+  [[ -n "${!name:-}" ]] || fail "$name is required"
+done
+[[ -f "$TOWER_LOCAL_WORKER_IDENTITY_FILE" ]] || fail 'Worker identity file does not exist'
+export TOWER_LOCAL_WORKER_DEPLOYMENT_ID="${TOWER_LOCAL_WORKER_DEPLOYMENT_ID:-${TOWER_DEPLOYMENT_ID:-production}}"
+exec node "$entrypoint"

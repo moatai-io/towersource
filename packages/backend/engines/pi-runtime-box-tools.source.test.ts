@@ -10,8 +10,10 @@ describe('Project bash UX contract', () => {
     expect(source).toContain("label: 'Bash'");
     expect(source).toContain('persistent working computer');
     expect(source).toContain('Commands start in /workspace');
-    expect(source).toContain('Tower routes it to the execution authority already assigned to this Project');
+    expect(source).toContain('Organization Admin host paths are routed to the credential-free Operator Runtime');
     expect(source).toContain('Treat /workspace as the Project root');
+    expect(source).toContain("authorityMode: operatorResolution.operatorPlane ? 'operator-plane'");
+    expect(source).toContain("operatorResolution.credentialMode !== 'none'");
     expect(source).toContain("name: 'project_process'");
     expect(source).toContain('started by bash');
   });

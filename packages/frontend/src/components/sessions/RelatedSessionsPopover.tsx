@@ -7,6 +7,8 @@
  * See: workspace/decisions/2026-04-21-session-backlinks-level1.md
  */
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import i18n from '../../i18n';
 import type { RelatedSessionsResponse } from '@tower/shared';
 import { useSessionStore } from '../../stores/session-store';
 
@@ -36,10 +38,11 @@ function relativeTime(dateStr: string): string {
   if (hours < 24) return `~${Math.round(hours * 10) / 10}h`;
   const days = hours / 24;
   if (days < 30) return `~${Math.round(days * 10) / 10}d`;
-  return new Date(normalized).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  return new Date(normalized).toLocaleDateString(i18n.resolvedLanguage || i18n.language, { month: 'short', day: 'numeric' });
 }
 
 export function RelatedSessionsPopover({ sessionId, x, y, onClose }: RelatedSessionsPopoverProps) {
+  const { t } = useTranslation('layout');
   const ref = useRef<HTMLDivElement>(null);
   const [adjustedPos, setAdjustedPos] = useState({ left: x, top: y });
   const [data, setData] = useState<RelatedSessionsResponse | null>(null);
@@ -66,7 +69,7 @@ export function RelatedSessionsPopover({ sessionId, x, y, onClose }: RelatedSess
         const json = (await res.json()) as RelatedSessionsResponse;
         if (!cancelled) setData(json);
       } catch (e: any) {
-        if (!cancelled) setError(e.message || 'Failed to load related sessions');
+        if (!cancelled) setError(e.message || t('relatedSessionsLoadFailed'));
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -74,7 +77,7 @@ export function RelatedSessionsPopover({ sessionId, x, y, onClose }: RelatedSess
     return () => {
       cancelled = true;
     };
-  }, [sessionId]);
+  }, [sessionId, t]);
 
   // Keep popover inside viewport (same pattern as SessionContextMenu)
   useLayoutEffect(() => {
@@ -122,7 +125,7 @@ export function RelatedSessionsPopover({ sessionId, x, y, onClose }: RelatedSess
     <div
       ref={ref}
       role="dialog"
-      aria-label="Related sessions"
+      aria-label={t('relatedSessions')}
       className="fixed z-50 bg-surface-800 border border-surface-700 rounded-lg shadow-xl w-[320px] max-w-[90vw]"
       style={adjustedPos}
     >
@@ -140,7 +143,7 @@ export function RelatedSessionsPopover({ sessionId, x, y, onClose }: RelatedSess
             d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"
           />
         </svg>
-        <span className="text-[14px] font-medium text-gray-200">관련 세션</span>
+        <span className="text-[14px] font-medium text-gray-200">{t('relatedSessions')}</span>
         {data && !loading && (
           <span
             className="ml-auto text-[12px] text-surface-600 tabular-nums"
@@ -153,18 +156,18 @@ export function RelatedSessionsPopover({ sessionId, x, y, onClose }: RelatedSess
 
       <div className="max-h-[320px] overflow-y-auto">
         {loading && (
-          <div className="px-3 py-6 text-center text-[13px] text-surface-500">로딩 중…</div>
+          <div className="px-3 py-6 text-center text-[13px] text-surface-500">{t('loading')}…</div>
         )}
 
         {!loading && error && (
           <div className="px-3 py-4 text-[13px] text-red-400">
-            불러오기 실패: {error}
+            {t('loadFailed')}: {error}
           </div>
         )}
 
         {!loading && !error && data && data.results.length === 0 && (
           <div className="px-3 py-6 text-center text-[13px] text-surface-500">
-            관련 세션 없음
+            {t('noRelatedSessions')}
           </div>
         )}
 

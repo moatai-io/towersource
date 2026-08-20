@@ -1,3 +1,5 @@
+import i18n from '../i18n';
+
 type VapidResponse = { configured: boolean; publicKey: string | null };
 
 const API = import.meta.env.VITE_API_URL || '';
@@ -44,13 +46,13 @@ function detectPlatform(): string {
 }
 
 export async function subscribeToWebPush(): Promise<{ ok: true }> {
-  if (!isPushSupported()) throw new Error('이 브라우저는 Web Push를 지원하지 않습니다.');
+  if (!isPushSupported()) throw new Error(i18n.t('pushNotification.unsupported', { ns: 'common' }));
 
   const vapid = await getVapidInfo();
-  if (!vapid.configured || !vapid.publicKey) throw new Error('서버 Web Push 키가 아직 설정되지 않았습니다.');
+  if (!vapid.configured || !vapid.publicKey) throw new Error(i18n.t('pushNotification.serverKeyMissing', { ns: 'common' }));
 
   const permission = await Notification.requestPermission();
-  if (permission !== 'granted') throw new Error('브라우저 알림 권한이 허용되지 않았습니다.');
+  if (permission !== 'granted') throw new Error(i18n.t('pushNotification.permissionDenied', { ns: 'common' }));
 
   let registration = await navigator.serviceWorker.getRegistration('/');
   if (!registration) {

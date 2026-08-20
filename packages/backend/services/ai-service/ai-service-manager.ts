@@ -34,7 +34,7 @@ export interface AIServiceRow {
   created_at:string; updated_at:string;
 }
 export interface AIServiceOverview extends AIServiceRow {
-  ownerProjectId:string; ownerProjectRootPath:string|null; ownerAgentName:string; ownerAgentFace:string; serviceType:string; updatedAt:string;
+  ownerProjectId:string; ownerProjectRootPath:string|null; ownerAgentName:string; ownerAgentFace:string; ownerAgentProfileVersion:number; serviceType:string; updatedAt:string;
   currentDeployment?:{id:string;version:number;status:string;sourceSnapshot?:unknown;policySnapshot?:unknown;experienceSnapshot?:unknown;evaluationSnapshot?:unknown;deployedAt?:string|null;createdAt?:string}|null;
   latestDeployment?:{id:string;version:number;status:string}|null;
   deployments:Array<{id:string;version:number;status:string;deployedAt:string|null;createdAt:string}>;
@@ -78,7 +78,7 @@ export async function listAIServicesForUser(userId:number,role:string):Promise<A
   const privileged=role==='admin'||role==='operator';
   return query<AIServiceOverview>(`SELECT s.*,
     s.owner_project_id AS "ownerProjectId", p.root_path AS "ownerProjectRootPath", s.service_type AS "serviceType", s.updated_at AS "updatedAt",
-    COALESCE(pap.display_name,p.name) AS "ownerAgentName", COALESCE(pap.face,'✨') AS "ownerAgentFace",
+    COALESCE(pap.display_name,p.name) AS "ownerAgentName", COALESCE(pap.face,'✨') AS "ownerAgentFace", COALESCE(pap.instruction_version,0) AS "ownerAgentProfileVersion",
     CASE WHEN d.id IS NULL THEN NULL ELSE jsonb_build_object('id',d.id,'version',d.version,'status',d.status,'sourceSnapshot',d.source_snapshot,'policySnapshot',d.policy_snapshot,'experienceSnapshot',d.experience_snapshot,'evaluationSnapshot',d.evaluation_snapshot,'deployedAt',d.deployed_at,'createdAt',d.created_at) END AS "currentDeployment",
     (SELECT jsonb_build_object('id',ld.id,'version',ld.version,'status',ld.status) FROM ai_service_deployments ld WHERE ld.service_id=s.id ORDER BY ld.version DESC LIMIT 1) AS "latestDeployment",
     COALESCE((SELECT jsonb_agg(jsonb_build_object('id',vd.id,'version',vd.version,'status',vd.status,'deployedAt',vd.deployed_at,'createdAt',vd.created_at) ORDER BY vd.version DESC) FROM ai_service_deployments vd WHERE vd.service_id=s.id),'[]'::jsonb) AS deployments,

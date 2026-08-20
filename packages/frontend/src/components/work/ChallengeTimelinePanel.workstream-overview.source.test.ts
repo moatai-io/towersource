@@ -9,12 +9,12 @@ describe('Workstream overview surface', () => {
     expect(source).toContain('function WorkstreamOverview');
     expect(source).toContain('onClick={() => onSelectWorkstream(key)}');
     expect(source).toContain('onBack={returnToActivity}');
-    expect(source).toContain('←</span> AI 팀 활동');
+    expect(source).toContain("tr('challenge.timeline.title')");
   });
 
   it('answers status, progress, next action and provenance questions', () => {
-    for (const copy of ['진행 단계', '현재 진행 단계', '결과와 판단', '관련 대화', '다음 후보', '담당 AI', '협업 사용자']) {
-      expect(source).toContain(copy);
+    for (const key of ['progressSteps', 'currentProgress', 'resultsAndDecisions', 'relatedConversations', 'nextCandidates', 'assignedAi', 'collaborators']) {
+      expect(source).toContain(`challenge.timeline.${key}`);
     }
     expect(source).toContain('workstreamActionLabel(challenge)');
     expect(source).toContain('challenge.todoDone / challenge.todoTotal');

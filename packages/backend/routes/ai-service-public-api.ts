@@ -20,6 +20,7 @@ import { issueConversationResumeGrant, resumeConversation } from '../services/ai
 import { publicRequestActions, recordPublicCustomerRequest } from '../services/ai-service/customer-request-actions.js';
 import { deleteConversationFile, listConversationFiles, saveConversationFile } from '../services/ai-service/conversation-files.js';
 import { queryOne } from '../db/pg-repo.js';
+import { publicAIServiceErrorMessage } from '../services/ai-service/knowledge-citation-validation.js';
 
 const router = Router();
 const conversationUploadStaging = path.join(config.dataDir, 'upload-staging', 'ai-service-conversation-files');
@@ -48,10 +49,10 @@ function credential(req: any): string {
 }
 
 function fail(res: any, err: unknown) {
-  const message = err instanceof Error ? err.message : 'AI Service Channel request failed';
-  const status = err instanceof ChannelCredentialError ? err.status : /not found|inaccessible/i.test(message) ? 404 : /required|invalid|expired|mismatch/i.test(message) ? 401 : 500;
+  const internalMessage = err instanceof Error ? err.message : 'AI Service Channel request failed';
+  const status = err instanceof ChannelCredentialError ? err.status : /not found|inaccessible/i.test(internalMessage) ? 404 : /required|invalid|expired|mismatch/i.test(internalMessage) ? 401 : 500;
   if (status === 500) console.error('[ai-service-public]', err);
-  res.status(status).json({ error: message });
+  res.status(status).json({ error: publicAIServiceErrorMessage(err, 'AI Service Channel request failed') });
 }
 
 function text(value: unknown, name: string): string {
@@ -125,7 +126,7 @@ function publicMaterials(source: Record<string, unknown>): Array<Record<string, 
   });
 }
 
-async function activeSiteMetadata(channelId: string): Promise<Record<string, unknown>> {
+export async function activeSiteMetadata(channelId: string): Promise<Record<string, unknown>> {
   const row = await queryOne<{
     service_id: string; service_name: string; description: string; channel_name: string; config: Record<string, unknown> | null;
     deployment_id: string; deployment_version: number; source_snapshot: unknown; policy_snapshot: unknown; experience_snapshot: unknown;
@@ -150,6 +151,7 @@ async function activeSiteMetadata(channelId: string): Promise<Record<string, unk
     channelId,
     name: row.service_name,
     face: publicFace(identity.face || experience.face),
+    tagline: publicString(identity.tagline || experience.tagline),
     description: row.description,
     channelName: row.channel_name,
     access: { mode: access.mode, hasPassword: access.hasPassword, requiresPassword: access.mode === 'password', requiresLogin: access.mode === 'login_required', disabled: access.mode === 'disabled' },
@@ -294,7 +296,8 @@ router.post('/sites/:channelId/conversations/:conversationId/stream', async (req
     writeNdjson(res, { type: 'done', response });
     res.end();
   } catch (err) {
-    writeNdjson(res, { type: 'error', error: err instanceof Error ? err.message : 'AI Service request failed' });
+    console.error('[ai-service-public-stream]', err);
+    writeNdjson(res, { type: 'error', error: publicAIServiceErrorMessage(err) });
     res.end();
   }
 });

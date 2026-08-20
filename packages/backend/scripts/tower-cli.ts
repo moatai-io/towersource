@@ -8,7 +8,7 @@ import fsp from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
-const DEFAULT_TOWER_URL = process.env.TOWER_URL || 'https://tower.tower.example.com';
+const DEFAULT_TOWER_URL = process.env.TOWER_URL || 'http://127.0.0.1:32355';
 const CONFIG_DIR = path.join(os.homedir(), '.tower');
 const CONFIG_PATH = path.join(CONFIG_DIR, 'cli.json');
 

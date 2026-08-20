@@ -2,6 +2,7 @@
 // Public API: AgentsPanel.
 
 import React, { useEffect, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useSettingsStore } from '../../stores/settings-store';
 import { useSessionStore } from '../../stores/session-store';
 import { useProjectStore } from '../../stores/project-store';
@@ -83,6 +84,7 @@ function toForm(agent: AgentDefinition | null): AgentDefinition {
 }
 
 export function AgentsPanel() {
+  const { t } = useTranslation('common');
   const open = useSettingsStore((s) => s.agentsPanelOpen);
   const setOpen = useSettingsStore((s) => s.setAgentsPanelOpen);
   const sessions = useSessionStore((s) => s.sessions);
@@ -139,14 +141,14 @@ export function AgentsPanel() {
         if (cancelled) return;
         setAgents([]);
         setSelectedId('');
-        setError(err?.message || '에이전트 목록을 불러오지 못했습니다.');
+        setError(err?.message || t('agentsPanel.error.load'));
       })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [open, projectId]);
 
   const selected = useMemo(() => agents.find((agent) => agent.id === selectedId) || null, [agents, selectedId]);
-  const projectName = projects.find((project) => project.id === projectId)?.name || '현재 프로젝트';
+  const projectName = projects.find((project) => project.id === projectId)?.name || t('agentsPanel.currentProject');
 
   const reloadAgents = async (preferredId?: string) => {
     const params = new URLSearchParams();
@@ -180,11 +182,11 @@ export function AgentsPanel() {
 
   const saveForm = async () => {
     if (!projectId) {
-      toastError('프로젝트를 먼저 선택하세요.');
+      toastError(t('agentsPanel.error.selectProject'));
       return;
     }
     if (!form.id.trim() || !form.role.trim() || !form.instruction.trim()) {
-      toastError('id, role, instruction은 필수입니다.');
+      toastError(t('agentsPanel.error.requiredFields'));
       return;
     }
     setSaving(true);
@@ -213,12 +215,12 @@ export function AgentsPanel() {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
-      toastSuccess(creating ? '전문가를 추가했습니다.' : '전문가 설정을 저장했습니다.');
+      toastSuccess(creating ? t('agentsPanel.created') : t('agentsPanel.saved'));
       setEditing(false);
       setCreating(false);
       await reloadAgents(data.id || form.id.trim());
     } catch (err: any) {
-      toastError(err?.message || '에이전트 저장에 실패했습니다.');
+      toastError(err?.message || t('agentsPanel.error.save'));
     } finally {
       setSaving(false);
     }
@@ -229,14 +231,14 @@ export function AgentsPanel() {
   const runSelectedAgent = (agent: AgentDefinition) => {
     const task = runTask.trim();
     if (!task) {
-      toastError('맡길 일을 먼저 적어주세요.');
+      toastError(t('agentsPanel.error.taskRequired'));
       return;
     }
     const command = `/agent ${agent.id} ${task}`;
     window.dispatchEvent(new CustomEvent('tower-run-agent-command', { detail: { command } }));
     setPendingRun({ agentId: agent.id, task, at: Date.now() });
     setRunTask('');
-    toastSuccess(`${agent.displayName || agent.id}에게 맡겼습니다. 결과는 현재 채팅으로 돌아옵니다.`);
+    toastSuccess(t('agentsPanel.delegated', { name: agent.displayName || agent.id }));
     window.setTimeout(() => {
       reloadAgents(agent.id).catch(() => {});
     }, 1500);
@@ -246,9 +248,9 @@ export function AgentsPanel() {
     const command = `/agent ${agent.id} `;
     try {
       await navigator.clipboard.writeText(command);
-      toastSuccess('명령어를 복사했습니다. 입력창에 붙여넣고 작업을 이어 적으세요.');
+      toastSuccess(t('agentsPanel.commandCopied'));
     } catch {
-      toastError('클립보드 복사에 실패했습니다.');
+      toastError(t('agentsPanel.error.clipboard'));
     }
   };
 
@@ -257,9 +259,9 @@ export function AgentsPanel() {
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setOpen(false)} />
       <div className="relative flex h-[min(92vh,860px)] w-[calc(100vw-24px)] max-w-[1120px] flex-col overflow-hidden rounded-2xl border border-surface-700 bg-surface-900 shadow-2xl">
         <div className="shrink-0 flex items-center justify-between border-b border-surface-800 px-6 py-4">
-          <div lang="ko" className="[word-break:keep-all] [overflow-wrap:break-word]">
-            <h2 className="text-[17px] font-bold text-gray-100">전문가</h2>
-            <p className="mt-0.5 text-[13px] text-surface-500">Primary AI 팀원이 필요할 때 함께 부르는 보조 역할을 설정하고 일을 맡깁니다.</p>
+          <div className="[word-break:keep-all] [overflow-wrap:break-word]">
+            <h2 className="text-[17px] font-bold text-gray-100">{t('agentsPanel.title')}</h2>
+            <p className="mt-0.5 text-[13px] text-surface-500">{t('agentsPanel.description')}</p>
           </div>
           <button onClick={() => setOpen(false)} className="p-1 text-gray-500 transition-colors hover:text-gray-300" aria-label="Close agents panel">
             <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
@@ -268,7 +270,7 @@ export function AgentsPanel() {
 
         <div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden lg:grid-cols-[340px_minmax(0,1fr)]">
           <aside className="flex min-h-0 flex-col border-b border-surface-800 bg-surface-950/30 p-4 lg:border-b-0 lg:border-r">
-            <label className="mb-3 block text-[12px] font-semibold uppercase tracking-wider text-surface-500">작업공간</label>
+            <label className="mb-3 block text-[12px] font-semibold uppercase tracking-wider text-surface-500">{t('agentsPanel.workspace')}</label>
             <select
               value={projectId}
               onChange={(e) => setProjectId(e.target.value)}
@@ -278,10 +280,10 @@ export function AgentsPanel() {
             </select>
 
             <div className="mb-3 flex items-center justify-between gap-2">
-              <div className="text-[12px] font-semibold uppercase tracking-wider text-surface-500">전문가 역할</div>
+              <div className="text-[12px] font-semibold uppercase tracking-wider text-surface-500">{t('agentsPanel.roles')}</div>
               <div className="flex items-center gap-2">
                 {loading && <span className="text-[12px] text-surface-600">loading…</span>}
-                <button onClick={beginCreate} className="rounded-md border border-primary-500/40 bg-primary-500/10 px-2 py-1 text-[12px] font-semibold text-primary-300 hover:bg-primary-500/15">추가</button>
+                <button onClick={beginCreate} className="rounded-md border border-primary-500/40 bg-primary-500/10 px-2 py-1 text-[12px] font-semibold text-primary-300 hover:bg-primary-500/15">{t('agentsPanel.add')}</button>
               </div>
             </div>
 
@@ -290,8 +292,8 @@ export function AgentsPanel() {
             <div className="min-h-0 flex-1 space-y-2 overflow-auto pr-1">
               {agents.length === 0 && !loading ? (
                 <div className="rounded-xl border border-dashed border-surface-700 bg-surface-950/40 p-4 text-[13px] leading-relaxed text-surface-500">
-                  아직 등록된 전문가가 없습니다.<br />
-                  <span className="font-mono text-surface-400">.tower/agents/*.agent.yaml</span> 파일을 추가하면 여기에 표시됩니다.
+                  {t('agentsPanel.noExperts')}<br />
+                  {t('agentsPanel.addFileHintBefore')} <span className="font-mono text-surface-400">.tower/agents/*.agent.yaml</span>{t('agentsPanel.addFileHintAfter')}
                 </div>
               ) : agents.map((agent) => (
                 <button
@@ -318,12 +320,12 @@ export function AgentsPanel() {
                 <div className="rounded-2xl border border-primary-500/25 bg-primary-500/5 p-5">
                   <div className="mb-5 flex items-start justify-between gap-3">
                     <div>
-                      <h3 className="text-xl font-bold text-surface-100">{creating ? '새 전문가 추가' : '전문가 설정 수정'}</h3>
-                      <p className="mt-1 text-[13px] leading-relaxed text-surface-500">프로젝트의 <span className="font-mono">.tower/agents</span> YAML 파일로 저장됩니다.</p>
+                      <h3 className="text-xl font-bold text-surface-100">{creating ? t('agentsPanel.addExpert') : t('agentsPanel.editExpert')}</h3>
+                      <p className="mt-1 text-[13px] leading-relaxed text-surface-500">{t('agentsPanel.savedAsPrefix')} <span className="font-mono">.tower/agents</span> {t('agentsPanel.savedAsSuffix')}</p>
                     </div>
                     <div className="flex gap-2">
-                      <button onClick={cancelEdit} className="rounded-lg border border-surface-700 px-3 py-2 text-[13px] font-semibold text-surface-300 hover:bg-surface-800">취소</button>
-                      <button disabled={saving} onClick={saveForm} className="rounded-lg border border-primary-500/40 bg-primary-500/15 px-3 py-2 text-[13px] font-semibold text-primary-300 hover:bg-primary-500/20 disabled:opacity-50">{saving ? '저장 중…' : '저장'}</button>
+                      <button onClick={cancelEdit} className="rounded-lg border border-surface-700 px-3 py-2 text-[13px] font-semibold text-surface-300 hover:bg-surface-800">{t('agentsPanel.cancel')}</button>
+                      <button disabled={saving} onClick={saveForm} className="rounded-lg border border-primary-500/40 bg-primary-500/15 px-3 py-2 text-[13px] font-semibold text-primary-300 hover:bg-primary-500/20 disabled:opacity-50">{saving ? t('agentsPanel.saving') : t('agentsPanel.save')}</button>
                     </div>
                   </div>
 
@@ -332,16 +334,16 @@ export function AgentsPanel() {
                       <input value={form.id} onChange={(e) => updateForm({ id: e.target.value })} placeholder="reviewer" className="mt-1 w-full rounded-lg border border-surface-700 bg-surface-950 px-3 py-2 font-mono text-[14px] text-surface-100 outline-none focus:border-primary-500/60" />
                     </label>
                     <label className="block text-[13px] font-semibold text-surface-400">Display name
-                      <input value={form.displayName || ''} onChange={(e) => updateForm({ displayName: e.target.value })} placeholder="리뷰어" className="mt-1 w-full rounded-lg border border-surface-700 bg-surface-950 px-3 py-2 text-[14px] text-surface-100 outline-none focus:border-primary-500/60" />
+                      <input value={form.displayName || ''} onChange={(e) => updateForm({ displayName: e.target.value })} placeholder={t('agentsPanel.placeholder.displayName')} className="mt-1 w-full rounded-lg border border-surface-700 bg-surface-950 px-3 py-2 text-[14px] text-surface-100 outline-none focus:border-primary-500/60" />
                     </label>
                     <label className="block text-[13px] font-semibold text-surface-400 md:col-span-2">Role
-                      <input value={form.role} onChange={(e) => updateForm({ role: e.target.value })} placeholder="독립 코드 리뷰어" className="mt-1 w-full rounded-lg border border-surface-700 bg-surface-950 px-3 py-2 text-[14px] text-surface-100 outline-none focus:border-primary-500/60" />
+                      <input value={form.role} onChange={(e) => updateForm({ role: e.target.value })} placeholder={t('agentsPanel.placeholder.role')} className="mt-1 w-full rounded-lg border border-surface-700 bg-surface-950 px-3 py-2 text-[14px] text-surface-100 outline-none focus:border-primary-500/60" />
                     </label>
                     <label className="block text-[13px] font-semibold text-surface-400 md:col-span-2">Instruction
-                      <textarea value={form.instruction} onChange={(e) => updateForm({ instruction: e.target.value })} rows={8} placeholder="이 에이전트가 지켜야 할 역할, 범위, 보고 방식을 적습니다." className="mt-1 w-full rounded-lg border border-surface-700 bg-surface-950 px-3 py-2 text-[14px] leading-relaxed text-surface-100 outline-none focus:border-primary-500/60" />
+                      <textarea value={form.instruction} onChange={(e) => updateForm({ instruction: e.target.value })} rows={8} placeholder={t('agentsPanel.placeholder.instruction')} className="mt-1 w-full rounded-lg border border-surface-700 bg-surface-950 px-3 py-2 text-[14px] leading-relaxed text-surface-100 outline-none focus:border-primary-500/60" />
                     </label>
                     <label className="block text-[13px] font-semibold text-surface-400 md:col-span-2">Goal <span className="font-normal text-surface-600">optional</span>
-                      <input value={form.goal || ''} onChange={(e) => updateForm({ goal: e.target.value })} placeholder="반복 실행 시 유지할 목표" className="mt-1 w-full rounded-lg border border-surface-700 bg-surface-950 px-3 py-2 text-[14px] text-surface-100 outline-none focus:border-primary-500/60" />
+                      <input value={form.goal || ''} onChange={(e) => updateForm({ goal: e.target.value })} placeholder={t('agentsPanel.placeholder.goal')} className="mt-1 w-full rounded-lg border border-surface-700 bg-surface-950 px-3 py-2 text-[14px] text-surface-100 outline-none focus:border-primary-500/60" />
                     </label>
                     <label className="block text-[13px] font-semibold text-surface-400">Engine
                       <select value={form.engine || ''} onChange={(e) => updateForm({ engine: (e.target.value || undefined) as AgentDefinition['engine'] })} className="mt-1 w-full rounded-lg border border-surface-700 bg-surface-950 px-3 py-2 text-[14px] text-surface-100 outline-none focus:border-primary-500/60">
@@ -373,32 +375,32 @@ export function AgentsPanel() {
                       <p className="mt-1 font-mono text-[13px] text-surface-500">/agent {selected.id} &lt;task&gt;</p>
                     </div>
                     <div className="flex gap-2">
-                      <button onClick={() => beginEdit(selected)} className="rounded-lg border border-surface-700 px-3 py-2 text-[13px] font-semibold text-surface-300 transition-colors hover:bg-surface-800">수정</button>
+                      <button onClick={() => beginEdit(selected)} className="rounded-lg border border-surface-700 px-3 py-2 text-[13px] font-semibold text-surface-300 transition-colors hover:bg-surface-800">{t('agentsPanel.edit')}</button>
                       <button onClick={() => copyRunCommand(selected)} className="rounded-lg border border-primary-500/40 bg-primary-500/10 px-3 py-2 text-[13px] font-semibold text-primary-300 transition-colors hover:bg-primary-500/15">
-                        명령어 복사
+                        {t('agentsPanel.copyCommand')}
                       </button>
                     </div>
                   </div>
                   <p className="mt-4 text-[15px] leading-relaxed text-surface-300">{selected.role}</p>
                   {pendingRun?.agentId === selected.id && (
                     <div className="mt-4 rounded-xl border border-amber-500/25 bg-amber-500/10 p-3 text-[13px] leading-relaxed text-amber-100">
-                      <div className="font-semibold">실행 요청을 보냈습니다</div>
-                      <div className="mt-1 text-amber-100/80">결과는 현재 채팅으로 돌아옵니다. 필요하면 이 패널을 열어둔 채 다른 preset도 확인할 수 있습니다.</div>
+                      <div className="font-semibold">{t('agentsPanel.runSent')}</div>
+                      <div className="mt-1 text-amber-100/80">{t('agentsPanel.runSentDescription')}</div>
                       <div className="mt-2 truncate font-mono text-[12px] text-amber-100/70">/agent {selected.id} {pendingRun.task}</div>
                     </div>
                   )}
                   <div className="sticky bottom-0 z-10 -mx-5 mt-4 border-t border-primary-500/20 bg-surface-950/95 p-4 shadow-[0_-12px_32px_rgba(0,0,0,0.25)] backdrop-blur">
-                    <label className="block text-[13px] font-semibold text-primary-300">이번에 맡길 일</label>
+                    <label className="block text-[13px] font-semibold text-primary-300">{t('agentsPanel.taskLabel')}</label>
                     <textarea
                       value={runTask}
                       onChange={(e) => setRunTask(e.target.value)}
                       rows={3}
-                      placeholder="예: 이번 변경사항을 리뷰하고 위험한 부분만 짚어줘"
+                      placeholder={t('agentsPanel.placeholder.task')}
                       className="mt-2 w-full rounded-lg border border-surface-700 bg-surface-950 px-3 py-2 text-[14px] leading-relaxed text-surface-100 outline-none focus:border-primary-500/60"
                     />
                     <div className="mt-2 flex items-center justify-between gap-3">
-                      <span className="text-[12px] text-surface-500">전송하면 현재 채팅에 명령이 들어가고, 완료 보고도 같은 채팅으로 돌아옵니다.</span>
-                      <button onClick={() => runSelectedAgent(selected)} className="shrink-0 rounded-lg border border-primary-500/40 bg-primary-500/15 px-3 py-2 text-[13px] font-semibold text-primary-300 hover:bg-primary-500/20">이 조수에게 맡기기</button>
+                      <span className="text-[12px] text-surface-500">{t('agentsPanel.taskDescription')}</span>
+                      <button onClick={() => runSelectedAgent(selected)} className="shrink-0 rounded-lg border border-primary-500/40 bg-primary-500/15 px-3 py-2 text-[13px] font-semibold text-primary-300 hover:bg-primary-500/20">{t('agentsPanel.delegate')}</button>
                     </div>
                   </div>
                   {selected.worker && (
@@ -417,7 +419,7 @@ export function AgentsPanel() {
 
                 {(selected.latestRun || selected.stateCard) && (
                   <section className="rounded-2xl border border-surface-800 bg-surface-950/25 p-5">
-                    <h4 className="mb-3 text-[13px] font-bold uppercase tracking-wider text-surface-500">최근 활동</h4>
+                    <h4 className="mb-3 text-[13px] font-bold uppercase tracking-wider text-surface-500">{t('agentsPanel.recentActivity')}</h4>
                     <div className="grid gap-4 md:grid-cols-2">
                       <div>
                         <div className="text-[12px] font-semibold uppercase tracking-wider text-surface-600">Latest run</div>
@@ -425,7 +427,7 @@ export function AgentsPanel() {
                           {selected.latestRun ? (
                             <>
                               <div className="mb-1 font-mono text-surface-400">{selected.latestRun.status} · {selected.latestRun.id.slice(0, 8)}</div>
-                              <div>{selected.latestRun.result_summary || selected.latestRun.error || '아직 요약이 없습니다.'}</div>
+                              <div>{selected.latestRun.result_summary || selected.latestRun.error || t('agentsPanel.noSummary')}</div>
                               {Array.isArray(selected.latestRun.artifact_paths) && selected.latestRun.artifact_paths.length > 0 && (
                                 <div className="mt-2 space-y-1 text-[12px] text-surface-500">
                                   <div className="font-semibold uppercase tracking-wider">Detail artifacts</div>
@@ -435,7 +437,7 @@ export function AgentsPanel() {
                                 </div>
                               )}
                             </>
-                          ) : '아직 실행 기록이 없습니다.'}
+                          ) : t('agentsPanel.noRunHistory')}
                         </div>
                       </div>
                       <div>
@@ -443,10 +445,10 @@ export function AgentsPanel() {
                         <div className="mt-2 rounded-xl border border-surface-800 bg-black/15 p-3 text-[13px] leading-relaxed text-surface-300">
                           {selected.stateCard ? (
                             <>
-                              <div className="mb-1 text-surface-400">{selected.stateCard.current_focus || selected.stateCard.goal || '현재 상태'}</div>
-                              <div>{selected.stateCard.next_action || selected.stateCard.last_action || '다음 액션이 없습니다.'}</div>
+                              <div className="mb-1 text-surface-400">{selected.stateCard.current_focus || selected.stateCard.goal || t('agentsPanel.currentStatus')}</div>
+                              <div>{selected.stateCard.next_action || selected.stateCard.last_action || t('agentsPanel.noNextAction')}</div>
                             </>
-                          ) : '아직 상태 카드가 없습니다.'}
+                          ) : t('agentsPanel.noStateCard')}
                         </div>
                       </div>
                     </div>
@@ -478,16 +480,16 @@ export function AgentsPanel() {
                   <h4 className="mb-2 text-[13px] font-bold uppercase tracking-wider text-surface-500">Source</h4>
                   <div className="font-mono text-[13px] text-surface-400">{sourceRelative(selected.sourcePath)}</div>
                   <p className="mt-3 text-[13px] leading-relaxed text-surface-500">
-                    이 화면의 수정 버튼으로 기본 필드를 편집할 수 있습니다. 고급 permissions/report는 아직 파일 직접 편집을 사용합니다.
+                    {t('agentsPanel.sourceDescription')}
                   </p>
                 </section>
               </div>
             ) : (
               <div className="flex h-full min-h-[360px] items-center justify-center">
                 <div className="max-w-md rounded-2xl border border-dashed border-surface-700 bg-surface-950/30 p-6 text-center">
-                  <div className="text-lg font-bold text-surface-200">{projectName}에 등록된 전문가가 없습니다</div>
+                  <div className="text-lg font-bold text-surface-200">{t('agentsPanel.noExpertsInProject', { project: projectName })}</div>
                   <p className="mt-2 text-[14px] leading-relaxed text-surface-500">
-                    전문가는 Primary AI 팀원이 검토·리서치·품질 확인처럼 필요한 순간에 함께 부르는 보조 역할입니다. 이 화면에서 역할을 추가하고 바로 일을 맡길 수 있습니다.
+                    {t('agentsPanel.emptyDescription')}
                   </p>
                 </div>
               </div>

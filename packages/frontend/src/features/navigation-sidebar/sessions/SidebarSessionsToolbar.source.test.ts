@@ -19,7 +19,9 @@ describe('Sidebar Session toolbar composition contract', () => {
     expect(toolbar).toContain(`setKindFilter("agents")`);
     expect(toolbar).toContain(`setKindFilter("runs")`);
     expect(toolbar).toContain(`setKindFilter("external")`);
-    expect(toolbar).toContain('외부 배포 (ext)');
+    expect(toolbar).toContain('t("agentConversations")');
+    expect(toolbar).toContain('t("externalDeploymentsWithExtension")');
+    expect(toolbar).toContain('title={t("clearSearch")}');
     expect(toolbar).toContain(`toggleFilter("labels")`);
   });
 

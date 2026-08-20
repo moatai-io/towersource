@@ -20,13 +20,13 @@ describe("FilesWorkspace row context creation", () => {
   });
 
   it("shows folder-specific context actions in the Files workspace menu", () => {
-    for (const label of [
-      "여기에 새 폴더",
-      "여기에 새 파일",
-      "이 폴더로 이동",
-      "경로 복사",
+    for (const key of [
+      'workspace.newFolderHere',
+      'workspace.newFileHere',
+      'workspace.moveToFolder',
+      'workspace.copyPath',
     ]) {
-      expect(source).toContain(label);
+      expect(source).toContain(key);
     }
   });
 });

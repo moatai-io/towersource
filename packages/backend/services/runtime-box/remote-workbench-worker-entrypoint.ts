@@ -18,6 +18,11 @@ const workerConfigSchema = z.object({
   host: z.string().min(1).default('127.0.0.1'),
   port: z.number().int().min(1).max(65535),
   projects: z.record(z.string().min(1), z.string().min(1)),
+  projections: z.record(z.string().regex(/^\/workspace\/[A-Za-z0-9._/-]+$/), z.string().min(1)).optional(),
+  operatorGitIdentity: z.object({
+    name: z.string().trim().min(1).max(200),
+    email: z.string().trim().email().max(320),
+  }).strict().optional(),
 }).strict();
 
 export interface RemoteWorkbenchWorkerConfig {
@@ -25,6 +30,8 @@ export interface RemoteWorkbenchWorkerConfig {
   host: string;
   port: number;
   projects: Record<string, string>;
+  projections?: Record<string, string>;
+  operatorGitIdentity?: { name: string; email: string };
 }
 
 /** Load and validate an operator-owned Worker allowlist without reading secret values from disk. */
@@ -38,7 +45,13 @@ export function loadRemoteWorkbenchWorkerConfig(configPath: string): RemoteWorkb
     return [projectId, resolvedRoot];
   }));
   if (Object.keys(projects).length === 0) throw new Error('Remote Worker requires at least one allowlisted project');
-  return { ...parsed, projects };
+  const projections = parsed.projections && Object.fromEntries(Object.entries(parsed.projections).map(([target, source]) => {
+    const resolvedSource = path.resolve(source);
+    const stat = fs.statSync(resolvedSource);
+    if (!stat.isDirectory()) throw new Error(`Remote Worker projection source is not a directory: ${target}`);
+    return [target, resolvedSource];
+  }));
+  return { ...parsed, projects, ...(projections ? { projections } : {}) };
 }
 
 /** Start one standalone Worker process from fixed config and an environment-injected bearer token. */
@@ -52,6 +65,8 @@ export function startRemoteWorkbenchWorker(env: NodeJS.ProcessEnv = process.env)
     workerId: config.workerId,
     token,
     projects: config.projects,
+    projections: config.projections,
+    operatorGitIdentity: config.operatorGitIdentity,
   });
   server.listen(config.port, config.host, () => {
     console.log(`[remote-workbench-worker] worker=${config.workerId} listen=${config.host}:${config.port} projects=${Object.keys(config.projects).length}`);

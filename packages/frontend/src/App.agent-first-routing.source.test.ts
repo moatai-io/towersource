@@ -18,7 +18,7 @@ describe('direct AI teammate creator routing', () => {
   it('opens the creator artifact directly, leaves Team Home, and keeps mobile fullscreen support', () => {
     const academyStart = source.indexOf("window.addEventListener('tower-start-agent-academy'");
     const academyBlock = source.slice(source.lastIndexOf('useEffect(() => {', academyStart), academyStart);
-    expect(academyBlock).toContain("mobileHiring ? { split: 'right', name: '새 AI 동료' } : { name: '새 AI 동료' }");
+    expect(academyBlock).toContain("mobileHiring ? { split: 'right', name: t('newAiTeammate') } : { name: t('newAiTeammate') }");
     expect(academyBlock).toContain("useSessionStore.getState().setActiveView('chat')");
     expect(academyBlock).toContain('useSessionStore.getState().openMobileContext(false)');
     expect(academyBlock.indexOf("setActiveView('chat')")).toBeGreaterThan(academyBlock.indexOf("'agent-draft'"));

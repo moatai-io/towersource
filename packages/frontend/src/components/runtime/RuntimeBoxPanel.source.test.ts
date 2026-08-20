@@ -8,7 +8,7 @@ describe('RuntimeBoxPanel stale error presentation contract', () => {
   it('keeps current lifecycle failures red and marks recovered failures as history', () => {
     expect(source).toContain("box.status === 'error'");
     expect(source).toContain("className: 'text-red-300'");
-    expect(source).toContain('이전 오류(복구됨):');
+    expect(source).toContain("i18n.t('runtimeBox.recoveredError'");
     expect(source).toContain("className: 'text-surface-500'");
   });
 

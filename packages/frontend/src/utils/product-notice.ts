@@ -1,3 +1,4 @@
+import i18n from '../i18n';
 import { toastError, toastInfo, toastSuccess, toastWarning } from './toast';
 
 export type ProductNoticeCode =
@@ -27,23 +28,23 @@ export interface ProductNotice {
   technicalDetail?: unknown;
 }
 
-const COPY: Record<ProductNoticeCode, string> = {
-  'oauth.connect.failed': '계정 연결을 시작하지 못했어요. 잠시 후 다시 시도해 주세요.',
-  'sidebar.upload.failed': '파일을 올리지 못했어요. 잠시 후 다시 시도해 주세요.',
-  'sidebar.personal.rename.failed': '개인 파일 이름을 바꾸지 못했어요.',
-  'sidebar.personal.archive.failed': '개인 파일을 보관하지 못했어요.',
-  'sidebar.session.move.failed': '대화를 다른 프로젝트로 옮기지 못했어요.',
-  'sidebar.file.create.failed': '파일이나 폴더를 만들지 못했어요.',
-  'sidebar.cwd.change.failed': '작업 폴더를 변경하지 못했어요.',
-  'sidebar.project.delete.failed': '프로젝트를 삭제하지 못했어요.',
-  'sidebar.member.remove.failed': '프로젝트 멤버를 내보내지 못했어요.',
-  'sidebar.file.move.failed': '파일이나 폴더를 옮기지 못했어요.',
-  'runtime.load.failed': 'Runtime Box 상태를 불러오지 못했어요. 잠시 후 다시 시도해 주세요.',
-  'runtime.capacity.save.failed': 'Runtime Box 용량 설정을 적용하지 못했어요.',
-  'runtime.logs.load.failed': '서비스 로그를 불러오지 못했어요.',
-  'runtime.service.stop.failed': '서비스를 중지하지 못했어요.',
-  'runtime.box.stop.failed': 'Runtime Box 실행을 중지하지 못했어요.',
-  'runtime.box.cleanup.failed': 'Runtime Box 임시 상태를 정리하지 못했어요.',
+const NOTICE_KEYS: Record<ProductNoticeCode, string> = {
+  'oauth.connect.failed': 'oauthConnectFailed',
+  'sidebar.upload.failed': 'sidebarUploadFailed',
+  'sidebar.personal.rename.failed': 'personalRenameFailed',
+  'sidebar.personal.archive.failed': 'personalArchiveFailed',
+  'sidebar.session.move.failed': 'sessionMoveFailed',
+  'sidebar.file.create.failed': 'fileCreateFailed',
+  'sidebar.cwd.change.failed': 'cwdChangeFailed',
+  'sidebar.project.delete.failed': 'projectDeleteFailed',
+  'sidebar.member.remove.failed': 'memberRemoveFailed',
+  'sidebar.file.move.failed': 'fileMoveFailed',
+  'runtime.load.failed': 'runtimeLoadFailed',
+  'runtime.capacity.save.failed': 'runtimeCapacitySaveFailed',
+  'runtime.logs.load.failed': 'runtimeLogsLoadFailed',
+  'runtime.service.stop.failed': 'runtimeServiceStopFailed',
+  'runtime.box.stop.failed': 'runtimeBoxStopFailed',
+  'runtime.box.cleanup.failed': 'runtimeBoxCleanupFailed',
 };
 
 function technicalMessage(detail: unknown): string | undefined {
@@ -58,7 +59,7 @@ function technicalMessage(detail: unknown): string | undefined {
  * raw server/exception detail stays in diagnostics instead of the toast body.
  */
 export function emitProductNotice(notice: ProductNotice): void {
-  const message = COPY[notice.code];
+  const message = i18n.t(`productNotice.${NOTICE_KEYS[notice.code]}`, { ns: 'common' });
   const detail = technicalMessage(notice.technicalDetail);
   if (detail) {
     console.warn('[product-notice]', {

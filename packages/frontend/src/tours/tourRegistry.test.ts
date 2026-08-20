@@ -1,7 +1,9 @@
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
+import i18n from '../i18n';
 import { getTourDefinition } from './tourRegistry';
 
 describe('Tower beginner guide', () => {
+  beforeEach(async () => { await i18n.changeLanguage('en'); });
   it('covers the core first-use scenes in a practical order', () => {
     const tour = getTourDefinition('beginner');
     expect(tour).not.toBeNull();
@@ -28,16 +30,20 @@ describe('Tower beginner guide', () => {
     const steps = getTourDefinition('beginner')?.steps ?? [];
     const copy = steps.map((step) => `${step.title} ${step.description}`).join('\n');
 
-    expect(copy).toContain('AI 팀');
-    expect(copy).toContain('채널');
     expect(copy).toContain('AI Team');
+    expect(copy).toContain('channels');
     expect(copy).toContain('Work');
-    expect(copy).toContain('선택지를 질문');
-    expect(copy).toContain('더블클릭');
-    expect(copy).toContain('우클릭');
-    expect(copy).toContain('이름과 기대하는 전문성');
-    expect(copy).toContain('합류 후');
-    expect(copy).not.toContain('내 할 일');
-    expect(copy).not.toContain('필요한 도구와 권한');
+    expect(copy).toContain('choices');
+    expect(copy).toContain('Double-click');
+    expect(copy).toContain('right-click');
+    expect(copy).toContain('name and expected expertise');
+    expect(copy).toContain('after the teammate joins');
+    expect(copy).not.toContain('My Todo');
+
+    return i18n.changeLanguage('ko').then(() => {
+      const koreanCopy = getTourDefinition('beginner')?.steps.map((step) => `${step.title} ${step.description}`).join('\n') ?? '';
+      expect(koreanCopy).toContain('AI 팀');
+      expect(koreanCopy).toContain('선택지를 질문');
+    });
   });
 });

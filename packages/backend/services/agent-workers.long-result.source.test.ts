@@ -39,9 +39,10 @@ describe("agent-workers long-result artifact contract", () => {
     expect(SRC).toContain("backingSessionId: worker.backing_session_id");
   });
 
-  it("persists onComplete mode on worker runs so report rescue respects wake/inject/none", () => {
+  it("normalizes persistent worker report rescue to wake-only", () => {
     expect(SRC).toContain('onComplete: input.onComplete || "wake"');
-    expect(SRC).toContain('onComplete: (latestRun?.metadata?.onComplete || "wake") as SendOnComplete');
+    expect(SRC).toContain('onComplete: "wake" as SendOnComplete');
+    expect(SRC).toContain('Persistent worker communication is supervisor-driven');
   });
 
   it("periodically re-arms running worker run settlement after restart retry windows", () => {

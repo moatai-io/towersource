@@ -91,6 +91,10 @@ interface TimelineResponse {
   };
 }
 
+function tr(key: string, options?: Record<string, unknown>): string {
+  return i18n.t(key, { ns: 'common', ...options });
+}
+
 function authHeaders(): HeadersInit {
   const token = localStorage.getItem('token');
   return token ? { Authorization: `Bearer ${token}` } : {};
@@ -115,7 +119,7 @@ function writeWorkstreamLocation(workstreamKey: string | null, projectId: string
 function formatDateTick(value: string): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleDateString('ko-KR', { month: 'numeric', day: 'numeric' });
+  return date.toLocaleDateString(i18n.resolvedLanguage || i18n.language, { month: 'numeric', day: 'numeric' });
 }
 
 function midnightTicks(start: string, end: string): string[] {
@@ -146,7 +150,7 @@ function tickStyle(value: string, start: string, end: string): React.CSSProperti
 function formatDateTime(value: string): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleString('ko-KR', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  return date.toLocaleString(i18n.resolvedLanguage || i18n.language, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
 
 function segmentStyle(segment: Segment, start: string, end: string): React.CSSProperties {
@@ -170,9 +174,9 @@ function workstreamKey(challenge: ChallengeRow): string {
 }
 
 function workstreamStatusLabel(challenge: ChallengeRow): string {
-  if (challenge.waitingReason === 'stale') return '업데이트 중단';
-  if (challenge.waitingReason === 'blocked') return '차단됨';
-  if (challenge.waitingReason === 'failed') return '실패';
+  if (challenge.waitingReason === 'stale') return tr('challenge.timeline.status.stale', { ns: 'common' });
+  if (challenge.waitingReason === 'blocked') return tr('challenge.timeline.status.blocked', { ns: 'common' });
+  if (challenge.waitingReason === 'failed') return tr('challenge.timeline.status.failed', { ns: 'common' });
   const key = challenge.status === 'resolved' ? 'resolved' : challenge.status === 'waiting' ? 'waiting' : 'active';
   return i18n.t(`challenge.status.${key}`, { ns: 'common' });
 }
@@ -193,12 +197,12 @@ function openSession(sessionId: string) {
 }
 
 function activityStatus(session: WorkSession, challenge: ChallengeRow): { label: string; tone: string } {
-  if (challenge.waitingReason === 'stale') return { label: '업데이트 중단', tone: 'text-surface-300 bg-surface-800 border-surface-700' };
-  if (challenge.waitingReason === 'blocked') return { label: '차단됨', tone: 'text-amber-700 dark:text-amber-300 bg-amber-500/10 border-amber-400/20' };
-  if (challenge.waitingReason === 'failed') return { label: '실패', tone: 'text-red-700 dark:text-red-200 bg-red-500/10 border-red-400/20' };
-  if (session.todoTotal > 0 && session.todoLeft === 0) return { label: '완료', tone: 'text-emerald-700 dark:text-emerald-300 bg-emerald-500/10 border-emerald-400/20' };
-  if (session.openTodos?.some((todo) => todo.status === 'in_progress')) return { label: '진행 중', tone: 'text-amber-700 dark:text-amber-300 bg-amber-500/10 border-amber-400/20' };
-  return { label: '확인 필요', tone: 'text-surface-300 bg-surface-800 border-surface-700' };
+  if (challenge.waitingReason === 'stale') return { label: tr('challenge.timeline.status.stale', { ns: 'common' }), tone: 'text-surface-300 bg-surface-800 border-surface-700' };
+  if (challenge.waitingReason === 'blocked') return { label: tr('challenge.timeline.status.blocked', { ns: 'common' }), tone: 'text-amber-700 dark:text-amber-300 bg-amber-500/10 border-amber-400/20' };
+  if (challenge.waitingReason === 'failed') return { label: tr('challenge.timeline.status.failed', { ns: 'common' }), tone: 'text-red-700 dark:text-red-200 bg-red-500/10 border-red-400/20' };
+  if (session.todoTotal > 0 && session.todoLeft === 0) return { label: tr('challenge.timeline.status.completed', { ns: 'common' }), tone: 'text-emerald-700 dark:text-emerald-300 bg-emerald-500/10 border-emerald-400/20' };
+  if (session.openTodos?.some((todo) => todo.status === 'in_progress')) return { label: tr('challenge.timeline.status.inProgress', { ns: 'common' }), tone: 'text-amber-700 dark:text-amber-300 bg-amber-500/10 border-amber-400/20' };
+  return { label: tr('challenge.timeline.status.needsReview', { ns: 'common' }), tone: 'text-surface-300 bg-surface-800 border-surface-700' };
 }
 
 function AgentFace({ session }: { session: WorkSession }) {
@@ -231,7 +235,7 @@ export function ChallengeTimelinePanel() {
       if (!res.ok) throw new Error(await res.text());
       setData(await res.json());
     } catch (err: any) {
-      setError(err?.message || 'Work timeline을 불러오지 못했습니다.');
+      setError(err?.message || tr('challenge.timeline.loadFailed'));
     } finally {
       setLoading(false);
     }
@@ -295,37 +299,37 @@ export function ChallengeTimelinePanel() {
         <div className="flex flex-wrap items-start justify-between gap-3 md:gap-4">
           <div>
             <div className="hidden text-[12px] font-semibold uppercase tracking-[0.18em] text-primary-700/90 dark:text-primary-300/80 md:mb-1 md:block">Activity briefing</div>
-            <h1 className="text-[20px] font-semibold tracking-tight text-surface-50 md:text-[24px]">AI 팀 활동</h1>
+            <h1 className="text-[20px] font-semibold tracking-tight text-surface-50 md:text-[24px]">{tr('challenge.timeline.title')}</h1>
             <p className="mt-1 hidden max-w-3xl text-[13px] leading-6 text-surface-500 md:block">
-              내 AI 팀원들이 진행 중인 일과 최근 결과, 확인이 필요한 상태를 한눈에 봅니다.
+              {tr('challenge.timeline.description')}
             </p>
           </div>
           <div className="flex w-full flex-wrap items-center gap-2 md:w-auto">
             <select value={rangeHours} onChange={(e) => setRangeHours(Number(e.target.value))} className="h-9 rounded-lg border border-surface-700 bg-surface-900 px-3 text-[13px] text-surface-200 outline-none focus:border-primary-500/70">
-              <option value={48}>지난 2일</option>
-              <option value={168}>지난 7일</option>
-              <option value={360}>지난 15일</option>
+              <option value={48}>{tr('challenge.timeline.last2Days')}</option>
+              <option value={168}>{tr('challenge.timeline.last7Days')}</option>
+              <option value={360}>{tr('challenge.timeline.last15Days')}</option>
             </select>
             <select value={bucketHours} onChange={(e) => setBucketHours(Number(e.target.value))} className="h-9 rounded-lg border border-surface-700 bg-surface-900 px-3 text-[13px] text-surface-200 outline-none focus:border-primary-500/70">
-              <option value={6}>6시간 단위</option>
-              <option value={24}>1일 단위</option>
+              <option value={6}>{tr('challenge.timeline.every6Hours')}</option>
+              <option value={24}>{tr('challenge.timeline.daily')}</option>
             </select>
             <select value={projectId} onChange={(e) => setProjectId(e.target.value)} className="h-9 min-w-0 flex-1 rounded-lg border border-surface-700 bg-surface-900 px-3 text-[13px] text-surface-200 outline-none focus:border-primary-500/70 md:max-w-[220px] md:flex-none">
-              <option value="all">내가 맡긴 전체 업무</option>
+              <option value="all">{tr('challenge.timeline.allAssignedWork')}</option>
               {projectsForFilter.map((project) => (
                 <option key={project.id || 'none'} value={project.id || 'none'}>{project.name}</option>
               ))}
             </select>
             <button onClick={load} disabled={loading} className="h-9 rounded-lg border border-surface-700 bg-surface-850 px-3 text-[13px] font-medium text-surface-300 transition-colors hover:border-primary-500/40 hover:text-primary-700 dark:text-primary-200 disabled:opacity-50">
-              {loading ? '불러오는 중' : '새로고침'}
+              {loading ? tr('challenge.timeline.loadingShort') : tr('challenge.timeline.refresh')}
             </button>
           </div>
         </div>
 
         <div className="mt-3 hidden grid-cols-2 gap-1.5 md:grid md:grid-cols-3">
-          <Stat label="AI 팀원" value={new Set((data?.projects || []).flatMap((project) => project.challenges.flatMap((challenge) => (challenge.sessions || []).map((session) => session.agentName)))).size} />
-          <Stat label="최근 활동" value={(data?.projects || []).reduce((sum, project) => sum + project.challenges.reduce((inner, challenge) => inner + (challenge.sessions?.length || 0), 0), 0)} tone="primary" />
-          <Stat label="확인할 단계" value={data?.totals.todoLeft ?? 0} tone="amber" />
+          <Stat label={tr('challenge.timeline.aiTeammates')} value={new Set((data?.projects || []).flatMap((project) => project.challenges.flatMap((challenge) => (challenge.sessions || []).map((session) => session.agentName)))).size} />
+          <Stat label={tr('challenge.timeline.recentActivity')} value={(data?.projects || []).reduce((sum, project) => sum + project.challenges.reduce((inner, challenge) => inner + (challenge.sessions?.length || 0), 0), 0)} tone="primary" />
+          <Stat label={tr('challenge.timeline.stepsToReview')} value={data?.totals.todoLeft ?? 0} tone="amber" />
         </div>
       </div>
 
@@ -334,9 +338,9 @@ export function ChallengeTimelinePanel() {
         {error ? (
           <div className="rounded-xl border border-red-400/20 bg-red-500/10 p-4 text-[14px] text-red-700 dark:text-red-200">{error}</div>
         ) : !data || loading ? (
-          <div className="rounded-xl border border-surface-800 bg-surface-900/60 p-6 text-[14px] text-surface-500">AI 팀 활동을 불러오는 중입니다…</div>
+          <div className="rounded-xl border border-surface-800 bg-surface-900/60 p-6 text-[14px] text-surface-500">{tr('challenge.timeline.loading')}</div>
         ) : data.projects.length === 0 ? (
-          <div className="rounded-xl border border-dashed border-surface-700 bg-surface-900/40 p-10 text-center text-surface-500">최근 AI 팀 활동이 없습니다.</div>
+          <div className="rounded-xl border border-dashed border-surface-700 bg-surface-900/40 p-10 text-center text-surface-500">{tr('challenge.timeline.empty')}</div>
         ) : selectedChallenge ? (
           <WorkstreamOverview challenge={selectedChallenge} onBack={returnToActivity} />
         ) : (
@@ -364,8 +368,8 @@ function AgentActivityTimeline({ projects, selectedWorkstreamKey, onSelectWorkst
     <section aria-labelledby="agent-activity-title" className="overflow-hidden rounded-xl border border-surface-800 bg-surface-900/55">
       <div className="border-b border-surface-800 bg-surface-950/45 px-4 py-3">
         <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-primary-700/90 dark:text-primary-300/80">Recent activity</div>
-        <h2 id="agent-activity-title" className="mt-0.5 text-[17px] font-semibold text-surface-100">최근 활동</h2>
-        <p className="mt-1 text-[12px] leading-5 text-surface-500">같은 AI 팀원의 업무를 묶어 최근 항목부터 보여줍니다.</p>
+        <h2 id="agent-activity-title" className="mt-0.5 text-[17px] font-semibold text-surface-100">{tr('challenge.timeline.recentActivity')}</h2>
+        <p className="mt-1 text-[12px] leading-5 text-surface-500">{tr('challenge.timeline.groupDescription')}</p>
       </div>
       <div className="divide-y divide-surface-800">
         {groups.map((group) => {
@@ -374,8 +378,8 @@ function AgentActivityTimeline({ projects, selectedWorkstreamKey, onSelectWorkst
           return <div key={group.key} className="px-4 py-3">
             <div className="mb-2 flex items-center gap-3">
               <AgentFace session={group.session} />
-              <div className="min-w-0 flex-1"><div className="text-[13px] font-semibold text-surface-100">{group.session.agentName}</div><div className="text-[11px] text-surface-600">{group.session.projectName} · 최근 업무 {group.items.length}건</div></div>
-              {group.items.length > 3 && <button type="button" onClick={() => setExpandedAgents((current) => { const next = new Set(current); expanded ? next.delete(group.key) : next.add(group.key); return next; })} className="rounded-md border border-surface-700 px-2 py-1 text-[11px] text-surface-400 hover:text-surface-100">{expanded ? '접기' : `+${group.items.length - 3} 더 보기`}</button>}
+              <div className="min-w-0 flex-1"><div className="text-[13px] font-semibold text-surface-100">{group.session.agentName}</div><div className="text-[11px] text-surface-600">{tr('challenge.timeline.recentWorkCount', { project: group.session.projectName, count: group.items.length })}</div></div>
+              {group.items.length > 3 && <button type="button" onClick={() => setExpandedAgents((current) => { const next = new Set(current); expanded ? next.delete(group.key) : next.add(group.key); return next; })} className="rounded-md border border-surface-700 px-2 py-1 text-[11px] text-surface-400 hover:text-surface-100">{expanded ? tr('challenge.timeline.collapse') : tr('challenge.timeline.showMore', { count: group.items.length - 3 })}</button>}
             </div>
             <div className="divide-y divide-surface-800/70 border-t border-surface-800/70">
               {visibleItems.map(({ session, challenge }) => {
@@ -400,7 +404,7 @@ function WorkstreamOverview({ challenge, onBack }: { challenge: ChallengeRow; on
   const openTodos = sessions.flatMap((session) => session.openTodos || []);
   const completedTodos = sessions.flatMap((session) => session.completedTodos || []);
   const outcome = challenge.outcomes?.[challenge.outcomes.length - 1];
-  const currentSummary = openTodos[0]?.content || outcome || challenge.runTitles?.[challenge.runTitles.length - 1] || '아직 현재 상태를 설명하는 기록이 없습니다.';
+  const currentSummary = openTodos[0]?.content || outcome || challenge.runTitles?.[challenge.runTitles.length - 1] || tr('challenge.timeline.noCurrentSummary');
   const progress = challenge.todoTotal > 0 ? Math.round((challenge.todoDone / challenge.todoTotal) * 100) : challenge.status === 'resolved' ? 100 : 0;
   const statusTone = challenge.status === 'resolved'
     ? 'border-emerald-500/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
@@ -411,7 +415,7 @@ function WorkstreamOverview({ challenge, onBack }: { challenge: ChallengeRow; on
   return (
     <section aria-labelledby="workstream-overview-title" className="mx-auto w-full max-w-5xl pb-6 [word-break:keep-all] [overflow-wrap:break-word]">
       <button type="button" onClick={onBack} className="mb-3 inline-flex min-h-9 items-center gap-1 rounded-lg px-2 text-[12px] font-semibold text-surface-500 transition-colors hover:bg-surface-800 hover:text-surface-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/60">
-        <span aria-hidden="true">←</span> AI 팀 활동
+        <span aria-hidden="true">←</span> {tr('challenge.timeline.title')}
       </button>
 
       <article className="overflow-hidden rounded-2xl border border-surface-800 bg-surface-900/65 shadow-sm">
@@ -420,14 +424,14 @@ function WorkstreamOverview({ challenge, onBack }: { challenge: ChallengeRow; on
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
                 <span className={`rounded-full border px-2 py-1 text-[10px] font-bold ${statusTone}`}>{workstreamStatusLabel(challenge)}</span>
-                <span className="text-[11px] text-surface-600">{challenge.projectName} · 최근 업데이트 {formatDateTime(challenge.lastAt)}</span>
+                <span className="text-[11px] text-surface-600">{tr('challenge.timeline.lastUpdated', { project: challenge.projectName, date: formatDateTime(challenge.lastAt) })}</span>
               </div>
               <h2 id="workstream-overview-title" className="mt-3 text-xl font-bold tracking-tight text-surface-100 sm:text-2xl">{challenge.title}</h2>
               <p className="mt-2 max-w-3xl text-[13px] leading-6 text-surface-400">{currentSummary}</p>
               <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-surface-600">
-                <span>담당 AI {Array.from(new Set(sessions.map((session) => session.agentName))).join(', ') || '기록 없음'}</span>
-                <span>협업 사용자 {challenge.owners.join(', ') || '기록 없음'}</span>
-                <span>관련 대화 {challenge.sessionCount}개</span>
+                <span>{tr('challenge.timeline.assignedAi', { names: Array.from(new Set(sessions.map((session) => session.agentName))).join(', ') || tr('challenge.timeline.noRecord') })}</span>
+                <span>{tr('challenge.timeline.collaborators', { names: challenge.owners.join(', ') || tr('challenge.timeline.noRecord') })}</span>
+                <span>{tr('challenge.timeline.relatedConversationCount', { count: challenge.sessionCount })}</span>
               </div>
             </div>
             <button type="button" disabled={!primarySession} onClick={() => primarySession && openSession(primarySession.id)} className="tone-accent tone-action min-h-11 shrink-0 rounded-xl border px-4 py-2.5 text-sm font-bold disabled:cursor-not-allowed disabled:opacity-50">
@@ -436,32 +440,32 @@ function WorkstreamOverview({ challenge, onBack }: { challenge: ChallengeRow; on
           </div>
         </div>
         <div className="border-t border-surface-800 bg-surface-950/25 px-4 py-4 sm:px-6">
-          <div className="flex items-center justify-between text-[11px]"><span className="font-semibold text-surface-400">진행 단계</span><span className="tabular-nums text-surface-500">{challenge.todoTotal > 0 ? `${challenge.todoDone}/${challenge.todoTotal}` : '단계 수 미기록'}</span></div>
+          <div className="flex items-center justify-between text-[11px]"><span className="font-semibold text-surface-400">{tr('challenge.timeline.progressSteps')}</span><span className="tabular-nums text-surface-500">{challenge.todoTotal > 0 ? `${challenge.todoDone}/${challenge.todoTotal}` : tr('challenge.timeline.stepCountMissing')}</span></div>
           <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-surface-800"><div className="h-full rounded-full bg-primary-500 transition-[width] motion-reduce:transition-none" style={{ width: `${progress}%` }} /></div>
         </div>
       </article>
 
       <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1.25fr)_minmax(280px,.75fr)]">
         <div className="space-y-4">
-          <OverviewSection title="현재 진행 단계" description="가장 최근 기록을 기준으로 완료된 일과 남은 일을 구분합니다.">
+          <OverviewSection title={tr('challenge.timeline.currentProgress')} description={tr('challenge.timeline.currentProgressDescription')}>
             <div className="grid gap-3 md:grid-cols-2">
-              <TodoOverview title="남은 단계" todos={openTodos} empty="남은 단계가 기록되지 않았습니다." />
-              <TodoOverview title="완료된 단계" todos={completedTodos.slice(-8).reverse()} empty="완료 단계가 기록되지 않았습니다." completed />
+              <TodoOverview title={tr('challenge.timeline.remainingSteps')} todos={openTodos} empty={tr('challenge.timeline.noRemainingSteps')} />
+              <TodoOverview title={tr('challenge.timeline.completedSteps')} todos={completedTodos.slice(-8).reverse()} empty={tr('challenge.timeline.noCompletedSteps')} completed />
             </div>
           </OverviewSection>
 
-          <OverviewSection title="결과와 판단" description="현재까지 나온 결과와 사용자가 확인해야 할 항목입니다.">
+          <OverviewSection title={tr('challenge.timeline.resultsAndDecisions')} description={tr('challenge.timeline.resultsDescription')}>
             <div className="grid gap-3 md:grid-cols-2">
-              <SimpleOverviewList title="최근 결과" items={(challenge.outcomes || []).slice(-5).reverse()} empty="아직 기록된 결과가 없습니다." />
-              <SimpleOverviewList title="열린 질문" items={(challenge.questions || []).filter((question) => question.status !== 'answered').map((question) => question.title)} empty="현재 열린 질문이 없습니다." />
+              <SimpleOverviewList title={tr('challenge.timeline.recentResults')} items={(challenge.outcomes || []).slice(-5).reverse()} empty={tr('challenge.timeline.noResults')} />
+              <SimpleOverviewList title={tr('challenge.timeline.openQuestions')} items={(challenge.questions || []).filter((question) => question.status !== 'answered').map((question) => question.title)} empty={tr('challenge.timeline.noOpenQuestions')} />
             </div>
           </OverviewSection>
         </div>
 
         <aside className="space-y-4">
-          <OverviewSection title="관련 대화" description="이 업무에 기여한 대화를 최근 순으로 엽니다.">
+          <OverviewSection title={tr('challenge.timeline.relatedConversations')} description={tr('challenge.timeline.relatedConversationsDescription')}>
             <div className="divide-y divide-surface-800">
-              {sessions.length === 0 ? <p className="py-2 text-[12px] text-surface-600">관련 대화가 없습니다.</p> : sessions.map((session) => (
+              {sessions.length === 0 ? <p className="py-2 text-[12px] text-surface-600">{tr('challenge.timeline.noRelatedConversations')}</p> : sessions.map((session) => (
                 <button key={session.id} type="button" onClick={() => openSession(session.id)} className="block w-full py-2.5 text-left transition-colors hover:text-primary-700 dark:hover:text-primary-200">
                   <span className="block truncate text-[12px] font-semibold text-surface-300">{session.runTitles[session.runTitles.length - 1] || session.name}</span>
                   <span className="mt-0.5 block text-[10px] text-surface-600">{session.agentName} · {formatDateTime(session.lastAt)}</span>
@@ -470,8 +474,8 @@ function WorkstreamOverview({ challenge, onBack }: { challenge: ChallengeRow; on
             </div>
           </OverviewSection>
 
-          <OverviewSection title="다음 후보" description="현재 실행 단계와 분리해 둔 후속 작업입니다.">
-            <SimpleOverviewList items={(challenge.backlog || []).map((item) => item.title)} empty="후속 작업 후보가 없습니다." />
+          <OverviewSection title={tr('challenge.timeline.nextCandidates')} description={tr('challenge.timeline.nextCandidatesDescription')}>
+            <SimpleOverviewList items={(challenge.backlog || []).map((item) => item.title)} empty={tr('challenge.timeline.noFollowUps')} />
           </OverviewSection>
         </aside>
       </div>
@@ -559,7 +563,7 @@ function ChallengeLine({ challenge, start, end, expanded, onToggle }: { challeng
               key={`${segment.start}-${index}`}
               className={`absolute top-[10px] flex h-[24px] min-w-[18px] items-center justify-center rounded-sm border px-2 text-[10px] font-bold shadow-sm shadow-black/20 ${segmentClass(segment.kind)}`}
               style={segmentStyle(segment, start, end)}
-              title={`${formatDateTime(segment.start)} → ${formatDateTime(segment.end)} · 진행 단계 기록 ${segment.snapshotCount}개`}
+              title={`${formatDateTime(segment.start)} → ${formatDateTime(segment.end)} · ${tr('challenge.timeline.progressSnapshotCount', { count: segment.snapshotCount })}`}
             >
               {segment.snapshotCount > 1 ? segment.snapshotCount : ''}
             </div>
@@ -568,7 +572,7 @@ function ChallengeLine({ challenge, start, end, expanded, onToggle }: { challeng
         <div className="grid place-items-center px-2 py-2 text-center">
           <div>
             <div className={`text-[12px] font-semibold ${challenge.status === 'resolved' ? 'text-emerald-700 dark:text-emerald-300' : challenge.status === 'active' ? 'text-amber-700 dark:text-amber-300' : 'text-red-700 dark:text-red-300'}`}>{statusText(challenge)}</div>
-            <div className="mt-0.5 text-[10px] text-surface-600">{challenge.todoTotal > 0 ? `${challenge.todoDone}/${challenge.todoTotal}` : '단계 수 미기록'}</div>
+            <div className="mt-0.5 text-[10px] text-surface-600">{challenge.todoTotal > 0 ? `${challenge.todoDone}/${challenge.todoTotal}` : tr('challenge.timeline.stepCountMissing')}</div>
           </div>
         </div>
       </div>
@@ -608,11 +612,11 @@ function WorkstreamDetail({ challenge, sessions }: { challenge: ChallengeRow; se
         <section>
           <div className="mb-2 flex items-center justify-between gap-3">
             <h3 className="text-[13px] font-semibold uppercase tracking-[0.14em] text-surface-500">Session breakdown</h3>
-            <span className="text-[11px] text-surface-600">세션 행은 펼침 · Open 버튼은 이동</span>
+            <span className="text-[11px] text-surface-600">{tr('challenge.timeline.sessionRowHint')}</span>
           </div>
           <div className="space-y-2">
             {sessions.length === 0 ? (
-              <EmptyDetail text="관련 세션 정보가 없습니다." />
+              <EmptyDetail text={tr('challenge.timeline.noSessionInfo')} />
             ) : sessions.map((session) => (
               <SessionCard key={session.id} session={session} expanded={expandedSessionIds.has(session.id)} onToggle={() => toggleSession(session.id)} />
             ))}
@@ -628,16 +632,16 @@ function WorkstreamDetail({ challenge, sessions }: { challenge: ChallengeRow; se
 
           {activeTab === 'runs' && (
             <div className="space-y-3">
-              <DetailCard title="Recent runs" empty="기록된 run title이 없습니다.">
+              <DetailCard title={tr('challenge.timeline.recentRuns')} empty={tr('challenge.timeline.noRunTitles')}>
                 {recentRuns.map((title) => <li key={title} className="text-surface-300">{title}</li>)}
               </DetailCard>
-              <DetailCard title="Outcomes" empty="기록된 outcome이 없습니다.">
+              <DetailCard title={tr('challenge.timeline.outcomes')} empty={tr('challenge.timeline.noOutcomes')}>
                 {outcomes.map((outcome) => <li key={outcome} className="text-surface-300">{outcome}</li>)}
               </DetailCard>
             </div>
           )}
           {activeTab === 'backlog' && (
-            <DetailCard title="Backlog" empty="남겨진 follow-up이 없습니다.">
+            <DetailCard title={tr('challenge.timeline.backlog')} empty={tr('challenge.timeline.noBacklog')}>
               {backlog.map((item) => (
                 <li key={item.title} className="text-surface-300">
                   <span className="font-medium text-surface-200">{item.title}</span>
@@ -648,7 +652,7 @@ function WorkstreamDetail({ challenge, sessions }: { challenge: ChallengeRow; se
             </DetailCard>
           )}
           {activeTab === 'questions' && (
-            <DetailCard title="Questions" empty="열린 질문이 없습니다.">
+            <DetailCard title={tr('challenge.timeline.questions')} empty={tr('challenge.timeline.noOpenQuestions')}>
               {questions.map((question) => (
                 <li key={question.title} className="text-surface-300">
                   <span className="font-medium text-surface-200">{question.title}</span>
@@ -702,7 +706,7 @@ function SessionCard({ session, expanded, onToggle }: { session: WorkSession; ex
           <div className="flex shrink-0 items-start gap-3">
             <div className="text-right">
               <div className={`text-[12px] font-semibold ${session.todoLeft === 0 ? 'text-emerald-700 dark:text-emerald-300' : 'text-amber-700 dark:text-amber-300'}`}>{session.todoLeft === 0 ? 'done' : `${session.todoLeft} left`}</div>
-              <div className="mt-1 text-[11px] text-surface-600">{session.todoTotal > 0 ? `${session.todoDone}/${session.todoTotal}` : '단계 수 미기록'}</div>
+              <div className="mt-1 text-[11px] text-surface-600">{session.todoTotal > 0 ? `${session.todoDone}/${session.todoTotal}` : tr('challenge.timeline.stepCountMissing')}</div>
             </div>
             <button type="button" onClick={(event) => { event.stopPropagation(); openSession(session.id); }} className="rounded-lg border border-primary-500/30 bg-primary-500/10 px-2.5 py-1 text-[11px] font-semibold text-primary-700 dark:text-primary-200 transition-colors hover:bg-primary-500/20">
               Open ↗
@@ -721,8 +725,8 @@ function SessionCard({ session, expanded, onToggle }: { session: WorkSession; ex
             </div>
           )}
           <div className="grid gap-3 md:grid-cols-2">
-            <TodoListPreview title="Open todos" todos={openTodos} empty="열린 todo가 없습니다." />
-            <TodoListPreview title="Completed sample" todos={completedTodos} empty="완료 샘플이 없습니다." />
+            <TodoListPreview title={tr('challenge.timeline.openTodos')} todos={openTodos} empty={tr('challenge.timeline.noOpenTodos')} />
+            <TodoListPreview title={tr('challenge.timeline.completedSample')} todos={completedTodos} empty={tr('challenge.timeline.noCompletedSample')} />
           </div>
         </div>
       )}

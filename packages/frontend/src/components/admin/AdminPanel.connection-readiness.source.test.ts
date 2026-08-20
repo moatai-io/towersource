@@ -7,15 +7,15 @@ const source = fs.readFileSync(path.join(__dirname, 'AdminPanel.tsx'), 'utf8');
 describe('Connection-centered management UI contract', () => {
   it('does not present project grant as verified Provider readiness', () => {
     expect(source).toContain("'connected_unverified'");
-    expect(source).toContain('연결됐지만 실제 확인 안 됨');
-    expect(source).toContain('프로젝트 연결됨');
+    expect(source).toContain("adminText('credentialConnections.readiness.connectedUnverified')");
+    expect(source).toContain("adminText('credentialConnections.readiness.connectedUnverifiedDescription'");
     expect(source).not.toContain("if (status === 'connected') return { label: '정상 사용 가능'");
   });
 
   it('uses a service Connection as the primary user-facing surface', () => {
-    expect(source).toContain("renderTab('credentials', 'Connections')");
-    expect(source).toContain('서비스 연결');
-    expect(source).toContain('서비스명, 용도, 현재 상태와 다음 행동만 확인하세요.');
+    expect(source).toContain("renderTab('credentials', t('connectionsTab'))");
+    expect(source).toContain("adminText('credentialConnections.readiness.connectedUnverified')");
+    expect(source).toContain('connectionPrimaryAction');
     expect(source).toContain('connectionPrimaryAction');
   });
 
@@ -23,7 +23,7 @@ describe('Connection-centered management UI contract', () => {
     expect(source).toContain('고급 Credential 관리');
     expect(source).toContain('showAdvanced && !isPersonalCredentialMode');
     expect(source).toContain('handleConnectionPrimaryAction');
-    expect(source).toContain("return { label: '관리', kind: 'detail' as const }");
+    expect(source).toContain("return { label: adminText('credentialConnections.primaryAction'), kind: 'detail' as const }");
     expect(source).not.toContain("label: '연결 확인'");
   });
 
@@ -31,8 +31,8 @@ describe('Connection-centered management UI contract', () => {
     expect(source).toContain('hidden overflow-x-auto md:block');
     expect(source).toContain('w-full min-w-[920px]');
     expect(source).toContain('divide-y divide-surface-800/60 md:hidden');
-    expect(source).toContain('<th className="px-4 py-2.5 text-left font-semibold">서비스</th>');
-    expect(source).toContain('<th className="px-4 py-2.5 text-left font-semibold">실제 인증</th>');
+    expect(source).toContain("<th className=\"px-4 py-2.5 text-left font-semibold\">{t('credentialConnections.service')}</th>");
+    expect(source).toContain("<th className=\"px-4 py-2.5 text-left font-semibold\">{t('credentialConnections.providerAuth')}</th>");
     expect(source).toContain('min-h-11 flex-1');
     expect(source).not.toContain('xl:grid-cols-3 gap-3 p-4');
   });
@@ -50,8 +50,8 @@ describe('Connection-centered management UI contract', () => {
     expect(source).toContain('aria-modal="true"');
     expect(source).toContain('md:max-w-[560px]');
     expect(source).toContain("'management' | 'agents'");
-    expect(source).toContain("['management', 'Connection 관리']");
-    expect(source).toContain("['agents', '허용 Agent']");
+    expect(source).toContain("['management', t('credentialConnections.managementTab')]");
+    expect(source).toContain("['agents', t('credentialConnections.agentsTab')]");
     expect(source).not.toContain("['summary', '요약']");
     expect(source).not.toContain("['diagnostics', '진단']");
     expect(source).toContain("if (event.key === 'Escape') closeConnectionDetail()");

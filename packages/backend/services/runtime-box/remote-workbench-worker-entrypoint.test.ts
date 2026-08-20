@@ -27,6 +27,22 @@ describe('Remote Workbench Worker standalone config', () => {
     });
   });
 
+  it('loads only fixed operator-owned projections below /workspace', async () => {
+    const root = await tempRoot();
+    const project = path.join(root, 'project-a');
+    const tower = path.join(root, 'tower');
+    await fs.mkdir(project);
+    await fs.mkdir(tower);
+    const config = path.join(root, 'worker.json');
+    await fs.writeFile(config, JSON.stringify({
+      workerId: 'worker-a', host: '127.0.0.1', port: 43123, projects: { p: project },
+      projections: { '/workspace/tower': tower },
+    }));
+    expect(loadRemoteWorkbenchWorkerConfig(config)).toMatchObject({
+      projects: { p: project }, projections: { '/workspace/tower': tower },
+    });
+  });
+
   it('rejects unknown config keys and non-directory project roots', async () => {
     const root = await tempRoot();
     const config = path.join(root, 'worker.json');

@@ -13,14 +13,14 @@ const store = fs.readFileSync(path.resolve(import.meta.dirname, '../../../../bac
 
 describe('Personal materials Viewer Pane', () => {
   it('shows owner-only files without duplicating the independent My Todo surface', () => {
-    expect(view).toContain('내 자료');
-    expect(view).toContain('노트와 업로드 파일을 구분하지 않고 한곳에서 찾습니다.');
+    expect(view).toContain("t('myMaterials')");
+    expect(view).toContain("t('personalMaterialsDescription')");
     expect(view).not.toContain('내 Todo');
     expect(view).not.toContain('내 체크리스트');
     expect(view).not.toContain('/api/personal-space/todos');
     expect(view).not.toContain("openPersonalPath('personal://todos')");
     expect(app).toContain("store.openTab('personal://todos'");
-    expect(app).toContain("name: '내 Todo'");
+    expect(app).toContain("name: t('myTodo')");
     expect(context).toContain("openFile?.path === 'personal://todos'");
     expect(context).toContain('return <PersonalTodoView />');
     expect(view).toContain('<FileExchangeSurface personalOnly unifiedPersonal');
@@ -28,7 +28,7 @@ describe('Personal materials Viewer Pane', () => {
     expect(exchange).toContain("readJson('/api/personal-space/files')");
     expect(exchange).toContain('/api/personal-space/files/upload');
     expect(exchange).toContain('/api/personal-space/files/create-directory');
-    expect(exchange).toContain('이름·위치 변경');
+    expect(exchange).toContain("t('fileExchange.changeNameLocation')");
     expect(exchange).toContain('onDrop={event =>');
   });
 
@@ -44,7 +44,7 @@ describe('Personal materials Viewer Pane', () => {
 
   it('keeps the archive as a secondary state with restore support', () => {
     expect(view).toContain("openPersonalPath('personal://archive')");
-    expect(view).toContain('··· 보관함');
+    expect(view).toContain("t('personalArchive.title')");
     expect(context).toContain("openFile?.path === 'personal://archive'");
     expect(context).toContain('return <PersonalArchiveView />');
     expect(app).toContain("store.openTab('personal://archive'");

@@ -14,6 +14,7 @@ import path from 'path';
 const PI_ENGINE_PATH = path.resolve(import.meta.dirname, '../pi-engine.ts');
 const PI_FAILURE_CLASSIFIER_PATH = path.resolve(import.meta.dirname, '../pi-failure-classifier.ts');
 const PI_TOOL_ASSEMBLY_PATH = path.resolve(import.meta.dirname, '../pi/tool-assembly.ts');
+const PI_SESSION_RESOURCES_PATH = path.resolve(import.meta.dirname, '../pi/session-resources.ts');
 const PI_FINANCE_TOOLS_PATH = path.resolve(import.meta.dirname, '../pi-finance-tools.ts');
 const PI_FINANCE_EXTRA_PATH = path.resolve(import.meta.dirname, '../pi-finance-tools-extra.ts');
 const PI_RUNTIME_BOX_TOOLS_PATH = path.resolve(import.meta.dirname, '../pi-runtime-box-tools.ts');
@@ -295,7 +296,8 @@ describe('Pi engine — model safety', () => {
     const src = readSource(PI_ENGINE_PATH);
     expect(src).toMatch(/getModelDefaults\(\)\.session/);
     expect(src).toMatch(/Using configured default model/);
-    expect(src).toMatch(/'litellm-responses': 'openai-responses'/);
+    expect(src).toMatch(/'openai-responses-compatible': 'openai-responses'/);
+    expect(src).toMatch(/const apiKind = m\.api && providerToDefaultApi\[m\.api\]/);
     expect(src).toMatch(/quickReplyLiteLLMResponses/);
     expect(src).toMatch(/Do not inject service_tier=priority for Smartest by default/);
     expect(src).not.toMatch(/serviceTier: 'priority'/);
@@ -303,7 +305,7 @@ describe('Pi engine — model safety', () => {
     expect(src).toMatch(/const defaultThinkingLevel = model\.provider === 'litellm-responses' && \(model\.id === 'smartest' \|\| model\.id === 'smartest-long'\)[\s\S]*?\? 'low'[\s\S]*?: 'medium'/);
     expect(src).toMatch(/thinkingLevel: effectiveThinkingLevel/);
     expect(src).toMatch(/requestedEffort: opts\.requestedEffort \|\| opts\.effort \|\| defaultThinkingLevel/);
-    expect(src).toMatch(/reasoning: isReasoningModel[\s\S]*?m\.provider === 'litellm-responses' && \(m\.modelId === 'smartest' \|\| m\.modelId === 'smartest-long'\) \? 'low' : 'medium'/);
+    expect(src).toMatch(/reasoning: isReasoningModel \? 'medium' : undefined/);
     expect(src).toMatch(/cost: m\.cost \|\|/);
     expect(src).toMatch(/LITELLM_BASE_URL/);
     expect(src).toMatch(/LITELLM_API_KEY/);
@@ -539,7 +541,7 @@ describe('Pi engine — ResourceLoader context injection', () => {
   });
 
   it('passes user/project scoped inputs to buildMemoryContext', () => {
-    const src = readSource('/home/tower/tower/packages/backend/engines/pi/session-resources.ts');
+    const src = readSource(PI_SESSION_RESOURCES_PATH);
     expect(src).toMatch(/buildMemoryContext\(\{[\s\S]*sessionId/);
     expect(src).toMatch(/userId: opts\.userId/);
     expect(src).toMatch(/projectId: opts\.projectId/);

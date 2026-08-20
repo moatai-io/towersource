@@ -7,14 +7,14 @@ const appSource = fs.readFileSync(new URL('../../App.tsx', import.meta.url), 'ut
 describe('WorkspaceKnowledgeGraph connected document actions', () => {
   it('offers creation for an empty relation graph and upgrade for an existing graph', () => {
     expect(graphSource).toContain("data.summary.edges > 0 ? 'upgrade' : 'create'");
-    expect(graphSource).toContain("'연결 문서 업그레이드' : '연결 문서 만들기'");
+    expect(graphSource).toContain("t('knowledgeGraph.upgradeConnectedDocs'):t('knowledgeGraph.createConnectedDocs')");
   });
 
   it('starts a project-scoped wiki-compile session with an explicit prompt', () => {
     expect(graphSource).toContain("const prompt = `/wiki-compile");
     expect(graphSource).toContain("new CustomEvent('tower-start-prompt-session'");
     expect(graphSource).toContain('projectId,');
-    expect(graphSource).toContain("sessionName: creating ? '연결 문서 만들기' : '연결 문서 업그레이드'");
+    expect(graphSource).toContain("sessionName: creating ? t('knowledgeGraph.createConnectedDocs') : t('knowledgeGraph.upgradeConnectedDocs')");
   });
 
   it('registers the reusable prompt-session event in App', () => {

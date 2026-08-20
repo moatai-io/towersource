@@ -5,6 +5,7 @@
 // documents. User-authored Markdown is content; this component is trusted UI.
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 
 const MAX_UTTERANCE_CHARS = 1600;
 
@@ -115,6 +116,7 @@ interface Props {
 }
 
 export function MarkdownTtsControls({ content, className }: Props) {
+  const { t } = useTranslation('files');
   const [supported, setSupported] = useState(false);
   const [speaking, setSpeaking] = useState(false);
   const [paused, setPaused] = useState(false);
@@ -231,8 +233,8 @@ export function MarkdownTtsControls({ content, className }: Props) {
         type="button"
         disabled
         className={className ?? 'flex h-8 w-8 items-center justify-center rounded-md border border-surface-700 text-sm text-gray-600'}
-        title="이 브라우저는 무료 내장 TTS를 지원하지 않습니다"
-        aria-label="이 브라우저는 무료 내장 TTS를 지원하지 않습니다"
+        title={t('markdownTts.unsupported')}
+        aria-label={t('markdownTts.unsupported')}
       >
         ▶
       </button>
@@ -240,14 +242,14 @@ export function MarkdownTtsControls({ content, className }: Props) {
   }
 
   return (
-    <div className={`inline-flex shrink-0 items-center rounded-md border border-surface-600 bg-surface-800 p-0.5 ${className ?? ''}`} title="브라우저 내장 음성으로 Markdown 본문 읽기">
+    <div className={`inline-flex shrink-0 items-center rounded-md border border-surface-600 bg-surface-800 p-0.5 ${className ?? ''}`} title={t('markdownTts.groupTitle')}>
       <button
         type="button"
         onClick={togglePlayback}
         disabled={!canSpeak}
         className={`flex h-7 w-7 items-center justify-center rounded text-sm font-medium transition-colors ${speaking && !paused ? 'bg-primary-600/25 text-primary-300' : 'text-gray-300 hover:bg-surface-700 hover:text-white'} disabled:cursor-not-allowed disabled:text-gray-600`}
-        title={paused ? '읽기 재개' : speaking ? '일시정지' : 'Markdown 본문 읽어주기'}
-        aria-label={paused ? '읽기 재개' : speaking ? '일시정지' : 'Markdown 본문 읽어주기'}
+        title={paused ? t('markdownTts.resume') : speaking ? t('markdownTts.pause') : t('markdownTts.read')}
+        aria-label={paused ? t('markdownTts.resume') : speaking ? t('markdownTts.pause') : t('markdownTts.read')}
       >
         {paused ? '▶' : speaking ? '⏸' : '▶'}
       </button>
@@ -256,7 +258,7 @@ export function MarkdownTtsControls({ content, className }: Props) {
           type="button"
           onClick={stop}
           className="rounded px-2 py-0.5 text-sm whitespace-nowrap text-red-300 transition-colors hover:bg-red-500/10 hover:text-red-200"
-          title="읽기 중지"
+          title={t('markdownTts.stop')}
         >
           ■
         </button>

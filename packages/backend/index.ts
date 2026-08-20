@@ -22,6 +22,7 @@ import { shutdownEngines } from './engines/index.js';
 import { startUnifiedScheduler, stopUnifiedScheduler } from './services/task/unified-scheduler.js';
 import { startReconciler as startPublishingReconciler, stopReconciler as stopPublishingReconciler } from './services/publishing/reconciler.js';
 import { THUMBNAILS_DIR } from './services/publishing/thumbnail-generator.js';
+import { activeSiteMetadata } from './routes/ai-service-public-api.js';
 import { initNotificationHub } from './services/notification-hub.js';
 import { startSessionMemoryCardDueScanner, stopSessionMemoryCardDueScanner } from './services/ai/session-memory-card.js';
 import { auditStaleSessions } from './services/session/session-manager.js';
@@ -85,6 +86,34 @@ app.use('/published-thumbnails', express.static(THUMBNAILS_DIR(), {
   },
 }));
 
+function escapeHtml(value: unknown): string {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/\"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function isSharePreviewCrawler(userAgent: unknown): boolean {
+  return /facebookexternalhit|Facebot|Twitterbot|Slackbot|Discordbot|LinkedInBot|kakaotalk-scrap|TelegramBot|Google-InspectionTool/i.test(String(userAgent || ''));
+}
+
+function agentFaceAssetUrl(metadata: Record<string, unknown>, baseUrl: string): string | undefined {
+  const face = typeof metadata.face === 'string' ? metadata.face : '';
+  if (!face.startsWith('character:')) return undefined;
+  const id = face.slice('character:'.length).replace(/[^a-zA-Z0-9_-]/g, '');
+  return id ? `${baseUrl}/agent-characters/${encodeURIComponent(id)}.webp` : undefined;
+}
+
+function renderAgentShareCardSvg(metadata: Record<string, unknown>, baseUrl: string): string {
+  const name = escapeHtml(metadata.name || '배포된 AI 에이전트');
+  const description = escapeHtml(metadata.tagline || metadata.description || 'Tower AI Service');
+  const face = agentFaceAssetUrl(metadata, baseUrl);
+  const faceMarkup = face ? `<image href="${escapeHtml(face)}" x="92" y="118" width="300" height="300" preserveAspectRatio="xMidYMid slice" clip-path="url(#faceClip)"/>` : '<text x="242" y="292" text-anchor="middle" fill="#dbeafe" font-size="120" font-family="sans-serif">AI</text>';
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630"><defs><linearGradient id="bg" x1="0" x2="1" y1="0" y2="1"><stop stop-color="#0f172a"/><stop offset="1" stop-color="#134e4a"/></linearGradient><clipPath id="faceClip"><rect x="92" y="118" width="300" height="300" rx="44"/></clipPath></defs><rect width="1200" height="630" fill="url(#bg)"/><circle cx="1030" cy="-40" r="270" fill="#2dd4bf" opacity=".13"/><rect x="92" y="118" width="300" height="300" rx="44" fill="#1e293b"/>${faceMarkup}<text x="480" y="205" fill="#99f6e4" font-size="24" font-weight="700" font-family="sans-serif">TOWER AI AGENT</text><text x="480" y="290" fill="white" font-size="56" font-weight="700" font-family="sans-serif">${name}</text><text x="480" y="350" fill="#cbd5e1" font-size="28" font-family="sans-serif">${description.slice(0, 90)}</text><text x="480" y="510" fill="#94a3b8" font-size="22" font-family="sans-serif">공개된 자료와 허용된 기능으로 답변합니다</text></svg>`;
+}
+
 // Serve frontend in production
 const frontendPath = config.frontendDir;
 if (fs.existsSync(frontendPath)) {
@@ -98,6 +127,33 @@ if (fs.existsSync(frontendPath)) {
     res.setHeader('Expires', '0');
     res.sendFile(path.join(frontendPath, 'sw.js'));
   });
+  app.get('/ai/:channelId/share-card.svg', async (req, res) => {
+    try {
+      const metadata = await activeSiteMetadata(String(req.params.channelId));
+      const baseUrl = (config.sharePublicUrl || config.publicUrl || `${req.protocol}://${req.get('host')}`).replace(/\/$/, '');
+      res.setHeader('Cache-Control', 'public, max-age=300');
+      res.type('svg').send(renderAgentShareCardSvg(metadata, baseUrl));
+    } catch {
+      res.status(404).type('text').send('Not found');
+    }
+  });
+
+  app.get(['/ai/:channelId', '/ai-service-chat/:channelId'], async (req, res, next) => {
+    if (!isSharePreviewCrawler(req.get('user-agent'))) return next();
+    try {
+      const channelId = String(req.params.channelId);
+      const metadata = await activeSiteMetadata(channelId);
+      const baseUrl = (config.sharePublicUrl || config.publicUrl || `${req.protocol}://${req.get('host')}`).replace(/\/$/, '');
+      const title = escapeHtml(metadata.name || '배포된 AI 에이전트');
+      const description = escapeHtml(metadata.tagline || metadata.description || 'Tower AI Service');
+      const imageUrl = `${baseUrl}/ai/${encodeURIComponent(channelId)}/share-card.svg`;
+      res.setHeader('Cache-Control', 'public, max-age=300');
+      res.type('html').send(`<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>${title}</title><meta name="description" content="${description}"><meta property="og:title" content="${title}"><meta property="og:description" content="${description}"><meta property="og:type" content="website"><meta property="og:url" content="${escapeHtml(baseUrl + req.originalUrl)}"><meta property="og:image" content="${escapeHtml(imageUrl)}"><meta property="og:image:width" content="1200"><meta property="og:image:height" content="630"><meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="${title}"><meta name="twitter:description" content="${description}"><meta name="twitter:image" content="${escapeHtml(imageUrl)}"></head><body><h1>${title}</h1><p>${description}</p></body></html>`);
+    } catch {
+      next();
+    }
+  });
+
   app.use(express.static(frontendPath, {
     setHeaders: (res, filePath) => {
       // Hashed assets (e.g. index-DRQj5zgr.js) can be cached forever; everything else gets revalidation
@@ -436,11 +492,13 @@ server.listen(config.port, config.host, async () => {
       console.warn('[startup] restorePendingCallbacks failed (non-fatal):', err),
     );
     const { startDeliveryPump } = await import('./services/agent-communication/delivery-pump.js');
-    const { recoverDurableSessionSend } = await import('./services/session/spawn-rpc.js');
+    const { recoverDurableSessionSend, recoverDurableAgentReport } = await import('./services/session/spawn-rpc.js');
     startDeliveryPump({
       dependencies: {
         decidePolicy: async () => ({ action: 'deliver' }),
-        deliver: async (message) => recoverDurableSessionSend(message),
+        deliver: async (message) => message.kind === 'report'
+          ? recoverDurableAgentReport(message)
+          : recoverDurableSessionSend(message),
       },
     }).catch((err) => console.warn('[startup] Agent delivery pump failed (non-fatal):', err));
   }

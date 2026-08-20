@@ -26,13 +26,13 @@ describe('mobile sidebar visual hierarchy', () => {
     expect(source).toContain('newSessionCreatingRef.current = false;');
     expect(source).toContain('isMobile && newSessionCreating ?');
     expect(source).toContain('data-testid="new-session-loading"');
-    expect(source).toContain('새 세션을 준비하는 중…');
+    expect(source).toContain("t('layout:preparingNewSession')");
     expect(mobileSidebarBlock).toContain("useSessionStore.getState().setActiveView('chat');");
     expect(mobileSidebarBlock).toContain('void handleNewSession(projectId, label);');
   });
 
   it('keeps the previous session selected and reports an error when creation fails', () => {
-    expect(source).toContain("toastError('새 세션을 만들지 못했습니다');");
+    expect(source).toContain("toastError(t('layout:newSessionCreateFailed'))");
     expect(source).toContain('if (!session) {');
   });
 

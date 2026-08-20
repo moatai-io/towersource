@@ -1,21 +1,29 @@
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
+import i18n from '../i18n';
 import { presentChatRuntimeError } from './chat-runtime-error';
 
 describe('presentChatRuntimeError', () => {
+  beforeEach(async () => { await i18n.changeLanguage('en'); });
+
   it.each([
-    ['SESSION_LIMIT', '동시에 실행할 수 있는 대화 수를 초과했습니다. 다른 응답이 끝난 뒤 다시 시도해 주세요.'],
-    ['SDK_HANG', '응답이 오래 지연되어 실행을 멈췄습니다. 계속 진행하면 다시 이어갈 수 있습니다.'],
-    ['ACCESS_DENIED', '현재 권한으로 이 작업을 실행할 수 없습니다.'],
-    ['NO_SESSION_ID', '대화 연결 정보를 확인하지 못했습니다. 페이지를 새로고침한 뒤 다시 시도해 주세요.'],
-    ['COMPACT_FAILED', '대화 내용 정리를 완료하지 못했습니다. 잠시 후 다시 시도해 주세요.'],
+    ['SESSION_LIMIT', 'Too many conversations are running at once. Try again after another response finishes.'],
+    ['SDK_HANG', 'The response was delayed for too long and the run was stopped. Continue to resume it.'],
+    ['ACCESS_DENIED', 'You do not have permission to run this action.'],
+    ['NO_SESSION_ID', 'Conversation connection information is unavailable. Refresh the page and try again.'],
+    ['COMPACT_FAILED', 'Conversation cleanup could not be completed. Try again shortly.'],
   ])('maps %s to user-facing language', (code, expected) => {
     expect(presentChatRuntimeError(code).message).toBe(expected);
   });
 
   it('does not expose unknown provider or SDK diagnostics', () => {
     expect(presentChatRuntimeError(undefined)).toEqual({
-      message: '응답을 완료하지 못했습니다. 계속 진행하거나 다시 시도해 주세요.',
+      message: 'The response could not be completed. Continue or try again.',
       tone: 'error',
     });
+  });
+
+  it('follows the active Korean language', async () => {
+    await i18n.changeLanguage('ko');
+    expect(presentChatRuntimeError('ACCESS_DENIED').message).toBe('현재 권한으로 이 작업을 실행할 수 없습니다.');
   });
 });

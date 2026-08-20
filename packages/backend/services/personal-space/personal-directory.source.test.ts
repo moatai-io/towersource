@@ -22,7 +22,7 @@ describe('Personal Space folder browser contract', () => {
   });
 
   it('renders breadcrumbs, folder upload, search, sort, multi-select, move and archive', () => {
-    for (const text of ['personalPath', 'breadcrumbs', '+ 폴더', '파일 검색', '최근 수정순', 'selectedIds', '이름·위치 변경', '보관']) {
+    for (const text of ['personalPath', 'breadcrumbs', "t('fileExchange.addFolder')", "t('fileExchange.searchPlaceholder')", "t('fileExchange.sortModified')", 'selectedIds', "t('fileExchange.changeNameLocation')", "t('fileExchange.archive')"]) {
       expect(surface).toContain(text);
     }
     expect(surface).toContain("form.append('directory', targetDirectory)");

@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+fail() { printf 'tower-workbench-worker: %s\n' "$*" >&2; exit 1; }
+app_root="${TOWER_APP_ROOT:-$(dirname "$(dirname "$(realpath "$0")")")}"; app_root="$(realpath "$app_root")"
+entrypoint="$app_root/lib/tower/dist/backend/packages/backend/services/runtime-box/remote-workbench-worker-entrypoint.js"
+[[ -f "$entrypoint" ]] || fail "missing Worker entrypoint: $entrypoint"
+[[ -n "${TOWER_REMOTE_WORKER_CONFIG:-}" ]] || fail 'TOWER_REMOTE_WORKER_CONFIG is required'
+[[ -f "$TOWER_REMOTE_WORKER_CONFIG" ]] || fail 'Worker config file does not exist'
+[[ -n "${TOWER_REMOTE_WORKER_TOKEN:-}" ]] || fail 'TOWER_REMOTE_WORKER_TOKEN is required'
+exec node "$entrypoint"

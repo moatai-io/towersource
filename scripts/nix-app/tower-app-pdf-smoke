@@ -1,0 +1,50 @@
+#!/usr/bin/env node
+import { execFileSync } from 'node:child_process';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { pathToFileURL } from 'node:url';
+
+const appRoot = process.env.TOWER_APP_ROOT || path.dirname(path.dirname(fs.realpathSync(process.argv[1])));
+const rendererBin = process.env.NIX_RENDERER_BIN || path.join(appRoot, 'bin', 'tower-nix-render');
+const modulePath = path.join(appRoot, 'lib/tower/dist/backend/packages/backend/engines/pi-pdf-export-tool.js');
+
+if (process.env.PDF_EXPORT_RENDERER_MODE !== 'nix') {
+  throw new Error(`PDF_EXPORT_RENDERER_MODE must be nix, got ${process.env.PDF_EXPORT_RENDERER_MODE || 'unset'}`);
+}
+if (!path.isAbsolute(rendererBin) || !fs.existsSync(rendererBin)) {
+  throw new Error(`integrated Nix renderer is missing: ${rendererBin}`);
+}
+if (!fs.existsSync(modulePath)) {
+  throw new Error(`packaged pdf_export module is missing: ${modulePath}`);
+}
+
+const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tower-app-pdf-smoke-'));
+const inputPath = path.join(tempDir, 'smoke.html');
+const outputPath = path.join(tempDir, 'smoke.pdf');
+try {
+  fs.writeFileSync(inputPath, `<!doctype html><html lang="ko"><head><meta charset="utf-8"><style>@page{size:A4;margin:18mm}body{font-family:sans-serif}</style></head><body><h1>Tower PDF export smoke</h1><p>통합 Nix renderer 검증</p></body></html>`);
+  const { exportHtmlToPdf } = await import(pathToFileURL(modulePath).href);
+  const originalStdoutWrite = process.stdout.write.bind(process.stdout);
+  process.stdout.write = process.stderr.write.bind(process.stderr);
+  let result;
+  try {
+    result = await exportHtmlToPdf({ inputPath, outputPath, waitMs: 100 });
+  } finally {
+    process.stdout.write = originalStdoutWrite;
+  }
+  const stat = fs.statSync(outputPath);
+  if (result.requested !== 'nix' || result.used !== 'nix' || result.fallback || stat.size <= 1000) {
+    throw new Error(`Nix renderer smoke failed: ${JSON.stringify({ result, bytes: stat.size })}`);
+  }
+  let pages = null;
+  try {
+    const info = execFileSync('pdfinfo', [outputPath], { encoding: 'utf8' });
+    pages = Number(info.match(/^Pages:\s+(\d+)/m)?.[1] || 0) || null;
+  } catch {
+    // PDF structure is already checked by non-empty output; page count is advisory.
+  }
+  process.stdout.write(`${JSON.stringify({ status: 'ok', renderer: result.used, fallback: result.fallback, bytes: stat.size, pages })}\n`);
+} finally {
+  fs.rmSync(tempDir, { recursive: true, force: true });
+}

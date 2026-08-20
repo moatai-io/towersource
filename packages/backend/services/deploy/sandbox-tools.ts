@@ -492,7 +492,7 @@ export async function sandboxToolStart(req: SandboxToolStartRequest): Promise<Sa
     status: 'running',
     expires_at: expiresAt,
     host_port: hostPort,
-    url, // auth-required 면 https://<slug>.tower.tower.example.com/, private 면 undefined
+    url, // auth-required면 configured SANDBOX_TOOL_BASE_DOMAIN URL, private면 undefined
   };
 }
 
@@ -781,7 +781,14 @@ export async function sandboxToolRestart(
   );
 
   // url 재계산 (사용자에게 보내주기 위해 — DB 의 proxy_subdomain 기반)
-  const baseDomain = process.env.SANDBOX_TOOL_BASE_DOMAIN || 'tower.tower.example.com';
+  let publicHost = '';
+  try {
+    publicHost = process.env.PUBLIC_URL ? new URL(process.env.PUBLIC_URL).hostname : '';
+  } catch {}
+  const baseDomain = process.env.SANDBOX_TOOL_BASE_DOMAIN?.trim() || publicHost;
+  if (rows[0].proxy_subdomain && !baseDomain) {
+    throw new SandboxDeniedError('SANDBOX_TOOL_BASE_DOMAIN or PUBLIC_URL is required for externally visible sandbox tools');
+  }
   const url = rows[0].proxy_subdomain ? `https://${rows[0].proxy_subdomain}.${baseDomain}/` : undefined;
 
   return {
@@ -844,7 +851,14 @@ export async function sandboxToolUpdateVisibility(
     throw new SandboxDeniedError(`tool ${toolId} is ${tool.status} — update_visibility requires status='running'`);
   }
   if (tool.visibility === newVisibility) {
-    const baseDomain = process.env.SANDBOX_TOOL_BASE_DOMAIN || 'tower.tower.example.com';
+    let publicHost = '';
+    try {
+      publicHost = process.env.PUBLIC_URL ? new URL(process.env.PUBLIC_URL).hostname : '';
+    } catch {}
+    const baseDomain = process.env.SANDBOX_TOOL_BASE_DOMAIN?.trim() || publicHost;
+    if (tool.proxy_subdomain && !baseDomain) {
+      throw new SandboxDeniedError('SANDBOX_TOOL_BASE_DOMAIN or PUBLIC_URL is required for externally visible sandbox tools');
+    }
     return {
       ok: true,
       old_visibility: tool.visibility,

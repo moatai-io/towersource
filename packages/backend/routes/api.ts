@@ -76,6 +76,8 @@ import {
   getLog, getFileDiff, manualCommit, rollbackToCommit,
 } from '../services/git/git-manager.js';
 import { config, availableModels, loadModelsFile, saveModelsFile, reloadModels, getModelDefaults, normalizePiSessionModelId } from '../config.js';
+import { getInferenceProviderReadiness } from '../services/ai/inference-provider-readiness.js';
+import { configureInferenceProvider, inferenceSetupStatus, probeInferenceProvider, type PublicInferenceProvider } from '../services/ai/inference-provider-setup.js';
 import { oauthManager } from '../services/auth/oauth-manager-instance.js';
 import { isGoogleOAuthConfigured, getGoogleAuthUrl, exchangeGoogleCode, getGoogleUserInfo, GOOGLE_DEFAULT_SCOPES } from '../services/auth/google-oauth.js';
 import { findOAuthProvider, listOAuthProviders } from '../services/auth/oauth-provider-registry.js';
@@ -2524,6 +2526,45 @@ router.delete('/session-shares/:id', async (req, res) => {
 
 router.get('/admin/models', adminMiddleware, (_req, res) => {
   res.json(loadModelsFile());
+});
+
+router.get('/admin/inference-setup', adminMiddleware, (_req, res) => {
+  res.json(inferenceSetupStatus());
+});
+
+router.post('/admin/inference-setup/probe', adminMiddleware, async (req, res) => {
+  try {
+    const result = await probeInferenceProvider({
+      provider: req.body?.provider as PublicInferenceProvider,
+      apiKey: String(req.body?.apiKey ?? ''),
+      baseUrl: req.body?.baseUrl ? String(req.body.baseUrl) : undefined,
+      modelId: req.body?.modelId ? String(req.body.modelId) : undefined,
+    });
+    res.json(result);
+  } catch (err: any) {
+    res.status(400).json({ error: err.message || 'Provider connection failed' });
+  }
+});
+
+router.post('/admin/inference-setup/apply', adminMiddleware, async (req, res) => {
+  try {
+    const actorUserId = Number((req as any).user?.userId ?? (req as any).user?.id);
+    if (!Number.isInteger(actorUserId) || actorUserId <= 0) return res.status(401).json({ error: 'Authenticated admin required' });
+    const result = await configureInferenceProvider({
+      provider: req.body?.provider as PublicInferenceProvider,
+      apiKey: String(req.body?.apiKey ?? ''),
+      baseUrl: req.body?.baseUrl ? String(req.body.baseUrl) : undefined,
+      modelId: req.body?.modelId ? String(req.body.modelId) : undefined,
+      actorUserId,
+    });
+    const reloaded = reloadModels();
+    const piEngine = await getEngine('pi') as any;
+    await piEngine.reloadModelRegistry?.();
+    broadcast({ type: 'config_update', models: config.claudeEnabled ? reloaded.claude : [], piModels: config.piEnabled ? reloaded.pi : [], localModels: config.localEnabled ? reloaded.local : [], defaults: reloaded.defaults, claudeEnabled: config.claudeEnabled, piEnabled: config.piEnabled, localEnabled: config.localEnabled });
+    res.json({ ok: true, ...result, readiness: getInferenceProviderReadiness() });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message || 'Provider setup failed' });
+  }
 });
 
 router.put('/admin/models', adminMiddleware, (req, res) => {
@@ -6028,6 +6069,7 @@ router.get('/config', (_req, res) => {
     localEnabled: config.localEnabled,
     localModels: config.localEnabled ? config.localModels : [],
     defaults: getModelDefaults(),
+    inferenceReadiness: getInferenceProviderReadiness(),
     agentFirstEnabled: config.agentFirstEnabled,
     aiServicesEnabled: config.aiServicesEnabled,
     workspaceAppsEnabled: config.workspaceAppsEnabled,

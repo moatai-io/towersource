@@ -57,22 +57,22 @@ describe('Public AI Service hosted chat page source contract', () => {
     expect(source).toContain('function MessageBubble');
     expect(source).toContain('h-[var(--public-chat-viewport-height,100dvh)]');
     expect(source).toContain('max-h-[var(--public-chat-viewport-height,100dvh)]');
-    expect(source).toContain('배포된 AI 에이전트');
+    expect(source).toContain("t('aiServices.publicChat.defaultAgentName')");
     expect(source).toContain('Tower AI Service');
     expect(source).toContain('agentFace={agentFace}');
-    expect(source).toContain('응답을 작성하는 중');
-    expect(source).toContain('AI가 실수할 수 있습니다');
+    expect(source).toContain("t('aiServices.publicChat.responding')");
+    expect(source).toContain("t('aiServices.publicChat.disclaimer')");
     expect(source).toContain('<textarea');
     expect(source).toContain("event.key === 'Enter' && !event.shiftKey");
-    expect(source).toContain('고급 credential 링크로 접속했습니다');
+    expect(source).toContain("t('aiServices.publicChat.credentialLinkNotice')");
     expect(source).not.toContain('ChatPanel');
   });
 
   it('keeps the composer available while a response is running and queues later turns locally', () => {
     expect(source).toContain('queuedMessages');
     expect(source).toContain('setQueuedMessages((current) => [...current');
-    expect(source).toContain('다음 턴 대기열');
-    expect(source).toContain('응답 중에도 입력할 수 있어요');
+    expect(source).toContain("t('aiServices.publicChat.queueCount'");
+    expect(source).toContain("t('aiServices.publicChat.queueHint')");
     expect(source).not.toContain('<textarea ref={inputRef} value={input} disabled={busy}');
   });
 
@@ -100,7 +100,7 @@ describe('Public AI Service hosted chat page source contract', () => {
     expect(source).toContain('/conversations/${encodeURIComponent(activeConversation.id)}/files`');
     expect(source).toContain('loadConversationFiles(stored)');
     expect(source).toContain('accept=".txt,.csv,text/plain,text/csv"');
-    expect(source).toContain('이 대화에 자료 첨부');
+    expect(source).toContain("t('aiServices.publicChat.attachMaterial')");
     expect(source).toContain('removeConversationFile');
   });
 
@@ -117,10 +117,10 @@ describe('Public AI Service hosted chat page source contract', () => {
   it('uses fixed-size mobile header actions instead of breaking Korean labels vertically', () => {
     expect(source).toContain('flex shrink-0 items-center gap-1 sm:gap-1.5');
     expect(source).toContain('h-9 w-9 shrink-0 items-center justify-center');
-    expect(source).toContain('aria-label="이 AI에 대해"');
+    expect(source).toContain("aria-label={t('aiServices.publicChat.aboutAi')}");
     expect(source).toContain('<span aria-hidden="true" className="sm:hidden">ⓘ</span>');
     expect(source).toContain("<span aria-hidden=\"true\" className=\"sm:hidden\">{light ? '☾' : '☀'}</span>");
-    expect(source).toContain('<span className="hidden sm:inline">이 AI에 대해</span>');
+    expect(source).toContain("<span className=\"hidden sm:inline\">{t('aiServices.publicChat.aboutAi')}</span>");
     expect(source).toContain('hidden truncate text-[11px] sm:block');
     expect(source).toContain('min-w-0 flex-1 overflow-hidden');
   });
@@ -131,14 +131,14 @@ describe('Public AI Service hosted chat page source contract', () => {
     expect(source).toContain('new TextDecoder()');
     expect(source).toContain("event.type === 'text'");
     expect(source).toContain('requestAbortRef.current?.abort()');
-    expect(source).toContain('aria-label="응답 중지"');
+    expect(source).toContain("aria-label={t('aiServices.publicChat.stopResponse')}");
   });
 
   it('respects manual reading position and offers an explicit jump to new messages', () => {
     expect(source).toContain('isNearBottomRef');
     expect(source).toContain('handleConversationScroll');
     expect(source).toContain('showJumpToLatest');
-    expect(source).toContain('새 메시지 ↓');
+    expect(source).toContain("t('aiServices.publicChat.newMessages')");
     expect(source).not.toContain('[messages, busy, elapsedNow]');
   });
 
@@ -151,9 +151,9 @@ describe('Public AI Service hosted chat page source contract', () => {
 
   it('shows a useful empty state and one retry surface for failed responses', () => {
     expect(source).toContain('suggestions.map');
-    expect(source).toContain('에게 물어보세요');
+    expect(source).toContain("t('aiServices.publicChat.askAgent'");
     expect(source).toContain('retryFailed');
-    expect(source).toContain('다시 시도');
+    expect(source).toContain("t('aiServices.publicChat.retry')");
     expect(source).not.toContain('요청을 처리하지 못했습니다: ${message}');
   });
 
@@ -170,7 +170,7 @@ describe('Public AI Service hosted chat page source contract', () => {
     expect(source).toContain('new TextDecoder()');
     expect(source).toContain("event.type === 'text'");
     expect(source).toContain('requestAbortRef.current?.abort()');
-    expect(source).toContain('응답 중지');
+    expect(source).toContain("t('aiServices.publicChat.stopResponse')");
     expect(source).toContain('isLive={busy && index === messages.length - 1');
   });
 
@@ -179,17 +179,17 @@ describe('Public AI Service hosted chat page source contract', () => {
     expect(source).toContain('prefers-color-scheme: light');
     expect(source).toContain('setTheme(light ? \'dark\' : \'light\')');
     expect(source).toContain('/api/ai-service-public/sites/${encodeURIComponent(channelId)}/metadata');
-    expect(source).toContain('할 수 있는 일');
-    expect(source).toContain('공개된 자료');
+    expect(source).toContain("t('aiServices.publicChat.capabilities')");
+    expect(source).toContain("t('aiServices.publicChat.publishedMaterials')");
     expect(source).toContain('formatElapsed(elapsedNow)');
     expect(source).toContain('toolsFromResponse(response)');
-    expect(source).toContain('원본 Project 폴더에는 접근하지 않습니다');
+    expect(source).toContain("t('aiServices.publicChat.noPublishedMaterials')");
   });
 
   it('honors public UI visibility flags from Channel metadata', () => {
     expect(source).toContain('showInfoPanel');
     expect(source).toContain('showInfoDrawer');
-    expect(source).toContain('이 AI에 대해');
+    expect(source).toContain("t('aiServices.publicChat.aboutAi')");
     expect(source).toContain('role="dialog"');
     expect(source).toContain('showTools');
     expect(source).toContain('showMaterials');
@@ -202,16 +202,16 @@ describe('Public AI Service hosted chat page source contract', () => {
   it('renders public-safe access gates for password, login-required, and disabled modes', () => {
     expect(source).toContain('accessMode');
     expect(source).toContain('accessBlocked');
-    expect(source).toContain('비밀번호가 필요한 AI 웹사이트입니다');
+    expect(source).toContain("t('aiServices.publicChat.passwordRequiredTitle')");
     expect(source).toContain('unlockPassword');
-    expect(source).toContain('로그인이 필요합니다');
-    expect(source).toContain('외부 접근을 중지했습니다');
+    expect(source).toContain("t('aiServices.publicChat.loginRequired')");
+    expect(source).toContain("t('aiServices.publicChat.accessDisabled')");
   });
 
   it('offers explicit new-conversation control after restoring browser continuity', () => {
     expect(source).toContain('startNewConversation');
-    expect(source).toContain('이 브라우저의 이전 대화를 이어서 열었습니다.');
-    expect(source).toContain('새 대화 시작');
+    expect(source).toContain("t('aiServices.publicChat.restoredConversation')");
+    expect(source).toContain("t('aiServices.publicChat.startNewConversation')");
     expect(source).toContain('removeItem(conversationStorageKey(channelId, token))');
   });
 
@@ -220,18 +220,18 @@ describe('Public AI Service hosted chat page source contract', () => {
     expect(source).toContain('submitCustomerRequest');
     expect(source).toContain('/requests`');
     expect(source).toContain('idempotencyKey');
-    expect(source).toContain('담당자에게 전달할 내용을 확인해 주세요');
+    expect(source).toContain("t('aiServices.publicChat.requestBodyPlaceholder')");
     expect(source).toContain('requestAction.confirmationLabel');
   });
 
   it('renders customer-readable answer provenance and actions instead of raw tool labels', () => {
     expect(source).toContain('friendlyToolName');
-    expect(source).toContain("knowledge_search: '선택된 자료 검색'");
+    expect(source).toContain("['knowledge_search', 'knowledge_read', 'WebSearch', 'WebFetch']");
     expect(source).toContain('citationsFromResponse');
-    expect(source).toContain('이 답변의 근거');
-    expect(source).toContain('답변 복사');
-    expect(source).toContain('도움됨');
-    expect(source).toContain('아쉬움');
+    expect(source).toContain("t('aiServices.publicChat.answerSources')");
+    expect(source).toContain("t('aiServices.publicChat.copyAnswer')");
+    expect(source).toContain("t('aiServices.publicChat.helpful')");
+    expect(source).toContain("t('aiServices.publicChat.unhelpful')");
     expect(source).not.toContain('<span>사용 도구</span>');
   });
 
@@ -243,9 +243,9 @@ describe('Public AI Service hosted chat page source contract', () => {
     expect(source).toContain('ai-service-chat-theme');
     expect(source).toContain('formatElapsed(message.elapsedMs)');
     expect(source).toContain('friendlyToolName');
-    expect(source).toContain('할 수 있는 일');
-    expect(source).toContain('공개된 자료');
+    expect(source).toContain("t('aiServices.publicChat.capabilities')");
+    expect(source).toContain("t('aiServices.publicChat.publishedMaterials')");
     expect(source).toContain('setInterval');
-    expect(source).toContain("{light ? '어둡게' : '밝게'}");
+    expect(source).toContain("light ? t('aiServices.publicChat.dark') : t('aiServices.publicChat.light')");
   });
 });

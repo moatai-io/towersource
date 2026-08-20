@@ -21,6 +21,7 @@ const TRANSCRIPT_CONTEXT_SHARE = 0.5;
 const APPROX_CHARS_PER_TOKEN = 4;
 const MIN_TRANSCRIPT_BUDGET_CHARS = 8_000;
 const DEFAULT_MODEL_CONTEXT_WINDOW = 200_000;
+const DEFAULT_TRANSCRIPT_PAGE_SIZE = 20;
 const TRUNCATION_MARKER = '\n\n[… older transcript content omitted to preserve context budget …]\n\n';
 
 type VisibleTranscriptMessage = {
@@ -94,7 +95,7 @@ const SessionTranscriptReadParams = Type.Object({
     uniqueItems: true,
     description: 'Visible conversation roles to return. Default: both user and assistant.',
   })),
-  limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 500, description: 'Most recent stored messages to inspect. Default 100.' })),
+  limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 500, default: DEFAULT_TRANSCRIPT_PAGE_SIZE, description: `Most recent stored messages to inspect. Default ${DEFAULT_TRANSCRIPT_PAGE_SIZE}.` })),
   before: Type.Optional(Type.String({ minLength: 1, description: 'Message id cursor for loading an older page.' })),
 });
 
@@ -162,7 +163,7 @@ export function createSessionTranscriptReadTool(ctx: SessionTranscriptReadToolCo
 
       try {
         const page = await getMessagesPaginated(sessionId, {
-          limit: params.limit ?? 100,
+          limit: params.limit ?? DEFAULT_TRANSCRIPT_PAGE_SIZE,
           before: params.before,
         });
         const roles = new Set<VisibleRole>(params.roles?.length ? params.roles : ['user', 'assistant']);

@@ -10,17 +10,17 @@ describe('personal AI usage summary', () => {
   it('shows the authenticated user usage and estimated cost in work history', () => {
     expect(timeline).toContain('<PersonalUsageSummary />');
     expect(summary).toContain('/api/metrics/my-ai-usage?days=');
-    expect(summary).toContain('내 AI 사용량');
-    expect(summary).toContain('추정 비용');
-    expect(summary).toContain('프로젝트별 대화 강도');
+    expect(summary).toContain("t('personalUsage.title')");
+    expect(summary).toContain("t('personalUsage.estimatedCost')");
+    expect(summary).toContain("t('personalUsage.heatmapTitle')");
     expect(summary).toContain('HEATMAP_LEGEND_LEVELS');
-    expect(summary).toContain('대화 강도 범례');
+    expect(summary).toContain("t('personalUsage.legend')");
     expect(summary).toContain('hover:scale-125');
     expect(summary).toContain('bg-cyan-200/20');
     expect(summary).toContain('bg-cyan-300');
     expect(summary).toContain('scale-[0.42]');
-    expect(summary).toContain('최대 {max}턴/일');
-    expect(summary).toContain("data.costAvailable ? formatCost(data.totals.costUsd) : '집계 없음'");
+    expect(summary).toContain("t('personalUsage.maxTurnsPerDay', { count: max })");
+    expect(summary).toContain("data.costAvailable ? formatCost(data.totals.costUsd) : t('personalUsage.unavailable')");
   });
 
   it('scopes the backend query to the authenticated session owner', () => {

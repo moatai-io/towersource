@@ -2,6 +2,7 @@
 import React from 'react';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import i18n from '../../i18n';
 import { MarkdownTtsControls, markdownToSpeakableText, splitSpeakableText } from './MarkdownTtsControls';
 
 class MockSpeechSynthesisUtterance {
@@ -67,7 +68,8 @@ describe('MarkdownTtsControls', () => {
     getVoices: ReturnType<typeof vi.fn>;
   };
 
-  beforeEach(() => {
+  beforeEach(async () => {
+    await i18n.changeLanguage('en');
     synth = {
       paused: false,
       speaking: false,
@@ -106,17 +108,17 @@ describe('MarkdownTtsControls', () => {
   it('turns the play button into pause/resume instead of restarting from the beginning', async () => {
     render(<MarkdownTtsControls content={'# 제목\n\n첫 문장입니다.'} />);
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Markdown 본문 읽어주기' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Read Markdown aloud' }));
 
     expect(synth.cancel).toHaveBeenCalledTimes(1);
     expect(synth.speak).toHaveBeenCalledTimes(1);
 
-    fireEvent.click(await screen.findByRole('button', { name: '일시정지' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Pause reading' }));
 
     expect(synth.pause).toHaveBeenCalledTimes(1);
-    expect(await screen.findByRole('button', { name: '읽기 재개' })).toBeTruthy();
+    expect(await screen.findByRole('button', { name: 'Resume reading' })).toBeTruthy();
 
-    fireEvent.click(screen.getByRole('button', { name: '읽기 재개' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Resume reading' }));
 
     expect(synth.resume).toHaveBeenCalledTimes(1);
     expect(synth.speak).toHaveBeenCalledTimes(1);
@@ -125,7 +127,7 @@ describe('MarkdownTtsControls', () => {
   it('does not pause an idle browser speech session on unmount', async () => {
     const { unmount } = render(<MarkdownTtsControls content={'# 제목\n\n본문'} />);
 
-    await screen.findByRole('button', { name: 'Markdown 본문 읽어주기' });
+    await screen.findByRole('button', { name: 'Read Markdown aloud' });
     unmount();
 
     expect(synth.pause).not.toHaveBeenCalled();
@@ -135,7 +137,7 @@ describe('MarkdownTtsControls', () => {
   it('pauses instead of canceling when playback is interrupted by unmount', async () => {
     const { unmount } = render(<MarkdownTtsControls content={'# 제목\n\n본문'} />);
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Markdown 본문 읽어주기' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Read Markdown aloud' }));
     unmount();
 
     expect(synth.pause).toHaveBeenCalledTimes(1);
@@ -145,12 +147,12 @@ describe('MarkdownTtsControls', () => {
   it('restores a paused browser speech session after the controls remount', async () => {
     const first = render(<MarkdownTtsControls content={'# 제목\n\n본문'} />);
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Markdown 본문 읽어주기' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Read Markdown aloud' }));
     first.unmount();
 
     render(<MarkdownTtsControls content={'# 제목\n\n본문'} />);
 
-    fireEvent.click(await screen.findByRole('button', { name: '읽기 재개' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Resume reading' }));
 
     expect(synth.resume).toHaveBeenCalledTimes(1);
     expect(synth.speak).toHaveBeenCalledTimes(1);
@@ -159,11 +161,11 @@ describe('MarkdownTtsControls', () => {
   it('pauses instead of restarting when content changes mid-playback', async () => {
     const { rerender } = render(<MarkdownTtsControls content={'# 제목\n\n첫 본문'} />);
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Markdown 본문 읽어주기' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Read Markdown aloud' }));
     rerender(<MarkdownTtsControls content={'# 제목\n\n수정된 본문'} />);
 
     await waitFor(() => expect(synth.pause).toHaveBeenCalledTimes(1));
     expect(synth.speak).toHaveBeenCalledTimes(1);
-    expect(screen.getByRole('button', { name: '읽기 재개' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Resume reading' })).toBeTruthy();
   });
 });

@@ -1,4 +1,5 @@
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 import { toastError, toastQuiet, toastSuccess } from '../../utils/toast';
 import {
   getNotificationPermission,
@@ -53,8 +54,8 @@ type GroupId = 'direct' | 'longTaskDone' | 'needsAction' | 'aiDone' | 'updates';
 
 type GroupConfig = {
   id: GroupId;
-  title: string;
-  desc: string;
+  titleKey: string;
+  descKey: string;
   events: string[];
   on: Pick<EventPreference, 'inApp' | 'toast' | 'webPush'>;
   off: Pick<EventPreference, 'inApp' | 'toast' | 'webPush'>;
@@ -63,40 +64,40 @@ type GroupConfig = {
 const groups: GroupConfig[] = [
   {
     id: 'direct',
-    title: '나를 부른 알림',
-    desc: '@멘션, 직접 확인해야 하는 메시지',
+    titleKey: 'groupDirectTitle',
+    descKey: 'groupDirectDescription',
     events: ['message.mention'],
     on: { inApp: true, toast: true, webPush: true },
     off: { inApp: false, toast: false, webPush: false },
   },
   {
     id: 'longTaskDone',
-    title: '내가 시작한 긴 작업 완료',
-    desc: '리서치, 파일 변환, 긴 분석 같은 태스크 완료',
+    titleKey: 'groupLongTaskDoneTitle',
+    descKey: 'groupLongTaskDoneDescription',
     events: ['task.completed'],
     on: { inApp: true, toast: true, webPush: true },
     off: { inApp: false, toast: false, webPush: false },
   },
   {
     id: 'needsAction',
-    title: '실패 알림',
-    desc: '태스크 실패와 자동화 실패',
+    titleKey: 'groupNeedsActionTitle',
+    descKey: 'groupNeedsActionDescription',
     events: ['task.failed', 'automation.failed'],
     on: { inApp: true, toast: true, webPush: true },
     off: { inApp: false, toast: false, webPush: false },
   },
   {
     id: 'aiDone',
-    title: '일반 AI 완료',
-    desc: '세션 완료, 병렬 세션 완료, AI 선제 메시지',
+    titleKey: 'groupAiDoneTitle',
+    descKey: 'groupAiDoneDescription',
     events: ['session.completed', 'spawn.completed', 'proactive.message'],
     on: { inApp: true, toast: true, webPush: false },
     off: { inApp: false, toast: false, webPush: false },
   },
   {
     id: 'updates',
-    title: '일반 작업 업데이트',
-    desc: '태스크 성공, 자동화 성공, 일반 채널 메시지',
+    titleKey: 'groupUpdatesTitle',
+    descKey: 'groupUpdatesDescription',
     events: ['automation.completed', 'message.room', 'system.announcement'],
     on: { inApp: true, toast: false, webPush: false },
     off: { inApp: false, toast: false, webPush: false },
@@ -104,9 +105,9 @@ const groups: GroupConfig[] = [
 ];
 
 const globalChannels = [
-  { key: 'inAppEnabled', label: '알림 센터', desc: '벨과 목록에 저장' },
-  { key: 'toastEnabled', label: '앱 안 토스트', desc: '열린 탭에서 짧게 표시' },
-  { key: 'webPushEnabled', label: '브라우저/PWA', desc: 'Tower를 보지 않아도 멘션·실패·긴 작업 완료만 OS 알림' },
+  { key: 'inAppEnabled', labelKey: 'channelInAppLabel', descKey: 'channelInAppDescription' },
+  { key: 'toastEnabled', labelKey: 'channelToastLabel', descKey: 'channelToastDescription' },
+  { key: 'webPushEnabled', labelKey: 'channelWebPushLabel', descKey: 'channelWebPushDescription' },
 ] as const;
 
 function Toggle({ checked, onChange, disabled = false }: { checked: boolean; onChange: (next: boolean) => void; disabled?: boolean }) {
@@ -130,6 +131,7 @@ function Toggle({ checked, onChange, disabled = false }: { checked: boolean; onC
 }
 
 export function NotificationSettingsPanel() {
+  const { t } = useTranslation('settings');
   const [prefs, setPrefs] = React.useState<NotificationPreferences | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [saving, setSaving] = React.useState(false);
@@ -149,7 +151,7 @@ export function NotificationSettingsPanel() {
     })
       .then((r) => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`)))
       .then((data) => { if (!cancelled) setPrefs(data); })
-      .catch((err) => { if (!cancelled) setError(err.message || '알림 설정을 불러오지 못했습니다.'); })
+      .catch((err) => { if (!cancelled) setError(err.message || t('loadFailed')); })
       .finally(() => { if (!cancelled) setLoading(false); });
 
     if (isPushSupported()) {
@@ -177,7 +179,7 @@ export function NotificationSettingsPanel() {
       setPrefs(data);
       setSavedAt(Date.now());
     } catch (err: any) {
-      setError(err?.message || '알림 설정 저장에 실패했습니다.');
+      setError(err?.message || t('saveFailed'));
     } finally {
       setSaving(false);
     }
@@ -203,18 +205,18 @@ export function NotificationSettingsPanel() {
             ? { ...event, webPush: true }
             : { ...event, webPush: false }),
         });
-        toastSuccess('브라우저 알림이 켜졌습니다');
+        toastSuccess(t('browserNotificationsEnabled'));
       } else {
         // Turning off should never be blocked by browser/SW cleanup. Persist the
         // Tower preference first, then best-effort unsubscribe this browser.
         await save({ ...prefs, global: { ...prefs.global, webPushEnabled: false } });
         await unsubscribeFromWebPush().catch(() => {});
         setPushPermission(getNotificationPermission());
-        toastQuiet('브라우저 알림을 껐습니다');
+        toastQuiet(t('browserNotificationsDisabled'));
       }
     } catch (err: any) {
       setPushPermission(getNotificationPermission());
-      toastError(err?.message || '브라우저 알림 설정에 실패했습니다');
+      toastError(err?.message || t('browserNotificationSettingsFailed'));
     } finally {
       setPushBusy(false);
     }
@@ -224,9 +226,9 @@ export function NotificationSettingsPanel() {
     setPushBusy(true);
     try {
       const result = await sendTestPush();
-      toastQuiet(`테스트 알림 전송: ${result.sent}개`);
+      toastQuiet(t('testNotificationSent', { count: result.sent }));
     } catch (err: any) {
-      toastError(err?.message || '테스트 알림 전송 실패');
+      toastError(err?.message || t('testNotificationFailed'));
     } finally {
       setPushBusy(false);
     }
@@ -263,27 +265,25 @@ export function NotificationSettingsPanel() {
   }
 
   if (!prefs) {
-    return <div className="text-[14px] text-red-400">{error || '알림 설정을 사용할 수 없습니다.'}</div>;
+    return <div className="text-[14px] text-red-400">{error || t('unavailable')}</div>;
   }
 
   return (
     <section className="space-y-5">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h3 className="text-[19px] font-semibold text-gray-100 tracking-tight">알림</h3>
-          <p className="mt-1 text-[14px] leading-relaxed text-surface-500">
-            세부 이벤트 대신 네 가지 묶음만 고릅니다. 프로젝트별 알림은 세션/프로젝트 메뉴에서 조정합니다.
-          </p>
+          <h3 className="text-[19px] font-semibold text-gray-100 tracking-tight">{t('notifications')}</h3>
+          <p className="mt-1 text-[14px] leading-relaxed text-surface-500">{t('notificationDescription')}</p>
         </div>
         <div className="shrink-0 text-[12px] text-surface-500">
-          {saving ? '저장 중' : savedAt ? '저장됨' : '자동 저장'}
+          {saving ? t('saving') : savedAt ? t('saved') : t('autoSave')}
         </div>
       </div>
 
       {error && <div className="text-[13px] text-red-300 p-3 border border-red-500/20 rounded-xl bg-red-500/8">{error}</div>}
 
       <div className="space-y-2">
-        <h4 className="text-[14px] font-semibold text-gray-300">어디로 받을까요</h4>
+        <h4 className="text-[14px] font-semibold text-gray-300">{t('deliveryTitle')}</h4>
         <div className="divide-y divide-surface-800 border-y border-surface-800">
           {globalChannels.map((item) => {
             const isPush = item.key === 'webPushEnabled';
@@ -291,13 +291,13 @@ export function NotificationSettingsPanel() {
             return (
               <div key={item.key} className="py-3 flex items-center justify-between gap-4">
                 <div className="min-w-0">
-                  <div className="text-[14px] font-medium text-gray-200">{item.label}</div>
+                  <div className="text-[14px] font-medium text-gray-200">{t(item.labelKey)}</div>
                   <div className="mt-0.5 text-[12px] text-surface-500">
                     {isPush && pushPermission === 'denied'
-                      ? '브라우저 설정에서 알림 권한을 다시 허용해야 합니다'
+                      ? t('browserPermissionRequired')
                       : isPush && pushConfigured === false
-                        ? '서버 Web Push 키 설정이 필요합니다'
-                        : item.desc}
+                        ? t('webPushConfigurationRequired')
+                        : t(item.descKey)}
                   </div>
                 </div>
                 <Toggle
@@ -316,19 +316,19 @@ export function NotificationSettingsPanel() {
             onClick={handleTestPush}
             className="mt-2 text-[13px] text-surface-400 hover:text-gray-200 disabled:opacity-50"
           >
-            테스트 알림 보내기
+            {t('sendTestNotification')}
           </button>
         )}
       </div>
 
       <div className="space-y-2">
-        <h4 className="text-[14px] font-semibold text-gray-300">무엇을 받을까요</h4>
+        <h4 className="text-[14px] font-semibold text-gray-300">{t('eventTypesTitle')}</h4>
         <div className="divide-y divide-surface-800 border-y border-surface-800">
           {groups.map((group) => (
             <div key={group.id} className="py-3 flex items-center justify-between gap-4">
               <div className="min-w-0">
-                <div className="text-[14px] font-medium text-gray-200">{group.title}</div>
-                <div className="mt-0.5 text-[12px] text-surface-500 leading-snug">{group.desc}</div>
+                <div className="text-[14px] font-medium text-gray-200">{t(group.titleKey)}</div>
+                <div className="mt-0.5 text-[12px] text-surface-500 leading-snug">{t(group.descKey)}</div>
               </div>
               <Toggle checked={isGroupOn(group)} onChange={(next) => updateGroup(group, next)} />
             </div>
@@ -337,7 +337,7 @@ export function NotificationSettingsPanel() {
       </div>
 
       <p className="text-[12px] leading-relaxed text-surface-500">
-        프로젝트별 알림은 사이드바 우클릭 메뉴에서 조정하도록 분리할 예정입니다.
+        {t('projectNotificationHint')}
       </p>
     </section>
   );

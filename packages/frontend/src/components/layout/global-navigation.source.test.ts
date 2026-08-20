@@ -24,7 +24,7 @@ describe('global navigation source contracts', () => {
     }
     expect(header).toContain('aria-expanded={open}');
     expect(publishPanel).toContain('data-testid="publishing-hub"');
-    expect(publishPanel).toContain('aria-label="Publishing Hub"');
+    expect(publishPanel).toContain("aria-label={i18n.t('publish.hubTitle')}");
     for (const [landmark, source] of destinationSources) {
       const contents = fs.readFileSync(path.join(__dirname, source), 'utf8');
       expect(contents).toContain(`data-testid="${landmark}"`);

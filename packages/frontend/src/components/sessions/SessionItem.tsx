@@ -36,11 +36,12 @@ function isLongContextSessionModel(modelUsed?: string | null): boolean {
 }
 
 function AwaitingUserMark() {
+  const { t } = useTranslation('layout');
   return (
     <span
       className="tone-pill tone-warning inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[12px] font-bold leading-none"
-      aria-label="답변 대기 중"
-      title="AI가 질문 중 — 답변이 필요합니다"
+      aria-label={t('awaitingAnswer')}
+      title={t('aiQuestionNeedsAnswer')}
     >
       ?
     </span>
@@ -308,7 +309,7 @@ function SessionContextMenu({
               d="M4 7h16M4 12h10M4 17h16"
             />
           </svg>
-          {longContext ? "일반 컨텍스트로 되돌리기" : "롱컨텍스트로 처리"}
+          {longContext ? t("restoreNormalContext") : t("useLongContext")}
         </button>
         {/* Copy link */}
         <button
@@ -651,7 +652,7 @@ export function SessionItem({
   const runningElapsed = rowState.elapsed === "running" ? turnElapsed : null;
   const runningActivity =
     rowState.indicator.kind === "running"
-      ? rowState.indicator.summary || "응답 작성 중"
+      ? rowState.indicator.summary || t("writingResponse")
       : null;
   const longContext = isLongContextSessionModel(session.modelUsed);
   const [longContextPending, setLongContextPending] = useState(false);
@@ -721,11 +722,11 @@ export function SessionItem({
         .updateSessionMeta(session.id, { modelUsed: nextModel });
       toastSuccess(
         longContext
-          ? "일반 컨텍스트로 되돌렸습니다."
-          : "이 세션을 롱컨텍스트로 처리합니다.",
+          ? t("normalContextRestored")
+          : t("longContextEnabled"),
       );
     } catch (err: any) {
-      toastError(err?.message || "롱컨텍스트 설정을 저장하지 못했습니다.");
+      toastError(err?.message || t("longContextSaveFailed"));
     } finally {
       setLongContextPending(false);
     }
@@ -825,30 +826,30 @@ export function SessionItem({
           ) : rowState.indicator.kind === "running" ? (
             <RunIndicator
               size="xs"
-              label="이 세션이 실행 중입니다"
+              label={t('sessionRunning')}
               className="tower-session-run-mark shrink-0"
             />
           ) : rowState.indicator.kind === "error" ? (
             <span
               className="inline-flex h-4 w-3 shrink-0 items-center justify-center text-[13px] font-bold leading-none text-red-400"
-              aria-label="오류 발생"
-              title="오류 발생 — 세션을 열면 사라집니다"
+              aria-label={t('errorOccurred')}
+              title={t('errorClearsOnOpen')}
             >
               !
             </span>
           ) : rowState.indicator.kind === "stopped" ? (
             <span
               className="inline-flex h-4 w-3 shrink-0 items-center justify-center text-[12px] font-bold leading-none text-orange-300"
-              aria-label="중단됨"
-              title="중단됨 — 세션을 열면 사라집니다"
+              aria-label={t('stopped')}
+              title={t('stoppedClearsOnOpen')}
             >
               ■
             </span>
           ) : rowState.indicator.kind === "done" ? (
             <span
               className="tone-success tone-text inline-flex h-4 w-3 shrink-0 items-center justify-center text-[14px] font-bold leading-none opacity-90"
-              aria-label="완료됨"
-              title="완료됨 — 세션을 열면 사라집니다"
+              aria-label={t('completed')}
+              title={t('completedClearsOnOpen')}
             >
               ✓
             </span>
@@ -905,7 +906,7 @@ export function SessionItem({
             {longContext && (
               <span
                 className="ml-1 text-[9px] font-bold text-amber-200 bg-amber-500/15 ring-1 ring-amber-400/25 px-1 rounded align-middle"
-                title="이 세션은 롱컨텍스트 라우트로 실행됩니다. 응답 시작이 느려지고 계정 사용량이 커질 수 있습니다."
+                title={t('longContextRouteHint')}
               >
                 LONG
               </span>
@@ -918,9 +919,9 @@ export function SessionItem({
             {isChannelAi && (
               <span
                 className="ml-1 text-[9px] font-bold text-cyan-200 bg-cyan-500/20 ring-1 ring-cyan-400/30 px-1 rounded align-middle"
-                title="채널 전용 AI 대화 — 사이드바에서 삭제 불가"
+                title={t('channelConversationHint')}
               >
-                🤖 채널
+                🤖 {t('channel')}
               </span>
             )}
             {isProactive && (
@@ -946,7 +947,7 @@ export function SessionItem({
             >
               {rowState.indicator.kind === "awaiting_user" ? (
                 <span className="tone-pill tone-warning text-[11px] font-semibold rounded px-1 py-0.5 leading-none">
-                  답변 필요{turnElapsed ? ` · ${turnElapsed}` : ""}
+                  {t('answerNeeded')}{turnElapsed ? ` · ${turnElapsed}` : ""}
                 </span>
               ) : rowState.indicator.kind === "queued" ? (
                 <span className="text-[11px] font-semibold text-primary-300 bg-primary-500/10 border border-primary-500/20 rounded px-1 py-0.5 leading-none">
@@ -956,7 +957,7 @@ export function SessionItem({
               {runningElapsed ? (
                 <span
                   className="flex min-w-0 max-w-[18rem] items-center justify-end gap-1"
-                  title={`${runningActivity || "실행 중"} · 현재 턴이 서버에서 수락된 뒤 ${runningElapsed} 경과`}
+                  title={t('runningElapsedHint', { activity: runningActivity || t('running'), elapsed: runningElapsed })}
                 >
                   <span className="min-w-0 truncate text-surface-500">
                     {runningActivity}
@@ -969,25 +970,25 @@ export function SessionItem({
                 <>
                   <span
                     className="shrink min-w-[2ch] max-w-[9ch] truncate font-normal text-surface-500"
-                    title={`세션 작성자: ${otherOwnerUsername}`}
+                    title={t('sessionAuthor', { name: otherOwnerUsername })}
                   >
                     {otherOwnerLabel}
                   </span>
                   <span
                     className="shrink-0 whitespace-nowrap"
-                    title="최근 활동"
+                    title={t('recentActivity')}
                   >
                     {" "}
                     · {relativeTime(session.updatedAt)}
                   </span>
                 </>
               ) : (
-                <span title="최근 활동">{relativeTime(session.updatedAt)}</span>
+                <span title={t('recentActivity')}>{relativeTime(session.updatedAt)}</span>
               )}
               {!runningElapsed && conversationTurnCount > 0 ? (
                 <span
                   className="text-sidebar-session-meta-size text-surface-600 tabular-nums"
-                  title={`${conversationTurnCount}회 대화 (tool 호출 제외)`}
+                  title={t('conversationCountExcludingTools', { count: conversationTurnCount })}
                 >
                   ({conversationTurnCount})
                 </span>

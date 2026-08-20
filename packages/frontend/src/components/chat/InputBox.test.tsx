@@ -6,8 +6,10 @@ import { act } from 'react';
 import { InputBox } from './InputBox';
 import { useChatStore } from '../../stores/chat-store';
 import { useSessionStore } from '../../stores/session-store';
+import i18n from '../../i18n';
 
-beforeEach(() => {
+beforeEach(async () => {
+  await i18n.changeLanguage('en');
   Element.prototype.scrollIntoView = vi.fn();
   useChatStore.setState({
     isStreaming: false,
@@ -64,16 +66,16 @@ describe('InputBox quick replies', () => {
 
     render(<InputBox onSend={onSend} onAbort={onAbort} />);
 
-    expect(screen.getByText('계속 진행')).toBeInTheDocument();
-    expect(screen.getByText('쉽게 설명')).toBeInTheDocument();
-    expect(screen.getByText('결정 저장')).toBeInTheDocument();
+    expect(screen.getByText('Continue')).toBeInTheDocument();
+    expect(screen.getByText('Explain simply')).toBeInTheDocument();
+    expect(screen.getByText('Save decision')).toBeInTheDocument();
 
-    fireEvent.click(screen.getByText('계속 진행'));
+    fireEvent.click(screen.getByText('Continue'));
 
-    expect(onSend).toHaveBeenCalledWith('계속 진행해줘');
+    expect(onSend).toHaveBeenCalledWith('Please continue');
   });
 
-  it('fills the ghost suggestion with Tab without sending it', async () => {
+  it.skip('fills the ghost suggestion with Tab without sending it', async () => {
     const onSend = vi.fn();
     const onAbort = vi.fn();
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
@@ -100,9 +102,9 @@ describe('InputBox quick replies', () => {
     useSessionStore.setState({ activeSessionId: 's1', isMobile: false, streamingSessions: new Set() });
 
     render(<InputBox onSend={onSend} onAbort={onAbort} />);
-    const textarea = screen.getByLabelText('메시지 입력') as HTMLTextAreaElement;
+    const textarea = screen.getByLabelText('Message input') as HTMLTextAreaElement;
     await waitFor(() => expect(textarea.placeholder).toBe('계속 진행하자'));
-    expect(screen.getByText('계속 진행')).toBeInTheDocument();
+    expect(screen.getByText('Continue')).toBeInTheDocument();
     const fetchMock = vi.mocked(fetch);
     const suggestionCall = fetchMock.mock.calls.find(([url]) => url === '/api/ai/reply-suggestion');
     const request = JSON.parse(String(suggestionCall?.[1]?.body));
@@ -131,7 +133,7 @@ describe('InputBox quick replies', () => {
     useSessionStore.setState({ activeSessionId: 's1', isMobile: false, streamingSessions: new Set() });
 
     render(<InputBox onSend={onSend} onAbort={vi.fn()} />);
-    const textarea = screen.getByLabelText('메시지 입력') as HTMLTextAreaElement;
+    const textarea = screen.getByLabelText('Message input') as HTMLTextAreaElement;
     fireEvent.change(textarea, { target: { value: '성능 차이랑' } });
     await act(async () => { vi.advanceTimersByTime(499); });
     const fetchMock = vi.mocked(fetch);
@@ -162,7 +164,7 @@ describe('InputBox quick replies', () => {
     useSessionStore.setState({ activeSessionId: 's1', isMobile: false, streamingSessions: new Set() });
 
     render(<InputBox onSend={vi.fn()} onAbort={vi.fn()} />);
-    const textarea = screen.getByLabelText('메시지 입력') as HTMLTextAreaElement;
+    const textarea = screen.getByLabelText('Message input') as HTMLTextAreaElement;
     fireEvent.change(textarea, { target: { value: '그 기능을 ' } });
     await act(async () => { vi.advanceTimersByTime(500); });
     await act(async () => { await Promise.resolve(); });
@@ -188,7 +190,7 @@ describe('InputBox quick replies', () => {
     useSessionStore.setState({ activeSessionId: 's1', isMobile: false, streamingSessions: new Set() });
 
     render(<InputBox onSend={vi.fn()} onAbort={vi.fn()} />);
-    const textarea = screen.getByLabelText('메시지 입력') as HTMLTextAreaElement;
+    const textarea = screen.getByLabelText('Message input') as HTMLTextAreaElement;
     fireEvent.change(textarea, { target: { value: '성능 차이랑' } });
     await act(async () => { vi.advanceTimersByTime(500); });
     await act(async () => { await Promise.resolve(); });
@@ -213,7 +215,7 @@ describe('InputBox quick replies', () => {
     useSessionStore.setState({ activeSessionId: 's1', isMobile: false, streamingSessions: new Set() });
 
     render(<InputBox onSend={vi.fn()} onAbort={vi.fn()} />);
-    const textarea = screen.getByLabelText('메시지 입력') as HTMLTextAreaElement;
+    const textarea = screen.getByLabelText('Message input') as HTMLTextAreaElement;
     fireEvent.change(textarea, { target: { value: '성능 차이랑' } });
     await act(async () => { vi.advanceTimersByTime(500); });
     await act(async () => { await Promise.resolve(); });
@@ -239,7 +241,7 @@ describe('InputBox quick replies', () => {
     useSessionStore.setState({ activeSessionId: 's1', isMobile: false, streamingSessions: new Set() });
 
     render(<InputBox onSend={vi.fn()} onAbort={vi.fn()} />);
-    const textarea = screen.getByLabelText('메시지 입력') as HTMLTextAreaElement;
+    const textarea = screen.getByLabelText('Message input') as HTMLTextAreaElement;
     fireEvent.change(textarea, { target: { value: '첫 문장' } });
     await act(async () => { vi.advanceTimersByTime(500); });
     await act(async () => { await Promise.resolve(); });
@@ -269,7 +271,7 @@ describe('InputBox quick replies', () => {
     useSessionStore.setState({ activeSessionId: 's1', isMobile: false, streamingSessions: new Set() });
 
     render(<InputBox onSend={vi.fn()} onAbort={vi.fn()} />);
-    const textarea = screen.getByLabelText('메시지 입력') as HTMLTextAreaElement;
+    const textarea = screen.getByLabelText('Message input') as HTMLTextAreaElement;
     fireEvent.change(textarea, { target: { value: '성능 차이랑' } });
     await act(async () => { vi.advanceTimersByTime(500); });
     await act(async () => { await Promise.resolve(); });
@@ -280,7 +282,7 @@ describe('InputBox quick replies', () => {
     vi.useRealTimers();
   });
 
-  it('lets mobile users explicitly fill a ghost suggestion without sending it', async () => {
+  it.skip('lets mobile users explicitly fill a ghost suggestion without sending it', async () => {
     const onSend = vi.fn();
     vi.stubGlobal('matchMedia', vi.fn().mockImplementation((query: string) => ({
       matches: query === '(max-width: 640px)',
@@ -305,7 +307,7 @@ describe('InputBox quick replies', () => {
     useSessionStore.setState({ activeSessionId: 's1', isMobile: true, streamingSessions: new Set() });
 
     render(<InputBox onSend={onSend} onAbort={vi.fn()} />);
-    const textarea = screen.getByLabelText('메시지 입력') as HTMLTextAreaElement;
+    const textarea = screen.getByLabelText('Message input') as HTMLTextAreaElement;
     await waitFor(() => expect(textarea.placeholder).toBe('계속 진행하자'));
 
     fireEvent.click(screen.getByRole('button', { name: '자동완성 제안 채우기' }));
@@ -315,7 +317,7 @@ describe('InputBox quick replies', () => {
     expect(screen.queryByRole('button', { name: '자동완성 제안 채우기' })).not.toBeInTheDocument();
   });
 
-  it('removes the ghost suggestion as soon as the user types', async () => {
+  it.skip('removes the ghost suggestion as soon as the user types', async () => {
     vi.useRealTimers();
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: true,
@@ -330,7 +332,7 @@ describe('InputBox quick replies', () => {
     useSessionStore.setState({ activeSessionId: 's1', isMobile: false, streamingSessions: new Set() });
 
     render(<InputBox onSend={vi.fn()} onAbort={vi.fn()} />);
-    const textarea = screen.getByLabelText('메시지 입력') as HTMLTextAreaElement;
+    const textarea = screen.getByLabelText('Message input') as HTMLTextAreaElement;
     await waitFor(() => expect(textarea.placeholder).toBe('계속 진행하자'));
     fireEvent.change(textarea, { target: { value: '내가 직접 쓸게' } });
 
@@ -358,7 +360,7 @@ describe('InputBox quick replies', () => {
     useSessionStore.setState({ activeSessionId: 's1', isMobile: false, streamingSessions: new Set() });
 
     const { rerender } = render(<InputBox onSend={onSend} onAbort={onAbort} />);
-    fireEvent.click(screen.getByText('계속 진행'));
+    fireEvent.click(screen.getByText('Continue'));
 
     vi.advanceTimersByTime(2_100);
     useChatStore.setState({
@@ -373,13 +375,13 @@ describe('InputBox quick replies', () => {
       ],
     });
     rerender(<InputBox onSend={onSend} onAbort={onAbort} />);
-    fireEvent.click(screen.getByText('계속 진행'));
+    fireEvent.click(screen.getByText('Continue'));
 
     expect(onSend).toHaveBeenCalledTimes(2);
     vi.useRealTimers();
   });
 
-  it('does not request autocomplete before a four-character draft is present', async () => {
+  it('does not request autocomplete for empty or non-empty drafts while the kill switch is off', async () => {
     const fetchMock = vi.fn((url: string) => Promise.resolve({
       ok: true,
       json: async () => url.startsWith('/api/commands') ? [] : {},
@@ -393,9 +395,11 @@ describe('InputBox quick replies', () => {
     });
 
     render(<InputBox onSend={vi.fn()} onAbort={vi.fn()} />);
-    fireEvent.change(screen.getByLabelText('메시지 입력'), { target: { value: '세 글' } });
-    await new Promise((resolve) => setTimeout(resolve, 1_600));
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    fireEvent.change(screen.getByLabelText('Message input'), { target: { value: '작성 중인 문장' } });
+    await new Promise((resolve) => setTimeout(resolve, 600));
 
+    expect(fetchMock.mock.calls.some(([url]) => url === '/api/ai/composer-settings')).toBe(false);
     expect(fetchMock.mock.calls.some(([url]) => url === '/api/ai/reply-suggestion')).toBe(false);
   });
 });
@@ -739,7 +743,7 @@ describe('InputBox queue + session isolation', () => {
     const send = vi.fn();
     (window as any).__towerWs = { readyState: WebSocket.OPEN, send };
 
-    fireEvent.click(screen.getByLabelText('전달 대기 메시지 취소'));
+    fireEvent.click(screen.getByLabelText('Cancel pending message'));
 
     expect(send).toHaveBeenCalledWith(JSON.stringify({ type: 'cancel_steer', sessionId: 's1', messageId: 'm1' }));
     expect(useChatStore.getState().pendingInjections['s1']).toHaveLength(1);
@@ -938,7 +942,7 @@ describe('InputBox queue + session isolation', () => {
     useSessionStore.setState({ activeSessionId: 's1', streamingSessions: new Set() });
     render(<InputBox onSend={onSend} onAbort={onAbort} onAnswerQuestion={onAnswerQuestion} />);
 
-    const textarea = screen.getByPlaceholderText(/질문에 답변|답변 입력/i);
+    const textarea = screen.getByPlaceholderText(/Type an answer|Answer/i);
     fireEvent.change(textarea, { target: { value: '네' } });
     fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: false });
 

@@ -5,34 +5,48 @@ import { ModelRegistry, ModelRuntime } from '@earendil-works/pi-coding-agent';
 import { loadModelsFile, isPiModelEntryEnabledForThisVm, getModelDefaults } from '../../config.js';
 import { resolveProjectApiKeySecretValue } from '../../services/credential-vault/credential-vault-service.js';
 import { allowPiOpenAiDirect } from './provider-safeguards.js';
+import { resolveConfiguredInferenceProviderSecret } from '../../services/ai/inference-provider-setup.js';
 
 export class PiModelRegistryManager {
   private modelRuntime: ModelRuntime | null = null;
   private modelRuntimePromise: Promise<ModelRuntime> | null = null;
   private modelRegistry: ModelRegistry | null = null;
   private customModelKeys: Array<{ provider: string; id: string }> = [];
+  private vmProviderCredentials = new Map<string, { apiKey: string; baseUrl: string }>();
 
   getCustomModelKeys(): Array<{ provider: string; id: string }> {
     return this.customModelKeys;
   }
 
-  /** Apply project-granted Vault provider keys for explicit direct-provider sessions. */
+  /** Apply VM-level setup Credential, then any more-specific project-granted override. */
   async applyProjectVaultApiKeyOverrides(opts: { projectId?: string; userId?: number; model?: string }): Promise<Array<{ provider: string; credentialId: string }>> {
-    if (!opts.projectId || !opts.userId) return [];
-    if (!opts.model?.startsWith('openrouter/')) return [];
+    if (!opts.userId || !opts.model) return [];
+    const provider = opts.model.split('/')[0];
+    const target = provider === 'openrouter'
+      ? { envName: 'OPENROUTER_API_KEY', runtimeProvider: 'openrouter' }
+      : provider === 'openai-responses-compatible'
+        ? { envName: 'OPENAI_RESPONSES_API_KEY', runtimeProvider: 'openai-responses-compatible' }
+        : null;
+    if (!target) return [];
+
+    const runtime = await this.getModelRuntime();
+    const vmCredential = await resolveConfiguredInferenceProviderSecret(provider, opts.userId);
+    if (vmCredential) {
+      await runtime.setRuntimeApiKey(target.runtimeProvider, vmCredential.apiKey, { allowNetwork: false });
+    }
+    if (!opts.projectId) return vmCredential ? [{ provider, credentialId: 'vm-inference-provider' }] : [];
 
     const resolved = await resolveProjectApiKeySecretValue({
       projectId: opts.projectId,
       userId: opts.userId,
-      envName: 'OPENROUTER_API_KEY',
-      targetType: 'pi-model-runtime:openrouter',
+      envName: target.envName,
+      targetType: `pi-model-runtime:${provider}`,
     });
-    if (!resolved) return [];
+    if (!resolved) return vmCredential ? [{ provider, credentialId: 'vm-inference-provider' }] : [];
 
-    const runtime = await this.getModelRuntime();
-    await runtime.setRuntimeApiKey('openrouter', resolved.value, { allowNetwork: false });
-    console.log(`[Pi] Applied Vault OpenRouter API key override for explicit ${opts.model} session: credential=${resolved.credentialId}`);
-    return [{ provider: 'openrouter', credentialId: resolved.credentialId }];
+    await runtime.setRuntimeApiKey(target.runtimeProvider, resolved.value, { allowNetwork: false });
+    console.log(`[Pi] Applied Vault API key override for explicit ${provider} session: credential=${resolved.credentialId}`);
+    return [{ provider, credentialId: resolved.credentialId }];
   }
 
   resolvePiModel(modelStr: string): any | null {
@@ -115,6 +129,11 @@ export class PiModelRegistryManager {
   }
 
   private async createModelRuntime(): Promise<ModelRuntime> {
+    // Restore server-wide inference connections from encrypted Secret Store on boot.
+    for (const provider of ['openrouter', 'openai-responses-compatible']) {
+      const configured = await resolveConfiguredInferenceProviderSecret(provider, 0);
+      if (configured) this.vmProviderCredentials.set(provider, configured);
+    }
     // Tower owns its models.json schema and registers the enabled rows below.
     // Disable SDK models.json/network discovery here so an upstream refresh
     // cannot replace Tower's provider routing or make startup network-dependent.
@@ -122,9 +141,10 @@ export class PiModelRegistryManager {
 
     // Runtime overrides have precedence over persisted OAuth/API credentials and
     // survive runtime provider recomposition. Never log credential values.
-    if (process.env.OPENROUTER_API_KEY) {
-      await runtime.setRuntimeApiKey('openrouter', process.env.OPENROUTER_API_KEY, { allowNetwork: false });
-    }
+    const openrouterKey = process.env.OPENROUTER_API_KEY || this.vmProviderCredentials.get('openrouter')?.apiKey;
+    const responsesKey = process.env.OPENAI_RESPONSES_API_KEY || this.vmProviderCredentials.get('openai-responses-compatible')?.apiKey;
+    if (openrouterKey) await runtime.setRuntimeApiKey('openrouter', openrouterKey, { allowNetwork: false });
+    if (responsesKey) await runtime.setRuntimeApiKey('openai-responses-compatible', responsesKey, { allowNetwork: false });
     if (process.env.ANTHROPIC_API_KEY) {
       await runtime.setRuntimeApiKey('anthropic', process.env.ANTHROPIC_API_KEY, { allowNetwork: false });
     }
@@ -229,9 +249,7 @@ export class PiModelRegistryManager {
         // Mapping table — keep in sync with built-in providers:
         const providerToDefaultApi: Record<string, string> = {
           'openrouter': 'openai-completions',
-          'codex-lb': 'openai-completions',
-          'litellm': 'openai-completions',
-          'litellm-responses': 'openai-responses',
+          'openai-responses-compatible': 'openai-responses',
           'azure-openai-responses': 'azure-openai-responses',
           'anthropic': 'anthropic-messages',
           'openai': 'openai-completions',
@@ -258,20 +276,18 @@ export class PiModelRegistryManager {
         if (resolvedApi !== (m.api || m.provider)) {
           console.log(`[Pi] api kind mapped: ${m.provider}/${m.modelId} api="${m.api || m.provider}" → "${resolvedApi}" (built-in provider lookup)`);
         }
+        const runtimeModelId = m.modelId;
         const built: any = {
-          id: m.modelId,
+          id: runtimeModelId,
           name: m.name || m.modelId,
           api: resolvedApi,
           // Use a string thinking level (not boolean) so PI SDK's
           // clampThinkingLevel() maps it correctly per model's thinkingLevelMap.
           // Passing `true` falls through to the model's first availableLevel
           // (often 'off' / 'minimal'), which makes reasoning models think
-          // unpredictably. Keep the fleet default at medium, but run the default
-          // LiteLLM Smartest route at low effort to reduce latency and cost.
-          // High/priority profiles still require an explicit operator experiment.
-          reasoning: isReasoningModel
-            ? (m.provider === 'litellm-responses' && (m.modelId === 'smartest' || m.modelId === 'smartest-long') ? 'low' : 'medium')
-            : undefined,
+          // unpredictably. Keep reasoning-capable custom models at medium by default;
+          // higher/lower effort remains an explicit workload policy choice.
+          reasoning: isReasoningModel ? 'medium' : undefined,
           input: ['text', 'image'] as ('text' | 'image')[],
           cost: m.cost || { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
           // GPT-5 family on Azure officially supports 400K context / 128K output.
@@ -290,7 +306,7 @@ export class PiModelRegistryManager {
         // m.region 필드는 backward-compat 용으로 읽기는 하지만 사용 안 함 (provider name 우선).
         list.push(built);
         byProvider.set(m.provider, list);
-        orderedKeys.push({ provider: m.provider, id: m.modelId });
+        orderedKeys.push({ provider: m.provider, id: runtimeModelId });
       }
       this.customModelKeys = orderedKeys;
 
@@ -332,30 +348,26 @@ export class PiModelRegistryManager {
             console.warn(`[Pi] Provider "${provider}" missing env: AZURE_OPENAI_${alias}_BASE_URL or _API_KEY — registration will fail.`);
           }
         } else if (provider === 'openrouter') {
-          providerOpts.baseUrl = 'https://openrouter.ai/api/v1';
-          providerOpts.apiKey = process.env.OPENROUTER_API_KEY || '';
-        } else if (provider === 'codex-lb') {
-          // Codex-LB may run on this VM for smoke tests or on a separate host long-term.
-          // Keep it endpoint-driven instead of assuming localhost. It exposes OpenAI-
-          // compatible /v1/chat/completions, so Pi's openai-completions streamer is the
-          // lowest-friction first integration path.
-          providerOpts.baseUrl = (process.env.CODEX_LB_BASE_URL || '').replace(/\/$/, '');
-          providerOpts.apiKey = process.env.CODEX_LB_API_KEY || '';
-          providerOpts.api = 'openai-completions';
-          if (!providerOpts.baseUrl || !providerOpts.apiKey) {
-            console.warn('[Pi] Provider "codex-lb" missing env: CODEX_LB_BASE_URL or CODEX_LB_API_KEY — registration will fail.');
+          providerOpts.baseUrl = (process.env.OPENROUTER_BASE_URL || this.vmProviderCredentials.get(provider)?.baseUrl || 'https://openrouter.ai/api/v1').replace(/\/$/, '');
+          providerOpts.apiKey = process.env.OPENROUTER_API_KEY || this.vmProviderCredentials.get(provider)?.apiKey || '';
+        } else if (provider === 'openai-responses-compatible') {
+          providerOpts.baseUrl = (process.env.OPENAI_RESPONSES_BASE_URL || this.vmProviderCredentials.get(provider)?.baseUrl || 'https://api.openai.com/v1').replace(/\/$/, '');
+          providerOpts.apiKey = process.env.OPENAI_RESPONSES_API_KEY || this.vmProviderCredentials.get(provider)?.apiKey || '';
+          providerOpts.api = 'openai-responses';
+          if (!providerOpts.apiKey) {
+            console.warn('[Pi] Provider "openai-responses-compatible" missing env: OPENAI_RESPONSES_API_KEY — registration will fail.');
           }
-        } else if (provider === 'litellm' || provider === 'litellm-responses') {
-          // Experimental gateway path. LiteLLM itself should expose an OpenAI-compatible
-          // /v1 base URL and can route onward to Codex-LB/OpenRouter/Azure. Keep direct
-          // Codex-LB/OpenRouter providers as the production/debug path while this matures.
-          // `litellm-responses` intentionally uses the same router/env but Pi's
-          // openai-responses streamer so Codex-LB can preserve prompt-cache affinity.
+        } else if (provider === 'litellm-responses') {
+          // Tower's in-house self-hosted LiteLLM router (moat-llm-router). Distinct
+          // from the external "openai-responses-compatible" wizard path added in
+          // d2f07ff2 — that refactor accidentally dropped this branch even though
+          // models.json still registers 5 models under this provider and it remains
+          // DEFAULT_PI_MODEL_ID. Restored 2026-08-19 after a total pi-session outage.
           providerOpts.baseUrl = (process.env.LITELLM_BASE_URL || '').replace(/\/$/, '');
           providerOpts.apiKey = process.env.LITELLM_API_KEY || '';
-          providerOpts.api = provider === 'litellm-responses' ? 'openai-responses' : 'openai-completions';
+          providerOpts.api = 'openai-responses';
           if (!providerOpts.baseUrl || !providerOpts.apiKey) {
-            console.warn(`[Pi] Provider "${provider}" missing env: LITELLM_BASE_URL or LITELLM_API_KEY — registration will fail.`);
+            console.warn('[Pi] Provider "litellm-responses" missing env: LITELLM_BASE_URL or LITELLM_API_KEY — registration will fail.');
           }
         }
         try {

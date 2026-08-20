@@ -42,6 +42,8 @@ export function SettingsPanel() {
           <h2 className="text-[17px] font-bold text-surface-100">{t('mySettings')}</h2>
           <button
             onClick={() => setOpen(false)}
+            aria-label={t('common:close')}
+            title={t('common:close')}
             className="p-1 text-gray-500 hover:text-gray-300 transition-colors"
           >
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -75,21 +77,15 @@ export function SettingsPanel() {
           {/* Language selector */}
           <section>
             <h3 className="text-[14px] font-semibold text-surface-500 uppercase tracking-wider mb-3">{t('language')}</h3>
-            <div className="flex gap-2">
-              {(['en', 'ko'] as const).map((lang) => (
-                <button
-                  key={lang}
-                  onClick={() => handleLanguageChange(lang)}
-                  className={`flex-1 py-2 text-sm font-medium rounded-lg border transition-all ${
-                    language === lang
-                      ? 'bg-surface-800 border-primary-500 text-primary-400'
-                      : 'bg-surface-900 border-surface-700 text-surface-500 hover:border-surface-600'
-                  }`}
-                >
-                  {lang === 'en' ? t('english') : t('korean')}
-                </button>
-              ))}
-            </div>
+            <select
+              value={language}
+              onChange={(event) => handleLanguageChange(event.target.value as LangId)}
+              aria-label={t('language')}
+              className="w-full rounded-lg border border-surface-700 bg-surface-900 px-3 py-2 text-sm font-medium text-surface-200 outline-none transition-colors focus:border-primary-500"
+            >
+              <option value="en">{t('english')}</option>
+              <option value="ko">{t('korean')}</option>
+            </select>
           </section>
 
           {/* Font size selector */}

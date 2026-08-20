@@ -1,4 +1,6 @@
 import React from 'react';
+import { useTranslation } from 'react-i18next';
+import i18n from '../../i18n';
 import { toastSuccess } from '../../utils/toast';
 import { emitProductNotice } from '../../utils/product-notice';
 import { useConfirm } from '../../hooks/useDialog';
@@ -106,10 +108,11 @@ export function runtimeBoxErrorPresentation(box: RuntimeBox): { label: string; c
   if (box.status === 'error') {
     return { label: box.last_error, className: 'text-red-300' };
   }
-  return { label: `이전 오류(복구됨): ${box.last_error}`, className: 'text-surface-500' };
+  return { label: i18n.t('runtimeBox.recoveredError', { ns: 'common', error: box.last_error }), className: 'text-surface-500' };
 }
 
 export function RuntimeBoxPanel() {
+  const { t } = useTranslation('common');
   const confirm = useConfirm();
   const canEditCapacity = getCurrentRole() === 'admin';
   const [data, setData] = React.useState<ServicesResponse | null>(null);
@@ -157,9 +160,9 @@ export function RuntimeBoxPanel() {
     );
     if (exceedsRecommendation) {
       const ok = await confirm({
-        title: '권장 용량 초과 설정',
-        message: '현재 서버 사양에서 권장하는 수보다 큽니다. 메모리 부족이나 작업 지연이 생길 수 있지만 저장은 가능합니다. 그대로 적용할까요?',
-        confirmLabel: '초과 설정 적용',
+        title: t('runtimeBox.capacity.exceedsTitle'),
+        message: t('runtimeBox.capacity.exceedsMessage'),
+        confirmLabel: t('runtimeBox.capacity.applyExceeded'),
         danger: true,
       });
       if (!ok) return;
@@ -175,7 +178,7 @@ export function RuntimeBoxPanel() {
       if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
       setCapacity(body);
       setCapacityDraft(body.current);
-      toastSuccess('Runtime Box 용량 설정을 즉시 적용했습니다.');
+      toastSuccess(t('runtimeBox.capacity.applied'));
     } catch (err: unknown) {
       emitProductNotice({ code: 'runtime.capacity.save.failed', technicalDetail: err });
     } finally {
@@ -225,9 +228,9 @@ export function RuntimeBoxPanel() {
 
   const stopBox = async (box: RuntimeBox) => {
     const ok = await confirm({
-      title: 'Runtime Box 실행 중지',
-      message: `${projectLabel(box)}의 실행 중인 dev service를 중지하고 Runtime Box를 내립니다. 프로젝트 파일은 삭제되지 않습니다.`,
-      confirmLabel: '실행 중지',
+      title: t('runtimeBox.stop.title'),
+      message: t('runtimeBox.stop.message', { project: projectLabel(box) }),
+      confirmLabel: t('runtimeBox.stop.confirm'),
       danger: true,
     });
     if (!ok) return;
@@ -236,7 +239,7 @@ export function RuntimeBoxPanel() {
       const res = await fetch(`/api/runtime-box/boxes/${box.id}/stop`, { method: 'POST', headers: authHeaders() });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
-      toastSuccess(`Runtime Box 실행 중지 완료 (#${box.id})`);
+      toastSuccess(t('runtimeBox.stop.completed', { id: box.id }));
       await load();
     } catch (err: unknown) {
       emitProductNotice({
@@ -251,9 +254,9 @@ export function RuntimeBoxPanel() {
 
   const destroyBox = async (box: RuntimeBox) => {
     const ok = await confirm({
-      title: 'Runtime Box 임시 정리',
-      message: `${projectLabel(box)}의 임시 실행 상태와 남은 컨테이너를 정리합니다. 컨테이너 이름 충돌이나 오래된 실행 흔적 때문에 다시 켜지지 않을 때 필요합니다. 프로젝트 파일은 삭제되지 않으며, 다음에 필요하면 같은 프로젝트에서 다시 켤 수 있습니다.`,
-      confirmLabel: '임시 정리',
+      title: t('runtimeBox.cleanup.title'),
+      message: t('runtimeBox.cleanup.message', { project: projectLabel(box) }),
+      confirmLabel: t('runtimeBox.cleanup.confirm'),
       danger: true,
     });
     if (!ok) return;
@@ -262,7 +265,7 @@ export function RuntimeBoxPanel() {
       const res = await fetch(`/api/runtime-box/boxes/${box.id}`, { method: 'DELETE', headers: authHeaders() });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
-      toastSuccess(`Runtime Box 임시 정리 완료 (#${box.id})`);
+      toastSuccess(t('runtimeBox.cleanup.completed', { id: box.id }));
       await load();
     } catch (err: unknown) {
       emitProductNotice({
@@ -282,7 +285,7 @@ export function RuntimeBoxPanel() {
           <div>
             <div className="text-sm uppercase tracking-[0.24em] text-primary-400/80">Project Runtime Box</div>
             <h1 className="mt-1 text-3xl font-semibold text-gray-100">VM Runtime Services</h1>
-            <p className="mt-1 text-base text-surface-400">Preview는 임시 개발 서버입니다. 지속 공유 URL은 명시적으로 Publish할 때만 생성됩니다.</p>
+            <p className="mt-1 text-base text-surface-400">{t('runtimeBox.description')}</p>
           </div>
           <button onClick={load} disabled={loading} className="rounded-lg border border-surface-700 bg-surface-850 px-3 py-2 text-base text-surface-200 hover:bg-surface-800 disabled:opacity-50">
             {loading ? 'Refreshing…' : 'Refresh'}
@@ -297,29 +300,29 @@ export function RuntimeBoxPanel() {
 
         {capacity && <section className="rounded-xl border border-surface-800 bg-surface-900/70 p-4 space-y-4">
           <div>
-            <h2 className="text-lg font-semibold text-surface-100">실행 용량</h2>
-            <p className="mt-1 text-sm text-surface-400">현재 서버: CPU {capacity.host.cpuThreads} threads · RAM {(capacity.host.totalMemoryMb / 1024).toFixed(1)}GB · Box당 최대 {(capacity.box.maxMemoryMb / 1024).toFixed(1)}GB</p>
-            <p className="mt-1 text-sm text-surface-500">권장값은 RAM의 70%와 CPU 여유를 기준으로 계산합니다. 더 큰 값도 경고 확인 후 저장할 수 있습니다.</p>
+            <h2 className="text-lg font-semibold text-surface-100">{t('runtimeBox.capacity.title')}</h2>
+            <p className="mt-1 text-sm text-surface-400">{t('runtimeBox.capacity.host', { cpu: capacity.host.cpuThreads, ram: (capacity.host.totalMemoryMb / 1024).toFixed(1), max: (capacity.box.maxMemoryMb / 1024).toFixed(1) })}</p>
+            <p className="mt-1 text-sm text-surface-500">{t('runtimeBox.capacity.description')}</p>
           </div>
           <div className="grid gap-3 md:grid-cols-2">
             <label className="space-y-1 text-sm text-surface-300">
-              <span>서버 전체 동시 Box · 권장 {capacity.recommended.maxRunning}</span>
+              <span>{t('runtimeBox.capacity.serverLimit', { count: capacity.recommended.maxRunning })}</span>
               <input type="number" min={1} value={capacityDraft.maxRunning} onChange={(e) => setCapacityDraft((v) => ({ ...v, maxRunning: Number(e.target.value) }))} className="w-full rounded-lg border border-surface-700 bg-surface-950 px-3 py-2 text-surface-100" />
             </label>
             <label className="space-y-1 text-sm text-surface-300">
-              <span>사용자당 동시 Box · 권장 {capacity.recommended.maxRunningPerUser}</span>
+              <span>{t('runtimeBox.capacity.userLimit', { count: capacity.recommended.maxRunningPerUser })}</span>
               <input type="number" min={1} value={capacityDraft.maxRunningPerUser} onChange={(e) => setCapacityDraft((v) => ({ ...v, maxRunningPerUser: Number(e.target.value) }))} className="w-full rounded-lg border border-surface-700 bg-surface-950 px-3 py-2 text-surface-100" />
             </label>
           </div>
-          {(capacityDraft.maxRunning > capacity.recommended.maxRunning || capacityDraft.maxRunningPerUser > capacity.recommended.maxRunningPerUser) && <div className="tone-card tone-warning rounded-lg p-3 text-sm">권장량을 초과했습니다. 저장 시 한 번 더 확인합니다.</div>}
-          {capacityDraft.maxRunningPerUser > capacityDraft.maxRunning && <div className="text-sm text-surface-500">사용자당 값이 전체 값보다 커도 저장할 수 있지만 실제 동시 실행은 전체 한도에 먼저 막힙니다.</div>}
-          {canEditCapacity ? <div className="flex justify-end"><button onClick={saveCapacity} disabled={capacitySaving || capacityDraft.maxRunning < 1 || capacityDraft.maxRunningPerUser < 1} className="rounded-lg bg-primary-600 px-4 py-2 text-sm font-semibold text-white hover:bg-primary-500 disabled:opacity-50">{capacitySaving ? '저장 중…' : '용량 설정 저장'}</button></div> : <p className="text-sm text-surface-500">Operator는 현재 설정을 조회할 수 있고, 변경은 Admin만 할 수 있습니다.</p>}
+          {(capacityDraft.maxRunning > capacity.recommended.maxRunning || capacityDraft.maxRunningPerUser > capacity.recommended.maxRunningPerUser) && <div className="tone-card tone-warning rounded-lg p-3 text-sm">{t('runtimeBox.capacity.exceededWarning')}</div>}
+          {capacityDraft.maxRunningPerUser > capacityDraft.maxRunning && <div className="text-sm text-surface-500">{t('runtimeBox.capacity.userOverServer')}</div>}
+          {canEditCapacity ? <div className="flex justify-end"><button onClick={saveCapacity} disabled={capacitySaving || capacityDraft.maxRunning < 1 || capacityDraft.maxRunningPerUser < 1} className="rounded-lg bg-primary-600 px-4 py-2 text-sm font-semibold text-white hover:bg-primary-500 disabled:opacity-50">{capacitySaving ? t('runtimeBox.capacity.saving') : t('runtimeBox.capacity.save')}</button></div> : <p className="text-sm text-surface-500">{t('runtimeBox.capacity.adminOnly')}</p>}
         </section>}
 
         <section className="overflow-hidden rounded-xl border border-surface-800 bg-surface-900/70">
           <div className="border-b border-surface-800 px-4 py-3 text-base font-semibold text-surface-200">Boxes</div>
           {boxes.length === 0 ? (
-            <div className="p-8 text-center text-base text-surface-500">{loading ? 'Loading boxes…' : 'Runtime Box row가 없습니다.'}</div>
+            <div className="p-8 text-center text-base text-surface-500">{loading ? t('runtimeBox.loadingBoxes') : t('runtimeBox.noBoxes')}</div>
           ) : (
             <div className="divide-y divide-surface-800">
               {boxes.map((b) => {
@@ -344,15 +347,15 @@ export function RuntimeBoxPanel() {
                       <div className="flex shrink-0 flex-wrap gap-2">
                         {(b.status === 'running' || b.status === 'starting') && (
                           <button onClick={() => stopBox(b)} disabled={busyBoxId === b.id} className="rounded-lg border border-red-500/40 px-3 py-1.5 text-sm font-semibold text-red-300 hover:bg-red-500/10 disabled:opacity-50">
-                            {busyBoxId === b.id ? '중지 중…' : '실행 중지'}
+                            {busyBoxId === b.id ? t('runtimeBox.stop.stopping') : t('runtimeBox.stop.confirm')}
                           </button>
                         )}
                         {b.status !== 'running' && b.status !== 'starting' && (
                           <div className="flex flex-col items-start gap-1">
                             <button onClick={() => destroyBox(b)} disabled={busyBoxId === b.id} className="rounded-lg border border-surface-700 px-3 py-1.5 text-sm font-semibold text-surface-200 hover:bg-surface-800 disabled:opacity-50">
-                              {busyBoxId === b.id ? '정리 중…' : '임시 정리'}
+                              {busyBoxId === b.id ? t('runtimeBox.cleanup.cleaning') : t('runtimeBox.cleanup.confirm')}
                             </button>
-                            <span className="max-w-[220px] text-[13px] leading-snug text-surface-500">컨테이너 충돌·오래된 실행 흔적 정리. 파일은 유지됩니다.</span>
+                            <span className="max-w-[220px] text-[13px] leading-snug text-surface-500">{t('runtimeBox.cleanup.hint')}</span>
                           </div>
                         )}
                       </div>
@@ -368,7 +371,7 @@ export function RuntimeBoxPanel() {
           <div className="border-b border-surface-800 px-4 py-3 text-base font-semibold text-surface-200">Services</div>
           {!data || services.length === 0 ? (
             <div className="p-8 text-center text-base text-surface-500">
-              {loading ? 'Loading services…' : '현재 running/pending/error/expired service가 없습니다.'}
+              {loading ? t('runtimeBox.loadingServices') : t('runtimeBox.noServices')}
             </div>
           ) : (
             <div className="divide-y divide-surface-800">

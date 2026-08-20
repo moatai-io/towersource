@@ -26,6 +26,20 @@ describe('Agent Connection management route contract', () => {
     expect(route).not.toContain('connections/catalog/secrets');
   });
 
+  it('promotes multi-field credential_group rows to one Connection contract', () => {
+    expect(route).toContain("id: `group:${row.id}`");
+    expect(route).toContain("connectionType: 'credential_group'");
+    expect(route).toContain('fieldCount: Number(row.field_count)');
+    expect(route).toContain('connectedFieldCount: Number(row.allowed_count)');
+    expect(route).toContain("metadata->>'credential_group'");
+    expect(route).toContain("String(intent.connection_id).startsWith('group:')");
+    expect(route).toContain("code: 'CREDENTIAL_GROUP_INCOMPLETE'");
+    expect(route).toContain('credential_group: intent.source_id');
+    expect(route).toContain('const credentialsByGroup = new Map<string, any[]>()');
+    expect(route).toContain("source: 'group'");
+    expect(route).toContain("reason: connected ? 'all grouped credentials connected'");
+  });
+
   it('uses manager authorization and stored preview intents for connect/disconnect', () => {
     expect(route).toContain("router.post('/connections/:connectionId/preview'");
     expect(route).toContain("router.post('/connections/:connectionId/apply'");
@@ -36,6 +50,13 @@ describe('Agent Connection management route contract', () => {
     expect(route).toContain("scope IN ('workspace', 'internal-default')");
     expect(route).toContain("WHERE wc.scope = 'personal'");
     expect(route).not.toContain("scope IN ('workspace', 'internal-default', 'personal')");
+  });
+
+  it('keeps Agent-dedicated project credentials visible while marking their connection boundary', () => {
+    expect(route).toContain("WHERE scope <> 'personal'\n          ORDER BY provider, id");
+    expect(route).toContain("connectionScope: credential.scope === 'project' ? 'agent_dedicated' : 'shared'");
+    expect(route).toContain("dedicatedProjectId: credential.scope === 'project'");
+    expect(route).toContain("connectionScope: members.every(member => member.scope === 'project') ? 'agent_dedicated' : 'shared'");
   });
 
   it('does not widen workspace defaults or raw secret administration', () => {

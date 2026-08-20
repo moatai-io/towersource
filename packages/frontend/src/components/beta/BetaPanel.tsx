@@ -1,4 +1,5 @@
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 import { useProjectStore } from '../../stores/project-store';
 import { useSettingsStore } from '../../stores/settings-store';
 import { AgentHiringWizard } from './AgentHiringWizard';
@@ -100,6 +101,7 @@ function RunColumn({ run, winner }: { run: WorkbenchRun; winner: boolean }) {
 }
 
 export function BetaPanel() {
+  const { t, i18n } = useTranslation('skills');
   const betaWorkbenchEnabled = useSettingsStore((s) => !!s.serverConfig?.betaWorkbenchEnabled);
   const projects = useProjectStore((s) => s.projects);
   const pinnedProject = projects.find((p) => p.pinned) ?? projects[0];
@@ -128,7 +130,7 @@ export function BetaPanel() {
       setHistory(h.history || []);
       setTestCases(c.testCases || []);
     } catch (err: any) {
-      setError(err?.message || 'Beta 데이터를 불러오지 못했습니다.');
+      setError(err?.message || t('workbench.errors.load'));
     }
   }, [betaWorkbenchEnabled]);
 
@@ -148,7 +150,7 @@ export function BetaPanel() {
   }, []);
 
   if (!betaWorkbenchEnabled) {
-    return <div className="flex-1 flex items-center justify-center text-sm text-surface-500">Beta workbench is not enabled on this VM.</div>;
+    return <div className="flex-1 flex items-center justify-center text-sm text-surface-500">{t('workbench.notEnabled')}</div>;
   }
 
   const loadCase = (item: TestCase) => {
@@ -171,7 +173,7 @@ export function BetaPanel() {
   };
 
   const runWorkbench = async () => {
-    if (!prompt.trim()) { setError('비교할 prompt를 입력하세요.'); return; }
+    if (!prompt.trim()) { setError(t('workbench.errors.promptRequired')); return; }
     setBusy(true); setError(null); setResult(null);
     try {
       const data = await apiJson<WorkbenchResult>('/api/beta/skill-workbench/run', {
@@ -187,12 +189,12 @@ export function BetaPanel() {
       setResult(data);
       await refreshSideData();
     } catch (err: any) {
-      setError(err?.message || 'Skill workbench 실행에 실패했습니다.');
+      setError(err?.message || t('workbench.errors.run'));
     } finally { setBusy(false); }
   };
 
   const saveCase = async () => {
-    if (!prompt.trim()) { setError('저장할 prompt를 입력하세요.'); return; }
+    if (!prompt.trim()) { setError(t('workbench.errors.savePromptRequired')); return; }
     setSaving(true); setError(null);
     try {
       const data = await apiJson<{ testCase: TestCase }>('/api/beta/skill-workbench/test-cases', {
@@ -212,7 +214,7 @@ export function BetaPanel() {
       await refreshSideData();
       setActiveSideTab('cases');
     } catch (err: any) {
-      setError(err?.message || 'Test case 저장에 실패했습니다.');
+      setError(err?.message || t('workbench.errors.saveCase'));
     } finally { setSaving(false); }
   };
 
@@ -227,7 +229,7 @@ export function BetaPanel() {
       }
       await refreshSideData();
     } catch (err: any) {
-      setError(err?.message || 'Test case 삭제에 실패했습니다.');
+      setError(err?.message || t('workbench.errors.deleteCase'));
     }
   };
 
@@ -246,45 +248,45 @@ export function BetaPanel() {
       <div className="max-w-[1600px] mx-auto p-6 space-y-6">
         <header className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4">
           <div className="space-y-2">
-            <div className="inline-flex items-center gap-2 rounded-full border border-primary-500/30 bg-primary-500/10 px-3 py-1 text-xs font-semibold text-primary-300">Beta 기능 · full VM only</div>
-            <h1 className="text-2xl font-bold tracking-tight">Skill Workbench</h1>
-            <p className="max-w-3xl text-sm leading-6 text-surface-400">Skill off · Draft · Baseline 결과를 비교하고 scoring/history/test case를 저장합니다.</p>
+            <div className="inline-flex items-center gap-2 rounded-full border border-primary-500/30 bg-primary-500/10 px-3 py-1 text-xs font-semibold text-primary-300">{t('workbench.betaBadge')}</div>
+            <h1 className="text-2xl font-bold tracking-tight">{t('workbench.title')}</h1>
+            <p className="max-w-3xl text-sm leading-6 text-surface-400">{t('workbench.description')}</p>
           </div>
-          {result?.winnerId && <div className="rounded-xl border border-primary-500/30 bg-primary-500/10 px-4 py-3 text-sm text-primary-300">현재 자동 추천: <b>{result.runs.find((r) => r.id === result.winnerId)?.label}</b></div>}
+          {result?.winnerId && <div className="rounded-xl border border-primary-500/30 bg-primary-500/10 px-4 py-3 text-sm text-primary-300">{t('workbench.recommendation')}: <b>{result.runs.find((r) => r.id === result.winnerId)?.label}</b></div>}
         </header>
 
         <div className="grid grid-cols-1 2xl:grid-cols-[1fr_360px] gap-5">
           <div className="space-y-5 min-w-0">
             <section className="rounded-2xl border border-surface-700/70 bg-surface-900/80 p-4 space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-                <label className="text-xs font-semibold text-surface-400 space-y-1 md:col-span-1">Project context
+                <label className="text-xs font-semibold text-surface-400 space-y-1 md:col-span-1">{t('workbench.projectContext')}
                   <select value={projectId} onChange={(e) => setProjectId(e.target.value)} className="w-full rounded-lg bg-surface-950 border border-surface-700 px-3 py-2 text-sm text-gray-100 outline-none focus:border-primary-500">
-                    <option value="">No project</option>
+                    <option value="">{t('workbench.noProject')}</option>
                     {projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
                   </select>
                 </label>
-                <label className="text-xs font-semibold text-surface-400 space-y-1">Draft skill
+                <label className="text-xs font-semibold text-surface-400 space-y-1">{t('workbench.draftSkill')}
                   <input value={draftSkillName} onChange={(e) => setDraftSkillName(e.target.value)} placeholder="great-copy" className="w-full rounded-lg bg-surface-950 border border-surface-700 px-3 py-2 text-sm text-gray-100 outline-none focus:border-primary-500" />
                 </label>
-                <label className="text-xs font-semibold text-surface-400 space-y-1">Baseline skill
+                <label className="text-xs font-semibold text-surface-400 space-y-1">{t('workbench.baselineSkill')}
                   <input value={baselineSkillName} onChange={(e) => setBaselineSkillName(e.target.value)} placeholder="marketing-coach" className="w-full rounded-lg bg-surface-950 border border-surface-700 px-3 py-2 text-sm text-gray-100 outline-none focus:border-primary-500" />
                 </label>
-                <label className="text-xs font-semibold text-surface-400 space-y-1">Case title
-                  <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Optional test case title" className="w-full rounded-lg bg-surface-950 border border-surface-700 px-3 py-2 text-sm text-gray-100 outline-none focus:border-primary-500" />
+                <label className="text-xs font-semibold text-surface-400 space-y-1">{t('workbench.caseTitle')}
+                  <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder={t('workbench.caseTitlePlaceholder')} className="w-full rounded-lg bg-surface-950 border border-surface-700 px-3 py-2 text-sm text-gray-100 outline-none focus:border-primary-500" />
                 </label>
               </div>
 
-              <label className="block text-xs font-semibold text-surface-400 space-y-1">Prompt
-                <textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="비교할 사용자 입력을 붙여 넣으세요." rows={8} className="w-full resize-y rounded-xl bg-surface-950 border border-surface-700 px-3 py-3 text-sm text-gray-100 outline-none focus:border-primary-500" />
+              <label className="block text-xs font-semibold text-surface-400 space-y-1">{t('workbench.prompt')}
+                <textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder={t('workbench.promptPlaceholder')} rows={8} className="w-full resize-y rounded-xl bg-surface-950 border border-surface-700 px-3 py-3 text-sm text-gray-100 outline-none focus:border-primary-500" />
               </label>
-              <label className="block text-xs font-semibold text-surface-400 space-y-1">Notes
-                <input value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="이 케이스에서 보고 싶은 점, 성공 기준 등" className="w-full rounded-lg bg-surface-950 border border-surface-700 px-3 py-2 text-sm text-gray-100 outline-none focus:border-primary-500" />
+              <label className="block text-xs font-semibold text-surface-400 space-y-1">{t('workbench.notes')}
+                <input value={notes} onChange={(e) => setNotes(e.target.value)} placeholder={t('workbench.notesPlaceholder')} className="w-full rounded-lg bg-surface-950 border border-surface-700 px-3 py-2 text-sm text-gray-100 outline-none focus:border-primary-500" />
               </label>
 
               <div className="flex flex-wrap items-center gap-3">
-                <button onClick={runWorkbench} disabled={busy} className="rounded-lg bg-primary-500 px-4 py-2 text-sm font-semibold text-white hover:bg-primary-400 disabled:opacity-50 disabled:cursor-not-allowed">{busy ? 'Running…' : 'Run comparison'}</button>
-                <button onClick={saveCase} disabled={saving} className="rounded-lg border border-surface-700 bg-surface-850 px-4 py-2 text-sm font-semibold text-surface-200 hover:bg-surface-800 disabled:opacity-50">{saving ? 'Saving…' : selectedTestCaseId ? 'Update test case' : 'Save as test case'}</button>
-                {selectedTestCaseId && <button onClick={() => { setSelectedTestCaseId(null); setTitle(''); setNotes(''); }} className="text-sm text-surface-400 hover:text-gray-100">새 케이스로 전환</button>}
+                <button onClick={runWorkbench} disabled={busy} className="rounded-lg bg-primary-500 px-4 py-2 text-sm font-semibold text-white hover:bg-primary-400 disabled:opacity-50 disabled:cursor-not-allowed">{busy ? t('workbench.running') : t('workbench.runComparison')}</button>
+                <button onClick={saveCase} disabled={saving} className="rounded-lg border border-surface-700 bg-surface-850 px-4 py-2 text-sm font-semibold text-surface-200 hover:bg-surface-800 disabled:opacity-50">{saving ? t('workbench.saving') : selectedTestCaseId ? t('workbench.updateCase') : t('workbench.saveCase')}</button>
+                {selectedTestCaseId && <button onClick={() => { setSelectedTestCaseId(null); setTitle(''); setNotes(''); }} className="text-sm text-surface-400 hover:text-gray-100">{t('workbench.newCase')}</button>}
                 {error && <p className="text-sm text-red-300">{error}</p>}
               </div>
             </section>
@@ -298,17 +300,17 @@ export function BetaPanel() {
 
           <aside className="rounded-2xl border border-surface-700/70 bg-surface-900/80 p-3 h-fit max-h-[calc(100vh-120px)] overflow-auto">
             <div className="grid grid-cols-2 rounded-lg bg-surface-950 p-1 text-xs font-semibold">
-              <button onClick={() => setActiveSideTab('history')} className={`rounded-md px-2 py-1.5 ${activeSideTab === 'history' ? 'bg-surface-800 text-primary-300' : 'text-surface-500'}`}>History</button>
-              <button onClick={() => setActiveSideTab('cases')} className={`rounded-md px-2 py-1.5 ${activeSideTab === 'cases' ? 'bg-surface-800 text-primary-300' : 'text-surface-500'}`}>Test cases</button>
+              <button onClick={() => setActiveSideTab('history')} className={`rounded-md px-2 py-1.5 ${activeSideTab === 'history' ? 'bg-surface-800 text-primary-300' : 'text-surface-500'}`}>{t('workbench.history')}</button>
+              <button onClick={() => setActiveSideTab('cases')} className={`rounded-md px-2 py-1.5 ${activeSideTab === 'cases' ? 'bg-surface-800 text-primary-300' : 'text-surface-500'}`}>{t('workbench.testCases')}</button>
             </div>
             <div className="mt-3 space-y-2">
               {activeSideTab === 'history' ? (
                 history.length ? history.map((item) => (
                   <button key={item.id} onClick={() => loadHistory(item)} className="w-full rounded-lg border border-surface-800 bg-surface-950/70 p-3 text-left hover:border-surface-600">
-                    <div className="flex items-center justify-between gap-2"><span className="truncate text-sm font-medium text-gray-200">{item.prompt.slice(0, 70)}</span><span className="text-[11px] text-surface-500">{new Date(item.createdAt).toLocaleString()}</span></div>
-                    <div className="mt-2 flex items-center gap-2 text-xs text-surface-400"><ScoreBadge score={item.runs.find((r) => r.id === item.winnerId)?.score.total} winner /> <span>{item.runs.find((r) => r.id === item.winnerId)?.label || 'No winner'}</span></div>
+                    <div className="flex items-center justify-between gap-2"><span className="truncate text-sm font-medium text-gray-200">{item.prompt.slice(0, 70)}</span><span className="text-[11px] text-surface-500">{new Date(item.createdAt).toLocaleString(i18n.resolvedLanguage || i18n.language)}</span></div>
+                    <div className="mt-2 flex items-center gap-2 text-xs text-surface-400"><ScoreBadge score={item.runs.find((r) => r.id === item.winnerId)?.score.total} winner /> <span>{item.runs.find((r) => r.id === item.winnerId)?.label || t('workbench.noWinner')}</span></div>
                   </button>
-                )) : <p className="p-3 text-sm text-surface-500">아직 history가 없습니다.</p>
+                )) : <p className="p-3 text-sm text-surface-500">{t('workbench.emptyHistory')}</p>
               ) : (
                 testCases.length ? testCases.map((item) => (
                   <div key={item.id} className={`rounded-lg border p-3 hover:border-surface-600 ${selectedTestCaseId === item.id ? 'border-primary-500/60 bg-primary-500/5' : 'border-surface-800 bg-surface-950/70'}`}>
@@ -318,10 +320,10 @@ export function BetaPanel() {
                       <div className="mt-2 text-[11px] text-surface-500">/{item.draftSkillName || 'draft'} vs /{item.baselineSkillName || 'baseline'}</div>
                     </button>
                     <div className="mt-2 flex justify-end">
-                      <button onClick={() => deleteCase(item)} className="text-[11px] text-surface-500 hover:text-red-300">삭제</button>
+                      <button onClick={() => deleteCase(item)} className="text-[11px] text-surface-500 hover:text-red-300">{t('workbench.delete')}</button>
                     </div>
                   </div>
-                )) : <p className="p-3 text-sm text-surface-500">저장된 test case가 없습니다.</p>
+                )) : <p className="p-3 text-sm text-surface-500">{t('workbench.emptyCases')}</p>
               )}
             </div>
           </aside>

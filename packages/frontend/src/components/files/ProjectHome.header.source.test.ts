@@ -11,7 +11,7 @@ describe("Project Home integrated header", () => {
       '<header className="pointer-events-auto sticky top-0 z-30',
     );
     expect(source).toContain("bg-surface-950");
-    expect(source).toContain('aria-label="AI 팀원 홈 보기"');
+    expect(source).toContain("aria-label={t('projectHome.navigationLabel')}");
     expect(source).not.toContain("sticky top-[53px]");
     expect(source).not.toContain("backdrop-blur-xl");
   });

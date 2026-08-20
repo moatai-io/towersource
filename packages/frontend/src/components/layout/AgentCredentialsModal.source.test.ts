@@ -8,7 +8,7 @@ const connections = fs.readFileSync(path.join(import.meta.dirname, 'AgentConnect
 
 describe('Agent Credential independent management surface', () => {
   it('opens from a dedicated Agent menu item rather than Project settings', () => {
-    expect(sidebar).toContain('Credential 관리');
+    expect(sidebar).toContain("t('agentCredentials.title')");
     expect(sidebar).toContain('setShowCredentials(true)');
     const settings = sidebar.slice(sidebar.indexOf('function ProjectSettingsPanel'));
     expect(settings).not.toContain('<AgentConnectionsPanel');
@@ -18,7 +18,7 @@ describe('Agent Credential independent management surface', () => {
     expect(modal).toContain('max-w-7xl');
     expect(modal).toContain('h-[min(92dvh,980px)]');
     expect(modal).toContain('<AgentConnectionsPanel projectId={project.id} spacious />');
-    expect(modal).toContain('새 전용 Credential 추가');
+    expect(modal).toContain("t('agentCredentials.addTitle')");
     expect(modal).toContain('/credentials/api-key`');
     expect(modal).toContain("scope: 'project'");
   });
@@ -27,16 +27,16 @@ describe('Agent Credential independent management surface', () => {
     expect(modal).toContain('/projects/${encodeURIComponent(project.id)}/credentials`');
     expect(modal).toContain('/credentials/${encodeURIComponent(editing.id)}/rotate`');
     expect(modal).toContain('/credentials/${encodeURIComponent(credential.id)}/inspect`');
-    expect(modal).toContain('원문 보기');
-    expect(modal).toContain('수정하기');
-    expect(modal).toContain('재인증');
-    expect(modal).toContain('구조 보기');
+    expect(modal).toContain("t('agentCredentials.reveal')");
+    expect(modal).toContain("t('agentCredentials.edit')");
+    expect(modal).toContain("t('agentCredentials.reauthenticate')");
+    expect(modal).toContain("t('agentCredentials.inspect')");
     expect(modal).toContain("const isAdmin = getCurrentRole() === 'admin'");
-    expect(modal).toContain('30초 후 자동 마스킹');
+    expect(modal).toContain("t('agentCredentials.rawMaskNotice')");
   });
 
   it('keeps secrets out of files/chat and supports keyboard dismissal', () => {
-    expect(modal).toContain('값은 채팅이나 프로젝트 파일에 저장되지 않습니다.');
+    expect(modal).toContain("t('agentCredentials.securityNotice')");
     expect(modal).toContain("event.key === 'Escape'");
     expect(modal).toContain('role="dialog"');
     expect(modal).toContain('aria-modal="true"');

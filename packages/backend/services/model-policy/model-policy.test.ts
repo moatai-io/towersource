@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { resolveAgentExecutionPolicy, resolveModelPolicy } from './model-policy.js';
 
 describe('model policy', () => {
-  it('preserves medium as the default Smartest execution policy', () => {
+  it('preserves medium as the default provider execution policy', () => {
     expect(resolveModelPolicy('medium')).toMatchObject({
       id: 'medium',
       revision: 1,
@@ -13,7 +13,7 @@ describe('model policy', () => {
     });
   });
 
-  it('routes title work to the cheap utility model', () => {
+  it('routes title work to the configured default provider', () => {
     expect(resolveModelPolicy('title')).toMatchObject({
       effectiveModel: 'litellm-responses/mini',
       effectiveEffort: 'low',
@@ -43,11 +43,11 @@ describe('model policy', () => {
   it('lets an Agent override model and effort over a logical policy', () => {
     expect(resolveAgentExecutionPolicy({
       modelPolicy: 'high',
-      model: 'litellm-responses/smart',
+      model: 'openrouter/openrouter/auto',
       effort: 'medium',
     })).toMatchObject({
       id: 'high',
-      effectiveModel: 'litellm-responses/smart',
+      effectiveModel: 'openrouter/openrouter/auto',
       requestedEffort: 'medium',
       effectiveEffort: 'medium',
     });

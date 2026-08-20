@@ -14,6 +14,10 @@ import {
   isPathWritableByRole,
 } from './project-access.js';
 
+const TEST_HOME = process.env.HOME || '/tmp';
+const TEST_WORKSPACE_ROOT = process.env.WORKSPACE_ROOT || path.join(TEST_HOME, 'workspace');
+const TEST_TOWER_REPO_ROOT = process.env.TOWER_REPO_ROOT || path.join(TEST_HOME, 'tower');
+
 describe('project path boundary realpath hardening', () => {
   let tmp: string;
 
@@ -229,7 +233,7 @@ describe('buildToolGuard — user-accessible cross-project file writes', () => {
       sessionProjectRoot: sessionRoot,
     });
     const result = guard('Bash', {
-      command: 'mkdir -p /home/tower/workspace/projects/never-existed-xyz',
+      command: `mkdir -p ${TEST_WORKSPACE_ROOT}/projects/never-existed-xyz`,
     });
     expect(result.allowed).toBe(false);
     if (!result.allowed) {
@@ -336,7 +340,20 @@ describe('buildToolGuard — user-accessible cross-project file writes', () => {
     expect(result.allowed).toBe(true);
   });
 
-  it('still blocks real inaccessible absolute paths in Bash commands', () => {
+  it.each([
+    ['inline JavaScript comment', "node - <<'JS'\nconst value = 1; // comment\nJS"],
+    ['HTTPS URL', 'curl -fsS https://example.com/api/health'],
+    ['shell double-slash token', "printf '%s\\n' //"],
+  ])('does not treat %s as an absolute filesystem path', (_label, command) => {
+    const guard = buildToolGuard({
+      role: 'member',
+      accessiblePaths: memberAccess,
+      sessionProjectRoot: sessionRoot,
+    });
+    expect(guard('Bash', { command })).toEqual({ allowed: true });
+  });
+
+  it('still blocks real inaccessible absolute paths in member Bash commands', () => {
     const guard = buildToolGuard({
       role: 'member',
       accessiblePaths: memberAccess,
@@ -346,6 +363,36 @@ describe('buildToolGuard — user-accessible cross-project file writes', () => {
       command: 'cat /etc/passwd',
     });
     expect(result.allowed).toBe(false);
+  });
+
+  it('admin native Bash may operate on host paths with sudo', () => {
+    const guard = buildToolGuard({
+      role: 'admin',
+      accessiblePaths: memberAccess,
+      sessionProjectRoot: sessionRoot,
+    });
+    expect(guard('Bash', {
+      command: 'sudo install -d /etc/tower-workers && systemctl daemon-reload',
+    })).toEqual({ allowed: true });
+  });
+
+  it('operator may diagnose host paths but retains the sudo damage-control boundary', () => {
+    const guard = buildToolGuard({
+      role: 'operator',
+      accessiblePaths: memberAccess,
+      sessionProjectRoot: sessionRoot,
+    });
+    expect(guard('Bash', { command: 'cat /etc/os-release' })).toEqual({ allowed: true });
+    expect(guard('Bash', { command: 'sudo install -d /etc/tower-workers' }).allowed).toBe(false);
+  });
+
+  it('keeps structured file tools project-scoped even for admin', () => {
+    const guard = buildToolGuard({
+      role: 'admin',
+      accessiblePaths: memberAccess,
+      sessionProjectRoot: sessionRoot,
+    });
+    expect(guard('Read', { path: '/etc/passwd' }).allowed).toBe(false);
   });
 
   it('blocks member direct Tower repo writes even if a path is mentioned explicitly', () => {
@@ -375,7 +422,7 @@ describe('buildToolGuard — user-accessible cross-project file writes', () => {
     // See: workspace/decisions/2026-05-04-projects-mkdir-policy.md
     const guard = buildToolGuard({ role: 'admin' });
     const result = guard('Bash', {
-      command: 'mkdir -p /home/tower/workspace/projects/never-existed-xyz',
+      command: `mkdir -p ${TEST_WORKSPACE_ROOT}/projects/never-existed-xyz`,
     });
     expect(result.allowed).toBe(false);
     if (!result.allowed) {
@@ -490,7 +537,7 @@ describe('buildToolGuard — admin/operator cross-project bypass (all VMs)', () 
       sessionProjectRoot: sessionRoot,
     });
     const result = guard('Bash', {
-      command: 'mkdir -p /home/tower/workspace/projects/never-existed-xyz',
+      command: `mkdir -p ${TEST_WORKSPACE_ROOT}/projects/never-existed-xyz`,
     });
     expect(result.allowed).toBe(false);
     if (!result.allowed) {
@@ -516,7 +563,7 @@ describe('buildToolGuard — admin/operator cross-project bypass (all VMs)', () 
       sessionProjectRoot: sessionRoot,
     });
     const result = guard('Bash', {
-      command: 'mkdir -p /home/tower/tower/packages/backend/services/new-feature',
+      command: `mkdir -p ${TEST_TOWER_REPO_ROOT}/packages/backend/services/new-feature`,
     });
     expect(result.allowed).toBe(false);
     if (!result.allowed) expect(result.message).toMatch(/Tower repo|admin/i);
@@ -528,7 +575,7 @@ describe('buildToolGuard — admin/operator cross-project bypass (all VMs)', () 
       sessionProjectRoot: sessionRoot,
     });
     const result = guard('Bash', {
-      command: 'git -C /home/tower/tower apply /home/tower/workspace/projects/demo-org/patch.diff',
+      command: `git -C ${TEST_TOWER_REPO_ROOT} apply ${TEST_WORKSPACE_ROOT}/projects/demo-org/patch.diff`,
     });
     expect(result.allowed).toBe(false);
     if (!result.allowed) expect(result.message).toMatch(/Tower repo|admin/i);
@@ -555,7 +602,7 @@ describe('buildToolGuard — admin/operator cross-project bypass (all VMs)', () 
 //
 // Decision: workspace/decisions/2026-05-04-projects-mkdir-policy.md
 describe('buildToolGuard — ghost project guard (always-on)', () => {
-  const WORKSPACE = '/home/tower/workspace';
+  const WORKSPACE = TEST_WORKSPACE_ROOT;
   const adminGuard = () => buildToolGuard({ role: 'admin' });
 
   it('blocks admin mkdir of a brand-new project slug', () => {
@@ -652,7 +699,7 @@ describe('buildToolGuard — ghost project guard (always-on)', () => {
   it('allows admin writes outside workspace entirely (~/tower, /tmp)', () => {
     const guard = adminGuard();
     expect(guard('Bash', {
-      command: 'mkdir -p /home/tower/tower/packages/backend/services/new-feature',
+      command: `mkdir -p ${TEST_TOWER_REPO_ROOT}/packages/backend/services/new-feature`,
     }).allowed).toBe(true);
     expect(guard('Bash', {
       command: 'mkdir -p /tmp/scratch-xyz',
@@ -718,7 +765,7 @@ describe('Tower-brain incident regression (ghost project guard)', () => {
     else process.env.TOWER_ROLE = originalRole;
   });
 
-  const WORKSPACE = '/home/tower/workspace';
+  const WORKSPACE = TEST_WORKSPACE_ROOT;
   const sessionRoot = `${WORKSPACE}/projects/demo-org`;
   const orphanRoot = `${WORKSPACE}/projects/tower-brain`;
 

@@ -26,7 +26,7 @@ describe('App mobile Viewer file opening', () => {
   it('opens the AI teammate hiring card as a transient fullscreen mobile workflow', () => {
     const academyStart = source.indexOf("window.addEventListener('tower-start-agent-academy'");
     const academyBlock = source.slice(source.lastIndexOf('useEffect(() => {', academyStart), academyStart);
-    expect(academyBlock).toContain("mobileHiring ? { split: 'right', name: '새 AI 동료' } : { name: '새 AI 동료' }");
+    expect(academyBlock).toContain("mobileHiring ? { split: 'right', name: t('newAiTeammate') } : { name: t('newAiTeammate') }");
     expect(academyBlock).toContain('useSessionStore.getState().openMobileContext(false);');
   });
 });

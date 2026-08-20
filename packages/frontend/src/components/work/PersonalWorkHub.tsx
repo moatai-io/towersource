@@ -1,4 +1,6 @@
 import React from 'react';
+import { useTranslation } from 'react-i18next';
+import i18n from '../../i18n';
 
 interface PersonalItem {
   id: string;
@@ -26,11 +28,12 @@ function authHeaders(): HeadersInit {
 
 function formatDate(value: string): string {
   const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? '' : date.toLocaleDateString('ko-KR', { month: 'short', day: 'numeric' });
+  return Number.isNaN(date.getTime()) ? '' : date.toLocaleDateString(i18n.resolvedLanguage || i18n.language, { month: 'short', day: 'numeric' });
 }
 
 /** Personal notes and checklist entry points. Todos remain a note-like personal view. */
 export function PersonalWorkHub({ onOpenTodos, onOpenItem, onCreateNote }: PersonalWorkHubProps) {
+  const { t } = useTranslation('layout');
   const [items, setItems] = React.useState<PersonalItem[]>([]);
   const [openTodoCount, setOpenTodoCount] = React.useState(0);
   const [itemsLoading, setItemsLoading] = React.useState(true);
@@ -91,27 +94,27 @@ export function PersonalWorkHub({ onOpenTodos, onOpenItem, onCreateNote }: Perso
     <section aria-labelledby="personal-materials-title" className="mt-5 overflow-hidden rounded-xl border border-surface-800 bg-surface-900/45">
       <div className="flex flex-wrap items-start justify-between gap-3 border-b border-surface-800 px-4 py-3">
         <div>
-          <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-emerald-300/80">Personal notes</div>
-          <h2 id="personal-materials-title" className="mt-0.5 text-[17px] font-semibold text-surface-100">내 자료</h2>
-          <p className="mt-1 text-[12px] leading-5 text-surface-500">나만 볼 수 있는 노트와 체크리스트입니다.</p>
+          <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-emerald-300/80">{t('personalWorkHub.eyebrow')}</div>
+          <h2 id="personal-materials-title" className="mt-0.5 text-[17px] font-semibold text-surface-100">{t('personalWorkHub.title')}</h2>
+          <p className="mt-1 text-[12px] leading-5 text-surface-500">{t('personalWorkHub.description')}</p>
         </div>
         <div className="flex items-center gap-2">
           <button type="button" onClick={onOpenTodos} className="rounded-md border border-surface-700 px-3 py-2 text-[12px] font-semibold text-surface-200 hover:border-primary-500/50 hover:text-primary-300">
-            체크리스트 {todosLoading ? '' : todosFailed ? '· 확인 필요' : `· ${openTodoCount}`}
+            {t('personalWorkHub.checklist')}{todosLoading ? '' : todosFailed ? t('personalWorkHub.needsAttention') : ` · ${openTodoCount}`}
           </button>
-          <button type="button" onClick={onCreateNote} className="rounded-md bg-primary-500 px-3 py-2 text-[12px] font-semibold text-white hover:bg-primary-400">+ 새 노트</button>
+          <button type="button" onClick={onCreateNote} className="rounded-md bg-primary-500 px-3 py-2 text-[12px] font-semibold text-white hover:bg-primary-400">{t('personalWorkHub.newNote')}</button>
         </div>
       </div>
 
       {(itemsFailed || todosFailed) && (
         <div className="flex items-center justify-between gap-3 border-b border-amber-400/20 bg-amber-400/10 px-4 py-2 text-[12px] text-amber-100">
-          <span>일부 개인 자료를 불러오지 못했습니다.</span>
-          <button type="button" onClick={() => setLoadAttempt((attempt) => attempt + 1)} className="shrink-0 rounded-md border border-amber-300/30 px-2.5 py-1 font-semibold hover:bg-amber-300/10">다시 시도</button>
+          <span>{t('personalWorkHub.partialLoadFailed')}</span>
+          <button type="button" onClick={() => setLoadAttempt((attempt) => attempt + 1)} className="shrink-0 rounded-md border border-amber-300/30 px-2.5 py-1 font-semibold hover:bg-amber-300/10">{t('personalWorkHub.retry')}</button>
         </div>
       )}
 
       <div className="px-4 py-2">
-        {itemsLoading ? <p className="py-3 text-[12px] text-surface-500">불러오는 중…</p> : itemsFailed ? <p className="py-3 text-[12px] leading-5 text-amber-300">자료 목록을 불러오지 못했습니다.</p> : items.length === 0 ? <p className="py-3 text-[12px] leading-5 text-surface-500">아직 개인 자료가 없습니다. 첫 노트를 만들어보세요.</p> : (
+        {itemsLoading ? <p className="py-3 text-[12px] text-surface-500">{t('personalWorkHub.loading')}</p> : itemsFailed ? <p className="py-3 text-[12px] leading-5 text-amber-300">{t('personalWorkHub.itemsLoadFailed')}</p> : items.length === 0 ? <p className="py-3 text-[12px] leading-5 text-surface-500">{t('personalWorkHub.empty')}</p> : (
           <div className="divide-y divide-surface-800">
             {items.map((item) => <button key={item.id} type="button" onClick={() => onOpenItem(item.uri)} className="flex w-full items-center gap-2 py-2 text-left hover:text-primary-300"><span aria-hidden="true">{item.kind === 'note' ? '📝' : '📎'}</span><span className="min-w-0 flex-1 truncate text-[12px] text-surface-300">{item.name}</span><span className="shrink-0 text-[10px] text-surface-600">{formatDate(item.updatedAt)}</span></button>)}
           </div>

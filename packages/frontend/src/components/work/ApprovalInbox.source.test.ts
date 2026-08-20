@@ -16,7 +16,7 @@ describe('My Work Approval Inbox source contract', () => {
     expect(source).toContain('async function approvalFetch');
     expect(source).toContain('retries = 1');
     expect(source).toContain('12_000');
-    expect(source).toContain('승인함 연결이 잠시 끊겼습니다');
+    expect(source).toContain("approvalInbox.error.connection");
     expect(source).not.toContain("setError(errorMessage(err, 'Failed to fetch'))");
   });
 

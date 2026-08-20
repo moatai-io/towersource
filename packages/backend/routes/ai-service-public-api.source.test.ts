@@ -7,6 +7,12 @@ const source = fs.readFileSync(path.resolve(import.meta.dirname, './ai-service-p
 const api = fs.readFileSync(path.resolve(import.meta.dirname, './api.ts'), 'utf8');
 
 describe('AI Service public Channel serving API source contract', () => {
+  it('masks Knowledge citation diagnostics on both JSON and streaming public responses', () => {
+    expect(source).toContain('publicAIServiceErrorMessage');
+    expect(source).toContain("console.error('[ai-service-public-stream]', err)");
+    expect(source).not.toContain("type: 'error', error: err instanceof Error ? err.message");
+  });
+
   it('stores Conversation uploads through a disk-staged public route without exposing paths', () => {
     expect(source).toContain("conversationUpload.single('file')");
     expect(source).toContain("res.status(400).json({ error: err.message || 'File upload failed' })");

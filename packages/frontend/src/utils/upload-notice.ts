@@ -1,3 +1,4 @@
+import i18n from '../i18n';
 import { toastError, toastSuccess } from './toast';
 
 export interface UploadNoticeResult {
@@ -13,11 +14,11 @@ export interface UploadNoticeResult {
 export function notifyUploadResult({ ok, fail }: UploadNoticeResult, targetLabel?: string): void {
   const target = targetLabel ? ` · ${targetLabel}` : '';
   if (fail > 0) {
-    const successPart = ok > 0 ? `성공 ${ok}개, ` : '';
-    toastError(`파일 업로드 결과: ${successPart}실패 ${fail}개${target}`);
+    const successPart = ok > 0 ? i18n.t('uploadNotice.successPart', { ns: 'common', ok }) : '';
+    toastError(i18n.t('uploadNotice.failed', { ns: 'common', successPart, fail, target }));
     return;
   }
   if (ok > 0) {
-    toastSuccess(`파일 ${ok}개를 올렸어요${target}`);
+    toastSuccess(i18n.t('uploadNotice.success', { ns: 'common', ok, target }));
   }
 }

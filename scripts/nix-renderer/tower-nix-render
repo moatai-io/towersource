@@ -1,0 +1,102 @@
+#!/usr/bin/env bash
+# Shadow-only deterministic HTML renderer packaged by flake.nix.
+# Production pdf_export does not call this script unless explicitly configured.
+
+set -euo pipefail
+
+usage() {
+  cat >&2 <<'EOF'
+Usage:
+  tower-nix-render input.html output.pdf [--wait-ms 1000]
+  tower-nix-render input.html output.png [--width 1440 --height 900 --scale 2 --wait-ms 1000]
+EOF
+}
+
+[[ $# -ge 2 ]] || { usage; exit 2; }
+INPUT="$1"
+OUTPUT="$2"
+shift 2
+
+WIDTH=1440
+HEIGHT=900
+SCALE=2
+WAIT_MS=1000
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --width) WIDTH="${2:-}"; shift 2 ;;
+    --height) HEIGHT="${2:-}"; shift 2 ;;
+    --scale|--device-scale-factor) SCALE="${2:-}"; shift 2 ;;
+    --wait-ms|--virtual-time-budget) WAIT_MS="${2:-}"; shift 2 ;;
+    -h|--help) usage; exit 0 ;;
+    *) echo "tower-nix-render: unknown option: $1" >&2; usage; exit 2 ;;
+  esac
+done
+
+[[ -f "$INPUT" ]] || { echo "tower-nix-render: input not found: $INPUT" >&2; exit 1; }
+case "${OUTPUT,,}" in
+  *.pdf|*.png) ;;
+  *) echo "tower-nix-render: output must end with .pdf or .png" >&2; exit 2 ;;
+esac
+
+CHROME="${CHROMIUM_PATH:-}"
+[[ -n "$CHROME" && -x "$CHROME" ]] || {
+  echo "tower-nix-render: CHROMIUM_PATH must point to the Nix Chromium executable" >&2
+  exit 1
+}
+
+mkdir -p "$(dirname "$OUTPUT")"
+# Chromium also creates process-singleton state below TMPDIR independently of
+# --user-data-dir. Force a short path rather than inheriting Tower's nested
+# per-agent TMPDIR.
+export TMPDIR=/tmp
+# Chromium's process-singleton Unix socket has a short path limit. Tower agent
+# TMPDIR paths can be deeply nested, so renderer-private state deliberately uses
+# the fixed short /tmp prefix.
+PROFILE_DIR="$(mktemp -d "/tmp/tnr-profile.XXXXXX")"
+LOG_DIR="$(mktemp -d "/tmp/tnr-log.XXXXXX")"
+cleanup() { rm -rf "$PROFILE_DIR" "$LOG_DIR"; }
+trap cleanup EXIT
+
+FILE_URL="$(python3 - "$INPUT" <<'PY'
+import pathlib, sys
+print(pathlib.Path(sys.argv[1]).resolve().as_uri())
+PY
+)"
+
+COMMON_ARGS=(
+  "--headless=new"
+  "--disable-gpu"
+  "--no-sandbox"
+  "--disable-dev-shm-usage"
+  "--disable-background-networking"
+  "--disable-component-update"
+  "--hide-scrollbars"
+  "--run-all-compositor-stages-before-draw"
+  "--user-data-dir=$PROFILE_DIR"
+  "--virtual-time-budget=$WAIT_MS"
+  "--font-render-hinting=medium"
+)
+
+if [[ "${OUTPUT,,}" == *.pdf ]]; then
+  "$CHROME" "${COMMON_ARGS[@]}" \
+    "--no-pdf-header-footer" \
+    "--print-to-pdf-no-header" \
+    "--print-to-pdf=$OUTPUT" \
+    "$FILE_URL" >"$LOG_DIR/stdout" 2>"$LOG_DIR/stderr" || {
+      cat "$LOG_DIR/stderr" >&2 || true
+      exit 1
+    }
+else
+  "$CHROME" "${COMMON_ARGS[@]}" \
+    "--window-size=${WIDTH},${HEIGHT}" \
+    "--force-device-scale-factor=${SCALE}" \
+    "--screenshot=$OUTPUT" \
+    "$FILE_URL" >"$LOG_DIR/stdout" 2>"$LOG_DIR/stderr" || {
+      cat "$LOG_DIR/stderr" >&2 || true
+      exit 1
+    }
+fi
+
+[[ -s "$OUTPUT" ]] || { echo "tower-nix-render: empty output: $OUTPUT" >&2; exit 1; }
+printf 'renderer=nix-shadow\nchromium=%s\noutput=%s\nbytes=%s\n' \
+  "$($CHROME --version)" "$OUTPUT" "$(stat -c %s "$OUTPUT")"

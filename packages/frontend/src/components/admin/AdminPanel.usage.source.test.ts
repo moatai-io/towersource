@@ -8,7 +8,7 @@ const appSource = readFileSync(new URL('../../App.tsx', import.meta.url), 'utf8'
 describe('AdminPanel usage integration', () => {
   it('keeps VM-wide usage inside the admin-only panel', () => {
     expect(adminSource).toContain("type AdminTab = 'users' | 'agents' | 'usage' | 'ai' | 'prompts' | 'runtime' | 'credentials' | 'system'");
-    expect(adminSource).toContain("renderTab('usage', '사용량')");
+    expect(adminSource).toContain("renderTab('usage', t('usage'))");
     expect(adminSource).toContain("tab === 'usage' && <UsagePanel embedded />");
     expect(adminSource).toContain("const OPERATOR_ALLOWED_TABS: ReadonlySet<AdminTab> = new Set(['users', 'agents', 'runtime', 'credentials'])");
   });

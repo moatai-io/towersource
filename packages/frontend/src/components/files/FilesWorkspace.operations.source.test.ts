@@ -12,7 +12,7 @@ const projectFilesApi = fs.readFileSync(
 describe("file operations", () => {
   it("searches recursively", () => {
     expect(projectFilesApi).toContain("router.get('/files/search'");
-    expect(s).toContain("Project 전체에서 파일명/경로 검색");
+    expect(s).toContain("workspace.searchProjectFiles");
   });
   it("renames deletes and moves", () => {
     for (const t of [
@@ -21,7 +21,7 @@ describe("file operations", () => {
       "moveSelected",
       "/api/files/rename",
       "/api/files/delete",
-      "되돌릴 수 없습니다",
+      "workspace.deleteMessage",
     ])
       expect(s).toContain(t);
   });
@@ -33,14 +33,14 @@ describe("file operations", () => {
     for (const t of [
       "copySelectedPaths",
       'paths.join("\\n")',
-      "개 경로 복사",
+      "workspace.pathsCopied",
       "createTowerFileShortLink",
-      "내부 링크 복사",
+      "workspace.copyInternalLink",
     ])
       expect(s).toContain(t);
   });
   it("records undo history", () => {
-    for (const t of ["fileHistory", "최근 작업", "되돌리기"])
+    for (const t of ["fileHistory", "workspace.recentActions", "workspace.undo"])
       expect(s).toContain(t);
   });
 });

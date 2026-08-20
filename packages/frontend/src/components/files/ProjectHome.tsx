@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import i18n from '../../i18n';
 import type { Project } from '../../stores/project-store';
 import { useFileStore } from '../../stores/file-store';
@@ -125,12 +126,7 @@ interface NotesIndexResponse {
   folders?: Array<{ folder: string; label: string; items: NoteItem[] }>;
 }
 
-const WORKSTREAM_RANGE_OPTIONS = [
-  { days: 3, label: '3일' },
-  { days: 7, label: '7일' },
-  { days: 14, label: '14일' },
-  { days: 30, label: '30일' },
-];
+const WORKSTREAM_RANGE_OPTIONS = [3, 7, 14, 30];
 
 interface WikiPageLink {
   path: string;
@@ -303,6 +299,7 @@ function loadProjectHomeTab(projectId?: string | null): ProjectHomeTab {
 }
 
 export function ProjectHome({ project, onOpenFiles, onOpenFile }: ProjectHomeProps) {
+  const { t } = useTranslation('files');
   const [homeTab, setHomeTab] = useState<ProjectHomeTab>(() => loadProjectHomeTab(project?.id));
   const [revealFilePath, setRevealFilePath] = useState<string | null>(null);
   const rootPath = project?.rootPath || '';
@@ -465,7 +462,7 @@ export function ProjectHome({ project, onOpenFiles, onOpenFile }: ProjectHomePro
     void fetch(`/api/files/notes-index?${params.toString()}`, { headers: authHeaders() })
       .then(async (res) => {
         const data = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(data.error || `노트 목록을 불러오지 못했습니다 (${res.status})`);
+        if (!res.ok) throw new Error(data.error || t('projectHome.notesLoadFailedStatus', { status: res.status }));
         return data as NotesIndexResponse;
       })
       .then((data) => {
@@ -477,13 +474,13 @@ export function ProjectHome({ project, onOpenFiles, onOpenFile }: ProjectHomePro
       .catch((err) => {
         if (cancelled) return;
         setNotes([]);
-        setNotesError(err instanceof Error ? err.message : '노트 목록을 불러오지 못했습니다');
+        setNotesError(err instanceof Error ? err.message : t('projectHome.notesLoadFailed'));
       })
       .finally(() => {
         if (!cancelled) setNotesLoading(false);
       });
     return () => { cancelled = true; };
-  }, [rootPath]);
+  }, [rootPath, t]);
 
   useEffect(() => {
     let cancelled = false;
@@ -616,16 +613,16 @@ export function ProjectHome({ project, onOpenFiles, onOpenFile }: ProjectHomePro
     try {
       const res = await fetch(`/api/projects/${project.id}/agent-profile`, { method: 'PATCH', headers: { ...authHeaders(), 'Content-Type': 'application/json' }, body: JSON.stringify(teammateDraft) });
       const updatedProject = await res.json().catch(() => null);
-      if (!res.ok || !updatedProject?.id) throw new Error(updatedProject?.error || '팀원을 수정하지 못했습니다.');
+      if (!res.ok || !updatedProject?.id) throw new Error(updatedProject?.error || t('projectHome.teammateUpdateFailed'));
       useProjectStore.getState().updateProject(updatedProject.id, updatedProject);
       setEditingTeammate(false);
-      toastSuccess('팀원 설정을 저장했습니다.');
+      toastSuccess(t('projectHome.teammateSaved'));
     } catch (error) {
-      toastError(error instanceof Error ? error.message : '팀원을 수정하지 못했습니다.');
+      toastError(error instanceof Error ? error.message : t('projectHome.teammateUpdateFailed'));
     } finally {
       setTeammateSaving(false);
     }
-  }, [project?.id, teammateDraft]);
+  }, [project?.id, teammateDraft, t]);
 
   const generateCharacter = useCallback(async () => {
     if (!project?.id || !characterPrompt.trim()) return;
@@ -633,11 +630,11 @@ export function ProjectHome({ project, onOpenFiles, onOpenFile }: ProjectHomePro
     try {
       const res = await fetch('/api/agent-characters/generate', { method: 'POST', headers: { ...authHeaders(), 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt: characterPrompt, projectId: project.id }) });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || '캐릭터를 생성하지 못했습니다.');
+      if (!res.ok) throw new Error(data.error || t('projectHome.characterGenerateFailed'));
       setTeammateDraft((current) => ({ ...current, face: data.face }));
-    } catch (error) { toastError(error instanceof Error ? error.message : '캐릭터를 생성하지 못했습니다.'); }
+    } catch (error) { toastError(error instanceof Error ? error.message : t('projectHome.characterGenerateFailed')); }
     finally { setCharacterGenerating(false); }
-  }, [characterPrompt, project?.id]);
+  }, [characterPrompt, project?.id, t]);
 
   const startNewConversation = useCallback(() => {
     if (!project?.id) return;
@@ -667,8 +664,8 @@ export function ProjectHome({ project, onOpenFiles, onOpenFile }: ProjectHomePro
     return (
       <div className="relative z-10 flex h-full flex-col items-center justify-center bg-surface-950 p-10 text-center">
         <div className="mb-3 text-5xl">🏠</div>
-        <h2 className="text-xl font-semibold text-gray-100">열 수 있는 프로젝트가 없습니다</h2>
-        <p className="mt-2 max-w-md text-sm text-surface-500">프로젝트가 생기면 홈에서 위키, 지침, 파일함을 한 번에 볼 수 있습니다.</p>
+        <h2 className="text-xl font-semibold text-gray-100">{t('projectHome.noProjectTitle')}</h2>
+        <p className="mt-2 max-w-md text-sm text-surface-500">{t('projectHome.noProjectDescription')}</p>
       </div>
     );
   }
@@ -683,20 +680,20 @@ export function ProjectHome({ project, onOpenFiles, onOpenFile }: ProjectHomePro
             <AgentIdentityAvatar project={project} className="h-7 w-7 shrink-0 rounded-lg border border-surface-700/60" />
             <span className="truncate">{project.agent?.displayName || project.name}</span>
           </div>
-          <nav className="relative z-10 order-3 flex w-full shrink-0 items-center gap-1 sm:order-none sm:w-auto" aria-label="AI 팀원 홈 보기">
-            <button type="button" onClick={() => { setHomeTab('home'); if (project?.id) rememberAgentWorkspaceLocation(project.id, 'home'); }} className={homeTabClass(homeTab === 'home')}>홈</button>
-            <button type="button" onClick={() => { setHomeTab('files'); if (project?.id) rememberAgentWorkspaceLocation(project.id, 'files'); }} className={homeTabClass(homeTab === 'files')}>전체 파일</button>
-            <button type="button" onClick={() => setHomeTab('graph')} className={homeTabClass(homeTab === 'graph')}>그래프</button>
+          <nav className="relative z-10 order-3 flex w-full shrink-0 items-center gap-1 sm:order-none sm:w-auto" aria-label={t('projectHome.navigationLabel')}>
+            <button type="button" onClick={() => { setHomeTab('home'); if (project?.id) rememberAgentWorkspaceLocation(project.id, 'home'); }} className={homeTabClass(homeTab === 'home')}>{t('projectHome.homeTab')}</button>
+            <button type="button" onClick={() => { setHomeTab('files'); if (project?.id) rememberAgentWorkspaceLocation(project.id, 'files'); }} className={homeTabClass(homeTab === 'files')}>{t('projectHome.allFilesTab')}</button>
+            <button type="button" onClick={() => setHomeTab('graph')} className={homeTabClass(homeTab === 'graph')}>{t('projectHome.graphTab')}</button>
           </nav>
           <div className="ml-auto hidden max-w-[35%] truncate font-mono text-[11px] text-surface-600 sm:block" title={rootPath}>{compactPath(rootPath)}</div>
         </div>
       </header>
       {homeTab === 'files' ? (
-        <FileExchangeDropTarget destination={{ scope: 'project', projectId: project.id, relativeDirectory: 'uploads' }} label={`${project.agent?.displayName || project.name} 작업공간에 복사`} className="h-[calc(100vh-58px)] min-h-[560px]"><FilesWorkspace embedded initialProjectId={project.id} revealPath={revealFilePath} onRevealComplete={() => setRevealFilePath(null)} onFileClick={onOpenFile} /></FileExchangeDropTarget>
+        <FileExchangeDropTarget destination={{ scope: 'project', projectId: project.id, relativeDirectory: 'uploads' }} label={t('projectHome.copyToWorkspace', { name: project.agent?.displayName || project.name })} className="h-[calc(100vh-58px)] min-h-[560px]"><FilesWorkspace embedded initialProjectId={project.id} revealPath={revealFilePath} onRevealComplete={() => setRevealFilePath(null)} onFileClick={onOpenFile} /></FileExchangeDropTarget>
       ) : homeTab === 'graph' ? (
         <div className="h-[calc(100vh-58px)] min-h-[560px]"><WorkspaceKnowledgeGraph projectId={project.id} rootPath={rootPath} onOpenFile={onOpenFile} onOpenSession={openSession} /></div>
       ) : homeTab === 'work' ? (
-        <div className="mx-auto w-full max-w-6xl px-3 py-3 sm:px-5 sm:py-4 lg:px-8"><div className="mb-3 flex items-center justify-between"><div><div className="text-[11px] font-bold uppercase tracking-[.16em] text-surface-500">Workstreams</div><h1 className="mt-1 text-xl font-bold text-surface-100">전체 진행 업무</h1></div><button onClick={() => setHomeTab('home')} className="rounded-lg border border-surface-700 px-3 py-1.5 text-xs font-semibold text-surface-300">홈으로</button></div><div className="space-y-3">{workstreams.map(item=><section key={item.id} className="rounded-2xl border border-surface-800 bg-surface-900/70 p-4"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><h2 className="truncate text-sm font-bold text-surface-200">{item.title}</h2><p className="mt-1 text-[11px] text-surface-600">{item.status==='resolved'?'완료한 업무':'진행한 업무'} · {formatRelativeTime(item.lastAt)}</p></div><span className="text-xs font-semibold tabular-nums text-surface-400">{item.todoTotal>0?`${item.todoDone}/${item.todoTotal}`:item.status==='resolved'?'완료':item.status==='waiting'?'확인 필요':'진행 중'}</span></div><div className="mt-3 border-t border-surface-800 pt-2">{item.sessions?.length?item.sessions.map(session=><button key={session.id} onClick={()=>openSession(session.id)} className="flex w-full items-center justify-between gap-3 rounded-lg px-2 py-2 text-left hover:bg-surface-800/55"><span className="min-w-0"><span className="block truncate text-xs font-semibold text-surface-300">{session.name}</span><span className="mt-0.5 block text-[10px] text-surface-600">{session.owner} · {session.todoTotal>0?`${session.todoDone}/${session.todoTotal} todo`:'단계 수 미기록'}</span></span><span className="text-[11px] text-primary-300">세션 열기 ›</span></button>):<p className="px-2 py-2 text-xs text-surface-600">연결된 세션이 없습니다.</p>}</div></section>)}</div></div>
+        <div className="mx-auto w-full max-w-6xl px-3 py-3 sm:px-5 sm:py-4 lg:px-8"><div className="mb-3 flex items-center justify-between"><div><div className="text-[11px] font-bold uppercase tracking-[.16em] text-surface-500">Workstreams</div><h1 className="mt-1 text-xl font-bold text-surface-100">{t('projectHome.allWork')}</h1></div><button onClick={() => setHomeTab('home')} className="rounded-lg border border-surface-700 px-3 py-1.5 text-xs font-semibold text-surface-300">{t('projectHome.backHome')}</button></div><div className="space-y-3">{workstreams.map(item=><section key={item.id} className="rounded-2xl border border-surface-800 bg-surface-900/70 p-4"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><h2 className="truncate text-sm font-bold text-surface-200">{item.title}</h2><p className="mt-1 text-[11px] text-surface-600">{item.status==='resolved'?t('projectHome.completedWork'):t('projectHome.workedOn')} · {formatRelativeTime(item.lastAt)}</p></div><span className="text-xs font-semibold tabular-nums text-surface-400">{item.todoTotal>0?`${item.todoDone}/${item.todoTotal}`:item.status==='resolved'?t('projectHome.done'):item.status==='waiting'?t('projectHome.needsAttention'):t('projectHome.inProgress')}</span></div><div className="mt-3 border-t border-surface-800 pt-2">{item.sessions?.length?item.sessions.map(session=><button key={session.id} onClick={()=>openSession(session.id)} className="flex w-full items-center justify-between gap-3 rounded-lg px-2 py-2 text-left hover:bg-surface-800/55"><span className="min-w-0"><span className="block truncate text-xs font-semibold text-surface-300">{session.name}</span><span className="mt-0.5 block text-[10px] text-surface-600">{session.owner} · {session.todoTotal>0?`${session.todoDone}/${session.todoTotal} todo`:t('projectHome.stepsNotRecorded')}</span></span><span className="text-[11px] text-primary-300">{t('projectHome.openSession')} ›</span></button>):<p className="px-2 py-2 text-xs text-surface-600">{t('projectHome.noLinkedSessions')}</p>}</div></section>)}</div></div>
       ) : <div className="mx-auto w-full max-w-6xl px-3 py-3 pb-[calc(1rem+env(safe-area-inset-bottom,0px))] sm:px-5 sm:py-4 lg:px-8">
         <AgentHomeOverview
               project={project}
@@ -719,32 +716,32 @@ export function ProjectHome({ project, onOpenFiles, onOpenFile }: ProjectHomePro
        {editingTeammate && (
         <div className="fixed inset-0 z-[80] grid place-items-center bg-black/55 p-3 sm:p-4" onMouseDown={() => setEditingTeammate(false)}>
           <div className="flex max-h-[calc(100dvh-1.5rem)] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-surface-700 bg-surface-900 shadow-2xl sm:max-h-[86dvh]" onMouseDown={(event) => event.stopPropagation()}>
-            <div className="flex shrink-0 items-center justify-between border-b border-surface-800 px-5 py-4"><h2 className="text-lg font-bold text-surface-100">AI 팀원 수정</h2><button onClick={() => setEditingTeammate(false)} className="text-surface-500">닫기</button></div>
+            <div className="flex shrink-0 items-center justify-between border-b border-surface-800 px-5 py-4"><h2 className="text-lg font-bold text-surface-100">{t('projectHome.editTeammate')}</h2><button onClick={() => setEditingTeammate(false)} className="text-surface-500">{t('projectHome.close')}</button></div>
             <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-5 py-4">
-              <label className="block text-xs font-semibold text-surface-400">이름<input value={teammateDraft.displayName} onChange={(e)=>setTeammateDraft({...teammateDraft,displayName:e.target.value})} className="mt-1 w-full rounded-xl border border-surface-700 bg-surface-950 px-3 py-2.5 text-sm text-surface-100"/></label>
-              <label className="block text-xs font-semibold text-surface-400">역할<input value={teammateDraft.role} onChange={(e)=>setTeammateDraft({...teammateDraft,role:e.target.value})} className="mt-1 w-full rounded-xl border border-surface-700 bg-surface-950 px-3 py-2.5 text-sm text-surface-100"/></label>
-              <label className="block text-xs font-semibold text-surface-400">한 줄 소개<textarea value={teammateDraft.tagline} onChange={(e)=>setTeammateDraft({...teammateDraft,tagline:e.target.value})} rows={3} className="mt-1 w-full rounded-xl border border-surface-700 bg-surface-950 px-3 py-2.5 text-sm text-surface-100"/></label>
+              <label className="block text-xs font-semibold text-surface-400">{t('projectHome.name')}<input value={teammateDraft.displayName} onChange={(e)=>setTeammateDraft({...teammateDraft,displayName:e.target.value})} className="mt-1 w-full rounded-xl border border-surface-700 bg-surface-950 px-3 py-2.5 text-sm text-surface-100"/></label>
+              <label className="block text-xs font-semibold text-surface-400">{t('projectHome.role')}<input value={teammateDraft.role} onChange={(e)=>setTeammateDraft({...teammateDraft,role:e.target.value})} className="mt-1 w-full rounded-xl border border-surface-700 bg-surface-950 px-3 py-2.5 text-sm text-surface-100"/></label>
+              <label className="block text-xs font-semibold text-surface-400">{t('projectHome.tagline')}<textarea value={teammateDraft.tagline} onChange={(e)=>setTeammateDraft({...teammateDraft,tagline:e.target.value})} rows={3} className="mt-1 w-full rounded-xl border border-surface-700 bg-surface-950 px-3 py-2.5 text-sm text-surface-100"/></label>
               <section className="rounded-xl border border-surface-700 bg-surface-950/55 p-3">
-                <div className="flex items-start justify-between gap-3"><div><div className="text-xs font-bold text-surface-200">이 팀원이 사용할 Skill</div><p className="mt-1 text-[11px] leading-4 text-surface-500">여기서 끈 Skill은 이 AI 팀원의 새 대화부터 제외됩니다. 카탈로그는 탐색과 상세 확인만 담당합니다.</p></div><span className="shrink-0 text-[11px] text-surface-500">{skills.length-teammateDraft.disabledSkills.length}/{skills.length} 사용</span></div>
+                <div className="flex items-start justify-between gap-3"><div><div className="text-xs font-bold text-surface-200">{t('projectHome.skillsForTeammate')}</div><p className="mt-1 text-[11px] leading-4 text-surface-500">{t('projectHome.disabledSkillHint')}</p></div><span className="shrink-0 text-[11px] text-surface-500">{t('projectHome.skillsEnabledCount', { enabled: skills.length-teammateDraft.disabledSkills.length, total: skills.length })}</span></div>
                 <div className="mt-3 max-h-48 space-y-1 overflow-y-auto pr-1">
-                  {skills.map((skill)=>{const enabled=!teammateDraft.disabledSkills.includes(skill.name);return <label key={skill.name} className="flex cursor-pointer items-center justify-between gap-3 rounded-lg px-2 py-1.5 hover:bg-surface-800/70"><span className="min-w-0"><span className="block truncate font-mono text-xs text-surface-200">/{skill.name}</span>{skill.description&&<span className="block truncate text-[10px] text-surface-600">{skill.description}</span>}</span><input type="checkbox" checked={enabled} onChange={()=>setTeammateDraft((current)=>({...current,disabledSkills:enabled?[...current.disabledSkills,skill.name]:current.disabledSkills.filter((name)=>name!==skill.name)}))} className="h-4 w-4 shrink-0 accent-primary-500" aria-label={`${skill.name} Skill 사용`}/></label>})}
-                  {!skills.length&&<p className="px-2 py-3 text-xs text-surface-600">설정할 Skill이 없습니다.</p>}
+                  {skills.map((skill)=>{const enabled=!teammateDraft.disabledSkills.includes(skill.name);return <label key={skill.name} className="flex cursor-pointer items-center justify-between gap-3 rounded-lg px-2 py-1.5 hover:bg-surface-800/70"><span className="min-w-0"><span className="block truncate font-mono text-xs text-surface-200">/{skill.name}</span>{skill.description&&<span className="block truncate text-[10px] text-surface-600">{skill.description}</span>}</span><input type="checkbox" checked={enabled} onChange={()=>setTeammateDraft((current)=>({...current,disabledSkills:enabled?[...current.disabledSkills,skill.name]:current.disabledSkills.filter((name)=>name!==skill.name)}))} className="h-4 w-4 shrink-0 accent-primary-500" aria-label={t('projectHome.useSkill', { name: skill.name })}/></label>})}
+                  {!skills.length&&<p className="px-2 py-3 text-xs text-surface-600">{t('projectHome.noConfigurableSkills')}</p>}
                 </div>
               </section>
               <section aria-labelledby="profile-selection-title">
-                <div id="profile-selection-title" className="text-xs font-bold text-surface-200">프로필 선택</div>
-                <p className="mt-1 text-[11px] leading-4 text-surface-500">기본 프로필 중 하나를 선택하세요.</p>
-                <div className="mt-2 grid grid-cols-6 gap-2 sm:grid-cols-8">{AGENT_CHARACTERS.map((character)=>{const selected=characterFace(teammateDraft.face)===character.id;return <button key={character.id} type="button" title={character.label} onClick={()=>setTeammateDraft((current)=>({...current,face:`character:${character.id}`}))} aria-label={`${character.label}${selected?' (선택됨)':''}`} aria-pressed={selected} className={`relative rounded-xl border p-1 ${selected?'border-primary-400 bg-primary-500/20 ring-1 ring-primary-400/40':'border-surface-700 bg-surface-950 hover:border-surface-500'}`}><AgentCharacterAvatar id={character.id} className="h-auto w-full rounded-lg"/>{selected&&<span className="absolute right-0.5 top-0.5 grid h-4 w-4 place-items-center rounded-full bg-primary-500 text-[10px] font-bold text-white" aria-hidden="true">✓</span>}</button>})}</div>
+                <div id="profile-selection-title" className="text-xs font-bold text-surface-200">{t('projectHome.selectProfile')}</div>
+                <p className="mt-1 text-[11px] leading-4 text-surface-500">{t('projectHome.selectDefaultProfile')}</p>
+                <div className="mt-2 grid grid-cols-6 gap-2 sm:grid-cols-8">{AGENT_CHARACTERS.map((character)=>{const selected=characterFace(teammateDraft.face)===character.id;const characterLabel=t(`agentCreation.characterLabels.${character.id}`);return <button key={character.id} type="button" title={characterLabel} onClick={()=>setTeammateDraft((current)=>({...current,face:`character:${character.id}`}))} aria-label={t('projectHome.profileSelectionLabel',{name:characterLabel,selected})} aria-pressed={selected} className={`relative rounded-xl border p-1 ${selected?'border-primary-400 bg-primary-500/20 ring-1 ring-primary-400/40':'border-surface-700 bg-surface-950 hover:border-surface-500'}`}><AgentCharacterAvatar id={character.id} className="h-auto w-full rounded-lg"/>{selected&&<span className="absolute right-0.5 top-0.5 grid h-4 w-4 place-items-center rounded-full bg-primary-500 text-[10px] font-bold text-white" aria-hidden="true">✓</span>}</button>})}</div>
               </section>
               <section className="border-t border-surface-700 pt-3" aria-labelledby="profile-generator-title">
                 <div className="flex items-center justify-between gap-3">
-                  <div className="min-w-0"><div id="profile-generator-title" className="text-xs font-bold text-surface-200">원하는 프로필이 없나요?</div><p className="mt-1 text-[11px] leading-4 text-surface-500">설명만 입력해 새로 생성해봐요.</p></div>
-                  <button type="button" onClick={()=>setCharacterGeneratorOpen((open)=>!open)} aria-expanded={characterGeneratorOpen} aria-controls="profile-generator-panel" className="shrink-0 rounded-lg border border-surface-600 px-3 py-2 text-xs font-bold text-surface-200 hover:border-primary-400 hover:text-primary-300">{characterGeneratorOpen?'접기':'새 프로필 생성'}</button>
+                  <div className="min-w-0"><div id="profile-generator-title" className="text-xs font-bold text-surface-200">{t('projectHome.noDesiredProfile')}</div><p className="mt-1 text-[11px] leading-4 text-surface-500">{t('projectHome.generateProfileDescription')}</p></div>
+                  <button type="button" onClick={()=>setCharacterGeneratorOpen((open)=>!open)} aria-expanded={characterGeneratorOpen} aria-controls="profile-generator-panel" className="shrink-0 rounded-lg border border-surface-600 px-3 py-2 text-xs font-bold text-surface-200 hover:border-primary-400 hover:text-primary-300">{characterGeneratorOpen?t('projectHome.collapse'):t('projectHome.generateNewProfile')}</button>
                 </div>
-                {characterGeneratorOpen&&<div id="profile-generator-panel" className="mt-3 rounded-xl border border-surface-700 bg-surface-950/70 p-3"><div className="flex items-center gap-3">{agentFaceImageUrl(teammateDraft.face)&&<img src={agentFaceImageUrl(teammateDraft.face)!} alt="현재 선택한 프로필" className="h-14 w-14 rounded-xl object-cover"/>}<p className="min-w-0 flex-1 text-[11px] leading-4 text-surface-500">Credential Vault의 OpenAI Image 연결을 사용합니다. 키 값은 화면에 노출되지 않습니다.</p></div><textarea value={characterPrompt} onChange={(e)=>setCharacterPrompt(e.target.value)} rows={2} aria-label="새 프로필 설명" placeholder="예: 차분한 한국인 보안 엔지니어, 짧은 머리, 남색 셔츠, 작은 자물쇠 소품" className="mt-3 w-full rounded-xl border border-surface-700 bg-surface-900 px-3 py-2 text-sm text-surface-100"/><button type="button" onClick={generateCharacter} disabled={characterGenerating||!characterPrompt.trim()} className="tone-accent tone-action mt-2 rounded-lg px-3 py-2 text-xs font-bold disabled:opacity-50">{characterGenerating?'생성 중…':'새 프로필 생성'}</button></div>}
+                {characterGeneratorOpen&&<div id="profile-generator-panel" className="mt-3 rounded-xl border border-surface-700 bg-surface-950/70 p-3"><div className="flex items-center gap-3">{agentFaceImageUrl(teammateDraft.face)&&<img src={agentFaceImageUrl(teammateDraft.face)!} alt={t('projectHome.currentSelectedProfile')} className="h-14 w-14 rounded-xl object-cover"/>}<p className="min-w-0 flex-1 text-[11px] leading-4 text-surface-500">{t('projectHome.imageConnectionHint')}</p></div><textarea value={characterPrompt} onChange={(e)=>setCharacterPrompt(e.target.value)} rows={2} aria-label={t('projectHome.newProfileDescription')} placeholder={t('projectHome.profilePromptExample')} className="mt-3 w-full rounded-xl border border-surface-700 bg-surface-900 px-3 py-2 text-sm text-surface-100"/><button type="button" onClick={generateCharacter} disabled={characterGenerating||!characterPrompt.trim()} className="tone-accent tone-action mt-2 rounded-lg px-3 py-2 text-xs font-bold disabled:opacity-50">{characterGenerating?t('projectHome.generating'):t('projectHome.generateNewProfile')}</button></div>}
               </section>
             </div>
-            <div className="flex shrink-0 justify-end gap-2 border-t border-surface-800 bg-surface-900 px-5 py-4"><button onClick={() => setEditingTeammate(false)} className="rounded-xl px-4 py-2 text-sm text-surface-400">취소</button><button onClick={saveTeammate} disabled={teammateSaving||!teammateDraft.displayName.trim()} className="tone-accent tone-action rounded-xl px-4 py-2 text-sm font-bold disabled:opacity-50">{teammateSaving?'저장 중…':'저장'}</button></div>
+            <div className="flex shrink-0 justify-end gap-2 border-t border-surface-800 bg-surface-900 px-5 py-4"><button onClick={() => setEditingTeammate(false)} className="rounded-xl px-4 py-2 text-sm text-surface-400">{t('projectHome.cancel')}</button><button onClick={saveTeammate} disabled={teammateSaving||!teammateDraft.displayName.trim()} className="tone-accent tone-action rounded-xl px-4 py-2 text-sm font-bold disabled:opacity-50">{teammateSaving?t('projectHome.saving'):t('projectHome.save')}</button></div>
           </div>
         </div>
       )}
@@ -755,13 +752,13 @@ export function ProjectHome({ project, onOpenFiles, onOpenFile }: ProjectHomePro
             <div className="flex items-start justify-between gap-4 border-b border-surface-800 px-5 py-4">
               <div>
                 <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-primary-300">Project Instructions</div>
-                <h2 className="mt-1 text-lg font-bold text-gray-100">프로젝트 지침</h2>
+                <h2 className="mt-1 text-lg font-bold text-gray-100">{t('projectHome.instructionsTitle')}</h2>
               </div>
-              <button onClick={() => setInstructionsOpen(false)} className="rounded-lg border border-surface-700 bg-surface-900 px-3 py-1.5 text-sm font-semibold text-surface-300 hover:text-gray-100">닫기</button>
+              <button onClick={() => setInstructionsOpen(false)} className="rounded-lg border border-surface-700 bg-surface-900 px-3 py-1.5 text-sm font-semibold text-surface-300 hover:text-gray-100">{t('projectHome.close')}</button>
             </div>
             <div className="min-h-0 flex-1 overflow-auto px-6 py-5">
               {instructionsLoading ? (
-                <div className="py-16 text-center text-sm text-surface-500">프로젝트 지침을 불러오는 중…</div>
+                <div className="py-16 text-center text-sm text-surface-500">{t('projectHome.instructionsLoading')}</div>
               ) : instructionsContent ? (
                 <MarkdownReadSurface
                   content={instructionsContent}
@@ -769,7 +766,7 @@ export function ProjectHome({ project, onOpenFiles, onOpenFile }: ProjectHomePro
                   className="prose prose-invert prose-sm max-w-none markdown-document"
                 />
               ) : (
-                <div className="rounded-xl border border-surface-800 bg-surface-900/70 p-4 text-sm text-surface-400">이 프로젝트에는 아직 AGENTS.md 지침 파일이 없습니다.</div>
+                <div className="rounded-xl border border-surface-800 bg-surface-900/70 p-4 text-sm text-surface-400">{t('projectHome.noInstructions')}</div>
               )}
             </div>
           </div>

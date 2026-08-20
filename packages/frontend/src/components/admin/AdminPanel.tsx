@@ -136,12 +136,12 @@ export function AdminPanel({ open, onClose, token }: AdminPanelProps) {
         {/* Tabs */}
         <div className="flex overflow-x-auto border-b border-surface-800 px-6 shrink-0">
           {renderTab('users', t('users'))}
-          {renderTab('agents', '에이전트 관리')}
-          {renderTab('usage', '사용량')}
+          {renderTab('agents', t('agentManagement'))}
+          {renderTab('usage', t('usage'))}
           {renderTab('ai', t('aiSettings'))}
           {renderTab('prompts', t('systemPrompt'))}
-          {renderTab('runtime', 'Runtime Box')}
-          {renderTab('credentials', 'Connections')}
+          {renderTab('runtime', t('runtimeBoxTab'))}
+          {renderTab('credentials', t('connectionsTab'))}
           {renderTab('system', t('system'))}
         </div>
 
@@ -185,6 +185,7 @@ type PurgePreview = {
 };
 
 function AgentLifecycleManagement({ token }: { token?: string | null }) {
+  const { t } = useTranslation('admin');
   const [status, setStatus] = useState<'active' | 'retired'>('active');
   const [agents, setAgents] = useState<ManagedAgent[]>([]);
   const [preview, setPreview] = useState<PurgePreview | null>(null);
@@ -236,14 +237,14 @@ function AgentLifecycleManagement({ token }: { token?: string | null }) {
   };
   return <div className="space-y-5">
     <div className="flex items-start justify-between gap-4">
-      <div><h3 className="text-lg font-semibold text-surface-100">에이전트 관리</h3><p className="text-sm text-surface-400 mt-1">폐기와 복구 상태를 확인하고 영구 삭제 영향을 미리 봅니다. 이 화면에서는 실제 삭제하지 않습니다.</p></div>
+      <div><h3 className="text-lg font-semibold text-surface-100">{t('agentManagement')}</h3><p className="text-sm text-surface-400 mt-1">{t('agentManagementIntro')}</p></div>
       <div className="flex rounded-lg border border-surface-700 p-1">
-        {(['active', 'retired'] as const).map(key => <button key={key} onClick={() => setStatus(key)} className={`px-3 py-1.5 rounded-md text-sm ${status === key ? 'bg-primary-600/20 text-primary-700 dark:text-primary-200' : 'text-surface-400 hover:text-surface-100'}`}>{key === 'active' ? '운영 중' : '폐기됨'}</button>)}
+        {(['active', 'retired'] as const).map(key => <button key={key} onClick={() => setStatus(key)} className={`px-3 py-1.5 rounded-md text-sm ${status === key ? 'bg-primary-600/20 text-primary-700 dark:text-primary-200' : 'text-surface-400 hover:text-surface-100'}`}>{key === 'active' ? t('lifecycleActive') : t('lifecycleRetired')}</button>)}
       </div>
     </div>
     {error && <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-300">{error}</div>}
-    {loading ? <div className="text-sm text-surface-400">불러오는 중…</div> : <div className="overflow-x-auto rounded-lg border border-surface-700"><table className="w-full text-sm"><thead className="bg-surface-800 text-surface-400"><tr><th className="p-3 text-left">에이전트</th><th className="p-3 text-left">소유자</th><th className="p-3 text-right">대화</th><th className="p-3 text-right">Runtime</th><th className="p-3 text-right">작업</th></tr></thead><tbody>{agents.map(agent => <tr key={agent.id} className="border-t border-surface-800"><td className="p-3"><div className="font-medium text-surface-100">{agent.name}</div><div className="text-xs text-surface-500">{agent.lifecycleStatus}{agent.retiredAt ? ` · ${new Date(agent.retiredAt).toLocaleString()}` : ''}</div></td><td className="p-3 text-surface-300">{agent.ownerUsername || '시스템'}</td><td className="p-3 text-right text-surface-300">{agent.sessionCount}</td><td className="p-3 text-right text-surface-300">{agent.runtimeBoxCount}</td><td className="p-3 text-right">{status === 'retired' ? <button onClick={() => inspect(agent.id)} className="rounded-md border border-red-500/30 px-3 py-1.5 text-red-300 hover:bg-red-500/10">영구 삭제 영향 보기</button> : <span className="text-xs text-surface-500">먼저 폐기 필요</span>}</td></tr>)}</tbody></table>{agents.length === 0 && <div className="p-8 text-center text-sm text-surface-500">해당 상태의 에이전트가 없습니다.</div>}</div>}
-    {preview && <div className="rounded-xl border border-red-500/30 bg-red-500/5 p-5 space-y-3"><div><h4 className="font-semibold text-surface-100">{preview.impact.projectName} · 영구 삭제 영향</h4><p className="text-xs text-surface-500 mt-1">미리보기 만료: {new Date(preview.expiresAt).toLocaleString()} · 이 작업은 대화·파일·전용 Credential을 복구할 수 없게 삭제합니다.</p></div><div className="grid grid-cols-2 md:grid-cols-4 gap-3">{Object.entries(preview.impact.database).map(([key, value]) => <div key={key} className="rounded-lg bg-surface-900/60 p-3"><div className="text-xs text-surface-500">{key}</div><div className="text-lg font-semibold text-surface-100">{value}</div></div>)}</div><div className="text-sm text-surface-300">전용 Credential {preview.impact.credentials.dedicated} · 공유 Credential {preview.impact.credentials.shared} · 검토 필요 {preview.impact.credentials.reviewRequired}</div>{preview.impact.blockers.length > 0 ? <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-200">차단 사유: {preview.impact.blockers.join(', ')}</div> : <div className="space-y-3 border-t border-red-500/20 pt-3"><label className="block text-sm text-surface-300">확인을 위해 에이전트 이름 <strong className="text-surface-100">{preview.impact.projectName}</strong>을 입력하세요.<input value={typedName} onChange={event => setTypedName(event.target.value)} className="mt-2 w-full rounded-lg border border-surface-700 bg-surface-900 px-3 py-2 text-surface-100" /></label><label className="flex items-start gap-2 text-sm text-surface-300"><input type="checkbox" checked={purgeConfirmed} onChange={event => setPurgeConfirmed(event.target.checked)} className="mt-1" /><span>대화, 파일, Runtime, 에이전트 전용 Credential의 영구 삭제를 이해했습니다.</span></label><button disabled={typedName !== preview.impact.projectName || !purgeConfirmed || !!purgeJob} onClick={applyPurge} className="rounded-md bg-red-600 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-40">영구 삭제 작업 시작</button>{purgeJob && <div className="rounded-lg border border-primary-500/30 bg-primary-500/10 p-3 text-sm text-primary-700 dark:text-primary-200">작업 {purgeJob.id} · 상태 {purgeJob.status}. 완료·실패·복구 필요 상태까지 자동 갱신됩니다.</div>}</div>}</div>}
+    {loading ? <div className="text-sm text-surface-400">{t('loadingAgents')}</div> : <div className="overflow-x-auto rounded-lg border border-surface-700"><table className="w-full text-sm"><thead className="bg-surface-800 text-surface-400"><tr><th className="p-3 text-left">{t('agent')}</th><th className="p-3 text-left">{t('owner')}</th><th className="p-3 text-right">{t('conversations')}</th><th className="p-3 text-right">{t('runtimeBoxTab')}</th><th className="p-3 text-right">{t('tasks')}</th></tr></thead><tbody>{agents.map(agent => <tr key={agent.id} className="border-t border-surface-800"><td className="p-3"><div className="font-medium text-surface-100">{agent.name}</div><div className="text-xs text-surface-500">{agent.lifecycleStatus}{agent.retiredAt ? ` · ${new Date(agent.retiredAt).toLocaleString()}` : ''}</div></td><td className="p-3 text-surface-300">{agent.ownerUsername || t('systemOwner')}</td><td className="p-3 text-right text-surface-300">{agent.sessionCount}</td><td className="p-3 text-right text-surface-300">{agent.runtimeBoxCount}</td><td className="p-3 text-right">{status === 'retired' ? <button onClick={() => inspect(agent.id)} className="rounded-md border border-red-500/30 px-3 py-1.5 text-red-300 hover:bg-red-500/10">{t('permanentDeleteImpact')}</button> : <span className="text-xs text-surface-500">{t('retireFirst')}</span>}</td></tr>)}</tbody></table>{agents.length === 0 && <div className="p-8 text-center text-sm text-surface-500">{t('noAgentsInStatus')}</div>}</div>}
+    {preview && <div className="rounded-xl border border-red-500/30 bg-red-500/5 p-5 space-y-3"><div><h4 className="font-semibold text-surface-100">{preview.impact.projectName} · {t('permanentDeletionImpact')}</h4><p className="text-xs text-surface-500 mt-1">{t('previewExpires', { time: new Date(preview.expiresAt).toLocaleString() })} · {t('permanentDeletionWarning')}</p></div><div className="grid grid-cols-2 md:grid-cols-4 gap-3">{Object.entries(preview.impact.database).map(([key, value]) => <div key={key} className="rounded-lg bg-surface-900/60 p-3"><div className="text-xs text-surface-500">{key}</div><div className="text-lg font-semibold text-surface-100">{value}</div></div>)}</div><div className="text-sm text-surface-300">전용 Credential {preview.impact.credentials.dedicated} · 공유 Credential {preview.impact.credentials.shared} · 검토 필요 {preview.impact.credentials.reviewRequired}</div>{preview.impact.blockers.length > 0 ? <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-200">차단 사유: {preview.impact.blockers.join(', ')}</div> : <div className="space-y-3 border-t border-red-500/20 pt-3"><label className="block text-sm text-surface-300">{t('confirmAgentNamePrefix')} <strong className="text-surface-100">{preview.impact.projectName}</strong>{t('confirmAgentNameSuffix')}<input value={typedName} onChange={event => setTypedName(event.target.value)} className="mt-2 w-full rounded-lg border border-surface-700 bg-surface-900 px-3 py-2 text-surface-100" /></label><label className="flex items-start gap-2 text-sm text-surface-300"><input type="checkbox" checked={purgeConfirmed} onChange={event => setPurgeConfirmed(event.target.checked)} className="mt-1" /><span>{t('understandPermanentDeletion')}</span></label><button disabled={typedName !== preview.impact.projectName || !purgeConfirmed || !!purgeJob} onClick={applyPurge} className="rounded-md bg-red-600 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-40">{t('startPermanentDeletion')}</button>{purgeJob && <div className="rounded-lg border border-primary-500/30 bg-primary-500/10 p-3 text-sm text-primary-700 dark:text-primary-200">{t('deletionProgress', { id: purgeJob.id, status: purgeJob.status })}</div>}</div>}</div>}
   </div>;
 }
 
@@ -618,7 +619,7 @@ function UserManagement({ token }: { token?: string | null }) {
           <thead>
             <tr className="bg-surface-800/60 text-[13px] text-gray-500 uppercase tracking-wider">
               <th className="text-left px-4 py-2.5 font-semibold">{t('name')}</th>
-              <th className="text-left px-4 py-2.5 font-semibold">상태</th>
+              <th className="text-left px-4 py-2.5 font-semibold">{t('userStatus')}</th>
               <th className="text-left px-4 py-2.5 font-semibold">{t('password')}</th>
               <th className="text-left px-4 py-2.5 font-semibold">{t('role')}</th>
               <th className="text-left px-4 py-2.5 font-semibold">{t('customerVms')}</th>
@@ -821,6 +822,7 @@ function UserManagement({ token }: { token?: string | null }) {
 }
 
 function ApprovalStatusCell({ user, isAdmin, onApprove, onReject }: { user: User; isAdmin: boolean; onApprove: () => void; onReject: () => void }) {
+  const { t } = useTranslation('admin');
   const status = user.approval_status || 'active';
   const statusClass = status === 'active'
     ? 'tone-success'
@@ -839,8 +841,8 @@ function ApprovalStatusCell({ user, isAdmin, onApprove, onReject }: { user: User
       )}
       {status === 'pending' && isAdmin && (
         <div className="flex gap-1 pt-1">
-          <button onClick={onApprove} className="tone-action tone-success px-2 py-1 rounded text-[12px]">승인</button>
-          <button onClick={onReject} className="tone-action tone-danger px-2 py-1 rounded text-[12px]">거절</button>
+          <button onClick={onApprove} className="tone-action tone-success px-2 py-1 rounded text-[12px]">{t('approve')}</button>
+          <button onClick={onReject} className="tone-action tone-danger px-2 py-1 rounded text-[12px]">{t('reject')}</button>
         </div>
       )}
     </div>
@@ -868,6 +870,7 @@ function SignupInviteCodesPanel({
   const [showForm, setShowForm] = useState(false);
   const [draft, setDraft] = useState({ code: '', label: '', defaultRole: 'member', maxUses: '20', expiresAt: '' });
   const [error, setError] = useState('');
+  const { t } = useTranslation('admin');
 
   const recommend = async () => {
     const qs = draft.label ? `?label=${encodeURIComponent(draft.label)}` : '';
@@ -896,7 +899,7 @@ function SignupInviteCodesPanel({
       onRefresh();
     } else {
       const data = await res.json().catch(() => ({}));
-      setError(data.error || '초대 코드 생성 실패');
+      setError(data.error || t('creationFailed'));
     }
   };
 
@@ -911,8 +914,8 @@ function SignupInviteCodesPanel({
     <div className="rounded-lg border border-surface-700 bg-surface-800/20 overflow-hidden">
       <div className="px-4 py-3 border-b border-surface-800 flex items-center justify-between gap-4">
         <div>
-          <div className="text-[14px] font-semibold text-gray-300">초대 코드</div>
-          <div className="text-[13px] text-gray-500 mt-0.5">회원가입에 사용할 코드를 만들고 승인 방식을 관리합니다.</div>
+          <div className="text-[14px] font-semibold text-gray-300">{t('inviteCode')}</div>
+          <div className="text-[13px] text-gray-500 mt-0.5">{t('inviteCodeIntro')}</div>
         </div>
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-1 rounded-lg border border-surface-700 bg-surface-900/60 p-1">
@@ -920,31 +923,31 @@ function SignupInviteCodesPanel({
               onClick={() => onApprovalModeChange('auto')}
               className={`px-2.5 py-1 rounded-md text-[13px] transition-colors ${settings.approvalMode === 'auto' ? 'tone-action tone-success' : 'text-gray-500 hover:text-gray-300'}`}
             >
-              코드 있으면 자동 승인
+              {t('autoApproveMode')}
             </button>
             <button
               onClick={() => onApprovalModeChange('manual')}
               className={`px-2.5 py-1 rounded-md text-[13px] transition-colors ${settings.approvalMode === 'manual' ? 'tone-action tone-warning' : 'text-gray-500 hover:text-gray-300'}`}
             >
-              관리자 승인 필요
+              {t('manualApproveMode')}
             </button>
           </div>
           <button onClick={() => setShowForm(!showForm)} className="text-[14px] px-3 py-1.5 rounded-lg bg-primary-600/20 border border-primary-500/30 text-primary-300 hover:bg-primary-600/30">
-            {showForm ? '닫기' : '+ 초대 코드'}
+            {showForm ? t('close') : t('addInviteCode')}
           </button>
         </div>
       </div>
       <div className="px-4 py-2 border-b border-surface-800 bg-surface-900/20 text-[13px] text-gray-500">
-        현재 설정: {settings.approvalMode === 'auto' ? '초대 코드가 맞으면 바로 가입되고 관리자에게 알림이 갑니다.' : '초대 코드가 맞아도 pending 상태로 만들고, 관리자가 승인해야 로그인할 수 있습니다.'}
+        {t('currentSettings')} {settings.approvalMode === 'auto' ? t('autoApproveDescription') : t('manualApproveDescription')}
       </div>
       {showForm && (
         <div className="p-4 border-b border-surface-800 bg-surface-900/30 space-y-3">
           {error && <div className="text-[14px] text-red-400">{error}</div>}
           <div className="grid grid-cols-5 gap-2">
-            <input value={draft.label} onChange={(e) => setDraft({ ...draft, label: e.target.value })} placeholder="라벨/고객명" className="bg-surface-900 border border-surface-700 rounded-md px-3 py-2 text-[14px] text-gray-200" />
+            <input value={draft.label} onChange={(e) => setDraft({ ...draft, label: e.target.value })} placeholder={t('inviteLabelPlaceholder')} className="bg-surface-900 border border-surface-700 rounded-md px-3 py-2 text-[14px] text-gray-200" />
             <div className="flex gap-1">
-              <input value={draft.code} onChange={(e) => setDraft({ ...draft, code: e.target.value })} placeholder="코드" className="min-w-0 flex-1 bg-surface-900 border border-surface-700 rounded-md px-3 py-2 text-[14px] text-gray-200 font-mono" />
-              <button onClick={recommend} className="px-2 rounded-md bg-surface-800 text-[13px] text-gray-300">추천</button>
+              <input value={draft.code} onChange={(e) => setDraft({ ...draft, code: e.target.value })} placeholder={t('inviteCodePlaceholder')} className="min-w-0 flex-1 bg-surface-900 border border-surface-700 rounded-md px-3 py-2 text-[14px] text-gray-200 font-mono" />
+              <button onClick={recommend} className="px-2 rounded-md bg-surface-800 text-[13px] text-gray-300">{t('recommend')}</button>
             </div>
             <select value={draft.defaultRole} onChange={(e) => setDraft({ ...draft, defaultRole: e.target.value })} className="bg-surface-900 border border-surface-700 rounded-md px-3 py-2 text-[14px] text-gray-200">
               <option value="viewer">viewer</option>
@@ -953,17 +956,17 @@ function SignupInviteCodesPanel({
               <option value="operator">operator</option>
               <option value="customer_manager">customer_manager</option>
             </select>
-            <input type="number" min="1" value={draft.maxUses} onChange={(e) => setDraft({ ...draft, maxUses: e.target.value })} placeholder="사용 횟수" className="bg-surface-900 border border-surface-700 rounded-md px-3 py-2 text-[14px] text-gray-200" />
+            <input type="number" min="1" value={draft.maxUses} onChange={(e) => setDraft({ ...draft, maxUses: e.target.value })} placeholder={t('usageCountPlaceholder')} className="bg-surface-900 border border-surface-700 rounded-md px-3 py-2 text-[14px] text-gray-200" />
             <input type="date" value={draft.expiresAt} onChange={(e) => setDraft({ ...draft, expiresAt: e.target.value })} className="bg-surface-900 border border-surface-700 rounded-md px-3 py-2 text-[14px] text-gray-200" />
           </div>
           <div className="flex justify-end">
-            <button onClick={createInvite} className="px-4 py-2 text-[14px] bg-primary-600 hover:bg-primary-500 text-white rounded-md">생성</button>
+            <button onClick={createInvite} className="px-4 py-2 text-[14px] bg-primary-600 hover:bg-primary-500 text-white rounded-md">{t('create')}</button>
           </div>
         </div>
       )}
       <div className="divide-y divide-surface-800/70">
         {invites.length === 0 ? (
-          <div className="px-4 py-4 text-[14px] text-gray-500">아직 초대 코드가 없습니다.</div>
+          <div className="px-4 py-4 text-[14px] text-gray-500">{t('noInviteCodes')}</div>
         ) : invites.map((invite) => (
           <div key={invite.id} className="px-4 py-3 flex items-center gap-3 text-[14px]">
             <span className="font-mono text-primary-300 bg-primary-500/10 border border-primary-500/20 px-2 py-1 rounded">{invite.code}</span>
@@ -973,7 +976,7 @@ function SignupInviteCodesPanel({
             {invite.expires_at && <span className="text-gray-500">until {invite.expires_at.slice(0, 10)}</span>}
             {invite.disabled && <span className="text-red-400">disabled</span>}
             <div className="ml-auto flex gap-1">
-              <button onClick={() => toggleDisabled(invite)} className="px-2 py-1 rounded bg-surface-800 text-gray-300 hover:text-white">{invite.disabled ? '활성화' : '비활성화'}</button>
+              <button onClick={() => toggleDisabled(invite)} className="px-2 py-1 rounded bg-surface-800 text-gray-300 hover:text-white">{invite.disabled ? t('enable') : t('disable')}</button>
             </div>
           </div>
         ))}
@@ -1362,8 +1365,8 @@ function SystemPromptEditor({ token }: { token?: string | null }) {
     <div className="space-y-6">
       <section className="rounded-lg border border-surface-700 p-4 space-y-4">
         <div>
-          <h3 className="text-[15px] font-semibold text-surface-100">Session Prompt Inspector</h3>
-          <p className="text-[13px] text-surface-500 mt-1">Session ID를 입력하면 현재 서버 상태로 재구성한 시스템 프롬프트를 블록별로 표시합니다. 실제 비밀값 패턴은 항상 마스킹됩니다.</p>
+          <h3 className="text-[15px] font-semibold text-surface-100">{t('sessionPromptInspector')}</h3>
+          <p className="text-[13px] text-surface-500 mt-1">{t('sessionPromptInspectorIntro')}</p>
         </div>
         <div className="flex gap-2">
           <input
@@ -1374,7 +1377,7 @@ function SystemPromptEditor({ token }: { token?: string | null }) {
             className="flex-1 rounded-lg border border-surface-700 bg-surface-950 px-3 py-2 text-[14px] text-surface-100 font-mono focus:outline-none focus:border-primary-500"
           />
           <button onClick={handleInspect} disabled={inspecting || !inspectSessionId.trim()} className="rounded-lg bg-primary-600 px-4 py-2 text-[14px] font-medium text-white hover:bg-primary-500 disabled:opacity-50">
-            {inspecting ? '재구성 중' : '검토하기'}
+            {inspecting ? t('reconstructing') : t('inspect')}
           </button>
         </div>
         {inspectError && <div className="tone-danger tone-text text-[13px]">{inspectError}</div>}
@@ -1382,14 +1385,14 @@ function SystemPromptEditor({ token }: { token?: string | null }) {
           <div className="space-y-4">
             <div className="rounded-lg bg-surface-800/50 p-3 text-[13px] text-surface-300 space-y-1">
               <div><span className="text-surface-500">Session</span> {inspection.session.name} · {inspection.session.engine} · {inspection.session.model || 'default'}</div>
-              <div><span className="text-surface-500">Total</span> {inspection.total.characters.toLocaleString()} chars · 약 {inspection.total.estimatedTokens.toLocaleString()} tokens</div>
+              <div><span className="text-surface-500">Total</span> {inspection.total.characters.toLocaleString()} {t('chars')} · {t('approxTokens', { count: inspection.total.estimatedTokens.toLocaleString() })}</div>
               <div className="font-mono break-all"><span className="text-surface-500">SHA-256</span> {inspection.total.sha256}</div>
               <div className="tone-warning tone-text pt-1">{inspection.caveat}</div>
             </div>
             {inspection.blocks.map((item) => (
               <details key={item.id} open className="rounded-lg border border-surface-700 overflow-hidden">
                 <summary className="cursor-pointer px-3 py-2 bg-surface-800/60 text-[13px] text-surface-200">
-                  <span className="font-semibold">{item.id}</span> · {item.characters.toLocaleString()} chars · 약 {item.estimatedTokens.toLocaleString()} tokens
+                  <span className="font-semibold">{item.id}</span> · {item.characters.toLocaleString()} {t('chars')} · {t('approxTokens', { count: item.estimatedTokens.toLocaleString() })}
                   <span className="block text-[12px] text-surface-500 mt-0.5">{item.source}</span>
                 </summary>
                 <pre className="max-h-[520px] overflow-auto whitespace-pre-wrap break-words p-4 text-[13px] leading-relaxed text-surface-200 bg-surface-950">{item.content}</pre>
@@ -1512,7 +1515,7 @@ interface CredentialAdminConnectionOverview {
   };
   connections: Array<{
     id: string;
-    source: 'profile' | 'credential';
+    source: 'profile' | 'credential' | 'group';
     credentialId?: string;
     profileId?: string;
     displayName: string;
@@ -1520,6 +1523,8 @@ interface CredentialAdminConnectionOverview {
     connectionType: string;
     riskLevel: 'low' | 'medium' | 'high';
     enabled: boolean;
+    connectionScope?: 'shared' | 'agent_dedicated';
+    dedicatedProjectId?: string | null;
     defaultOn?: boolean;
     defaultScope?: string | null;
     defaultReason?: string | null;
@@ -1770,37 +1775,37 @@ function formatDateTime(value: string | null): string {
 }
 
 function credentialHealth(credential: WorkspaceCredential, targets: CredentialTargetSync[]) {
-  if (!credential.enabled) return { label: '비활성', className: 'tone-muted' };
+  if (!credential.enabled) return { key: 'disabled', label: adminText('credentialConnections.health.disabled'), className: 'tone-muted' };
   const relatedTargets = targets.filter(t => t.credential_id === credential.id);
   if (relatedTargets.some(t => t.last_status === 'error' || t.last_error)) {
-    return { label: '동기화 오류', className: 'tone-danger' };
+    return { key: 'syncError', label: adminText('credentialConnections.health.syncError'), className: 'tone-danger' };
   }
   if (relatedTargets.some(t => t.last_status === 'missing' || !t.last_status)) {
-    return { label: '동기화 확인 필요', className: 'tone-warning' };
+    return { key: 'syncAttention', label: adminText('credentialConnections.health.syncAttention'), className: 'tone-warning' };
   }
-  return { label: 'Vault 저장됨', className: 'tone-success' };
+  return { key: 'vaultStored', label: adminText('credentialConnections.health.vaultStored'), className: 'tone-success' };
 }
 
 function connectionStatusStyle(status: string) {
-  if (status === 'connected') return { label: '프로젝트 연결됨', className: 'tone-success' };
-  if (status === 'needs_attention') return { label: '확인 필요', className: 'tone-warning' };
-  if (status === 'disabled') return { label: '꺼짐', className: 'tone-muted' };
-  return { label: '사용 안 함', className: 'tone-muted' };
+  if (status === 'connected') return { label: adminText('credentialConnections.connectionStatus.connected'), className: 'tone-success' };
+  if (status === 'needs_attention') return { label: adminText('credentialConnections.connectionStatus.needsAttention'), className: 'tone-warning' };
+  if (status === 'disabled') return { label: adminText('credentialConnections.connectionStatus.disabled'), className: 'tone-muted' };
+  return { label: adminText('credentialConnections.connectionStatus.off'), className: 'tone-muted' };
 }
 
 function connectionReadinessStyle(connection: CredentialAdminConnectionOverview['connections'][number]) {
   const health = connection.readiness.providerHealth.status;
-  if (connection.readiness.effectiveStatus === 'ready') return { label: '사용 가능', className: 'tone-success', description: '프로젝트 연결과 실제 인증 확인이 모두 완료됐습니다.' };
-  if (health === 'invalid') return { label: 'API 키 교체 필요', className: 'tone-danger', description: '저장된 인증정보가 유효하지 않습니다. 새 인증정보로 교체해야 합니다.' };
-  if (health === 'reauth_required') return { label: '다시 로그인 필요', className: 'tone-warning', description: '저장된 로그인이 만료되었거나 취소되었습니다. 서비스를 다시 연결하세요.' };
-  if (health === 'degraded') return { label: '일부 기능 확인 필요', className: 'tone-warning', description: '연결은 유지되지만 일부 기능의 실제 사용 상태를 확인해야 합니다.' };
-  if (connection.readiness.effectiveStatus === 'connected_unverified') return { label: '연결됐지만 실제 확인 안 됨', className: 'tone-warning', description: '프로젝트에는 연결됐지만 공급자 인증이 실제로 동작하는지 아직 확인되지 않았습니다.' };
+  if (connection.readiness.effectiveStatus === 'ready') return { label: adminText('credentialConnections.readiness.ready'), className: 'tone-success', description: adminText('credentialConnections.readiness.readyDescription', { defaultValue: 'Project connection and provider authentication are both verified.' }) };
+  if (health === 'invalid') return { label: adminText('credentialConnections.readiness.invalid'), className: 'tone-danger', description: adminText('credentialConnections.readiness.invalidDescription', { defaultValue: 'Stored authentication is invalid and must be replaced.' }) };
+  if (health === 'reauth_required') return { label: adminText('credentialConnections.readiness.reauthRequired'), className: 'tone-warning', description: adminText('credentialConnections.readiness.reauthDescription', { defaultValue: 'The stored login expired or was revoked. Reconnect the service.' }) };
+  if (health === 'degraded') return { label: adminText('credentialConnections.readiness.degraded'), className: 'tone-warning', description: adminText('credentialConnections.readiness.degradedDescription', { defaultValue: 'The connection remains active, but some features need verification.' }) };
+  if (connection.readiness.effectiveStatus === 'connected_unverified') return { label: adminText('credentialConnections.readiness.connectedUnverified'), className: 'tone-warning', description: adminText('credentialConnections.readiness.connectedUnverifiedDescription', { defaultValue: 'The project is connected, but provider authentication has not been verified.' }) };
   const style = connectionStatusStyle(connection.status);
-  return { ...style, description: connection.status === 'disabled' ? '이 Connection은 현재 비활성화되어 있습니다.' : '이 Connection을 사용하는 프로젝트가 없습니다.' };
+  return { ...style, description: connection.status === 'disabled' ? adminText('credentialConnections.readiness.disabledDescription') : adminText('credentialConnections.readiness.unusedDescription') };
 }
 
 function connectionPrimaryAction(_connection: CredentialAdminConnectionOverview['connections'][number]) {
-  return { label: '관리', kind: 'detail' as const };
+  return { label: adminText('credentialConnections.primaryAction'), kind: 'detail' as const };
 }
 
 function riskStyle(risk: string) {
@@ -1854,6 +1859,7 @@ function copyText(text: string) {
 }
 
 export function PersonalCredentialsPanel({ open, onClose, token }: PersonalCredentialsPanelProps) {
+  const { t } = useTranslation('admin');
   if (!open) return null;
   return (
     <div data-testid="personal-credentials-panel" className="fixed inset-0 z-[200] flex items-center justify-center">
@@ -1866,7 +1872,7 @@ export function PersonalCredentialsPanel({ open, onClose, token }: PersonalCrede
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
               </svg>
             </div>
-            <h2 className="text-[18px] font-bold text-gray-100">개인 크레덴셜</h2>
+            <h2 className="text-[18px] font-bold text-gray-100">{t('personalCredentials')}</h2>
           </div>
           <button onClick={onClose} className="p-1.5 text-gray-500 hover:text-gray-300 hover:bg-surface-800 rounded-lg transition-colors">
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1884,6 +1890,7 @@ export function PersonalCredentialsPanel({ open, onClose, token }: PersonalCrede
 
 function CredentialVaultManagement({ token, mode }: { token?: string | null; mode: 'global' | 'personal' }) {
   const { t } = useTranslation('admin');
+  const translate = t;
   const role = getCurrentRole() || 'member';
   const isAdmin = role === 'admin';
   const canManageGlobalCredentials = mode === 'global' && role === 'admin';
@@ -2569,9 +2576,9 @@ function CredentialVaultManagement({ token, mode }: { token?: string | null; mod
     const disconnecting = input.lifecycle === 'disconnect';
     if (disconnecting) {
       const approved = await confirm({
-        title: 'Connection을 안전하게 끊을까요?',
-        message: `${selectedConnection.displayName}을 사용하는 Agent ${selectedConnection.stats.connectedProjects}개가 즉시 이 Connection을 사용할 수 없게 됩니다.\n\n암호화된 저장값과 Agent별 허용·차단 정책은 복구를 위해 보존됩니다.`,
-        confirmLabel: '안전하게 연결 끊기',
+        title: t('credentialConnections.disconnectConfirmTitle'),
+        message: t('credentialConnections.disconnectConfirmMessage', { name: selectedConnection.displayName, count: selectedConnection.stats.connectedProjects }),
+        confirmLabel: t('credentialConnections.disconnectSafely'),
         danger: true,
       });
       if (!approved) return;
@@ -2661,8 +2668,8 @@ function CredentialVaultManagement({ token, mode }: { token?: string | null; mod
       values: {},
     });
   };
-  const normalCredentials = credentials.filter(c => credentialHealth(c, targets).label === 'Vault 저장됨').length;
-  const warningCredentials = credentials.filter(c => ['동기화 확인 필요', '동기화 오류'].includes(credentialHealth(c, targets).label)).length;
+  const normalCredentials = credentials.filter(c => credentialHealth(c, targets).key === 'vaultStored').length;
+  const warningCredentials = credentials.filter(c => ['syncAttention', 'syncError'].includes(credentialHealth(c, targets).key)).length;
   const staleTargets = targets.filter(t => t.last_status === 'missing' || t.last_status === 'error' || t.last_error).length;
   const primaryOAuthProvider = oauthProviders.find(provider => provider.id === 'google') ?? oauthProviders[0];
   const aiCredentialPrompt = isPersonalCredentialMode
@@ -2678,21 +2685,21 @@ function CredentialVaultManagement({ token, mode }: { token?: string | null; mod
     ? `내 개인 로그인/API 키를 Credential Vault에 저장하고 특정 프로젝트에서만 쓰고 싶어.\nsecret 값은 내가 안전 입력으로 넣을게. 저장 후 Runtime Box에서는 값 말고 present/missing만 확인해줘.`
     : `<자체 호스팅 서버 이름>에 <서비스명> API 키를 Credential Vault로 추가하고 싶어.\n전체 프로젝트 기본 연결로 둘지, 특정 프로젝트에만 허용할지 판단해줘.\nsecret 값은 내가 안전 입력으로 넣을게. 적용 후 Runtime Box presence smoke까지 확인해줘.`;
 
-  if (loading) return <div className="text-gray-500 text-base py-8 text-center">외부 연결 상태를 불러오는 중…</div>;
+  if (loading) return <div className="text-gray-500 text-base py-8 text-center">{t('credentialConnections.connectionsLoading')}</div>;
 
   return (
     <div className="space-y-6">
       <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
         <div>
-          <div className="text-[13px] font-semibold text-primary-300 uppercase tracking-[0.2em] mb-2">{isPersonalCredentialMode ? '내 연결' : '외부 서비스 연결'}</div>
-          <h3 className="text-2xl font-semibold text-gray-100">{isPersonalCredentialMode ? '내 외부 서비스' : 'Connections'}</h3>
+          <div className="text-[13px] font-semibold text-primary-300 uppercase tracking-[0.2em] mb-2">{isPersonalCredentialMode ? t('credentialConnections.myConnections') : t('credentialConnections.externalConnections')}</div>
+          <h3 className="text-2xl font-semibold text-gray-100">{isPersonalCredentialMode ? t('credentialConnections.myConnections') : t('credentialConnections.connections')}</h3>
           <p className="text-base text-gray-500 mt-2 max-w-2xl">
             {isPersonalCredentialMode
-              ? '내가 사용하는 외부 계정을 연결하고, 어떤 프로젝트의 AI가 내 요청을 처리할 때 사용할 수 있는지 관리합니다. 다른 사용자가 같은 프로젝트의 AI 팀원을 사용해도 내 Credential은 전달되지 않습니다.'
-              : 'Tower와 프로젝트가 사용하는 외부 서비스를 한곳에서 연결하고 상태를 확인합니다. 실제 인증이 확인된 연결만 사용 가능으로 표시합니다.'}
+              ? t('credentialConnections.personalDescription')
+              : t('credentialConnections.adminDescription')}
           </p>
           <p className="text-[14px] text-gray-500 mt-2 max-w-3xl">
-            {isPersonalCredentialMode ? 'API 키와 로그인 값은 화면이나 대화에 표시되지 않습니다. 내가 시작한 실행에서만 허용한 프로젝트의 팀원·Helper와 Primary AI 팀원과 Helper Agent가 사용할 수 있습니다. 기술 설정은 필요한 경우에만 고급 관리에서 확인할 수 있습니다.' : '서비스명, 용도, 현재 상태와 다음 행동만 확인하세요. Credential ID와 Runtime env 같은 기술 설정은 고급 관리에 숨겨져 있습니다.'}
+            {isPersonalCredentialMode ? t('credentialConnections.personalPrivacyDescription') : t('credentialConnections.adminPrivacyDescription')}
           </p>
         </div>
         <div className="flex flex-wrap gap-2 shrink-0">
@@ -2703,12 +2710,12 @@ function CredentialVaultManagement({ token, mode }: { token?: string | null; mod
                   disabled={saving}
                   onClick={() => connectOAuthProvider(primaryOAuthProvider)}
                   aria-disabled={!primaryOAuthProvider.configured}
-                  title={!primaryOAuthProvider.configured ? '이 Tower 서버에 Google OAuth 설정이 필요합니다.' : undefined}
+                  title={!primaryOAuthProvider.configured ? t('credentialConnections.googleOauthSetupRequired') : undefined}
                   className="px-3 py-2 text-base rounded-lg bg-primary-600 text-white hover:bg-primary-500 transition-colors"
                 >
                   {primaryOAuthProvider.configured
-                    ? primaryOAuthProvider.status === 'not_connected' ? 'Google 계정 연결' : primaryOAuthProvider.status === 'reauth_required' ? 'Google 다시 로그인' : 'Google 계정 변경'
-                    : 'Google 연결 설정 필요'}
+                    ? primaryOAuthProvider.status === 'not_connected' ? t('credentialConnections.accountConnection') : primaryOAuthProvider.status === 'reauth_required' ? t('credentialConnections.reloginRequired') : t('credentialConnections.changeAccount')
+                    : t('credentialConnections.checkSetup')}
                 </button>
               )}
               <button
@@ -2718,22 +2725,22 @@ function CredentialVaultManagement({ token, mode }: { token?: string | null; mod
                 }}
                 className="px-3 py-2 text-base rounded-lg border border-surface-700 text-gray-200 hover:bg-surface-800 transition-colors"
               >
-                {connectionMode === 'api_key_simple' ? 'API 키 추가 닫기' : '+ API 키 추가'}
+                {connectionMode === 'api_key_simple' ? t('credentialConnections.close') : `+ ${t('credentialConnections.addConnection')}`}
               </button>
             </>
           ) : isAdmin && (
             <button onClick={openAddConnection} className="px-3 py-2 text-base rounded-lg bg-primary-600 text-white hover:bg-primary-500 transition-colors">
-              {connectionMode === 'none' ? '+ 연결 추가' : '추가 닫기'}
+              {connectionMode === 'none' ? `+ ${t('credentialConnections.addConnection')}` : t('credentialConnections.close')}
             </button>
           )}
           <button onClick={fetchAll} className="px-3 py-2 text-base rounded-lg border border-surface-700 text-gray-300 hover:text-gray-100 hover:bg-surface-800 transition-colors">
-            상태 새로고침
+            {t('credentialConnections.refreshStatus')}
           </button>
         </div>
       </div>
 
       {isPersonalCredentialMode && (
-        <div className="inline-flex w-full sm:w-auto rounded-lg border border-surface-700 bg-surface-950/50 p-1" role="tablist" aria-label="개인 연결 관리 영역">
+        <div className="inline-flex w-full sm:w-auto rounded-lg border border-surface-700 bg-surface-950/50 p-1" role="tablist" aria-label={t('credentialConnections.myConnections')}>
           <button
             type="button"
             role="tab"
@@ -2741,7 +2748,7 @@ function CredentialVaultManagement({ token, mode }: { token?: string | null; mod
             onClick={() => setPersonalSection('connections')}
             className={`flex-1 sm:flex-none rounded-md px-4 py-2 text-[14px] font-semibold transition-colors ${personalSection === 'connections' ? 'bg-surface-700 text-gray-100' : 'text-gray-500 hover:text-gray-300'}`}
           >
-            연결과 상태
+            {t('credentialConnections.connectionStatus.connected')}
           </button>
           <button
             type="button"
@@ -2750,7 +2757,7 @@ function CredentialVaultManagement({ token, mode }: { token?: string | null; mod
             onClick={() => setPersonalSection('projects')}
             className={`flex-1 sm:flex-none rounded-md px-4 py-2 text-[14px] font-semibold transition-colors ${personalSection === 'projects' ? 'bg-surface-700 text-gray-100' : 'text-gray-500 hover:text-gray-300'}`}
           >
-            내 프로젝트 권한{pendingAccessPolicies.length > 0 ? ` · ${pendingAccessPolicies.length}` : ''}
+            {t('credentialConnections.projects')}{pendingAccessPolicies.length > 0 ? ` · ${pendingAccessPolicies.length}` : ''}
           </button>
         </div>
       )}
@@ -2758,7 +2765,7 @@ function CredentialVaultManagement({ token, mode }: { token?: string | null; mod
       {error && (
         <div className="tone-card tone-danger rounded-lg px-4 py-3 text-base space-y-2">
           <div>{error}</div>
-          <div className="text-[14px] opacity-80">목록이 비어 보이거나 의미를 모르겠다면 아래 프롬프트를 운영자 AI에게 보내 상태를 먼저 진단하세요.</div>
+          <div className="text-[14px] opacity-80">{t('credentialConnections.errorDiagnosticHint')}</div>
         </div>
       )}
       {statusMessage && <div className="tone-card tone-success rounded-lg px-4 py-3 text-base">{statusMessage}</div>}
@@ -2766,8 +2773,8 @@ function CredentialVaultManagement({ token, mode }: { token?: string | null; mod
       {isPersonalCredentialMode && personalSection === 'connections' && oauthProviders.length > 0 && (
         <section className="rounded-xl border border-surface-700 bg-surface-950/30 overflow-hidden">
           <div className="px-4 py-3 border-b border-surface-800">
-            <h4 className="text-base font-semibold text-gray-100">로그인 계정</h4>
-            <p className="text-[14px] text-gray-500 mt-1">Google 메일·캘린더·드라이브에 사용할 내 계정입니다. 한 번 연결하면 Tower가 필요할 때 안전하게 불러옵니다.</p>
+            <h4 className="text-base font-semibold text-gray-100">{t('credentialConnections.accountConnection')}</h4>
+            <p className="text-[14px] text-gray-500 mt-1">{t('credentialConnections.googleAccountDescription')}</p>
           </div>
           <div className="divide-y divide-surface-800">
             {oauthProviders.map(provider => (
@@ -2776,21 +2783,21 @@ function CredentialVaultManagement({ token, mode }: { token?: string | null; mod
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="text-base font-semibold text-gray-100">{provider.label}</span>
                     <span className={`tone-pill px-2 py-0.5 text-[12px] ${provider.status === 'connected' ? 'tone-success' : provider.status === 'reauth_required' ? 'tone-warning' : 'tone-muted'}`}>
-                      {provider.status === 'connected' ? '연결됨' : provider.status === 'reauth_required' ? '다시 로그인 필요' : '연결 안 됨'}
+                      {provider.status === 'connected' ? t('credentialConnections.connected') : provider.status === 'reauth_required' ? t('credentialConnections.reloginRequired') : t('credentialConnections.notConnected')}
                     </span>
                   </div>
                   <div className="text-[14px] text-gray-500 mt-1">
                     {!provider.configured
-                      ? '이 Tower 서버의 Google OAuth 설정이 아직 완료되지 않았습니다. 운영자가 OAuth client와 이 도메인의 callback URI를 등록해야 합니다.'
-                      : provider.nickname || (provider.status === 'reauth_required' ? '저장된 로그인 정보가 만료되었거나 Google에서 폐기되었습니다.' : provider.description)}
+                      ? t('credentialConnections.googleOauthNotConfigured')
+                      : provider.nickname || (provider.status === 'reauth_required' ? t('credentialConnections.googleLoginExpired') : provider.description)}
                   </div>
-                  {provider.statusReason && provider.status === 'reauth_required' && <div className="mt-1 text-[12px] text-amber-300/80">실제 토큰 갱신 확인 실패 · 다시 연결하면 교체됩니다.</div>}
+                  {provider.statusReason && provider.status === 'reauth_required' && <div className="mt-1 text-[12px] text-amber-300/80">{t('credentialConnections.tokenRefreshFailed')}</div>}
                 </div>
                 <div className="flex flex-wrap gap-2 shrink-0">
                   <button disabled={saving} aria-disabled={!provider.configured} onClick={() => connectOAuthProvider(provider)} className="px-3 py-2 text-[14px] rounded-md bg-primary-600 text-white hover:bg-primary-500 transition-colors">
-                    {provider.configured ? provider.status === 'not_connected' ? '계정 연결' : provider.status === 'reauth_required' ? '다시 로그인' : '계정 변경' : '설정 방법 확인'}
+                    {provider.configured ? provider.status === 'not_connected' ? t('credentialConnections.accountConnection') : provider.status === 'reauth_required' ? t('credentialConnections.reloginRequired') : t('credentialConnections.changeAccount') : t('credentialConnections.checkSetup')}
                   </button>
-                  {provider.status !== 'not_connected' && <button disabled={saving} onClick={() => disconnectOAuthProvider(provider)} className="px-3 py-2 text-[14px] rounded-md border border-red-500/30 text-red-300 hover:bg-red-500/10 disabled:opacity-40 transition-colors">연결 해제</button>}
+                  {provider.status !== 'not_connected' && <button disabled={saving} onClick={() => disconnectOAuthProvider(provider)} className="px-3 py-2 text-[14px] rounded-md border border-red-500/30 text-red-300 hover:bg-red-500/10 disabled:opacity-40 transition-colors">{t('credentialConnections.disconnect')}</button>}
                 </div>
               </div>
             ))}
@@ -2802,30 +2809,30 @@ function CredentialVaultManagement({ token, mode }: { token?: string | null; mod
         <section className="rounded-xl border border-primary-500/25 bg-primary-500/5 p-4 space-y-3">
           <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-3">
             <div>
-              <h4 className="text-base font-semibold text-gray-100">AI에게 연결 상태 물어보기</h4>
-              <p className="text-[14px] text-gray-500 mt-1 max-w-3xl">서비스가 실제로 사용 가능한지, 문제가 있다면 무엇을 해야 하는지 같은 Connection 상태를 기준으로 설명합니다. 비밀값이나 기술 이름은 대화에 포함하지 않습니다.</p>
+              <h4 className="text-base font-semibold text-gray-100">{t('credentialConnections.askAiAboutConnections')}</h4>
+              <p className="text-[14px] text-gray-500 mt-1 max-w-3xl">{t('credentialConnections.askAiDescription')}</p>
             </div>
             <div className="flex flex-wrap gap-2">
-              <button onClick={() => copyText(aiCredentialPrompt)} className="px-3 py-1.5 text-[14px] rounded-md border border-primary-500/40 text-primary-300 hover:bg-primary-500/10 transition-colors">진단 프롬프트 복사</button>
-              <button onClick={() => copyText(diagnosticCopyText)} className="px-3 py-1.5 text-[14px] rounded-md border border-surface-700 text-gray-300 hover:bg-surface-800 transition-colors">화면 상태 전체 복사</button>
+              <button onClick={() => copyText(aiCredentialPrompt)} className="px-3 py-1.5 text-[14px] rounded-md border border-primary-500/40 text-primary-300 hover:bg-primary-500/10 transition-colors">{t('credentialConnections.copyDiagnosticPrompt')}</button>
+              <button onClick={() => copyText(diagnosticCopyText)} className="px-3 py-1.5 text-[14px] rounded-md border border-surface-700 text-gray-300 hover:bg-surface-800 transition-colors">{t('credentialConnections.copyScreenStatus')}</button>
             </div>
           </div>
           <pre className="whitespace-pre-wrap rounded-lg border border-surface-800 bg-surface-950/70 p-3 text-[14px] text-gray-300">{aiCredentialPrompt}</pre>
           <details className="text-[14px] text-gray-500">
-            <summary className="cursor-pointer text-gray-400">새 API 키를 추가할 때 쓸 프롬프트</summary>
+            <summary className="cursor-pointer text-gray-400">{t('credentialConnections.addApiKeyPrompt')}</summary>
             <div className="mt-2 flex flex-col gap-2">
               <pre className="whitespace-pre-wrap rounded-lg border border-surface-800 bg-surface-950/70 p-3 text-[14px] text-gray-300">{addCredentialPrompt}</pre>
-              <button onClick={() => copyText(addCredentialPrompt)} className="self-start px-3 py-1.5 text-[14px] rounded-md border border-surface-700 text-gray-300 hover:bg-surface-800 transition-colors">추가 프롬프트 복사</button>
+              <button onClick={() => copyText(addCredentialPrompt)} className="self-start px-3 py-1.5 text-[14px] rounded-md border border-surface-700 text-gray-300 hover:bg-surface-800 transition-colors">{t('credentialConnections.copyAddPrompt')}</button>
             </div>
           </details>
         </section>
       ) : personalSection === 'connections' ? (
         <details className="rounded-xl border border-surface-800 bg-surface-950/30 px-4 py-3 text-[14px] text-gray-500">
-          <summary className="cursor-pointer text-gray-300 font-medium">AI에게 연결 상태 물어보기</summary>
+          <summary className="cursor-pointer text-gray-300 font-medium">{t('credentialConnections.askAiAboutConnections')}</summary>
           <div className="mt-3 space-y-3">
-            <p>아래 내용에는 secret 값이 포함되지 않습니다.</p>
+            <p>{t('credentialConnections.noSecretsIncluded')}</p>
             <pre className="whitespace-pre-wrap rounded-lg border border-surface-800 bg-surface-950/70 p-3 text-[14px] text-gray-300">{aiCredentialPrompt}</pre>
-            <button onClick={() => copyText(aiCredentialPrompt)} className="px-3 py-1.5 rounded-md border border-primary-500/40 text-primary-300 hover:bg-primary-500/10 transition-colors">진단 문장 복사</button>
+            <button onClick={() => copyText(aiCredentialPrompt)} className="px-3 py-1.5 rounded-md border border-primary-500/40 text-primary-300 hover:bg-primary-500/10 transition-colors">{t('credentialConnections.copyDiagnosticText')}</button>
           </div>
         </details>
       ) : null}
@@ -2833,33 +2840,33 @@ function CredentialVaultManagement({ token, mode }: { token?: string | null; mod
       {(!isPersonalCredentialMode || personalSection === 'connections') && <div className="rounded-xl border border-surface-800 bg-surface-950/40 px-4 py-3 text-[14px] text-gray-400 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-2">
         <div>
           {isPersonalCredentialMode
-            ? `내 연결 ${credentials.length}개 · 프로젝트 변경 ${pendingAccessPolicies.length}개`
-            : `등록된 연결 ${adminOverview?.summary.connections ?? credentials.length}개 · 모든 프로젝트 기본 연결 ${adminOverview?.summary.defaultConnections ?? 0}개`}
-          {!isPersonalCredentialMode && ((adminOverview?.summary.needsAttention ?? warningCredentials) > 0 ? ` · 실제 점검 필요 ${adminOverview?.summary.needsAttention ?? warningCredentials}개` : ' · 지금 조치할 항목 없음')}
+            ? t('credentialConnections.personalSummary', { connections: credentials.length, changes: pendingAccessPolicies.length })
+            : t('credentialConnections.adminSummary', { connections: adminOverview?.summary.connections ?? credentials.length, defaults: adminOverview?.summary.defaultConnections ?? 0 })}
+          {!isPersonalCredentialMode && ((adminOverview?.summary.needsAttention ?? warningCredentials) > 0 ? t('credentialConnections.needsAttentionSummary', { count: adminOverview?.summary.needsAttention ?? warningCredentials }) : t('credentialConnections.noActionNeeded'))}
         </div>
-        <div className="text-gray-600">{isPersonalCredentialMode ? '값 비공개 · 내 프로젝트에만 연결' : `외부 동기화 대상 ${targets.length}개${staleTargets ? ` · 문제 ${staleTargets}개` : ''}`}</div>
+        <div className="text-gray-600">{isPersonalCredentialMode ? t('credentialConnections.privateProjectOnly') : t('credentialConnections.externalSyncSummary', { count: targets.length, problems: staleTargets || 0 })}</div>
       </div>}
 
       {adminOverview && !isPersonalCredentialMode && (
         <section className="rounded-xl border border-surface-700 bg-surface-950/30 overflow-hidden">
           <div className="px-4 py-3 border-b border-surface-800 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-2">
             <div>
-              <h4 className="text-base font-semibold text-gray-200">서비스 연결</h4>
-              <p className="text-[14px] text-gray-500 mt-1">서비스가 어디에서 쓰이고 실제로 사용할 수 있는지 확인합니다. 기술 설정은 고급 관리에서만 다룹니다.</p>
+              <h4 className="text-base font-semibold text-gray-200">{t('credentialConnections.serviceConnections')}</h4>
+              <p className="text-[14px] text-gray-500 mt-1">{t('credentialConnections.serviceConnectionsDescription')}</p>
             </div>
             <div className="text-[13px] text-gray-500">
-              연결됨 {adminOverview.connections.filter(c => c.stats.connectedProjects > 0).length}개 · 미연결 {adminOverview.connections.filter(c => c.stats.connectedProjects === 0).length}개
+              {t('credentialConnections.connectedSummary', { connected: adminOverview.connections.filter(c => c.stats.connectedProjects > 0).length, disconnected: adminOverview.connections.filter(c => c.stats.connectedProjects === 0).length })}
             </div>
           </div>
           <div className="hidden overflow-x-auto md:block">
             <table className="w-full min-w-[920px]">
               <thead>
                 <tr className="bg-surface-800/60 text-[13px] text-surface-500 uppercase tracking-wider">
-                  <th className="px-4 py-2.5 text-left font-semibold">서비스</th>
-                  <th className="px-4 py-2.5 text-left font-semibold">상태</th>
-                  <th className="px-4 py-2.5 text-left font-semibold">프로젝트</th>
-                  <th className="px-4 py-2.5 text-left font-semibold">실제 인증</th>
-                  <th className="w-36 px-4 py-2.5 text-right font-semibold">다음 행동</th>
+                  <th className="px-4 py-2.5 text-left font-semibold">{t('credentialConnections.service')}</th>
+                  <th className="px-4 py-2.5 text-left font-semibold">{t('credentialConnections.status')}</th>
+                  <th className="px-4 py-2.5 text-left font-semibold">{t('credentialConnections.projects')}</th>
+                  <th className="px-4 py-2.5 text-left font-semibold">{t('credentialConnections.providerAuth')}</th>
+                  <th className="w-36 px-4 py-2.5 text-right font-semibold">{t('credentialConnections.nextAction')}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-surface-800/60">
@@ -2876,14 +2883,14 @@ function CredentialVaultManagement({ token, mode }: { token?: string | null; mod
                         <span className={`tone-pill inline-flex whitespace-nowrap px-2 py-0.5 text-[13px] ${readiness.className}`}>{readiness.label}</span>
                       </td>
                       <td className="px-4 py-3 align-top">
-                        <div className="text-[14px] font-medium text-surface-300">{connection.defaultOn ? '전체 프로젝트' : connection.stats.connectedProjects > 0 ? `${connection.stats.connectedProjects}개 프로젝트` : '미연결'}</div>
-                        <div className="mt-1 text-[13px] text-surface-500">{connection.defaultOn ? '기본 사용' : connection.stats.connectedProjects > 0 ? `전체 ${connection.stats.totalProjects}개 중 일부` : '사용 중인 프로젝트 없음'}</div>
+                        <div className="text-[14px] font-medium text-surface-300">{connection.defaultOn ? t('credentialConnections.allProjects') : connection.stats.connectedProjects > 0 ? t('credentialConnections.projectCount', { count: connection.stats.connectedProjects }) : t('credentialConnections.notConnected')}</div>
+                        <div className="mt-1 text-[13px] text-surface-500">{connection.defaultOn ? t('credentialConnections.defaultUse') : connection.stats.connectedProjects > 0 ? t('credentialConnections.someOfTotalProjects', { count: connection.stats.totalProjects }) : t('credentialConnections.noProjectsUsing')}</div>
                       </td>
                       <td className="px-4 py-3 align-top">
                         <div className={`text-[14px] font-medium ${connection.readiness.providerHealth.status === 'ready' ? 'tone-success tone-text' : 'text-surface-400'}`}>
-                          {connection.readiness.providerHealth.status === 'ready' ? '확인됨' : '확인 안 됨'}
+                          {connection.readiness.providerHealth.status === 'ready' ? t('credentialConnections.verified') : t('credentialConnections.unverified')}
                         </div>
-                        <div className="mt-1 text-[13px] text-surface-500">{connection.readiness.providerHealth.reasonCode || (connection.readiness.providerHealth.checkedAt ? `마지막 확인 ${new Date(connection.readiness.providerHealth.checkedAt).toLocaleString()}` : '아직 실제 인증을 확인하지 않았습니다.')}</div>
+                        <div className="mt-1 text-[13px] text-surface-500">{connection.readiness.providerHealth.reasonCode || (connection.readiness.providerHealth.checkedAt ? t('credentialConnections.lastChecked', { date: new Date(connection.readiness.providerHealth.checkedAt).toLocaleString() }) : t('credentialConnections.authNotChecked'))}</div>
                       </td>
                       <td className="px-4 py-3 text-right align-top">
                         <button
@@ -2915,12 +2922,12 @@ function CredentialVaultManagement({ token, mode }: { token?: string | null; mod
                   </div>
                   <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-[13px]">
                     <div>
-                      <dt className="text-surface-500">프로젝트</dt>
-                      <dd className="mt-0.5 text-[14px] font-medium text-surface-300">{connection.defaultOn ? '전체 프로젝트' : connection.stats.connectedProjects > 0 ? `${connection.stats.connectedProjects}개 사용` : '미연결'}</dd>
+                      <dt className="text-surface-500">{t('credentialConnections.projects')}</dt>
+                      <dd className="mt-0.5 text-[14px] font-medium text-surface-300">{connection.defaultOn ? t('credentialConnections.allProjects') : connection.stats.connectedProjects > 0 ? t('credentialConnections.projectsInUse', { count: connection.stats.connectedProjects }) : t('credentialConnections.notConnected')}</dd>
                     </div>
                     <div>
-                      <dt className="text-surface-500">실제 인증</dt>
-                      <dd className={`mt-0.5 text-[14px] font-medium ${connection.readiness.providerHealth.status === 'ready' ? 'tone-success tone-text' : 'text-surface-400'}`}>{connection.readiness.providerHealth.status === 'ready' ? '확인됨' : '확인 안 됨'}</dd>
+                      <dt className="text-surface-500">{t('credentialConnections.providerAuth')}</dt>
+                      <dd className={`mt-0.5 text-[14px] font-medium ${connection.readiness.providerHealth.status === 'ready' ? 'tone-success tone-text' : 'text-surface-400'}`}>{connection.readiness.providerHealth.status === 'ready' ? t('credentialConnections.verified') : t('credentialConnections.unverified')}</dd>
                     </div>
                   </dl>
                   <div className="flex items-center gap-2">
@@ -2943,7 +2950,7 @@ function CredentialVaultManagement({ token, mode }: { token?: string | null; mod
         <div className="fixed inset-0 z-50 flex justify-end" role="presentation">
           <button
             type="button"
-            aria-label="Connection 관리 닫기"
+            aria-label={t('credentialConnections.closeManagement')}
             className="absolute inset-0 bg-surface-950/70"
             onClick={closeConnectionDetail}
           />
@@ -2955,18 +2962,18 @@ function CredentialVaultManagement({ token, mode }: { token?: string | null; mod
           >
             <header className="flex items-start justify-between gap-4 border-b border-surface-800 px-4 py-4 md:px-5">
               <div className="min-w-0">
-                <div className="text-[13px] font-semibold uppercase tracking-[0.16em] text-primary-300">Connection 관리</div>
+                <div className="text-[13px] font-semibold uppercase tracking-[0.16em] text-primary-300">{t('credentialConnections.managementTab')}</div>
                 <h4 id="connection-detail-title" className="mt-1 truncate text-xl font-semibold text-surface-100">{selectedConnection.displayName}</h4>
                 <p className="mt-1 text-[14px] leading-relaxed text-surface-400">{connectionPurpose(selectedConnection)}</p>
               </div>
-              <button type="button" onClick={closeConnectionDetail} className="min-h-10 shrink-0 rounded-md border border-surface-700 px-3 text-[14px] text-surface-300 hover:bg-surface-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400">닫기</button>
+              <button type="button" onClick={closeConnectionDetail} className="min-h-10 shrink-0 rounded-md border border-surface-700 px-3 text-[14px] text-surface-300 hover:bg-surface-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400">{t('credentialConnections.close')}</button>
             </header>
 
-            <nav aria-label="Connection 관리 영역" className="flex overflow-x-auto border-b border-surface-800 px-2 md:px-3">
+            <nav aria-label={t('credentialConnections.managementTab')} className="flex overflow-x-auto border-b border-surface-800 px-2 md:px-3">
               {([
-                ['management', 'Connection 관리'],
-                ['agents', '허용 Agent'],
-                ['advanced', '고급'],
+                ['management', t('credentialConnections.managementTab')],
+                ['agents', t('credentialConnections.agentsTab')],
+                ['advanced', t('credentialConnections.advancedTab')],
               ] as const).map(([tab, label]) => (
                 <button
                   key={tab}
@@ -2989,17 +2996,17 @@ function CredentialVaultManagement({ token, mode }: { token?: string | null; mod
                     <p className="mt-3 text-[14px] leading-relaxed text-surface-300">{connectionReadinessStyle(selectedConnection).description}</p>
                   </section>
                   <dl className="divide-y divide-surface-800 border-y border-surface-800">
-                    <div className="flex justify-between gap-4 py-3"><dt className="text-[14px] text-surface-400">프로젝트 연결</dt><dd className="text-right text-[14px] font-medium text-surface-200">{selectedConnection.stats.connectedProjects}개 사용 중</dd></div>
-                    <div className="flex justify-between gap-4 py-3"><dt className="text-[14px] text-surface-400">실제 인증</dt><dd className="text-right text-[14px] font-medium text-surface-200">{selectedConnection.readiness.providerHealth.status === 'ready' ? '확인됨' : selectedConnection.readiness.providerHealth.status === 'unsupported' ? '자동 확인 미지원' : '확인 필요'}</dd></div>
-                    <div className="flex justify-between gap-4 py-3"><dt className="text-[14px] text-surface-400">차단·점검</dt><dd className="text-right text-[14px] font-medium text-surface-200">차단 {selectedConnection.stats.blockedProjects} · 점검 {selectedConnection.stats.attentionProjects}</dd></div>
+                    <div className="flex justify-between gap-4 py-3"><dt className="text-[14px] text-surface-400">{t('credentialConnections.projectAccess')}</dt><dd className="text-right text-[14px] font-medium text-surface-200">{t('credentialConnections.projectsInUse', { count: selectedConnection.stats.connectedProjects })}</dd></div>
+                    <div className="flex justify-between gap-4 py-3"><dt className="text-[14px] text-surface-400">{t('credentialConnections.providerAuth')}</dt><dd className="text-right text-[14px] font-medium text-surface-200">{selectedConnection.readiness.providerHealth.status === 'ready' ? t('credentialConnections.verified') : selectedConnection.readiness.providerHealth.status === 'unsupported' ? t('credentialConnections.automaticCheckUnsupported') : t('credentialConnections.verificationNeeded')}</dd></div>
+                    <div className="flex justify-between gap-4 py-3"><dt className="text-[14px] text-surface-400">{t('credentialConnections.blockedAttention')}</dt><dd className="text-right text-[14px] font-medium text-surface-200">{t('credentialConnections.blockedAttentionCounts', { blocked: selectedConnection.stats.blockedProjects, attention: selectedConnection.stats.attentionProjects })}</dd></div>
                   </dl>
-                  {selectedConnection.source === 'credential' && <section className="space-y-3 rounded-lg border border-surface-700 bg-surface-900 p-4"><div><h5 className="text-base font-semibold text-surface-100">기본 관리</h5><p className="mt-1 text-[14px] text-surface-400">이름 변경, 계정 다시 연결, 안전한 연결 끊기와 복구를 관리합니다.</p></div><label className="block text-[13px] font-medium text-surface-400">Connection 이름<input value={connectionDisplayNameDraft} onChange={event => setConnectionDisplayNameDraft(event.target.value)} className="mt-2 min-h-11 w-full rounded-md border border-surface-700 bg-surface-950 px-3 text-[14px] text-surface-100 outline-none focus-visible:ring-2 focus-visible:ring-primary-400" /></label><div className="flex flex-wrap gap-2"><button type="button" disabled={connectionLifecycleBusy || connectionDisplayNameDraft.trim() === selectedConnection.displayName || connectionDisplayNameDraft.trim().length < 2} onClick={() => void updateOrganizationConnection({ displayName: connectionDisplayNameDraft.trim() })} className="min-h-10 rounded-md border border-surface-700 px-3 text-[13px] font-medium text-surface-200 hover:bg-surface-800 disabled:cursor-not-allowed disabled:text-surface-600">이름 저장</button>{selectedConnection.credentials.some(credential => credential.allowedActions?.replacementAction === 'reauth' && credential.provider === 'google') && <button type="button" disabled={saving || !selectedConnection.enabled} onClick={() => void connectOrganizationGoogle(selectedConnection.credentialId)} className="tone-accent tone-action min-h-10 rounded-md px-3 text-[13px] font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400 disabled:bg-surface-800 disabled:text-surface-500">Google 계정 다시 연결</button>}{selectedConnection.enabled ? <button type="button" disabled={connectionLifecycleBusy} onClick={() => void updateOrganizationConnection({ lifecycle: 'disconnect' })} className="tone-action tone-danger min-h-10 rounded-md px-3 text-[13px] font-semibold disabled:cursor-not-allowed">안전하게 연결 끊기</button> : <button type="button" disabled={connectionLifecycleBusy} onClick={() => void updateOrganizationConnection({ lifecycle: 'restore' })} className="tone-action tone-success min-h-10 rounded-md px-3 text-[13px] font-semibold disabled:cursor-not-allowed">연결 복구</button>}</div></section>}
+                  {selectedConnection.source === 'credential' && <section className="space-y-3 rounded-lg border border-surface-700 bg-surface-900 p-4"><div><h5 className="text-base font-semibold text-surface-100">{t('credentialConnections.basicManagement')}</h5><p className="mt-1 text-[14px] text-surface-400">{t('credentialConnections.basicManagementDescription')}</p></div><label className="block text-[13px] font-medium text-surface-400">{t('credentialConnections.connectionName')}<input value={connectionDisplayNameDraft} onChange={event => setConnectionDisplayNameDraft(event.target.value)} className="mt-2 min-h-11 w-full rounded-md border border-surface-700 bg-surface-950 px-3 text-[14px] text-surface-100 outline-none focus-visible:ring-2 focus-visible:ring-primary-400" /></label><div className="flex flex-wrap gap-2"><button type="button" disabled={connectionLifecycleBusy || connectionDisplayNameDraft.trim() === selectedConnection.displayName || connectionDisplayNameDraft.trim().length < 2} onClick={() => void updateOrganizationConnection({ displayName: connectionDisplayNameDraft.trim() })} className="min-h-10 rounded-md border border-surface-700 px-3 text-[13px] font-medium text-surface-200 hover:bg-surface-800 disabled:cursor-not-allowed disabled:text-surface-600">{t('credentialConnections.saveName')}</button>{selectedConnection.credentials.some(credential => credential.allowedActions?.replacementAction === 'reauth' && credential.provider === 'google') && <button type="button" disabled={saving || !selectedConnection.enabled} onClick={() => void connectOrganizationGoogle(selectedConnection.credentialId)} className="tone-accent tone-action min-h-10 rounded-md px-3 text-[13px] font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400 disabled:bg-surface-800 disabled:text-surface-500">{t('credentialConnections.reconnectGoogle')}</button>}{selectedConnection.enabled ? <button type="button" disabled={connectionLifecycleBusy} onClick={() => void updateOrganizationConnection({ lifecycle: 'disconnect' })} className="tone-action tone-danger min-h-10 rounded-md px-3 text-[13px] font-semibold disabled:cursor-not-allowed">{t('credentialConnections.disconnectSafely')}</button> : <button type="button" disabled={connectionLifecycleBusy} onClick={() => void updateOrganizationConnection({ lifecycle: 'restore' })} className="tone-action tone-success min-h-10 rounded-md px-3 text-[13px] font-semibold disabled:cursor-not-allowed">{t('credentialConnections.restoreConnection')}</button>}</div></section>}
                 </div>
               )}
 
               {connectionDetailTab === 'advanced' && (
                 <div className="space-y-4">
-                  <div><h5 className="text-base font-semibold text-surface-100">고급 Credential 관리</h5><p className="mt-1 text-[14px] text-surface-400">원문·구조·기술 이름처럼 일반 연결 관리에는 필요하지 않은 운영자 기능입니다.</p></div>
+                  <div><h5 className="text-base font-semibold text-surface-100">{t('credentialConnections.advancedCredentialManagement')}</h5><p className="mt-1 text-[14px] text-surface-400">원문·구조·기술 이름처럼 일반 연결 관리에는 필요하지 않은 운영자 기능입니다.</p></div>
                   <div className="divide-y divide-surface-800 border-y border-surface-800">
                     {selectedConnection.credentials.map(credential => (
                       <div key={credential.id} className="py-4">
@@ -3021,8 +3028,8 @@ function CredentialVaultManagement({ token, mode }: { token?: string | null; mod
                   </div>
                   {credentialRotateTarget && (
                     <section className="rounded-lg border border-surface-700 bg-surface-900 p-4" aria-label="Credential 교체">
-                      <div className="flex items-start justify-between gap-3"><div><h6 className="text-[14px] font-semibold text-surface-100">{credentialRotateTarget.displayName} 교체</h6><p className="mt-1 text-[13px] text-surface-400">기존 Credential ID와 프로젝트 연결을 유지하고 저장값만 교체합니다.</p></div><button type="button" onClick={() => { setCredentialRotateTarget(null); setCredentialRotateCandidate(''); }} className="text-[13px] text-surface-400 hover:text-surface-200">취소</button></div>
-                      <input type="password" autoComplete="off" value={credentialRotateCandidate} onChange={event => setCredentialRotateCandidate(event.target.value)} placeholder="새 Credential 값" className="mt-3 min-h-11 w-full rounded-md border border-surface-700 bg-surface-950 px-3 text-[14px] text-surface-100 outline-none focus:border-primary-400" />
+                      <div className="flex items-start justify-between gap-3"><div><h6 className="text-[14px] font-semibold text-surface-100">{credentialRotateTarget.displayName} 교체</h6><p className="mt-1 text-[13px] text-surface-400">기존 Credential ID와 프로젝트 연결을 유지하고 저장값만 교체합니다.</p></div><button type="button" onClick={() => { setCredentialRotateTarget(null); setCredentialRotateCandidate(''); }} className="text-[13px] text-surface-400 hover:text-surface-200">{t('common:cancel')}</button></div>
+                      <input type="password" autoComplete="off" value={credentialRotateCandidate} onChange={event => setCredentialRotateCandidate(event.target.value)} placeholder={'새 Credential 값'} className="mt-3 min-h-11 w-full rounded-md border border-surface-700 bg-surface-950 px-3 text-[14px] text-surface-100 outline-none focus:border-primary-400" />
                       <button type="button" disabled={credentialSecureBusy || !credentialRotateCandidate} onClick={rotateCredential} className="mt-3 min-h-10 rounded-md bg-primary-600 px-4 text-[14px] font-medium text-white hover:bg-primary-500 disabled:cursor-not-allowed disabled:opacity-50">{credentialSecureBusy ? '확인 중…' : '영향 확인 후 교체'}</button>
                     </section>
                   )}
@@ -3031,7 +3038,7 @@ function CredentialVaultManagement({ token, mode }: { token?: string | null; mod
 
               {connectionDetailTab === 'agents' && (
                 <div className="space-y-3">
-                  <div><h5 className="text-base font-semibold text-surface-100">허용 Agent</h5><p className="mt-1 text-[14px] text-surface-400">이 Connection을 사용할 수 있는 Agent를 관리합니다. 변경 시 영향 preview와 Admin 승인을 거칩니다.</p></div>
+                  <div><h5 className="text-base font-semibold text-surface-100">{t('credentialConnections.manageAllowedAgents')}</h5><p className="mt-1 text-[14px] text-surface-400">{t('credentialConnections.agentConnectionDescription')}</p></div>
                   <div className="divide-y divide-surface-800 border-y border-surface-800">
                     {[...selectedConnection.projects].sort((a, b) => {
                       const aOn = ['connected', 'inherited'].includes(a.status) ? 0 : 1;
@@ -3039,12 +3046,13 @@ function CredentialVaultManagement({ token, mode }: { token?: string | null; mod
                       return aOn - bOn || a.projectName.localeCompare(b.projectName);
                     }).map(project => {
                       const connected = ['connected', 'inherited'].includes(project.status);
+                      const dedicatedElsewhere = selectedConnection.connectionScope === 'agent_dedicated' && selectedConnection.dedicatedProjectId !== project.projectId;
                       const key = `${selectedConnection.id}:${project.projectId}`;
                       const saving = connectionSavingKey === key;
                       const rowError = connectionProjectErrors[key];
                       return <div key={key} className="flex min-h-14 items-start justify-between gap-3 py-2">
-                        <div className="min-w-0 pt-1"><div className="truncate text-[14px] font-medium text-surface-200">{project.projectName}</div><div className="truncate text-[13px] text-surface-400">{connected ? '이 프로젝트에서 사용 중' : plainConnectionStatus(project.status)}</div>{rowError && <div role="alert" className="mt-1 text-[13px] leading-relaxed tone-danger tone-text">연결 실패: {rowError}</div>}</div>
-                        <div className="flex shrink-0 flex-col gap-2 sm:flex-row"><button disabled={saving || !selectedConnection.enabled} onClick={() => updateConnectionProject(selectedConnection, project.projectId, connected ? 'deny' : 'allow')} className={`tone-action min-h-10 rounded-md px-3 text-[13px] transition-colors disabled:cursor-not-allowed ${connected ? 'tone-danger' : 'tone-success'}`}>{saving ? '저장 중…' : rowError && !connected ? '다시 시도' : connected ? '해제' : '연결'}</button></div>
+                        <div className="min-w-0 pt-1"><div className="truncate text-[14px] font-medium text-surface-200">{project.projectName}</div><div className="truncate text-[13px] text-surface-400">{dedicatedElsewhere ? t('credentialConnections.dedicatedCredential') : connected ? t('credentialConnections.connectedHere') : plainConnectionStatus(project.status)}</div>{rowError && <div role="alert" className="mt-1 text-[13px] leading-relaxed tone-danger tone-text">{t('credentialConnections.connectionFailed', { error: rowError })}</div>}</div>
+                        <div className="flex shrink-0 flex-col gap-2 sm:flex-row"><button disabled={saving || !selectedConnection.enabled || dedicatedElsewhere} onClick={() => updateConnectionProject(selectedConnection, project.projectId, connected ? 'deny' : 'allow')} className={`tone-action min-h-10 rounded-md px-3 text-[13px] transition-colors disabled:cursor-not-allowed ${connected ? 'tone-danger' : 'tone-success'}`}>{dedicatedElsewhere ? t('credentialConnections.agentDedicated') : saving ? t('credentialConnections.saving') : rowError && !connected ? t('credentialConnections.retry') : connected ? t('credentialConnections.disconnect') : t('credentialConnections.connect')}</button></div>
                       </div>;
                     })}
                   </div>
@@ -3053,12 +3061,12 @@ function CredentialVaultManagement({ token, mode }: { token?: string | null; mod
 
               {connectionDetailTab === 'advanced' && (
                 <div className="space-y-4">
-                  <div><h5 className="text-base font-semibold text-surface-100">진단 상태</h5><p className="mt-1 text-[14px] text-surface-400">저장·프로젝트 권한과 실제 Provider 인증은 서로 다른 상태입니다.</p></div>
+                  <div><h5 className="text-base font-semibold text-surface-100">{t('credentialConnections.connectionDiagnostic')}</h5><p className="mt-1 text-[14px] text-surface-400">{t('credentialConnections.diagnosticDescription')}</p></div>
                   <dl className="divide-y divide-surface-800 border-y border-surface-800">
                     <div className="py-3"><dt className="text-[13px] text-surface-400">Project access</dt><dd className="mt-1 text-[14px] text-surface-200">{selectedConnection.readiness.access.status}</dd></div>
                     <div className="py-3"><dt className="text-[13px] text-surface-400">Materialization</dt><dd className="mt-1 text-[14px] text-surface-200">{selectedConnection.readiness.materialization.status}</dd></div>
                     <div className="py-3"><dt className="text-[13px] text-surface-400">Provider health</dt><dd className="mt-1 text-[14px] text-surface-200">{selectedConnection.readiness.providerHealth.status}</dd></div>
-                    <div className="py-3"><dt className="text-[13px] text-surface-400">Reason code</dt><dd className="mt-1 break-all font-mono text-[13px] text-surface-200">{selectedConnection.readiness.providerHealth.reasonCode || '확인 근거 없음'}</dd></div>
+                    <div className="py-3"><dt className="text-[13px] text-surface-400">Reason code</dt><dd className="mt-1 break-all font-mono text-[13px] text-surface-200">{selectedConnection.readiness.providerHealth.reasonCode || t('credentialConnections.noVerificationEvidence')}</dd></div>
                   </dl>
                 </div>
               )}
@@ -3071,27 +3079,27 @@ function CredentialVaultManagement({ token, mode }: { token?: string | null; mod
         <section className="rounded-xl border border-surface-700 bg-surface-950/30 overflow-hidden">
           <div className="px-4 py-3 border-b border-surface-800 space-y-3">
             <div>
-              <h4 className="text-base font-semibold text-gray-200">내 Credential을 사용할 수 있는 AI 작업 공간</h4>
-              <p className="text-[14px] text-gray-500 mt-1">프로젝트를 허용하면 그 프로젝트의 Primary AI 팀원과 Helper Agent가 <strong className="text-gray-300 font-medium">내 요청을 처리할 때만</strong> 이 Credential을 사용할 수 있습니다.</p>
+              <h4 className="text-base font-semibold text-gray-200">{t('credentialConnections.personalWorkspacesTitle')}</h4>
+              <p className="text-[14px] text-gray-500 mt-1">{t('credentialConnections.personalWorkspacesDescription')}</p>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-2 text-[13px]">
               <div className="rounded-lg border border-surface-800 bg-surface-950/50 px-3 py-2">
-                <div className="text-gray-500">소유자</div>
-                <div className="text-gray-200 mt-1">나만</div>
+                <div className="text-gray-500">{t('credentialConnections.owner')}</div>
+                <div className="text-gray-200 mt-1">{t('credentialConnections.onlyMe')}</div>
               </div>
               <div className="rounded-lg border border-surface-800 bg-surface-950/50 px-3 py-2">
-                <div className="text-gray-500">사용 가능한 AI</div>
-                <div className="text-gray-200 mt-1">허용한 프로젝트의 팀원·Helper</div>
+                <div className="text-gray-500">{t('credentialConnections.availableAi')}</div>
+                <div className="text-gray-200 mt-1">{t('credentialConnections.allowedProjectAgents')}</div>
               </div>
               <div className="rounded-lg border border-surface-800 bg-surface-950/50 px-3 py-2">
-                <div className="text-gray-500">사용 조건</div>
-                <div className="text-gray-200 mt-1">내가 시작한 실행에서만</div>
+                <div className="text-gray-500">{t('credentialConnections.usageCondition')}</div>
+                <div className="text-gray-200 mt-1">{t('credentialConnections.onlyRunsIStart')}</div>
               </div>
             </div>
-            <p className="text-[12px] text-gray-600">프로젝트의 다른 구성원, 다른 사용자의 세션, 외부에 배포된 AI Service에는 이 개인 Credential이 자동으로 전달되지 않습니다. 실제 값은 화면과 대화에 표시되지 않습니다.</p>
+            <p className="text-[12px] text-gray-600">{t('credentialConnections.personalCredentialBoundary')}</p>
           </div>
           <div className="divide-y divide-surface-800">
-            {credentials.length === 0 && <div className="px-4 py-8 text-center text-[14px] text-gray-500">먼저 ‘연결과 상태’에서 개인 API 키나 로그인 계정을 추가하세요.</div>}
+            {credentials.length === 0 && <div className="px-4 py-8 text-center text-[14px] text-gray-500">{t('credentialConnections.addPersonalConnectionFirst')}</div>}
             {credentials.map(credential => {
               const stats = credentialAccessStats(credential);
               return (
@@ -3101,7 +3109,7 @@ function CredentialVaultManagement({ token, mode }: { token?: string | null; mod
                       <div className="text-base font-semibold text-gray-100">{credential.display_name || credential.id}</div>
                       <div className="text-[13px] text-gray-500 font-mono mt-1">{credential.default_env_name || credential.secret_name} · {friendlyScope(credential.scope)}</div>
                     </div>
-                    <span className="tone-pill tone-success px-2 py-0.5 text-[12px] self-start">연결 {stats.allowed}/{stats.total}</span>
+                    <span className="tone-pill tone-success px-2 py-0.5 text-[12px] self-start">{t('credentialConnections.accessCount', { allowed: stats.allowed, total: stats.total })}</span>
                   </div>
                   <div className="grid max-h-72 grid-cols-1 gap-2 overflow-y-auto pr-1 md:grid-cols-2 xl:grid-cols-3">
                     {projects.map(project => {
@@ -3115,7 +3123,7 @@ function CredentialVaultManagement({ token, mode }: { token?: string | null; mod
                           className={`text-left rounded-lg border px-3 py-2 transition-colors ${allowed ? 'tone-success tone-bg-soft tone-border' : 'border-surface-800 bg-surface-950/40 hover:border-surface-600'}`}
                         >
                           <div className="text-[14px] font-medium text-gray-200 truncate">{project.name}</div>
-                          <div className={`mt-1 text-[12px] ${allowed ? 'tone-text opacity-70' : 'text-gray-600'}`}>{label === 'Allowed' ? '내 AI 실행에서 사용 가능' : label}</div>
+                          <div className={`mt-1 text-[12px] ${allowed ? 'tone-text opacity-70' : 'text-gray-600'}`}>{label === 'Allowed' ? t('credentialConnections.availableInMyRuns') : label}</div>
                         </button>
                       );
                     })}
@@ -3129,10 +3137,10 @@ function CredentialVaultManagement({ token, mode }: { token?: string | null; mod
 
       {hasPendingAccessChanges && (
         <div className="tone-card tone-warning rounded-lg px-3 py-2 text-[14px] flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-          <span>저장 전 변경 {pendingAccessPolicies.length}개가 있습니다. 저장해야 실제 Runtime Box 권한에 반영됩니다.</span>
+          <span>{t('credentialConnections.pendingChanges', { count: pendingAccessPolicies.length })}</span>
           <span className="flex gap-2">
-            <button disabled={accessSaving} onClick={cancelAccessChanges} className="px-3 py-1.5 text-[14px] rounded-lg border border-surface-700 text-gray-300 hover:bg-surface-800 disabled:opacity-40 transition-colors">취소</button>
-            <button disabled={accessSaving} onClick={saveAccessChanges} className="px-3 py-1.5 text-[14px] rounded-lg bg-primary-600 text-white hover:bg-primary-500 disabled:opacity-40 transition-colors">{accessSaving ? '저장 중…' : '변경 저장'}</button>
+            <button disabled={accessSaving} onClick={cancelAccessChanges} className="px-3 py-1.5 text-[14px] rounded-lg border border-surface-700 text-gray-300 hover:bg-surface-800 disabled:opacity-40 transition-colors">{t('common:cancel')}</button>
+            <button disabled={accessSaving} onClick={saveAccessChanges} className="px-3 py-1.5 text-[14px] rounded-lg bg-primary-600 text-white hover:bg-primary-500 disabled:opacity-40 transition-colors">{accessSaving ? t('credentialConnections.saving') : t('credentialConnections.saveChanges')}</button>
           </span>
         </div>
       )}
@@ -3176,7 +3184,7 @@ function CredentialVaultManagement({ token, mode }: { token?: string | null; mod
                 <div className="space-y-2 min-w-0">
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="text-base font-semibold text-gray-100">{friendlyTargetType(t.target_type)}</span>
-                    <span className={`tone-pill px-2 py-0.5 text-[13px] ${hasProblem ? 'tone-warning' : 'tone-success'}`}>{hasProblem ? '확인 필요' : '동기화됨'}</span>
+                    <span className={`tone-pill px-2 py-0.5 text-[13px] ${hasProblem ? 'tone-warning' : 'tone-success'}`}>{hasProblem ? translate('needsReview') : translate('synced')}</span>
                   </div>
                   <div className="text-base text-gray-300"><span className="text-gray-500">키:</span> {t.display_name || t.credential_id}</div>
                   <div className="text-[14px] text-gray-500">
@@ -3204,7 +3212,7 @@ function CredentialVaultManagement({ token, mode }: { token?: string | null; mod
               <h4 className="text-base font-semibold text-gray-100">외부 연결 추가</h4>
               <p className="text-[14px] text-gray-500 mt-1">API key를 직접 저장하거나 OAuth 계정에 로그인해 연결할 수 있습니다.</p>
             </div>
-            <button onClick={() => setConnectionMode('none')} className="text-gray-500 hover:text-gray-300">닫기</button>
+            <button onClick={() => setConnectionMode('none')} className="text-gray-500 hover:text-gray-300">{t('credentialConnections.close')}</button>
           </div>
 
           {connectionMode === 'picker' && (
@@ -3436,7 +3444,7 @@ function CredentialVaultManagement({ token, mode }: { token?: string | null; mod
               <h4 className="text-base font-semibold text-gray-200">GitHub Actions Secret 동기화 추가</h4>
               <p className="text-[14px] text-gray-500 mt-1">필요할 때만 사용하세요. 선택한 Vault 키 값으로 GitHub 저장소의 Secret을 덮어쓸 수 있습니다.</p>
             </div>
-            <button onClick={() => setShowTargetForm(false)} className="text-gray-500 hover:text-gray-300">닫기</button>
+            <button onClick={() => setShowTargetForm(false)} className="text-gray-500 hover:text-gray-300">{t('credentialConnections.close')}</button>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <label><span className={labelClass}>연결 키</span><select className={inputClass} value={targetForm.credentialId} onChange={e => setTargetForm(f => ({ ...f, credentialId: e.target.value }))}>
@@ -3445,7 +3453,7 @@ function CredentialVaultManagement({ token, mode }: { token?: string | null; mod
             </select></label>
             <label><span className={labelClass}>GitHub secret 이름</span><input className={inputClass} value={targetForm.secretName} onChange={e => setTargetForm(f => ({ ...f, secretName: e.target.value }))} /></label>
             <label><span className={labelClass}>GitHub 저장소</span><input className={inputClass} value={targetForm.repo} onChange={e => setTargetForm(f => ({ ...f, repo: e.target.value }))} /></label>
-            <label><span className={labelClass}>프로젝트</span><select className={inputClass} value={targetForm.projectId} onChange={e => setTargetForm(f => ({ ...f, projectId: e.target.value }))}>
+            <label><span className={labelClass}>{t('credentialConnections.projects')}</span><select className={inputClass} value={targetForm.projectId} onChange={e => setTargetForm(f => ({ ...f, projectId: e.target.value }))}>
               <option value="">프로젝트 없음</option>
               {projects.map(project => <option key={project.id} value={project.id}>{project.name} · {project.id}</option>)}
             </select></label>
@@ -3570,11 +3578,12 @@ function SystemInfo() {
 // ───── AI Settings Management ─────
 
 function AiUsageManagement({ token }: { token?: string | null }) {
+  const { t } = useTranslation('admin');
   return (
     <div className="space-y-5">
       <div>
-        <h3 className="text-[15px] font-semibold text-gray-300 uppercase tracking-wider">사용량</h3>
-        <p className="text-[13px] text-gray-600 mt-1">이 VM의 AI 토큰 입출력, 추정 비용, 예산 잔량입니다. 전체 고객 예산 관리는 LiteLLM 관리 페이지에서 확인합니다.</p>
+        <h3 className="text-[15px] font-semibold text-gray-300 uppercase tracking-wider">{t('usage')}</h3>
+        <p className="text-[13px] text-gray-600 mt-1">{t('usageDescription')}</p>
       </div>
       <AiTokenUsageDashboard token={token} />
     </div>
@@ -3594,6 +3603,7 @@ interface AiComposerAdminSettings {
 }
 
 function AiComposerSettingsPanel({ token }: { token?: string | null }) {
+  const { t } = useTranslation('admin');
   const [settings, setSettings] = useState<AiComposerAdminSettings | null>(null);
   const [saving, setSaving] = useState(false);
   const authHeaders = useCallback(() => ({
@@ -3608,7 +3618,7 @@ function AiComposerSettingsPanel({ token }: { token?: string | null }) {
       .catch(() => {});
   }, [authHeaders]);
 
-  if (!settings) return <div className="text-sm text-surface-500">자동완성 설정을 불러오는 중…</div>;
+  if (!settings) return <div className="text-sm text-surface-500">{t('composerLoading')}</div>;
   const update = <K extends keyof AiComposerAdminSettings>(key: K, value: AiComposerAdminSettings[K]) => setSettings({ ...settings, [key]: value });
   const save = async () => {
     setSaving(true);
@@ -3633,21 +3643,21 @@ function AiComposerSettingsPanel({ token }: { token?: string | null }) {
   );
   return <div className="rounded-xl border border-surface-700 bg-surface-900/40 p-4 space-y-4">
     <div className="flex flex-wrap items-center gap-5">
-      <label className="flex items-center gap-2 text-sm text-surface-200"><input type="checkbox" checked={settings.enabled} onChange={event => update('enabled', event.target.checked)} /> 입력창 AI 자동완성</label>
-      <label className="flex items-center gap-2 text-sm text-surface-200"><input type="checkbox" checked={settings.emptyDraftEnabled} onChange={event => update('emptyDraftEnabled', event.target.checked)} /> 빈 입력창 추천</label>
-      <label className="flex items-center gap-2 text-sm text-surface-200"><input type="checkbox" checked={settings.inlineDraftEnabled} onChange={event => update('inlineDraftEnabled', event.target.checked)} /> 작성 중 문장 자동완성</label>
+      <label className="flex items-center gap-2 text-sm text-surface-200"><input type="checkbox" checked={settings.enabled} onChange={event => update('enabled', event.target.checked)} /> {t('composerInput')}</label>
+      <label className="flex items-center gap-2 text-sm text-surface-200"><input type="checkbox" checked={settings.emptyDraftEnabled} onChange={event => update('emptyDraftEnabled', event.target.checked)} /> {t('composerEmptyDraft')}</label>
+      <label className="flex items-center gap-2 text-sm text-surface-200"><input type="checkbox" checked={settings.inlineDraftEnabled} onChange={event => update('inlineDraftEnabled', event.target.checked)} /> {t('composerInlineDraft')}</label>
     </div>
     <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-      {numberField('입력 정지 시간', 'debounceMs', 'ms')}
-      {numberField('요청 최소 간격', 'minRequestIntervalMs', 'ms')}
-      {numberField('직전 답변 문맥', 'assistantContextChars', '자')}
-      {numberField('최소 입력 길이', 'minDraftLength', '자')}
-      {numberField('UI 응답 유효기간', 'responseMaxAgeMs', 'ms')}
-      {numberField('모델 timeout', 'modelTimeoutMs', 'ms')}
+      {numberField(t('composerDebounce'), 'debounceMs', 'ms')}
+      {numberField(t('composerMinInterval'), 'minRequestIntervalMs', 'ms')}
+      {numberField(t('composerContext'), 'assistantContextChars', 'chars')}
+      {numberField(t('composerMinLength'), 'minDraftLength', 'chars')}
+      {numberField(t('composerMaxAge'), 'responseMaxAgeMs', 'ms')}
+      {numberField(t('composerTimeout'), 'modelTimeoutMs', 'ms')}
     </div>
     <div className="flex items-center justify-between border-t border-surface-800 pt-3">
-      <p className="text-xs text-surface-500">저장 즉시 현재 탭에 반영되고, 다른 탭은 최대 30초 안에 갱신됩니다.</p>
-      <button onClick={save} disabled={saving} className="rounded-lg bg-primary-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50">{saving ? '저장 중…' : '설정 저장'}</button>
+      <p className="text-xs text-surface-500">{t('composerSavedHint')}</p>
+      <button onClick={save} disabled={saving} className="rounded-lg bg-primary-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50">{saving ? t('saving') : t('saveSettings')}</button>
     </div>
   </div>;
 }
@@ -3656,27 +3666,41 @@ function AiSettingsManagement({ token }: { token?: string | null }) {
   const { t } = useTranslation('admin');
   return (
     <div className="space-y-8">
+      <header className="max-w-3xl">
+        <h2 className="text-[20px] font-semibold text-surface-100">{t('aiOperationsTitle')}</h2>
+        <p className="mt-1 text-[14px] leading-6 text-surface-400">{t('aiOperationsIntro')}</p>
+      </header>
+
       <section>
-        <div className="mb-3">
-          <h3 className="text-[15px] font-semibold text-gray-300 uppercase tracking-wider">입력창 자동완성</h3>
-          <p className="text-[13px] text-gray-600 mt-1">재시작 없이 이 VM 전체의 mini 자동완성 동작을 조정합니다.</p>
-        </div>
-        <AiComposerSettingsPanel token={token} />
-      </section>
-      <section className="pt-6 border-t border-surface-800">
-        <div className="mb-3">
-          <h3 className="text-[15px] font-semibold text-gray-300 uppercase tracking-wider">{t('models')}</h3>
-          <p className="text-[13px] text-gray-600 mt-1">{t('modelsIntro')}</p>
-        </div>
         <ModelManagement token={token} />
       </section>
-      <section className="pt-6 border-t border-surface-800">
-        <div className="mb-3">
-          <h3 className="text-[15px] font-semibold text-gray-300 uppercase tracking-wider">{t('accounts')}</h3>
-          <p className="text-[13px] text-gray-600 mt-1">{t('accountsIntro')}</p>
-        </div>
-        <ClaudeAccountManagement token={token} />
-      </section>
+
+      <details className="group border-t border-surface-800 pt-6">
+        <summary className="flex cursor-pointer list-none items-start justify-between gap-4 rounded-lg py-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500">
+          <div>
+            <h3 className="text-[15px] font-semibold text-surface-200">{t('composerInput')}</h3>
+            <p className="mt-1 text-[13px] text-surface-500">{t('composerDescription')}</p>
+          </div>
+          <span className="text-[13px] text-primary-400 group-open:hidden">{t('showSettings')}</span>
+          <span className="hidden text-[13px] text-primary-400 group-open:inline">{t('hideSettings')}</span>
+        </summary>
+        <div className="mt-4"><AiComposerSettingsPanel token={token} /></div>
+      </details>
+
+      <details className="group border-t border-surface-800 pt-6">
+        <summary className="flex cursor-pointer list-none items-start justify-between gap-4 rounded-lg py-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500">
+          <div>
+            <div className="flex items-center gap-2">
+              <h3 className="text-[15px] font-semibold text-surface-200">{t('legacyExecution')}</h3>
+              <span className="rounded border border-amber-500/25 bg-amber-500/10 px-1.5 py-0.5 text-[11px] font-semibold text-amber-300">LEGACY</span>
+            </div>
+            <p className="mt-1 max-w-3xl text-[13px] leading-5 text-surface-500">{t('legacyExecutionIntro')}</p>
+          </div>
+          <span className="text-[13px] text-primary-400 group-open:hidden">{t('showSettings')}</span>
+          <span className="hidden text-[13px] text-primary-400 group-open:inline">{t('hideSettings')}</span>
+        </summary>
+        <div className="mt-4"><ClaudeAccountManagement token={token} /></div>
+      </details>
     </div>
   );
 }
@@ -3701,9 +3725,15 @@ interface ModelsData { claude: ClaudeModelEntry[]; pi: PiModelEntry[]; defaults?
 function ModelManagement({ token }: { token?: string | null }) {
   const { t } = useTranslation('admin');
   const [models, setModels] = useState<ModelsData | null>(null);
+  const [inferenceReadiness, setInferenceReadiness] = useState<{ status: 'ready' | 'setup_required' | 'invalid'; defaultModel: string; readyProviders: string[]; nextAction: string } | null>(null);
   const [saving, setSaving] = useState(false);
   const [addingPi, setAddingPi] = useState(false);
-  const [newPi, setNewPi] = useState({ provider: 'litellm-responses', modelId: '', name: '', badge: '' });
+  const [newPi, setNewPi] = useState({ provider: 'openrouter', modelId: '', name: '', badge: 'OR' });
+  const [wizardOpen, setWizardOpen] = useState(false);
+  const [wizard, setWizard] = useState({ provider: 'openrouter', apiKey: '', baseUrl: 'https://openrouter.ai/api/v1', modelId: 'openrouter/auto' });
+  const [wizardBusy, setWizardBusy] = useState<'probe' | 'apply' | null>(null);
+  const [wizardMessage, setWizardMessage] = useState<{ ok: boolean; text: string } | null>(null);
+  const [saveMessage, setSaveMessage] = useState<{ ok: boolean; text: string } | null>(null);
 
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (token) headers['Authorization'] = `Bearer ${token}`;
@@ -3715,15 +3745,51 @@ function ModelManagement({ token }: { token?: string | null }) {
       .catch(() => {});
   }, [token]);
 
-  useEffect(() => { fetchModels(); }, [fetchModels]);
+  useEffect(() => {
+    fetchModels();
+    fetch(`${API_BASE}/config`, { headers })
+      .then(r => r.ok ? r.json() : null)
+      .then(d => d?.inferenceReadiness && setInferenceReadiness(d.inferenceReadiness))
+      .catch(() => {});
+  }, [fetchModels]);
+
+  const updateWizardProvider = (provider: string) => {
+    setWizard(provider === 'openrouter'
+      ? { provider, apiKey: '', baseUrl: 'https://openrouter.ai/api/v1', modelId: 'openrouter/auto' }
+      : { provider, apiKey: '', baseUrl: 'https://api.openai.com/v1', modelId: 'gpt-5.1' });
+    setWizardMessage(null);
+  };
+
+  const runWizard = async (action: 'probe' | 'apply') => {
+    setWizardBusy(action);
+    setWizardMessage(null);
+    try {
+      const res = await fetch(`${API_BASE}/admin/inference-setup/${action}`, { method: 'POST', headers, body: JSON.stringify(wizard) });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || t('inferenceWizard.connectionFailed'));
+      setWizardMessage({ ok: true, text: action === 'probe' ? t('inferenceWizard.probePassed', { latency: data.latencyMs }) : t('inferenceWizard.setupComplete') });
+      if (action === 'apply') {
+        setWizard(prev => ({ ...prev, apiKey: '' }));
+        setInferenceReadiness(data.readiness ?? null);
+        fetchModels();
+      }
+    } catch (error) {
+      setWizardMessage({ ok: false, text: error instanceof Error ? error.message : t('inferenceWizard.connectionFailed') });
+    } finally {
+      setWizardBusy(null);
+    }
+  };
 
   const save = async (updated: ModelsData) => {
     setSaving(true);
+    setSaveMessage(null);
     try {
       const res = await fetch(`${API_BASE}/admin/models`, { method: 'PUT', headers, body: JSON.stringify(updated) });
-      if (res.ok) {
-        setModels(updated);
-      }
+      if (!res.ok) throw new Error(t('modelSaveFailed'));
+      setModels(updated);
+      setSaveMessage({ ok: true, text: t('modelSaveComplete') });
+    } catch (error) {
+      setSaveMessage({ ok: false, text: error instanceof Error ? error.message : t('modelSaveFailed') });
     } finally {
       setSaving(false);
     }
@@ -3731,32 +3797,49 @@ function ModelManagement({ token }: { token?: string | null }) {
 
   const toggleClaude = (idx: number) => {
     if (!models) return;
+    const model = models.claude[idx];
+    if (model.enabled && Object.values(models.defaults ?? {}).includes(model.id)) {
+      setSaveMessage({ ok: false, text: t('defaultModelDisableBlocked') });
+      return;
+    }
     const updated = { ...models, claude: models.claude.map((m, i) => i === idx ? { ...m, enabled: !m.enabled } : m) };
-    save(updated);
+    void save(updated);
   };
 
   const togglePi = (idx: number) => {
     if (!models) return;
+    const model = models.pi[idx];
+    const modelId = `${model.provider}/${model.modelId}`;
+    if (model.enabled && Object.values(models.defaults ?? {}).includes(modelId)) {
+      setSaveMessage({ ok: false, text: t('defaultModelDisableBlocked') });
+      return;
+    }
     const updated = { ...models, pi: models.pi.map((m, i) => i === idx ? { ...m, enabled: !m.enabled } : m) };
-    save(updated);
+    void save(updated);
   };
 
   const deletePi = (idx: number) => {
     if (!models) return;
+    const model = models.pi[idx];
+    const modelId = `${model.provider}/${model.modelId}`;
+    if (Object.values(models.defaults ?? {}).includes(modelId)) {
+      setSaveMessage({ ok: false, text: t('defaultModelDeleteBlocked') });
+      return;
+    }
     const updated = { ...models, pi: models.pi.filter((_, i) => i !== idx) };
-    save(updated);
+    void save(updated);
   };
 
   const inferPiModelDefaults = (entry: PiModelEntry): PiModelEntry => {
     const api = entry.api
-      || (entry.provider === 'litellm-responses' ? 'openai-responses'
-        : entry.provider === 'litellm' || entry.provider === 'openrouter' ? 'openai-completions'
+      || (entry.provider === 'openai-responses-compatible' ? 'openai-responses'
+        : entry.provider === 'openrouter' ? 'openai-completions'
         : undefined);
     return {
       ...entry,
       ...(api ? { api } : {}),
       contextWindow: entry.contextWindow ?? 272000,
-      maxTokens: entry.maxTokens ?? (entry.provider === 'litellm-responses' ? 32000 : 128000),
+      maxTokens: entry.maxTokens ?? 64000,
       roles: entry.roles ?? ['full', 'managed', 'standalone'],
     };
   };
@@ -3766,7 +3849,7 @@ function ModelManagement({ token }: { token?: string | null }) {
     const entry: PiModelEntry = inferPiModelDefaults({ ...newPi, enabled: true });
     const updated = { ...models, pi: [...models.pi, entry] };
     save(updated);
-    setNewPi({ provider: 'litellm-responses', modelId: '', name: '', badge: '' });
+    setNewPi({ provider: 'openrouter', modelId: '', name: '', badge: 'OR' });
     setAddingPi(false);
   };
 
@@ -3780,12 +3863,35 @@ function ModelManagement({ token }: { token?: string | null }) {
 
   const enabledClaude = models.claude.filter(m => m.enabled);
   const enabledPi = models.pi.filter(m => m.enabled);
-  const currentDefaults: ModelDefaults = models.defaults ?? { session: 'litellm-responses/smartest', ai_reply: 'litellm-responses/mini', ai_task: 'litellm-responses/mini' };
+  const currentDefaults: ModelDefaults = models.defaults ?? { session: 'openrouter/openrouter/auto', ai_reply: 'openrouter/openrouter/auto', ai_task: 'openrouter/openrouter/auto' };
 
   const saveDefaults = (key: keyof ModelDefaults, value: string) => {
     const updated = { ...models, defaults: { ...currentDefaults, [key]: value } };
-    save(updated);
+    void save(updated);
   };
+
+  const modelDisplayName = (id: string) => {
+    const claude = models.claude.find(model => model.id === id);
+    if (claude) return claude.name;
+    const pi = models.pi.find(model => `${model.provider}/${model.modelId}` === id);
+    return pi?.name ?? id;
+  };
+
+  const policyLabels: Record<keyof ModelDefaults, string> = {
+    session: t('primaryWorkModel'),
+    ai_reply: t('utilityWorkModel'),
+    ai_task: t('backgroundWorkModel'),
+  };
+  const policyReferences = (modelId: string) => (Object.entries(currentDefaults) as Array<[keyof ModelDefaults, string]>)
+    .filter(([, configuredModel]) => configuredModel === modelId)
+    .map(([policy]) => policyLabels[policy]);
+
+  const readinessStatus = inferenceReadiness?.status ?? 'ready';
+  const statusTone = readinessStatus === 'ready'
+    ? 'border-emerald-500/25 bg-emerald-500/8 text-emerald-200'
+    : readinessStatus === 'invalid'
+      ? 'border-red-500/25 bg-red-500/8 text-red-200'
+      : 'border-amber-500/25 bg-amber-500/8 text-amber-200';
 
   // Defaults may point at legacy fallback models or AI Router models. Store backend-native IDs here
   // (router models as provider/modelId, no UI prefix); the browser model-store adds
@@ -3797,65 +3903,111 @@ function ModelManagement({ token }: { token?: string | null }) {
   };
 
   return (
-    <div className="space-y-6">
-      {/* Default Models */}
-      <div>
-        <h3 className="text-[15px] font-semibold text-gray-300 uppercase tracking-wider mb-2">{t('defaultModels')}</h3>
+    <div className="space-y-8">
+      <section className={`rounded-xl border p-5 ${statusTone}`}>
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <div className="flex items-center gap-2">
+              <span className={`h-2.5 w-2.5 rounded-full ${readinessStatus === 'ready' ? 'bg-emerald-400' : readinessStatus === 'invalid' ? 'bg-red-400' : 'bg-amber-400'}`} />
+              <h3 className="text-[16px] font-semibold">{t('aiStatusTitle')}</h3>
+            </div>
+            <p className="mt-2 text-[14px] opacity-80">{readinessStatus === 'ready' ? t('aiStatusReady') : inferenceReadiness?.nextAction || t('aiStatusNeedsSetup')}</p>
+          </div>
+          <span className="rounded-full border border-current/20 px-2.5 py-1 text-[12px] font-semibold">
+            {readinessStatus === 'ready' ? t('statusReady') : readinessStatus === 'invalid' ? t('statusUnavailable') : t('statusNeedsAttention')}
+          </span>
+        </div>
+        <dl className="mt-5 grid gap-x-6 gap-y-4 border-t border-current/15 pt-4 sm:grid-cols-2 lg:grid-cols-4">
+          <div><dt className="text-[12px] opacity-60">{t('primaryWorkModel')}</dt><dd className="mt-1 truncate text-[14px] font-medium" title={modelDisplayName(currentDefaults.session)}>{modelDisplayName(currentDefaults.session)}</dd></div>
+          <div><dt className="text-[12px] opacity-60">{t('utilityWorkModel')}</dt><dd className="mt-1 truncate text-[14px] font-medium" title={modelDisplayName(currentDefaults.ai_reply)}>{modelDisplayName(currentDefaults.ai_reply)}</dd></div>
+          <div><dt className="text-[12px] opacity-60">{t('backgroundWorkModel')}</dt><dd className="mt-1 truncate text-[14px] font-medium" title={modelDisplayName(currentDefaults.ai_task)}>{modelDisplayName(currentDefaults.ai_task)}</dd></div>
+          <div><dt className="text-[12px] opacity-60">{t('defaultExecutionPath')}</dt><dd className="mt-1 truncate text-[14px] font-medium">{inferenceReadiness?.readyProviders?.join(', ') || t('aiRouter')}</dd></div>
+        </dl>
+      </section>
+
+      <section>
+        <div className="mb-3">
+          <h3 className="text-[16px] font-semibold text-surface-100">{t('modelPolicyTitle')}</h3>
+          <p className="mt-1 text-[13px] leading-5 text-surface-500">{t('modelPolicyIntro')}</p>
+        </div>
         <div className="bg-surface-800/50 rounded-lg border border-surface-700 divide-y divide-surface-700/50">
           {([
-            { key: 'session' as const, label: t('sessionModel'), desc: t('sessionModelDesc') },
-            { key: 'ai_reply' as const, label: t('aiReplyModel'), desc: t('aiReplyModelDesc') },
-            { key: 'ai_task' as const, label: t('taskExecutionModel'), desc: t('taskExecutionModelDesc') },
+            { key: 'session' as const, label: t('primaryWorkModel'), desc: t('sessionModelDesc') },
+            { key: 'ai_reply' as const, label: t('utilityWorkModel'), desc: t('aiReplyModelDesc') },
+            { key: 'ai_task' as const, label: t('backgroundWorkModel'), desc: t('taskExecutionModelDesc') },
           ]).map(({ key, label, desc }) => {
             const options = defaultModelOptions(key);
             const groups = [...new Set(options.map(o => o.group))];
             return (
-              <div key={key} className="flex items-center gap-3 px-4 py-3">
+              <div key={key} className="flex flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center">
                 <div className="flex-1 min-w-0">
                   <div className="text-[15px] text-gray-200 font-medium">{label}</div>
-                  <div className="text-[13px] text-gray-500">{desc}</div>
+                  <div className="mt-0.5 text-[13px] leading-5 text-gray-500">{desc}</div>
                 </div>
-                <select
-                  value={currentDefaults[key]}
-                  onChange={(e) => saveDefaults(key, e.target.value)}
-                  className="bg-surface-700 border border-surface-600 rounded-md px-3 py-1.5 text-[15px] text-gray-200 min-w-[180px]"
-                >
-                  {groups.length > 1 ? (
-                    groups.map(g => (
-                      <optgroup key={g} label={g}>
-                        {options.filter(o => o.group === g).map(o => (
-                          <option key={o.id} value={o.id}>{o.name}</option>
-                        ))}
-                      </optgroup>
-                    ))
-                  ) : (
-                    options.map(o => (
-                      <option key={o.id} value={o.id}>{o.name}</option>
-                    ))
-                  )}
+                <select value={currentDefaults[key]} onChange={(e) => saveDefaults(key, e.target.value)} disabled={saving} className="min-h-10 w-full rounded-md border border-surface-600 bg-surface-700 px-3 text-[14px] text-gray-200 sm:w-[240px]">
+                  {groups.length > 1 ? groups.map(g => <optgroup key={g} label={g}>{options.filter(o => o.group === g).map(o => <option key={o.id} value={o.id}>{o.name}</option>)}</optgroup>) : options.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
                 </select>
               </div>
             );
           })}
         </div>
-      </div>
+        <p className="mt-2 text-[12px] text-surface-600">{t('modelPolicyApplyHint')}</p>
+      </section>
+
+      <section className="border-t border-surface-800 pt-6">
+        <div className="mb-3">
+          <h3 className="text-[16px] font-semibold text-surface-100">{t('connectionsAndAuth')}</h3>
+          <p className="mt-1 text-[13px] leading-5 text-surface-500">{t('connectionsAndAuthIntro')}</p>
+        </div>
+        <div className="rounded-xl border border-surface-700 bg-surface-800/35 p-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div><h3 className="text-[16px] font-semibold text-surface-100">{t('inferenceWizard.title')}</h3><p className="mt-1 text-[13px] leading-5 text-surface-400">{t('inferenceWizard.description')}</p></div>
+          <button type="button" onClick={() => setWizardOpen(value => !value)} className="min-h-10 rounded-lg bg-primary-600 px-4 text-[14px] font-semibold text-white hover:bg-primary-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400">{wizardOpen ? t('common:close') : t('inferenceWizard.open')}</button>
+        </div>
+        {wizardOpen && <div className="mt-4 space-y-4 border-t border-surface-700 pt-4">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <label className="text-[13px] font-medium text-surface-300">{t('inferenceWizard.provider')}<select value={wizard.provider} onChange={event => updateWizardProvider(event.target.value)} className="mt-2 w-full rounded-lg border border-surface-700 bg-surface-950 px-3 py-2.5 text-[14px] text-surface-100"><option value="openrouter">OpenRouter</option><option value="openai-responses-compatible">OpenAI-compatible Responses</option></select></label>
+            <label className="text-[13px] font-medium text-surface-300">{t('inferenceWizard.modelId')}<input value={wizard.modelId} onChange={event => setWizard({ ...wizard, modelId: event.target.value })} className="mt-2 w-full rounded-lg border border-surface-700 bg-surface-950 px-3 py-2.5 font-mono text-[14px] text-surface-100" /></label>
+          </div>
+          <label className="block text-[13px] font-medium text-surface-300">{t('inferenceWizard.baseUrl')}<input value={wizard.baseUrl} onChange={event => setWizard({ ...wizard, baseUrl: event.target.value })} className="mt-2 w-full rounded-lg border border-surface-700 bg-surface-950 px-3 py-2.5 font-mono text-[14px] text-surface-100" /></label>
+          <label className="block text-[13px] font-medium text-surface-300">{t('inferenceWizard.apiKey')}<input type="password" value={wizard.apiKey} onChange={event => setWizard({ ...wizard, apiKey: event.target.value })} autoComplete="new-password" data-1p-ignore className="mt-2 w-full rounded-lg border border-surface-700 bg-surface-950 px-3 py-2.5 font-mono text-[14px] text-surface-100" /><span className="mt-1 block text-[12px] text-surface-500">{t('inferenceWizard.secretHint')}</span></label>
+          {wizardMessage && <div role="status" className={`rounded-lg border px-3 py-2 text-[13px] ${wizardMessage.ok ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200' : 'border-red-500/30 bg-red-500/10 text-red-200'}`}>{wizardMessage.text}</div>}
+          <div className="flex flex-wrap gap-2"><button type="button" disabled={!wizard.apiKey || !!wizardBusy} onClick={() => void runWizard('probe')} className="min-h-10 rounded-lg border border-surface-600 px-4 text-[14px] font-semibold text-surface-200 hover:bg-surface-800 disabled:opacity-50">{wizardBusy === 'probe' ? t('inferenceWizard.testing') : t('inferenceWizard.test')}</button><button type="button" disabled={!wizard.apiKey || !!wizardBusy} onClick={() => void runWizard('apply')} className="min-h-10 rounded-lg bg-primary-600 px-4 text-[14px] font-semibold text-white hover:bg-primary-500 disabled:opacity-50">{wizardBusy === 'apply' ? t('inferenceWizard.saving') : t('inferenceWizard.saveAndActivate')}</button></div>
+        </div>}
+        </div>
+      </section>
+
+      <section className="border-t border-surface-800 pt-6">
+        <div className="mb-3">
+          <h3 className="text-[16px] font-semibold text-surface-100">{t('availableModels')}</h3>
+          <p className="mt-1 text-[13px] leading-5 text-surface-500">{t('availableModelsIntro')}</p>
+        </div>
 
       {/* Legacy fallback models */}
-      <div>
-        <h3 className="text-[15px] font-semibold text-gray-300 uppercase tracking-wider mb-2">{t('claudeMax')}</h3>
-        <div className="bg-surface-800/50 rounded-lg border border-surface-700">
-          {models.claude.map((m, i) => (
+      <details className="group mb-5 rounded-lg border border-surface-700 bg-surface-800/25">
+        <summary className="flex cursor-pointer list-none items-center justify-between px-4 py-3">
+          <div><span className="text-[14px] font-medium text-surface-300">{t('claudeMax')}</span><span className="ml-2 text-[12px] text-surface-600">{t('legacyModelsHint')}</span></div>
+          <span className="text-[12px] text-primary-400 group-open:hidden">{t('showSettings')}</span><span className="hidden text-[12px] text-primary-400 group-open:inline">{t('hideSettings')}</span>
+        </summary>
+        <div className="border-t border-surface-700">
+          {models.claude.map((m, i) => {
+            const references = policyReferences(m.id);
+            return (
             <div key={m.id} className={rowClass}>
-              <div className={toggleClass(m.enabled)} onClick={() => toggleClaude(i)}>
-                <div className={dotClass(m.enabled)} />
+              <button type="button" role="switch" aria-checked={m.enabled} aria-label={t('toggleModel', { name: m.name })} className={toggleClass(m.enabled)} onClick={() => toggleClaude(i)}>
+                <span className={dotClass(m.enabled)} />
+              </button>
+              <div className="min-w-0 flex-1">
+                <span className="text-[15px] text-gray-200">{m.name}</span>
+                {references.length > 0 && <div className="mt-1 flex flex-wrap gap-1">{references.map(reference => <span key={reference} className="rounded bg-primary-500/10 px-1.5 py-0.5 text-[11px] text-primary-300">{reference}</span>)}</div>}
               </div>
-              <span className="text-[15px] text-gray-200 flex-1">{m.name}</span>
               <span className="text-[13px] text-gray-500 font-mono">{m.id}</span>
               <span className="text-[13px] px-1.5 py-0.5 rounded bg-surface-700 text-gray-400">{m.badge}</span>
             </div>
-          ))}
+            );
+          })}
         </div>
-      </div>
+      </details>
 
       {/* AI Router models */}
       <div>
@@ -3913,34 +4065,42 @@ function ModelManagement({ token }: { token?: string | null }) {
           {models.pi.length === 0 && (
             <div className="text-gray-500 text-[15px] py-4 text-center">{t('noPiModels')}</div>
           )}
-          {models.pi.map((m, i) => (
-            <div key={`${m.provider}/${m.modelId}`} className={rowClass}>
-              <div className={toggleClass(m.enabled)} onClick={() => togglePi(i)}>
-                <div className={dotClass(m.enabled)} />
-              </div>
+          {models.pi.map((m, i) => {
+            const modelId = `${m.provider}/${m.modelId}`;
+            const references = policyReferences(modelId);
+            return (
+            <div key={modelId} className={rowClass}>
+              <button type="button" role="switch" aria-checked={m.enabled} aria-label={t('toggleModel', { name: m.name })} className={toggleClass(m.enabled)} onClick={() => togglePi(i)}>
+                <span className={dotClass(m.enabled)} />
+              </button>
               <div className="flex-1 min-w-0">
                 <div className="text-[15px] text-gray-200">{m.name}</div>
                 <div className="text-[12px] text-gray-600 font-mono truncate">
                   {[m.api, m.contextWindow ? `${Math.round(m.contextWindow / 1000)}k ctx` : null, m.maxTokens ? `${Math.round(m.maxTokens / 1000)}k out` : null, m.roles?.length ? m.roles.join('/') : null].filter(Boolean).join(' · ')}
                 </div>
+                {references.length > 0 && <div className="mt-1 flex flex-wrap gap-1">{references.map(reference => <span key={reference} className="rounded bg-primary-500/10 px-1.5 py-0.5 text-[11px] text-primary-300">{reference}</span>)}</div>}
               </div>
-              <span className="text-[13px] text-gray-500 font-mono">{m.provider}/{m.modelId}</span>
+              <span className="text-[13px] text-gray-500 font-mono">{modelId}</span>
               {m.badge && <span className="text-[13px] px-1.5 py-0.5 rounded bg-surface-700 text-gray-400">{m.badge}</span>}
               <button
                 onClick={() => deletePi(i)}
-                className="text-gray-600 hover:text-red-400 transition-colors p-1"
-                title={t('common:delete')}
+                disabled={references.length > 0}
+                className="text-gray-600 hover:text-red-400 transition-colors p-1 disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:text-gray-600"
+                title={references.length > 0 ? t('defaultModelDeleteBlocked') : t('common:delete')}
               >
                 <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                 </svg>
               </button>
             </div>
-          ))}
+            );
+          })}
         </div>
       </div>
 
       {saving && <div className="text-[14px] text-primary-400 text-center">{t('common:saving')}</div>}
+      {saveMessage && <div role="status" className={`mt-3 rounded-lg border px-3 py-2 text-[13px] ${saveMessage.ok ? 'border-emerald-500/25 bg-emerald-500/10 text-emerald-200' : 'border-red-500/25 bg-red-500/10 text-red-200'}`}>{saveMessage.text}</div>}
+      </section>
     </div>
   );
 }
@@ -4023,6 +4183,7 @@ function UsageMetricCard({ label, value }: { label: string; value: string }) {
 }
 
 function TinyTokenUsageChart({ data }: { data: AiTokenUsageDay[] }) {
+  const { t } = useTranslation('admin');
   const width = 720;
   const height = 180;
   const padX = 28;
@@ -4039,8 +4200,8 @@ function TinyTokenUsageChart({ data }: { data: AiTokenUsageDay[] }) {
   return (
     <div className="rounded-lg border border-surface-700 bg-surface-900/60 p-3">
       <div className="flex items-center justify-between mb-2">
-        <div className="text-[14px] font-medium text-gray-300">최근 {data.length}일 토큰 사용량</div>
-        <div className="text-[12px] text-gray-600">input + output 기준</div>
+        <div className="text-[14px] font-medium text-gray-300">{t('recentTokenUsage', { days: data.length })}</div>
+        <div className="text-[12px] text-gray-600">{t('inputOutputBasis')}</div>
       </div>
       <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-[180px] overflow-visible">
         <line x1={padX} y1={height - padY} x2={width - padX} y2={height - padY} stroke="currentColor" className="text-surface-700" strokeWidth="1" />
@@ -4064,6 +4225,7 @@ function TinyTokenUsageChart({ data }: { data: AiTokenUsageDay[] }) {
 }
 
 function AiTokenUsageDashboard({ token }: { token?: string | null }) {
+  const { t } = useTranslation('admin');
   const [rows, setRows] = useState<AiTokenBudgetSnapshot[]>([]);
   const [usage, setUsage] = useState<AiTokenUsageSummary | null>(null);
   const [capturedAt, setCapturedAt] = useState<string>('');
@@ -4081,18 +4243,18 @@ function AiTokenUsageDashboard({ token }: { token?: string | null }) {
     try {
       const res = await fetch(`${API_BASE}/admin/ai-token-budgets`, { headers: headers() });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || 'AI token budget 조회 실패');
+      if (!res.ok) throw new Error(data.error || t('budgetLookupFailed'));
       setRows(Array.isArray(data.rows) ? data.rows : []);
       setUsage(data.usage || null);
       setCapturedAt(data.capturedAt || '');
     } catch (err: any) {
-      setError(err?.message || 'AI token budget 조회 실패');
+      setError(err?.message || t('budgetLookupFailed'));
       setRows([]);
       setUsage(null);
     } finally {
       setLoading(false);
     }
-  }, [headers]);
+  }, [headers, t]);
 
   useEffect(() => { fetchBudgets(); }, [fetchBudgets]);
 
@@ -4113,20 +4275,20 @@ function AiTokenUsageDashboard({ token }: { token?: string | null }) {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between text-[14px] text-gray-500">
-        <div>current VM · {capturedAt ? `captured ${new Date(capturedAt).toLocaleString()}` : 'AI usage'}</div>
+        <div>{t('currentVm')} · {capturedAt ? t('capturedAt', { time: new Date(capturedAt).toLocaleString() }) : t('aiUsage')}</div>
         <button
           onClick={fetchBudgets}
           className="px-2.5 py-1 text-[13px] text-gray-400 hover:text-gray-200 bg-surface-900 border border-surface-700 rounded-md"
-        >새로고침</button>
+        >{t('refresh')}</button>
       </div>
 
       {error && <div className="tone-card tone-warning px-4 py-3 text-[14px] rounded-lg">{error}</div>}
 
       <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-        <UsageMetricCard label="입력 토큰" value={formatTokenCount(totals?.inputTokens)} />
-        <UsageMetricCard label="출력 토큰" value={formatTokenCount(totals?.outputTokens)} />
-        <UsageMetricCard label="캐시 읽기" value={formatTokenCount(totals?.cacheReadTokens)} />
-        <UsageMetricCard label="추정 비용" value={formatBudgetMoney(totals?.costUsd)} />
+        <UsageMetricCard label={t('inputTokens')} value={formatTokenCount(totals?.inputTokens)} />
+        <UsageMetricCard label={t('outputTokens')} value={formatTokenCount(totals?.outputTokens)} />
+        <UsageMetricCard label={t('cacheRead')} value={formatTokenCount(totals?.cacheReadTokens)} />
+        <UsageMetricCard label={t('estimatedCost')} value={formatBudgetMoney(totals?.costUsd)} />
       </div>
 
       {usage?.daily && usage.daily.length > 0 && <TinyTokenUsageChart data={usage.daily} />}
@@ -4134,10 +4296,10 @@ function AiTokenUsageDashboard({ token }: { token?: string | null }) {
       <div className="bg-surface-800/50 rounded-lg border border-surface-700 overflow-hidden">
         <div className="px-4 py-3 border-b border-surface-700/60">
           <div className="text-[14px] font-medium text-gray-300">AI Token Budget</div>
-          <div className="text-[12px] text-gray-600">이 VM의 LiteLLM key 예산 잔량</div>
+          <div className="text-[12px] text-gray-600">{t('budgetRemaining')}</div>
         </div>
         {!budget ? (
-          <div className="px-4 py-8 text-center text-[15px] text-gray-500">표시할 AI token budget이 없습니다.</div>
+          <div className="px-4 py-8 text-center text-[15px] text-gray-500">{t('noTokenBudget')}</div>
         ) : (
           <div className="px-4 py-3">
             <div className="flex items-center gap-3">
@@ -4152,7 +4314,7 @@ function AiTokenUsageDashboard({ token }: { token?: string | null }) {
                   )}
                 </div>
                 <div className="text-[12px] text-gray-600 font-mono truncate">
-                  {(budget.models || []).join(', ') || 'models unknown'} · updated {new Date(budget.updatedAt).toLocaleString()}
+                  {(budget.models || []).join(', ') || t('modelsUnknown')} · {t('updatedAt', { time: new Date(budget.updatedAt).toLocaleString() })}
                 </div>
               </div>
               {budget.ok ? (
@@ -4161,7 +4323,7 @@ function AiTokenUsageDashboard({ token }: { token?: string | null }) {
                     {formatBudgetMoney(budget.spend)} / {formatBudgetMoney(budget.maxBudget)}
                   </div>
                   <div className="text-[13px] text-gray-500">
-                    remaining {formatBudgetMoney(remaining)} · {budget.budgetDuration || 'no duration'}
+                    {t('remainingAmount', { amount: formatBudgetMoney(remaining) })} · {budget.budgetDuration || t('noDuration')}
                   </div>
                 </div>
               ) : (

@@ -193,7 +193,7 @@ function ProcessMapTrace({ map, loading, onReload }: { map: ProcessMap | null; l
   if (loading && !map) {
     return (
       <div className="rounded-2xl border border-[var(--th-border-subtle)] bg-[var(--th-bg-secondary)] p-4 text-[13px] text-[var(--th-text-secondary)]">
-        Process Map을 불러오는 중…
+        {t('runCanvas.loading')}
       </div>
     );
   }
@@ -201,9 +201,9 @@ function ProcessMapTrace({ map, loading, onReload }: { map: ProcessMap | null; l
   if (!map) {
     return (
       <div className="rounded-2xl border border-dashed border-[var(--th-border-subtle)] bg-[var(--th-bg-secondary)] p-4">
-        <div className="text-[13px] font-semibold text-[var(--th-text-primary)]">아직 그려진 흐름이 없습니다</div>
-        <p className="mt-1 text-[12px] leading-5 text-[var(--th-text-muted)]">커맨드 실행이 시작되면 runtime이 만든 진행 지도가 여기에 표시됩니다.</p>
-        <button type="button" onClick={onReload} className="mt-3 rounded-lg border border-[var(--th-border-subtle)] px-2.5 py-1.5 text-[11px] font-semibold text-[var(--th-text-secondary)] hover:border-[var(--th-border)] hover:text-[var(--th-text-primary)]">다시 확인</button>
+        <div className="text-[13px] font-semibold text-[var(--th-text-primary)]">{t('runCanvas.emptyTitle')}</div>
+        <p className="mt-1 text-[12px] leading-5 text-[var(--th-text-muted)]">{t('runCanvas.emptyDescription')}</p>
+        <button type="button" onClick={onReload} className="mt-3 rounded-lg border border-[var(--th-border-subtle)] px-2.5 py-1.5 text-[11px] font-semibold text-[var(--th-text-secondary)] hover:border-[var(--th-border)] hover:text-[var(--th-text-primary)]">{t('runCanvas.checkAgain')}</button>
       </div>
     );
   }
@@ -216,7 +216,7 @@ function ProcessMapTrace({ map, loading, onReload }: { map: ProcessMap | null; l
             <div className="text-[10px] font-black uppercase tracking-[0.2em] text-[var(--th-text-muted)]">{routeLabel}</div>
             <div className="mt-1 truncate text-[13px] font-bold text-[var(--th-text-primary)]">{cleanMapTitle(map.title)}</div>
           </div>
-          <button type="button" onClick={onReload} className="shrink-0 rounded-lg border border-[var(--th-border-subtle)] bg-[var(--th-bg-primary)] px-2.5 py-1.5 text-[11px] font-semibold text-[var(--th-text-secondary)] hover:border-[var(--th-border)] hover:text-[var(--th-text-primary)]">새로고침</button>
+          <button type="button" onClick={onReload} className="shrink-0 rounded-lg border border-[var(--th-border-subtle)] bg-[var(--th-bg-primary)] px-2.5 py-1.5 text-[11px] font-semibold text-[var(--th-text-secondary)] hover:border-[var(--th-border)] hover:text-[var(--th-text-primary)]">{t('runCanvas.reload')}</button>
         </div>
         <div className="mt-3 flex items-center gap-2">
           <div className="h-1 min-w-0 flex-1 overflow-hidden rounded-full bg-[var(--tone-muted-bg)]">
@@ -262,9 +262,9 @@ function ProcessMapTrace({ map, loading, onReload }: { map: ProcessMap | null; l
                     {selected ? (
                       <span className="mt-2 block border-l-2 border-[var(--th-border-subtle)] pl-3">
                         <span className="flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-[var(--th-text-muted)]">
-                          <span>주체 <b className="font-semibold text-[var(--th-text-primary)]">{ownerLabel(node.owner)}</b></span>
-                          <span>자동화 <b className="font-semibold text-[var(--th-text-primary)]">{automationLabel(node.automationLevel)}</b></span>
-                          {evidenceLabel(node) ? <span>근거 <b className="font-semibold text-[var(--th-text-primary)]">{evidenceLabel(node)}</b></span> : null}
+                          <span>{t('runCanvas.owner')} <b className="font-semibold text-[var(--th-text-primary)]">{ownerLabel(node.owner)}</b></span>
+                          <span>{t('runCanvas.automation')} <b className="font-semibold text-[var(--th-text-primary)]">{automationLabel(node.automationLevel)}</b></span>
+                          {evidenceLabel(node) ? <span>{t('runCanvas.evidence')} <b className="font-semibold text-[var(--th-text-primary)]">{evidenceLabel(node)}</b></span> : null}
                         </span>
                         {node.evidence?.logs?.length ? (
                           <span className="mt-2 block rounded-lg bg-[var(--th-bg-primary)] px-2 py-1.5 text-[11px] leading-4 text-[var(--th-text-secondary)]">
@@ -318,16 +318,17 @@ function buildAutomationScoutPrompt(map: ProcessMap, sessionId: string | null): 
 }
 
 function ProcessMapRail({ hasProcess, runningCount, stepCount, onOpen }: { hasProcess: boolean; runningCount: number; stepCount: number; onOpen: () => void }) {
+  const { t } = useTranslation('chat');
   return (
     <aside className="hidden h-full w-12 shrink-0 border-l border-[var(--th-border-subtle)] bg-[var(--th-bg-primary)] xl:flex">
       <button
         type="button"
         onClick={onOpen}
         className="relative flex h-full w-full items-center justify-center text-[var(--th-text-muted)] hover:text-[var(--th-text-primary)]"
-        title="프로세스맵 펼치기"
+        title={t('runCanvas.expand')}
       >
         {hasProcess && <span className={`absolute top-3 h-2 w-2 rounded-full bg-[var(--th-accent-500)] ${runningCount > 0 ? 'animate-pulse' : ''}`} />}
-        <span className="-rotate-90 whitespace-nowrap text-[12px] font-bold tracking-wider">프로세스맵 펼치기{stepCount > 0 ? ` · ${stepCount}단계` : ''}</span>
+        <span className="-rotate-90 whitespace-nowrap text-[12px] font-bold tracking-wider">{t('runCanvas.expand')}{stepCount > 0 ? ` · ${t('runCanvas.stepCount', { count: stepCount })}` : ''}</span>
       </button>
     </aside>
   );
@@ -403,7 +404,7 @@ export function RunCanvasPanel({ sessionId, refreshKey = 0 }: { sessionId: strin
       setError(null);
       setMap(await fetchJson<ProcessMap>(`/api/sessions/${sessionId}/process-map`));
     } catch (err: any) {
-      setError(err?.message || 'Process Map을 불러오지 못했습니다.');
+      setError(err?.message || t('runCanvas.loadFailed'));
       setMap(null);
     } finally {
       setLoading(false);
@@ -432,11 +433,11 @@ export function RunCanvasPanel({ sessionId, refreshKey = 0 }: { sessionId: strin
       setAutomationScoutSessionId(typeof data?.sessionId === 'string' ? data.sessionId : null);
       setAutomationConfirmOpen(false);
     } catch (err: any) {
-      setError(err?.message || '자동화 후보 분석을 시작하지 못했습니다.');
+      setError(err?.message || t('runCanvas.automationStartFailed'));
     } finally {
       setAutomationStarting(false);
     }
-  }, [commandMap, selectedExecutionId, sessionId]);
+  }, [commandMap, selectedExecutionId, sessionId, t]);
 
   const startResize = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     event.preventDefault();
@@ -466,7 +467,7 @@ export function RunCanvasPanel({ sessionId, refreshKey = 0 }: { sessionId: strin
       <div
         role="separator"
         aria-orientation="vertical"
-        title="폭 조절"
+        title={t('runCanvas.resize')}
         onPointerDown={startResize}
         onDoubleClick={() => setWidth(DEFAULT_PANEL_WIDTH)}
         className="group absolute left-0 top-0 z-20 h-full w-2 -translate-x-1 cursor-col-resize touch-none"
@@ -477,7 +478,7 @@ export function RunCanvasPanel({ sessionId, refreshKey = 0 }: { sessionId: strin
         <div className="min-w-0">
           <div className="text-[12px] font-bold uppercase tracking-wider text-[var(--th-text-primary)]">Process Map</div>
           <div className="truncate text-[11px] text-[var(--th-text-muted)]">
-            {commandMap ? cleanMapTitle(commandMap.title) : '커맨드 실행 대기'}{processMapWriteActive ? ' · live map' : ''}{runningCount > 0 ? ` · 실행 중 ${runningCount}` : ''}
+            {commandMap ? cleanMapTitle(commandMap.title) : t('runCanvas.waitingForRun')}{processMapWriteActive ? ` · ${t('runCanvas.liveMap')}` : ''}{runningCount > 0 ? ` · ${t('runCanvas.runningCount', { count: runningCount })}` : ''}
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-1">
@@ -486,34 +487,34 @@ export function RunCanvasPanel({ sessionId, refreshKey = 0 }: { sessionId: strin
               type="button"
               onClick={() => setAutomationConfirmOpen(true)}
               className="rounded-md border border-[var(--tone-accent-border)] bg-[var(--tone-accent-bg)] px-2 py-1 text-[11px] font-semibold text-[var(--tone-accent-text)] hover:brightness-105"
-              title="현재 흐름을 자동화 후보로 분석"
+              title={t('runCanvas.analyzeAutomationTitle')}
             >
-              자동화 해보기
+              {t('runCanvas.analyzeAutomation')}
             </button>
           ) : null}
           <button
             type="button"
             onClick={() => { setDismissedMapId(currentMapId); setMode('collapsed'); }}
             className="rounded-md border border-[var(--th-border-subtle)] px-2 py-1 text-[11px] text-[var(--th-text-secondary)] hover:border-[var(--th-border)] hover:text-[var(--th-text-primary)]"
-            title="접기"
+            title={t('runCanvas.collapse')}
           >
-            접기
+            {t('runCanvas.collapse')}
           </button>
         </div>
       </div>
       {!processMapWriteActive && executionOptions.length > 0 ? (
         <div className="border-b border-[var(--th-border-subtle)] px-3 py-2">
           <label className="flex items-center gap-2 text-[11px] text-[var(--th-text-muted)]">
-            <span className="shrink-0 font-bold text-[var(--th-text-secondary)]">실행 선택</span>
+            <span className="shrink-0 font-bold text-[var(--th-text-secondary)]">{t('runCanvas.selectRun')}</span>
             <select
               value={selectedExecutionId || 'latest'}
               onChange={(event) => setCommandScope(event.target.value === 'latest' ? { type: 'latest' } : { type: 'node', nodeId: event.target.value })}
               className="min-w-0 flex-1 rounded-md border border-[var(--th-border-subtle)] bg-[var(--th-bg-primary)] px-2 py-1.5 text-[11px] font-semibold text-[var(--th-text-secondary)] outline-none hover:border-[var(--th-border)] hover:text-[var(--th-text-primary)]"
-              title="이 세션에서 실행한 command/skill 선택"
+              title={t('runCanvas.selectRunTitle')}
             >
-              <option value="latest">최신 실행</option>
+              <option value="latest">{t('runCanvas.latestRun')}</option>
               {executionOptions.map((node, index) => (
-                <option key={node.id} value={node.id}>{index === 0 ? '최신 · ' : ''}{node.kind === 'command' ? '⌘' : '✦'} {commandNameFromNode(node)} · {statusLabel(node.status, t)}</option>
+                <option key={node.id} value={node.id}>{index === 0 ? `${t('runCanvas.latest')} · ` : ''}{node.kind === 'command' ? '⌘' : '✦'} {commandNameFromNode(node)} · {statusLabel(node.status, t)}</option>
               ))}
             </select>
           </label>
@@ -531,19 +532,19 @@ export function RunCanvasPanel({ sessionId, refreshKey = 0 }: { sessionId: strin
       ) : null}
       {automationConfirmOpen ? (
         <div className="m-3 rounded-2xl border border-[var(--tone-accent-border)] bg-[var(--tone-accent-bg)] p-3 text-[12px] text-[var(--tone-accent-text)] shadow-lg">
-          <div className="font-bold text-[var(--th-text-primary)]">이 흐름을 자동화 후보로 분석할까요?</div>
-          <p className="mt-1 leading-5 text-[var(--th-text-secondary)]">현재 세션을 부모로 두고 Automation Scout subagent가 반복 업무인지, 새 스킬/기존 스킬 수정/code command/schedule 후보인지 검토합니다. 바로 스킬을 만들지는 않습니다.</p>
+          <div className="font-bold text-[var(--th-text-primary)]">{t('runCanvas.confirmAutomationTitle')}</div>
+          <p className="mt-1 leading-5 text-[var(--th-text-secondary)]">{t('runCanvas.confirmAutomationDescription')}</p>
           <div className="mt-3 flex justify-end gap-2">
-            <button type="button" onClick={() => setAutomationConfirmOpen(false)} className="rounded-md border border-[var(--th-border-subtle)] bg-[var(--th-bg-primary)] px-2.5 py-1.5 text-[11px] font-semibold text-[var(--th-text-secondary)] hover:text-[var(--th-text-primary)]">취소</button>
-            <button type="button" onClick={startAutomationScout} disabled={automationStarting} className="rounded-md border border-[var(--tone-accent-border)] bg-[var(--tone-accent-bg)] px-2.5 py-1.5 text-[11px] font-bold text-[var(--tone-accent-text)] disabled:opacity-60">{automationStarting ? '시작 중…' : '분석 시작'}</button>
+            <button type="button" onClick={() => setAutomationConfirmOpen(false)} className="rounded-md border border-[var(--th-border-subtle)] bg-[var(--th-bg-primary)] px-2.5 py-1.5 text-[11px] font-semibold text-[var(--th-text-secondary)] hover:text-[var(--th-text-primary)]">{t('runCanvas.cancel')}</button>
+            <button type="button" onClick={startAutomationScout} disabled={automationStarting} className="rounded-md border border-[var(--tone-accent-border)] bg-[var(--tone-accent-bg)] px-2.5 py-1.5 text-[11px] font-bold text-[var(--tone-accent-text)] disabled:opacity-60">{automationStarting ? t('runCanvas.starting') : t('runCanvas.startAnalysis')}</button>
           </div>
         </div>
       ) : null}
       {automationScoutSessionId ? (
         <div className="mx-3 mt-3 rounded-2xl border border-[var(--tone-success-border)] bg-[var(--tone-success-bg)] p-3 text-[12px] text-[var(--tone-success-text)]">
-          <div className="font-bold text-[var(--th-text-primary)]">Automation Scout가 시작됐습니다</div>
-          <p className="mt-1 text-[var(--th-text-secondary)]">분석이 끝나면 이 세션으로 보고됩니다. 바로 보고 싶으면 subagent 세션을 열 수 있습니다.</p>
-          <a href={`/s/${automationScoutSessionId}`} target="_blank" rel="noreferrer" className="mt-2 inline-flex rounded-md border border-[var(--tone-success-border)] bg-[var(--th-bg-primary)] px-2.5 py-1.5 text-[11px] font-bold text-[var(--tone-success-text)] hover:brightness-105">subagent 세션 열기</a>
+          <div className="font-bold text-[var(--th-text-primary)]">{t('runCanvas.scoutStartedTitle')}</div>
+          <p className="mt-1 text-[var(--th-text-secondary)]">{t('runCanvas.scoutStartedDescription')}</p>
+          <a href={`/s/${automationScoutSessionId}`} target="_blank" rel="noreferrer" className="mt-2 inline-flex rounded-md border border-[var(--tone-success-border)] bg-[var(--th-bg-primary)] px-2.5 py-1.5 text-[11px] font-bold text-[var(--tone-success-text)] hover:brightness-105">{t('runCanvas.openSubagentSession')}</a>
         </div>
       ) : null}
       {error ? (

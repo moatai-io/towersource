@@ -36,6 +36,21 @@ const BLOB_DIR = path.join(process.cwd(), 'data', 'blobs');
 
 // Threshold above which base64 binary content is extracted to disk
 const BLOB_THRESHOLD = 8 * 1024; // 8 KB of base64 text
+// Durable assistant tool traces can carry Pi's tool output on `tool_use.result`.
+// Keep this aligned with the user-facing bash contract so one noisy command
+// cannot inflate the DB row and every later provider request by megabytes.
+const TOOL_USE_RESULT_MAX_CHARS = 50 * 1024;
+
+function truncateToolUseResult(text: string): string {
+  const sanitized = sanitizeEmbeddedBinaryText(text);
+  if (sanitized.length <= TOOL_USE_RESULT_MAX_CHARS) return sanitized;
+
+  const marker = `\n\n... [tool output truncated ${(sanitized.length / 1024).toFixed(0)}KB → 50KB] ...\n\n`;
+  const remaining = TOOL_USE_RESULT_MAX_CHARS - marker.length;
+  const headLength = Math.ceil(remaining / 2);
+  const tailLength = Math.floor(remaining / 2);
+  return sanitized.slice(0, headLength) + marker + sanitized.slice(-tailLength);
+}
 
 export interface StoredMessage {
   id: string;
@@ -67,6 +82,7 @@ export interface StoredMessage {
  * 1. Remove `thinking` blocks (not needed for display or resume)
  * 2. Extract large base64 images/PDFs to disk, replace with file reference
  * 3. Truncate large tool_result text (keep first/last 2KB)
+ * 4. Truncate Pi-style tool_use.result traces to the 50KB bash output contract
  */
 function compactContent(blocks: any[]): any[] {
   if (!Array.isArray(blocks)) return blocks;
@@ -132,6 +148,15 @@ function compactContent(blocks: any[]): any[] {
       } else {
         result.push({ ...block, content: sanitized });
       }
+      continue;
+    }
+
+    // 4. Pi stores the attached output on the assistant tool_use block itself.
+    // This is distinct from Claude-style user tool_result blocks and previously
+    // bypassed the truncation above, allowing a single 1MB shell result to force
+    // immediate context compaction.
+    if (block.type === 'tool_use' && typeof block.result === 'string') {
+      result.push({ ...block, result: truncateToolUseResult(block.result) });
       continue;
     }
 

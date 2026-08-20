@@ -110,7 +110,7 @@ describe('ToolUseCard file previews', () => {
     expect(screen.getByText(/line-104/)).toBeInTheDocument();
     expect(screen.getByText(/line-220/)).toBeInTheDocument();
     expect(screen.queryByText(/line-105/)).not.toBeInTheDocument();
-    expect(screen.getByText(/중간 60 lines 생략/)).toBeInTheDocument();
+    expect(screen.getByText(/중간 60줄 생략/)).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: '전체 보기' }));
     expect(screen.getByText(/line-105/)).toBeInTheDocument();
@@ -153,7 +153,7 @@ describe('ToolUseCard file previews', () => {
       />
     );
 
-    expect(screen.getByText(/채팅 UI에서는 숨겼습니다/)).toBeInTheDocument();
+    expect(screen.getByText(/채팅에서 숨겼습니다/)).toBeInTheDocument();
     expect(screen.queryByText(/verysecretvalue/)).not.toBeInTheDocument();
   });
 
@@ -446,5 +446,17 @@ describe('ToolUseCard streaming state', () => {
     );
 
     expect(screen.getByText('Running tests')).toBeInTheDocument();
+  });
+
+  it('uses natural English controls for long tool output', async () => {
+    await i18n.changeLanguage('en');
+    const result = Array.from({ length: 220 }, (_, i) => `line-${i + 1}`).join('\n');
+
+    render(<ToolUseCard name="Bash" input={{ command: 'cat sample.txt' }} result={result} defaultExpanded={true} />);
+
+    expect(screen.getByText('Show full output')).toBeInTheDocument();
+    expect(screen.getByText('Open in new window')).toBeInTheDocument();
+    expect(screen.getByText('Copy visible content')).toBeInTheDocument();
+    expect(screen.getByText(/60 lines omitted from the middle/)).toBeInTheDocument();
   });
 });

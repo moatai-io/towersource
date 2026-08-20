@@ -33,6 +33,6 @@ describe('Workspace Apps definition loader contract', () => {
     expect(client).toContain('/api/workspace-apps?');
     expect(home).toContain('fetchWorkspaceAppDefinitions(projectId)');
     expect(home).toContain('setDefinitions([sampleWorkspaceAppDefinition])');
-    expect(home).toContain('업무 화면');
+    expect(home).toContain("t('workspaceApps.home.workScreen')");
   });
 });

@@ -3,6 +3,22 @@
  * Public API: parseKnowledgeReadEvidence, validateKnowledgeAnswerCitations.
  */
 
+export const KNOWLEDGE_CITATION_PUBLIC_MESSAGE = '답변의 출처를 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.';
+
+export class AIServiceKnowledgeCitationError extends Error {
+  readonly code = 'AI_SERVICE_KNOWLEDGE_CITATION_INVALID';
+  readonly publicMessage = KNOWLEDGE_CITATION_PUBLIC_MESSAGE;
+
+  constructor(message: string) {
+    super(message);
+    this.name = 'AIServiceKnowledgeCitationError';
+  }
+}
+
+export function publicAIServiceErrorMessage(err: unknown, fallback = 'AI Service request failed'): string {
+  return err instanceof AIServiceKnowledgeCitationError ? err.publicMessage : err instanceof Error ? err.message : fallback;
+}
+
 export interface KnowledgeReadEvidence {
   documentId: string;
   path: string;
@@ -48,6 +64,13 @@ function escaped(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+function citationRanges(value: string): Array<{ lineStart: number; lineEnd: number }> {
+  return [...value.matchAll(/(?:#?L|lines?\s*)?(\d+)[–—-](?:L)?(\d+)/giu)].map((match) => ({
+    lineStart: Number(match[1]),
+    lineEnd: Number(match[2]),
+  }));
+}
+
 /**
  * Validate path/line citations in final text against same-turn knowledge_read evidence.
  * A cited range must be fully contained in a range that the runtime actually returned.
@@ -62,14 +85,9 @@ export function validateKnowledgeAnswerCitations(text: string, evidence: Knowled
 
   for (const item of evidence) {
     const path = escaped(item.path);
-    const patterns = [
-      new RegExp(`(?:\\[K(\\d+)\\s*[:：]\\s*)?[\\x60]?${path}[\\x60]?#L(\\d+)-L(\\d+)`, 'gu'),
-      new RegExp(`(?:\\[K(\\d+)\\s*[:：]\\s*)?[\\x60]?${path}[\\x60]?\\s+(?:L|lines?\\s*)(\\d+)[–—-](?:L)?(\\d+)`, 'giu'),
-    ];
-    for (const pattern of patterns) {
-      for (const match of text.matchAll(pattern)) {
-        const lineStart = Number(match[2]);
-        const lineEnd = Number(match[3]);
+    const pattern = new RegExp(`(?:\\[K(\\d+)\\s*[:：]\\s*)?[\\x60]?${path}[\\x60]?\\s*((?:#?L|lines?\\s*)?\\d+[–—-](?:L)?\\d+(?:\\s*,\\s*(?:#?L|lines?\\s*)?\\d+[–—-](?:L)?\\d+)*)`, 'giu');
+    for (const match of text.matchAll(pattern)) {
+      for (const { lineStart, lineEnd } of citationRanges(match[2])) {
         const key = `${item.path}:${lineStart}:${lineEnd}`;
         if (seen.has(key)) continue;
         seen.add(key);
@@ -83,15 +101,15 @@ export function validateKnowledgeAnswerCitations(text: string, evidence: Knowled
   }
 
   // Detect citations to snapshot-looking paths that were never returned by knowledge_read.
-  const generic = /(?:\[K\d+\s*[:：]\s*)?[`]?([\p{L}\p{N}_. /-]+?\.(?:md|txt))[`]?\s*(?:#L|\s+(?:L|lines?\s*))(\d+)[–—-](?:L)?(\d+)/giu;
+  const generic = /(?:\[K\d+\s*[:：]\s*)?[`]?([\p{L}\p{N}_. /-]+?\.(?:md|txt))[`]?\s*((?:#?L|lines?\s*)?\d+[–—-](?:L)?\d+(?:\s*,\s*(?:#?L|lines?\s*)?\d+[–—-](?:L)?\d+)*)/giu;
   for (const match of text.matchAll(generic)) {
     const path = match[1].trim().split(/\s+/).at(-1) || '';
-    const lineStart = Number(match[2]);
-    const lineEnd = Number(match[3]);
-    const key = `${path}:${lineStart}:${lineEnd}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    invalid.push({ path, lineStart, lineEnd });
+    for (const { lineStart, lineEnd } of citationRanges(match[2])) {
+      const key = `${path}:${lineStart}:${lineEnd}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      invalid.push({ path, lineStart, lineEnd });
+    }
   }
   return { verified, invalid };
 }

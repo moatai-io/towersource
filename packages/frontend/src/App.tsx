@@ -42,7 +42,6 @@ const AgentsPanel = lazyNamed<typeof import('./components/agents/AgentsPanel').A
 const HelpPanel = lazyNamed<typeof import('./components/help/HelpPanel').HelpPanel>(() => import('./components/help/HelpPanel'), 'HelpPanel');
 const PublishPanel = lazyNamed<typeof import('./components/publish/PublishPanel').PublishPanel>(() => import('./components/publish/PublishPanel'), 'PublishPanel');
 const AIServiceHome = lazyNamed<typeof import('./features/ai-services/AIServiceHome').AIServiceHome>(() => import('./features/ai-services/AIServiceHome'), 'AIServiceHome');
-const WorkspaceAppsHome = lazyNamed<typeof import('./features/workspace-apps/WorkspaceAppsHome').WorkspaceAppsHome>(() => import('./features/workspace-apps/WorkspaceAppsHome'), 'WorkspaceAppsHome');
 import { ErrorBoundary } from './components/common/ErrorBoundary';
 import { OfflineBanner } from './components/common/OfflineBanner';
 import { UpdateBanner } from './components/common/UpdateBanner';
@@ -592,7 +591,6 @@ function App() {
   const aiPanelOpen = useAiPanelStore((s) => s.open);
   const aiPanelContextType = useAiPanelStore((s) => s.contextType);
   const aiServicesEnabled = useSettingsStore((s) => s.serverConfig?.aiServicesEnabled === true);
-  const workspaceAppsEnabled = useSettingsStore((s) => s.serverConfig?.workspaceAppsEnabled === true);
   const settingsOpen = useSettingsStore((s) => s.isOpen);
   const skillsBrowserOpen = useSettingsStore((s) => s.skillsBrowserOpen);
   const agentsPanelOpen = useSettingsStore((s) => s.agentsPanelOpen);
@@ -881,7 +879,7 @@ function App() {
     try {
       const session = await createSessionInDb(undefined, projectId, label);
       if (!session) {
-        toastError('새 세션을 만들지 못했습니다');
+        toastError(t('layout:newSessionCreateFailed'));
         return;
       }
       setActiveSessionId(session.id);
@@ -1357,7 +1355,7 @@ function App() {
             useChatStore.getState().setEngineSessionId(null);
             clearMessages();
             useChatStore.getState().setSessionLoading(false);
-            toastError('요청한 세션을 찾을 수 없습니다');
+            toastError(t('layout:requestedSessionNotFound'));
           };
 
           // 로컬 sessions 에서 short_code/UUID 매칭 우선
@@ -1428,10 +1426,10 @@ function App() {
       removeSession(id);
       // Clear any orphaned queue for the hidden session
       useChatStore.getState().clearSessionQueue(id);
-      toastQuiet('세션을 숨겼습니다 · History에서 복원');
+      toastQuiet(t('layout:sessionHiddenRestoreFromHistory'));
     } catch (err) {
       console.warn('[app] handleDeleteSession failed:', err);
-      toastError('세션 숨기기에 실패했습니다');
+      toastError(t('layout:sessionHideFailed'));
     }
   }, [token, removeSession]);
 
@@ -1495,7 +1493,7 @@ function App() {
       fetch(`${API_BASE}/files/read?path=${encodeURIComponent(path)}`, { headers })
         .then(async (res) => {
           const data = await res.json().catch(() => ({}));
-          if (!res.ok) throw new Error(data.error || `파일을 불러오지 못했습니다 (${res.status})`);
+          if (!res.ok) throw new Error(data.error || t('layout:fileLoadFailedWithStatus', { status: res.status }));
           useFileStore.getState().openTab(data.path || path, typeof data.content === 'string' ? data.content : '', data.language || 'text', data.encoding, {
             forceNew: backgroundViewer,
             split: 'right',
@@ -1551,7 +1549,7 @@ function App() {
     if (metadata?.kind === 'file') {
       const contentUrl = `${API_BASE}/personal-space/files/content?uri=${encodeURIComponent(uri)}`;
       const store = useFileStore.getState();
-      store.openTab(contentUrl, '', 'url', 'utf-8', { forceNew: true, split: 'right', name: metadata.name || '내 파일' });
+      store.openTab(contentUrl, '', 'url', 'utf-8', { forceNew: true, split: 'right', name: metadata.name || t('viewMyFiles') });
       revealPersonalViewer();
       recordRecentPersonalDocument(uri);
       void recordServerPersonalDocumentOpened(uri).catch(() => {});
@@ -1560,14 +1558,14 @@ function App() {
     }
     const res = await fetch(`${API_BASE}/personal-space/files/read?uri=${encodeURIComponent(uri)}`, { headers });
     const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.error || `개인 노트를 불러오지 못했습니다 (${res.status})`);
+    if (!res.ok) throw new Error(data.error || t('layout:personalNoteLoadFailedWithStatus', { status: res.status }));
     const resolvedUri = data.uri || uri;
     if (Number.isInteger(data.version)) personalFileVersionsRef.current.set(resolvedUri, data.version);
     const store = useFileStore.getState();
     store.openTab(resolvedUri, typeof data.content === 'string' ? data.content : '', 'markdown', 'utf-8', {
       forceNew: true,
       split: 'right',
-      name: data.name || '개인 노트',
+      name: data.name || t('personalNoteTitleAndFilename'),
     });
     revealPersonalViewer();
     recordRecentPersonalDocument(resolvedUri);
@@ -1581,7 +1579,7 @@ function App() {
     store.openTab(mobile ? 'personal://documents' : 'personal://materials', '', mobile ? 'personal-documents' : 'personal-materials', 'utf-8', {
       forceNew: true,
       split: 'right',
-      name: mobile ? '내 문서' : '내 자료',
+      name: mobile ? t('myDocuments') : t('myMaterials'),
     });
     revealPersonalViewer();
     triggerArtifactFlash();
@@ -1592,7 +1590,7 @@ function App() {
     store.openTab('personal://todos', '', 'personal-todos', 'utf-8', {
       forceNew: true,
       split: 'right',
-      name: '내 Todo',
+      name: t('myTodo'),
     });
     revealPersonalViewer();
     triggerArtifactFlash();
@@ -1603,7 +1601,7 @@ function App() {
     store.openTab('personal://archive', '', 'personal-archive', 'utf-8', {
       forceNew: true,
       split: 'right',
-      name: '보관함',
+      name: t('layout:archive'),
     });
     revealPersonalViewer();
     triggerArtifactFlash();
@@ -1612,7 +1610,7 @@ function App() {
   const handleReloadFile = useCallback((path: string) => {
     if (path.startsWith('personal://')) {
       void openPersonalFileInViewer(path).catch((error) => {
-        toastError(error instanceof Error ? error.message : '개인 노트를 다시 읽지 못했습니다');
+        toastError(error instanceof Error ? error.message : t('layout:personalNoteReloadFailed'));
       });
       return;
     }
@@ -1633,7 +1631,7 @@ function App() {
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
-      const message = data.error || `개인 노트 이름을 바꾸지 못했습니다 (${res.status})`;
+      const message = data.error || t('layout:personalNoteRenameFailedWithStatus', { status: res.status });
       toastError(message);
       throw new Error(message);
     }
@@ -1643,7 +1641,7 @@ function App() {
     if (Number.isInteger(data.version)) personalFileVersionsRef.current.set(nextUri, data.version);
     else if (previousVersion != null) personalFileVersionsRef.current.set(nextUri, previousVersion + 1);
     useFileStore.getState().renameOpenTabPath(uri, nextUri, data.name || `${title}.md`);
-    toastSuccess('개인 노트 제목과 파일명을 바꿨습니다');
+    toastSuccess(t('layout:personalNoteRenamed'));
   }, [token]);
 
   const handleCreatePersonalNote = useCallback(async () => {
@@ -1656,12 +1654,12 @@ function App() {
         body: JSON.stringify({ content: '' }),
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || `개인 노트를 만들지 못했습니다 (${res.status})`);
+      if (!res.ok) throw new Error(data.error || t('layout:personalNoteCreateFailedWithStatus', { status: res.status }));
       await openPersonalFileInViewer(data.uri);
       useFileStore.getState().setContextPanelTab('write');
-      toastSuccess('빈 개인 노트를 열었습니다');
+      toastSuccess(t('layout:blankPersonalNoteOpened'));
     } catch (error) {
-      toastError(error instanceof Error ? error.message : '개인 노트를 만들지 못했습니다');
+      toastError(error instanceof Error ? error.message : t('layout:personalNoteCreateFailed'));
     }
   }, [openPersonalFileInViewer, token]);
 
@@ -1671,7 +1669,7 @@ function App() {
       const token = localStorage.getItem('token');
       const contentUrl = sessionAttachmentContentUrl(sessionId, path, token);
       if (!contentUrl) {
-        toastError('첨부파일을 열 세션 정보를 찾지 못했습니다');
+        toastError(t('layout:attachmentSessionNotFound'));
         return;
       }
       const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
@@ -1679,7 +1677,7 @@ function App() {
       fetch(metadataUrl, { headers })
         .then(async (res) => {
           const data = await res.json().catch(() => ({}));
-          if (!res.ok) throw new Error(data.error || `첨부파일을 불러오지 못했습니다 (${res.status})`);
+          if (!res.ok) throw new Error(data.error || t('layout:attachmentLoadFailedWithStatus', { status: res.status }));
           const attachment = data.attachment || {};
           const mimeType = String(attachment.mimeType || '');
           const language = mimeType.startsWith('image/') ? 'image' : 'text';
@@ -1687,11 +1685,11 @@ function App() {
           useFileStore.getState().setActiveFilePane('extra');
           useFileStore.getState().openTab(contentUrl, '', language, 'utf-8', {
             split: 'right',
-            name: attachment.name || '첨부파일',
+            name: attachment.name || t('layout:attachment'),
           });
           if (useSessionStore.getState().isMobile) useSessionStore.getState().openMobileContext();
         })
-        .catch((error) => toastError(error instanceof Error ? error.message : '첨부파일을 열지 못했습니다'));
+        .catch((error) => toastError(error instanceof Error ? error.message : t('layout:attachmentOpenFailed')));
       return;
     }
     handleFileClick(path, { split: 'right' });
@@ -1736,7 +1734,7 @@ function App() {
       if (path === 'personal://materials' || path === 'personal://documents') {
         if (path === 'personal://materials' && useSessionStore.getState().isMobile) {
           const store = useFileStore.getState();
-          store.openTab('personal://materials', '', 'personal-materials', 'utf-8', { forceNew: true, split: 'right', name: '내 파일' });
+          store.openTab('personal://materials', '', 'personal-materials', 'utf-8', { forceNew: true, split: 'right', name: t('myMaterials') });
           revealPersonalViewer();
           return;
         }
@@ -1749,7 +1747,7 @@ function App() {
       }
       if (path.startsWith('personal://')) {
         void openPersonalFileInViewer(path).catch((error) => {
-          toastError(error instanceof Error ? error.message : '개인 파일을 열지 못했습니다');
+          toastError(error instanceof Error ? error.message : t('layout:personalFileOpenFailed'));
         });
         return;
       }
@@ -1935,7 +1933,7 @@ function App() {
         JSON.stringify(draft, null, 2),
         'agent-draft',
         undefined,
-        mobileHiring ? { split: 'right', name: '새 AI 동료' } : { name: '새 AI 동료' },
+        mobileHiring ? { split: 'right', name: t('newAiTeammate') } : { name: t('newAiTeammate') },
       );
       // The creator is a file-backed workflow. Leave the Team Home workspace so
       // its activeView branch cannot keep rendering over the newly opened draft.
@@ -2024,11 +2022,11 @@ function App() {
         body: JSON.stringify({ uri: path, content, expectedVersion: personalFileVersionsRef.current.get(path) }),
       }).then(async (res) => {
         const data = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(data.error || `개인 노트를 저장하지 못했습니다 (${res.status})`);
+        if (!res.ok) throw new Error(data.error || t('layout:personalNoteSaveFailedWithStatus', { status: res.status }));
         if (Number.isInteger(data.version)) personalFileVersionsRef.current.set(path, data.version);
         useFileStore.getState().markTabSavedByPath(path);
-        toastSuccess('개인 노트를 저장했습니다');
-      }).catch((error) => toastError(error instanceof Error ? error.message : '개인 노트를 저장하지 못했습니다'));
+        toastSuccess(t('layout:personalNoteSaved'));
+      }).catch((error) => toastError(error instanceof Error ? error.message : t('layout:personalNoteSaveFailed')));
       return;
     }
     saveFile(path, content);
@@ -2039,7 +2037,7 @@ function App() {
     try {
       const existing = usePinStore.getState().pins.find((pin) => pin.file_path === filePath);
       if (existing) {
-        toastQuiet('이미 즐겨찾기에 있습니다');
+        toastQuiet(t('layout:alreadyInFavorites'));
         return;
       }
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
@@ -2059,7 +2057,7 @@ function App() {
       if (res.ok) {
         const pin = await res.json();
         usePinStore.getState().addPin(pin);
-        toastQuiet(`${name} 즐겨찾기에 추가됨`);
+        toastQuiet(t('layout:addedToFavorites', { name }));
       }
     } catch (err) { console.warn('[app] handlePinFile failed:', err); }
   }, [token]);
@@ -2070,7 +2068,7 @@ function App() {
       if (token) headers['Authorization'] = `Bearer ${token}`;
       await fetch(`${API_BASE}/pins/${id}`, { method: 'DELETE', headers });
       usePinStore.getState().removePin(id);
-      toastQuiet('즐겨찾기에서 해제됨');
+      toastQuiet(t('layout:removedFromFavorites'));
     } catch (err) { console.warn('[app] handleUnpinFile failed:', err); }
   }, [token]);
 
@@ -2285,10 +2283,7 @@ function App() {
     if (!aiServicesEnabled && activeView === 'aiServices') {
       useSessionStore.getState().setActiveView('chat');
     }
-    if (!workspaceAppsEnabled && activeView === 'workspaceApps') {
-      useSessionStore.getState().setActiveView('chat');
-    }
-  }, [activeView, aiServicesEnabled, workspaceAppsEnabled]);
+  }, [activeView, aiServicesEnabled]);
 
   useEffect(() => {
     if (activeView === 'kanban') {
@@ -2486,7 +2481,7 @@ function App() {
                 onPersonalTodosClick={() => { openPersonalTodosInViewer(); setSidebarOpen(false); }}
                 onPersonalFileClick={(uri) => {
                   void openPersonalFileInViewer(uri).then(() => setSidebarOpen(false)).catch((error) => {
-                    toastError(error instanceof Error ? error.message : '개인 파일을 열지 못했습니다');
+                    toastError(error instanceof Error ? error.message : t('layout:personalFileOpenFailed'));
                   });
                 }}
                 onDirectoryClick={handleDirectoryClick}
@@ -2527,7 +2522,7 @@ function App() {
                 onPersonalTodosClick={openPersonalTodosInViewer}
                 onPersonalFileClick={(uri) => {
                   void openPersonalFileInViewer(uri).catch((error) => {
-                    toastError(error instanceof Error ? error.message : '개인 파일을 열지 못했습니다');
+                    toastError(error instanceof Error ? error.message : t('layout:personalFileOpenFailed'));
                   });
                 }}
                 onDirectoryClick={handleDirectoryClick}
@@ -2625,11 +2620,9 @@ function App() {
                       onRemovePin={handleUnpinFile}
                     />
                   ) : activeView === 'aiTeam' ? (
-                    <div data-ai-team-scroll className="h-full overflow-auto bg-surface-950 px-3 py-4 sm:px-6 lg:px-8"><div className="mx-auto max-w-6xl"><AITeamHome projects={projects} sessions={appSessions} activeSessionId={activeSessionId} onSelectSession={handleSelectSession} onNewSession={handleNewSession} onOpenProjectHome={(project) => { useFileStore.getState().openSystemTab('projectFiles', { refId: project.id, title: `${project.agent?.displayName || project.name} 홈`, icon: project.agent?.face || '✨' }); useSessionStore.getState().setActiveView('chat'); }} /></div></div>
+                    <div data-ai-team-scroll className="h-full overflow-auto bg-surface-950 px-3 py-4 sm:px-6 lg:px-8"><div className="mx-auto max-w-6xl"><AITeamHome projects={projects} sessions={appSessions} activeSessionId={activeSessionId} onSelectSession={handleSelectSession} onNewSession={handleNewSession} onOpenProjectHome={(project) => { useFileStore.getState().openSystemTab('projectFiles', { refId: project.id, title: t('layout:namedHome', { name: project.agent?.displayName || project.name }), icon: project.agent?.face || '✨' }); useSessionStore.getState().setActiveView('chat'); }} /></div></div>
                   ) : activeView === 'aiServices' && aiServicesEnabled ? (
                     <AIServiceHome />
-                  ) : activeView === 'workspaceApps' && workspaceAppsEnabled ? (
-                    <WorkspaceAppsHome />
                   ) : activeView === 'beta' ? (
                     <BetaPanel />
                   ) : activeView === 'projectFiles' && activeTabId === null && !activeSystemTabId ? (
@@ -2819,8 +2812,8 @@ function App() {
                   void handleCreatePersonalNote();
                 }}
                 className="group flex w-9 shrink-0 flex-col items-center justify-center border-l border-surface-800 bg-surface-950/85 text-surface-400 transition hover:bg-surface-900 hover:text-surface-100"
-                title={splitTabId ? 'Viewer 다시 열기' : '빈 개인 노트 만들기'}
-                aria-label={splitTabId ? 'Viewer 다시 열기' : '빈 개인 노트 만들기'}
+                title={splitTabId ? t('layout:reopenViewer') : t('layout:createBlankPersonalNote')}
+                aria-label={splitTabId ? t('layout:reopenViewer') : t('layout:createBlankPersonalNote')}
               >
                 <span className="mb-2 rotate-90 whitespace-nowrap text-[12px] font-medium tracking-wide">Viewer</span>
                 <span className="rounded-full border border-surface-700 px-1.5 py-0.5 text-[11px] group-hover:border-surface-500">{extraTabs.length > 0 ? extraTabs.length : '+'}</span>
@@ -2854,11 +2847,9 @@ function App() {
                     onRemovePin={handleUnpinFile}
                   />
                 ) : activeView === 'aiTeam' ? (
-                  <div data-ai-team-scroll className="h-full overflow-auto bg-surface-950 px-3 py-4"><AITeamHome projects={projects} sessions={appSessions} activeSessionId={activeSessionId} onSelectSession={handleSelectSession} onNewSession={handleNewSession} onOpenProjectHome={(project) => { useFileStore.getState().openSystemTab('projectFiles', { refId: project.id, title: `${project.agent?.displayName || project.name} 홈`, icon: project.agent?.face || '✨' }); useSessionStore.getState().setActiveView('chat'); }} /></div>
+                  <div data-ai-team-scroll className="h-full overflow-auto bg-surface-950 px-3 py-4"><AITeamHome projects={projects} sessions={appSessions} activeSessionId={activeSessionId} onSelectSession={handleSelectSession} onNewSession={handleNewSession} onOpenProjectHome={(project) => { useFileStore.getState().openSystemTab('projectFiles', { refId: project.id, title: t('layout:namedHome', { name: project.agent?.displayName || project.name }), icon: project.agent?.face || '✨' }); useSessionStore.getState().setActiveView('chat'); }} /></div>
                 ) : activeView === 'aiServices' && aiServicesEnabled ? (
                   <AIServiceHome />
-                ) : activeView === 'workspaceApps' && workspaceAppsEnabled ? (
-                  <WorkspaceAppsHome />
                 ) : activeView === 'beta' ? (
                   <BetaPanel />
                 ) : activeView === 'projectFiles' && activeTabId === null && !activeSystemTabId ? (
@@ -2890,8 +2881,8 @@ function App() {
                   >
                     <div className="h-7 w-7 animate-spin rounded-full border-2 border-surface-700 border-t-primary-400" aria-hidden="true" />
                     <div>
-                      <p className="text-sm font-medium text-surface-100">새 세션을 준비하는 중…</p>
-                      <p className="mt-1 text-xs text-surface-400">잠시만 기다려 주세요.</p>
+                      <p className="text-sm font-medium text-surface-100">{t('layout:preparingNewSession')}</p>
+                      <p className="mt-1 text-xs text-surface-400">{t('layout:pleaseWait')}</p>
                     </div>
                   </div>
                 ) : (
@@ -2920,7 +2911,7 @@ function App() {
         activeSessionId={activeSessionId}
         onClose={() => setAiQuickPanelOpen(false)}
         onSelectSession={handleSelectSession}
-        onOpenHome={(project) => { useFileStore.getState().openSystemTab('projectFiles', { refId: project.id, title: `${project.agent?.displayName || project.name} 홈`, icon: project.agent?.face || '✨' }); useSessionStore.getState().setActiveView('chat'); }}
+        onOpenHome={(project) => { useFileStore.getState().openSystemTab('projectFiles', { refId: project.id, title: t('layout:namedHome', { name: project.agent?.displayName || project.name }), icon: project.agent?.face || '✨' }); useSessionStore.getState().setActiveView('chat'); }}
         onNewTeammate={() => window.dispatchEvent(new CustomEvent('tower-start-agent-academy'))}
         onOpenAll={() => useSessionStore.getState().setActiveView('aiTeam')}
       />

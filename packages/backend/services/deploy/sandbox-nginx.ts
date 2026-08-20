@@ -196,7 +196,14 @@ export async function writeNginxConfig(tool: ToolForNginx): Promise<{ slug: stri
   checkSlugConflict(slug);
 
   const configPath = pathLib.join(NGINX_DIR, `${slug}.conf`);
-  const baseDomain = process.env.SANDBOX_TOOL_BASE_DOMAIN || 'tower.tower.example.com';
+  let publicHost = '';
+  try {
+    publicHost = process.env.PUBLIC_URL ? new URL(process.env.PUBLIC_URL).hostname : '';
+  } catch {}
+  const baseDomain = process.env.SANDBOX_TOOL_BASE_DOMAIN?.trim() || publicHost;
+  if (!baseDomain) {
+    throw new Error('SANDBOX_TOOL_BASE_DOMAIN or PUBLIC_URL is required for externally visible sandbox tools');
+  }
   const certDomain = process.env.SANDBOX_TOOL_CERT_DOMAIN || baseDomain;
   // ssh tunnel 모델 (Q14a): 본체 127.0.0.1:host_port → sibling 127.0.0.1:host_port.
   const execVmHost = '127.0.0.1';

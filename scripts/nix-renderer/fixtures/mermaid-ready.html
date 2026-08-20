@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>Mermaid-ready renderer fixture</title>
+<style>
+@page { size: A4 landscape; margin: 16mm; }
+body { font-family: Pretendard, "Noto Sans CJK KR", sans-serif; color: #172033; }
+h1 { font-size: 28px; }
+.diagram { display: flex; align-items: center; gap: 18px; margin-top: 40px; padding: 28px; background: #f8fafc; border-radius: 20px; }
+.node { padding: 18px 24px; border: 2px solid #2563eb; border-radius: 14px; background: white; font-weight: 700; }
+.arrow { font-size: 32px; color: #2563eb; }
+#render-state { color: #047857; font-weight: 700; }
+</style>
+</head>
+<body>
+<h1>동적 다이어그램 렌더 완료 점검</h1>
+<p id="render-state">렌더 대기 중</p>
+<div id="diagram" class="diagram"></div>
+<script>
+setTimeout(() => {
+  document.getElementById('diagram').innerHTML = '<div class="node">flake.lock</div><div class="arrow">→</div><div class="node">Nix closure</div><div class="arrow">→</div><div class="node">PDF</div>';
+  document.getElementById('render-state').textContent = 'MERMAID_RENDERED_OK';
+}, 150);
+</script>
+</body>
+</html>

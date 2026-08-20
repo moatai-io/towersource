@@ -34,6 +34,6 @@ describe('durable Agent purge source contract', () => {
     expect(api).toContain("router.post('/admin/agents/:id/purge/apply'");
     expect(ui).toContain('typedName !== preview.impact.projectName');
     expect(ui).toContain('purgeConfirmed');
-    expect(ui).toContain('영구 삭제 작업 시작');
+    expect(ui).toContain("t('startPermanentDeletion')");
   });
 });

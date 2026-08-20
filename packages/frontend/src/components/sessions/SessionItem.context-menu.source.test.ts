@@ -29,7 +29,7 @@ describe('SessionItem context menu positioning', () => {
     expect(source).toContain(`const LONG_CONTEXT_MODEL_USED = "litellm-responses/smartest-long";`);
     expect(source).toContain(`const DEFAULT_CONTEXT_MODEL_USED = "litellm-responses/smartest";`);
     expect(source).toContain("onToggleLongContext={toggleLongContext}");
-    expect(source).toContain(`{longContext ? "일반 컨텍스트로 되돌리기" : "롱컨텍스트로 처리"}`);
+    expect(source).toContain(`{longContext ? t("restoreNormalContext") : t("useLongContext")}`);
     expect(source).toContain("body: JSON.stringify({ modelUsed: nextModel }),");
     expect(source).toContain('setLongContextPending(true);');
     expect(source).toContain('.getState()\n        .updateSessionMeta(session.id, { modelUsed: nextModel });');

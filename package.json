@@ -29,6 +29,7 @@
     "skills:materialize": "tsx packages/backend/scripts/materialize-managed-skills.ts",
     "tower": "tsx packages/backend/scripts/tower-cli.ts",
     "tower:server": "tsx packages/backend/scripts/tower-server-cli.ts",
+    "provider:doctor": "tsx packages/backend/scripts/provider-doctor.ts",
     "publish:thumbnails": "tsx packages/backend/scripts/backfill-publish-thumbnails.ts",
     "smoke:ai-service-public-channel": "TOWER_ROLE=full WORKSPACE_ROOT=${WORKSPACE_ROOT:-$HOME/workspace} tsx packages/backend/scripts/ai-service-public-channel-smoke.ts",
     "lint:dialogs": "node scripts/check-no-native-dialogs.mjs",

@@ -43,8 +43,8 @@ const CREATE_DESCRIPTION = [
   'for one-time work, create a subagent with a bounded task and simply do not reuse it.',
   'The worker is registered in Agent Control Plane tables with a state card and run log.',
   '',
-  'Report contract: worker runs report back to the supervisor by default and wake the parent session when the report is ready.',
-  'Use on_complete="inject" only for report-only delivery; use on_complete="none" only for rare muted/background work.',
+  'Report contract: worker runs always report back to the supervisor and wake the parent session when the report is ready.',
+  'Persistent worker communication is wake-only; report-only delivery is not exposed on this path.',
   '',
   'Support AI sessions share the same active child-session quota: up to 10 active callbacks per parent session.'
 ].join('\n');
@@ -56,8 +56,8 @@ const SEND_DESCRIPTION = [
   'Use this instead of creating a new sub-agent when the worker should remember',
   'prior decisions, role, and previous runs.',
   '',
-  'Report contract: follow-up runs report back by default and wake the supervisor when done.',
-  'Use on_complete="inject" only for report-only delivery; on_complete="none" is a rare muted/background exception.',
+  'Report contract: follow-up runs always report back and wake the supervisor when done.',
+  'Persistent worker communication is wake-only; report-only delivery is not exposed on this path.',
 ].join('\n');
 
 function errText(prefix: string, err: any): string {
@@ -91,7 +91,6 @@ export function createAgentWorkerMcpServer(ctx: AgentWorkerMcpContext) {
           model: z.string().optional().describe('Optional model id for backing session.'),
           model_policy: z.enum(MODEL_POLICY_IDS).optional().describe('Logical workload policy. ultra is reserved and currently disabled.'),
           effort: z.enum(['low', 'medium', 'high', 'xhigh', 'max']).optional().describe('Optional explicit reasoning effort override.'),
-          on_complete: z.enum(['wake', 'inject', 'none']).optional().describe('Default wake/report-and-resume. inject = report-only without auto-resuming parent. none = rare muted/background exception.'),
         },
         async (args) => {
           try {
@@ -112,7 +111,7 @@ export function createAgentWorkerMcpServer(ctx: AgentWorkerMcpContext) {
               model: args.model,
               modelPolicy: args.model_policy,
               effort: args.effort,
-              onComplete: args.on_complete || 'wake',
+              onComplete: 'wake',
             });
             return {
               content: [{
@@ -127,7 +126,7 @@ export function createAgentWorkerMcpServer(ctx: AgentWorkerMcpContext) {
                   `- agentRole: ${JSON.stringify(result.role)}\n` +
                   (result.face ? `- agentFace: ${JSON.stringify(result.face)}\n` : '') +
                   (result.tagline ? `- agentTagline: ${JSON.stringify(result.tagline)}\n` : '') +
-                  `- mode: ${args.on_complete || 'wake'}\n` +
+                  `- mode: wake\n` +
                   `Reports default to wake/report-and-resume; use status only when you need extra detail.`,
               }],
             };
@@ -142,7 +141,6 @@ export function createAgentWorkerMcpServer(ctx: AgentWorkerMcpContext) {
         {
           worker: z.string().min(1).describe('Worker id, backing session id, id prefix, or exact worker name.'),
           message: z.string().min(1).describe('Follow-up task/message to send to the persistent agent.'),
-          on_complete: z.enum(['wake', 'inject', 'none']).optional().describe('Default wake/report-and-resume. inject = report-only without auto-resuming parent. none = rare muted/background exception.'),
         },
         async (args) => {
           try {
@@ -154,7 +152,7 @@ export function createAgentWorkerMcpServer(ctx: AgentWorkerMcpContext) {
               callerRole: ctx.parentRole || 'member',
               workerIdOrName: args.worker,
               message: args.message,
-              onComplete: args.on_complete || 'wake',
+              onComplete: 'wake',
             });
             return {
               content: [{
@@ -168,7 +166,7 @@ export function createAgentWorkerMcpServer(ctx: AgentWorkerMcpContext) {
                   `- agentRole: ${JSON.stringify(result.role)}\n` +
                   (result.face ? `- agentFace: ${JSON.stringify(result.face)}\n` : '') +
                   (result.tagline ? `- agentTagline: ${JSON.stringify(result.tagline)}\n` : '') +
-                  `- mode: ${args.on_complete || 'wake'}`,
+                  `- mode: wake`,
               }],
             };
           } catch (err: any) {

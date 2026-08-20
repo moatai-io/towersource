@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useChatStore, type ChatMessage } from '../../stores/chat-store';
 import { useSessionStore } from '../../stores/session-store';
 import { useActiveSessionStreaming } from '../../hooks/useActiveSessionStreaming';
@@ -103,10 +104,10 @@ function buildSteeringPreview(texts: string[]): { lines: string[]; hiddenLineCou
   };
 }
 
-function turnStatusText(phase: string, hasQueue: boolean): string {
+function turnStatusText(phase: string, hasQueue: boolean, t: (key: string, options?: Record<string, unknown>) => string): string {
   // Phase 상태(preparing, tool_running 등)는 AssistantPlaceholder가 메시지
   // 영역에서 직접 표시. InputBox 위 박스는 큐 상태만 담당.
-  if (hasQueue && phase !== 'awaiting_user') return '대기열에 추가됨 — 현재 응답이 끝나면 자동 전송됩니다';
+  if (hasQueue && phase !== 'awaiting_user') return t('queueAdded');
   return '';
 }
 
@@ -147,9 +148,13 @@ interface AiComposerSettings {
   minDraftLength: number;
 }
 
+// Temporary client-side kill switch. The backend independently rejects stale
+// clients so neither mobile nor desktop can invoke the autocomplete model.
+const AI_COMPOSER_AUTOCOMPLETE_ENABLED = false;
+
 const DEFAULT_AI_COMPOSER_SETTINGS: AiComposerSettings = {
-  enabled: true,
-  emptyDraftEnabled: true,
+  enabled: false,
+  emptyDraftEnabled: false,
   inlineDraftEnabled: false,
   debounceMs: 500,
   minRequestIntervalMs: 5_000,
@@ -158,6 +163,7 @@ const DEFAULT_AI_COMPOSER_SETTINGS: AiComposerSettings = {
 };
 
 export function InputBox({ onSend, onAbort, onSafeStop, onAnswerQuestion, onJumpPrevUser, onJumpNextUser, hasPrevUser, hasNextUser }: InputBoxProps) {
+  const { t } = useTranslation('chat');
   const [input, setInput] = useState('');
   const [ghostSuggestion, setGhostSuggestion] = useState('');
   const [ghostSuffix, setGhostSuffix] = useState('');
@@ -278,6 +284,10 @@ export function InputBox({ onSend, onAbort, onSafeStop, onAnswerQuestion, onJump
   }, [messages]);
 
   useEffect(() => {
+    if (!AI_COMPOSER_AUTOCOMPLETE_ENABLED) {
+      setComposerSettings(DEFAULT_AI_COMPOSER_SETTINGS);
+      return;
+    }
     let active = true;
     const load = async () => {
       try {
@@ -305,7 +315,7 @@ export function InputBox({ onSend, onAbort, onSafeStop, onAnswerQuestion, onJump
   }, []);
 
   useEffect(() => {
-    if (!composerSettings.enabled || !currentSessionId || isStreaming || pendingQuestion || attachments.length > 0 || !latestAssistantText) {
+    if (!AI_COMPOSER_AUTOCOMPLETE_ENABLED || !composerSettings.enabled || !currentSessionId || isStreaming || pendingQuestion || attachments.length > 0 || !latestAssistantText) {
       setGhostSuggestion('');
       setGhostSuffix('');
       return;
@@ -658,10 +668,10 @@ export function InputBox({ onSend, onAbort, onSafeStop, onAnswerQuestion, onJump
         }
         toastInfo(
           source === 'steer-cancel'
-            ? 'steering 취소 — 입력창에 복원했습니다'
+            ? t('steeringRestored')
             : source === 'steer-copy'
-              ? '전달 대기 메시지를 입력창에 복사했습니다'
-              : '대기열 취소 — 입력창에 복원했습니다'
+              ? t('pendingMessageRestored')
+              : t('queueRestored')
         );
       } else if (source === 'steer-cancel') {
         // A cancelled steer should return to the composer even when the user has
@@ -675,20 +685,20 @@ export function InputBox({ onSend, onAbort, onSafeStop, onAnswerQuestion, onJump
             el.focus();
           });
         }
-        toastInfo('steering 취소 — 입력창에 복원했습니다');
+        toastInfo(t('steeringRestored'));
       } else {
         // Input has text — copy to clipboard instead
         navigator.clipboard.writeText(text).then(() => {
           toastInfo(
             source === 'steer-copy'
-              ? '전달 대기 메시지를 클립보드에 복사했습니다'
-              : '대기열 취소 — 클립보드에 복사했습니다'
+              ? t('pendingMessageCopied')
+              : t('queueCopied')
           );
         }).catch(() => {
           toastInfo(
             source === 'steer-copy'
-              ? '전달 대기 메시지 복사에 실패했습니다'
-              : '대기열 취소됨'
+              ? t('pendingCopyFailed')
+              : t('queueCanceled')
           );
         });
       }
@@ -1037,7 +1047,7 @@ export function InputBox({ onSend, onAbort, onSafeStop, onAnswerQuestion, onJump
         const payload = decodeExchangeDrag(exchangeRaw);
         const sessionId = useSessionStore.getState().activeSessionId;
         if (!payload || !sessionId) {
-          toastInfo('파일을 첨부하려면 먼저 세션을 선택하세요.');
+          toastInfo(t('selectSessionBeforeAttach'));
           return;
         }
         const receipt = await transferFile(payload.source, { scope: 'session', sessionId }, async () => true);
@@ -1054,10 +1064,10 @@ export function InputBox({ onSend, onAbort, onSafeStop, onAnswerQuestion, onJump
           });
           textareaRef.current?.focus();
         } else {
-          toastInfo(receipt?.status === 'stale' ? '원본이 변경되었습니다. 다시 드래그하세요.' : '현재 권한으로 첨부할 수 없습니다.');
+          toastInfo(receipt?.status === 'stale' ? t('sourceChangedDrag') : t('attachPermissionDenied'));
         }
       } catch (error) {
-        toastInfo(error instanceof Error ? error.message : '파일을 첨부하지 못했습니다.');
+        toastInfo(error instanceof Error ? error.message : t('attachFailed'));
       }
       return;
     }
@@ -1121,12 +1131,12 @@ export function InputBox({ onSend, onAbort, onSafeStop, onAnswerQuestion, onJump
     if (optimized.changedCount > 0 && optimized.optimizedBytes < optimized.originalBytes) {
       const saved = Math.round((1 - optimized.optimizedBytes / optimized.originalBytes) * 100);
       toastInfo(
-        `파일 ${optimized.changedCount}개 최적화 — ${formatBytes(optimized.originalBytes)} → ${formatBytes(optimized.optimizedBytes)} (${saved}% 절감)`
+        t('filesOptimized', { count: optimized.changedCount, original: formatBytes(optimized.originalBytes), optimized: formatBytes(optimized.optimizedBytes), saved })
       );
     }
     const activeSessionId = useSessionStore.getState().activeSessionId;
     if (!activeSessionId) {
-      toastInfo('파일을 첨부하려면 먼저 세션을 선택하세요.');
+      toastInfo(t('selectSessionBeforeAttach'));
       return;
     }
     try {
@@ -1168,7 +1178,7 @@ export function InputBox({ onSend, onAbort, onSafeStop, onAnswerQuestion, onJump
         percent: 0,
         completedFiles: 0,
         totalFiles: optimized.files.length,
-        currentFileName: optimized.files[0]?.name || '파일',
+        currentFileName: optimized.files[0]?.name || t('fileFallback'),
       });
       for (const filesInBatch of batches) {
         const batchBytes = filesInBatch.reduce((sum, file) => sum + file.size, 0);
@@ -1200,12 +1210,12 @@ export function InputBox({ onSend, onAbort, onSafeStop, onAnswerQuestion, onJump
         });
       }
       if (uploadFailures.length > 0) {
-        const names = uploadFailures.slice(0, 3).map(failure => failure.name || '파일').join(', ');
-        const rest = uploadFailures.length > 3 ? ` 외 ${uploadFailures.length - 3}개` : '';
+        const names = uploadFailures.slice(0, 3).map(failure => failure.name || t('fileFallback')).join(', ');
+        const rest = uploadFailures.length > 3 ? t('additionalFiles', { count: uploadFailures.length - 3 }) : '';
         useChatStore.getState().addAttachment({
           id: `upload-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
           type: 'upload',
-          label: '일부 파일 업로드 실패',
+          label: t('partialUploadFailed'),
           content: `[Upload failed: ${names}${rest}]`,
         });
       }
@@ -1269,7 +1279,7 @@ export function InputBox({ onSend, onAbort, onSafeStop, onAnswerQuestion, onJump
   return (
     <div className="w-full relative">
       {/* Turn/runtime status */}
-      {turnStatusText(activeTurn.phase, hasQueue) && (
+      {turnStatusText(activeTurn.phase, hasQueue, t) && (
         <div className="relative z-[2] mb-2">
           <div className="flex items-center gap-2 px-4 py-2 bg-surface-900/60 border border-surface-700/50 rounded-xl text-[15px] text-gray-300 backdrop-blur-sm">
             {activeTurn.phase === 'error' ? (
@@ -1277,13 +1287,13 @@ export function InputBox({ onSend, onAbort, onSafeStop, onAnswerQuestion, onJump
             ) : (
               <RunIndicator size="xs" label="" className="shrink-0 text-primary-400" />
             )}
-            <span className="truncate flex-1">{turnStatusText(activeTurn.phase, hasQueue)}</span>
+            <span className="truncate flex-1">{turnStatusText(activeTurn.phase, hasQueue, t)}</span>
             {hasQueue && (
               <button
                 type="button"
                 onClick={() => setQueueExpanded((v) => !v)}
                 className="flex items-center gap-1 text-[13px] px-2 py-0.5 rounded-full bg-primary-500/10 border border-primary-500/20 text-primary-300 hover:bg-primary-500/20 hover:text-primary-200 transition-colors shrink-0"
-                title={queueExpanded ? '대기열 닫기' : '대기열 열기'}
+                title={queueExpanded ? t('queueClose') : t('queueOpen')}
                 aria-expanded={queueExpanded}
               >
                 <span>+{currentQueue.length}</span>
@@ -1329,8 +1339,8 @@ export function InputBox({ onSend, onAbort, onSafeStop, onAnswerQuestion, onJump
                         }
                       }}
                       className="shrink-0 p-1 rounded hover:bg-primary-500/20 text-primary-300 hover:text-primary-200 transition-colors opacity-70 group-hover:opacity-100"
-                      title="입력창으로 가져오기"
-                      aria-label="입력창으로 가져오기"
+                      title={t('restoreToInput')}
+                      aria-label={t('restoreToInput')}
                     >
                       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 14l-7 7m0 0l-7-7m7 7V3" />
@@ -1343,8 +1353,8 @@ export function InputBox({ onSend, onAbort, onSafeStop, onAnswerQuestion, onJump
                         useChatStore.getState().cancelQueuedMessageAtIndex(currentSessionId, idx);
                       }}
                       className="shrink-0 p-1 rounded hover:bg-red-500/20 text-gray-400 hover:text-red-300 transition-colors opacity-70 group-hover:opacity-100"
-                      title="대기열에서 삭제"
-                      aria-label="대기열에서 삭제"
+                      title={t('removeFromQueue')}
+                      aria-label={t('removeFromQueue')}
                     >
                       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -1369,7 +1379,7 @@ export function InputBox({ onSend, onAbort, onSafeStop, onAnswerQuestion, onJump
           <div
             style={{ minHeight: steeringLayerHeight }}
             className="tower-steering-sheet pointer-events-none absolute left-0 right-0 top-0 z-0 rounded-t-2xl rounded-b-md backdrop-blur-xl animate-in fade-in slide-in-from-bottom-1 duration-200"
-            aria-label="전달 대기 중인 Pi 끼어들기 메시지"
+            aria-label={t('pendingSteering')}
           >
             <div className="pointer-events-auto flex items-start gap-3 px-3 pb-6 pt-3 sm:px-4 text-[14px]">
               <span className="tower-steering-spinner mt-1 w-2.5 h-2.5 border-[1.5px] rounded-full animate-spin shrink-0" />
@@ -1379,7 +1389,7 @@ export function InputBox({ onSend, onAbort, onSafeStop, onAnswerQuestion, onJump
                 className={`tower-steering-text min-w-0 flex-1 text-left leading-relaxed ${
                   steerExpanded ? '' : 'max-h-16 overflow-hidden'
                 }`}
-                title={steerExpanded ? '접기' : pendingInjectionText}
+                title={steerExpanded ? t('collapse') : pendingInjectionText}
                 aria-expanded={steerExpanded}
               >
                 {steerExpanded ? (
@@ -1399,7 +1409,7 @@ export function InputBox({ onSend, onAbort, onSafeStop, onAnswerQuestion, onJump
                     ))}
                     {steeringPreview.hiddenLineCount > 0 && (
                       <span className="mt-0.5 text-[13px] font-medium opacity-70">
-                        … +{steeringPreview.hiddenLineCount}줄
+                        {t('hiddenLines', { count: steeringPreview.hiddenLineCount })}
                       </span>
                     )}
                   </span>
@@ -1414,12 +1424,12 @@ export function InputBox({ onSend, onAbort, onSafeStop, onAnswerQuestion, onJump
                       ws.send(JSON.stringify({ type: 'cancel_steer', sessionId: currentSessionId, messageId: it.id }));
                     }
                   } else {
-                    toastInfo('연결이 끊겨 취소 요청을 보낼 수 없습니다');
+                    toastInfo(t('connectionCancelFailed'));
                   }
                 }}
                 className="tower-steering-cancel shrink-0 rounded-lg p-1 transition-colors"
-                title="스티어링을 모두 취소하고 입력창으로 가져오기"
-                aria-label="전달 대기 메시지 취소"
+                title={t('cancelSteeringRestore')}
+                aria-label={t('cancelPendingMessage')}
               >
                 <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.3} d="M6 18L18 6M6 6l12 12" />
@@ -1433,24 +1443,24 @@ export function InputBox({ onSend, onAbort, onSafeStop, onAnswerQuestion, onJump
           <div className={`relative z-10 flex gap-1.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden ${isMobile ? 'mb-1.5 px-1' : 'mb-2 px-2'}`}>
             <button
               type="button"
-              onClick={() => sendQuickReply('계속 진행해줘')}
+              onClick={() => sendQuickReply(t('continueRequest'))}
               className="shrink-0 rounded-full border border-surface-700/70 bg-surface-900/70 px-2.5 py-1 text-[13px] font-medium text-gray-300 hover:border-surface-600 hover:bg-surface-800/80 hover:text-gray-100 active:bg-surface-700/70"
             >
-              계속 진행
+              {t('quickContinue')}
             </button>
             <button
               type="button"
-              onClick={() => sendQuickReply('쉽게 설명해줘')}
+              onClick={() => sendQuickReply(t('explainRequest'))}
               className="shrink-0 rounded-full border border-surface-700/70 bg-surface-900/70 px-2.5 py-1 text-[13px] font-medium text-gray-300 hover:border-surface-600 hover:bg-surface-800/80 hover:text-gray-100 active:bg-surface-700/70"
             >
-              쉽게 설명
+              {t('quickExplain')}
             </button>
             <button
               type="button"
-              onClick={() => sendQuickReply('방금 정한 내용을 결정문서로 저장해줘')}
+              onClick={() => sendQuickReply(t('saveDecisionRequest'))}
               className="shrink-0 rounded-full border border-surface-700/70 bg-surface-900/70 px-2.5 py-1 text-[13px] font-medium text-gray-300 hover:border-surface-600 hover:bg-surface-800/80 hover:text-gray-100 active:bg-surface-700/70"
             >
-              결정 저장
+              {t('quickSaveDecision')}
             </button>
           </div>
         )}
@@ -1553,8 +1563,8 @@ export function InputBox({ onSend, onAbort, onSafeStop, onAnswerQuestion, onJump
                 // 데스크탑: surrounding stroke icons 와 맞춘 작은 line icon. 이모지/고해상도 느낌 제거.
                 : 'p-2 m-1 bg-transparent hover:bg-surface-700/45 text-gray-500 hover:text-surface-100'
             }`}
-            title={isStreaming ? '응답 진행 중 — 종료 후 첨부 가능' : '파일 첨부'}
-            aria-label="파일 첨부"
+            title={isStreaming ? t('streamingAttachDisabled') : t('attachFile')}
+            aria-label={t('attachFile')}
           >
             <svg className={isMobile ? 'w-4 h-4' : 'w-[18px] h-[18px]'} fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.9} d="M9.25 12.75l5.5-5.5a2.5 2.5 0 013.54 3.54l-7.25 7.25a4 4 0 01-5.66-5.66l7.05-7.05" />
@@ -1592,17 +1602,17 @@ export function InputBox({ onSend, onAbort, onSafeStop, onAnswerQuestion, onJump
             placeholder={
               // 모바일은 좁은 폭 + placeholder 가 작아도 길면 2줄 점유 → 짧은 문구로 분기.
               activeTurn.phase === 'awaiting_user'
-                ? (isMobile ? '답변 입력…' : '질문에 답변을 입력하세요…')
+                ? (isMobile ? t('answerShort') : t('answerPrompt'))
                 : isStreaming
                   ? (isPiStreamingSession
-                    ? (isMobile ? '진행 중에 끼어들기…' : '진행 중인 응답에 끼어들 메시지를 입력하세요…')
-                    : (isMobile ? '다음 턴…' : 'Type a message to send on the next turn...'))
+                    ? (isMobile ? t('steerShort') : t('steerPrompt'))
+                    : (isMobile ? t('nextTurnShort') : t('sendNextTurn')))
                   : attachments.length > 0
-                    ? (isMobile ? '덧붙이기…' : '메시지를 덧붙이거나 바로 전송하세요…')
-                    : ghostSuggestion || (isMobile ? '메시지…' : 'Type a message...')
+                    ? (isMobile ? t('addShort') : t('addOrSend'))
+                    : ghostSuggestion || (isMobile ? t('messageShort') : t('typeMessage'))
             }
             rows={1}
-            aria-label="메시지 입력"
+            aria-label={t('messageInput')}
             style={{ maxHeight: `${effectiveMaxH}px`, WebkitOverflowScrolling: 'touch' }}
             className={`relative z-[1] w-full bg-transparent border-none py-3 text-input-size text-gray-100 placeholder:text-surface-500 placeholder:italic resize-none focus:outline-none focus:ring-0 min-h-[48px] overscroll-contain ${
               isMobile ? 'px-2' : 'px-4'
@@ -1610,7 +1620,7 @@ export function InputBox({ onSend, onAbort, onSafeStop, onAnswerQuestion, onJump
           />
             {(ghostSuggestion || ghostSuffix) && (
               <div className={`pointer-events-none absolute bottom-0 right-1 z-[2] text-[10px] text-surface-500 ${isMobile ? 'hidden' : ''}`}>
-                Tab으로 자동완성 · Enter로 전송
+                {t('autocompleteHint')}
               </div>
             )}
           </div>
@@ -1620,10 +1630,10 @@ export function InputBox({ onSend, onAbort, onSafeStop, onAnswerQuestion, onJump
               type="button"
               onClick={acceptGhostSuggestion}
               className="shrink-0 self-center rounded-full border border-primary-500/25 bg-primary-500/10 px-2.5 py-1 text-[11px] font-medium text-primary-200 active:bg-primary-500/20"
-              aria-label="자동완성 제안 채우기"
-              title="제안을 입력창에 채우기"
+              aria-label={t('fillSuggestion')}
+              title={t('fillSuggestion')}
             >
-              완성
+              {t('complete')}
             </button>
           )}
 
@@ -1642,8 +1652,8 @@ export function InputBox({ onSend, onAbort, onSafeStop, onAnswerQuestion, onJump
                 className={`flex items-center justify-center rounded text-surface-500 hover:text-gray-200 hover:bg-surface-700/60 disabled:opacity-25 disabled:cursor-default disabled:hover:bg-transparent disabled:hover:text-surface-500 transition-colors ${
                   isMobile ? 'w-4 h-3.5' : 'w-5 h-4'
                 }`}
-                title={`이전 질문으로 · 단축키 ${navShortcutLabel}`}
-                aria-label={`이전 질문으로 이동 · 단축키 ${navShortcutLabel}`}
+                title={t('previousQuestion', { shortcut: navShortcutLabel })}
+                aria-label={t('previousQuestion', { shortcut: navShortcutLabel })}
               >
                 <svg className={isMobile ? 'w-2.5 h-2.5' : 'w-3 h-3'} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 15l7-7 7 7" />
@@ -1656,8 +1666,8 @@ export function InputBox({ onSend, onAbort, onSafeStop, onAnswerQuestion, onJump
                 className={`flex items-center justify-center rounded text-surface-500 hover:text-gray-200 hover:bg-surface-700/60 disabled:opacity-25 disabled:cursor-default disabled:hover:bg-transparent disabled:hover:text-surface-500 transition-colors ${
                   isMobile ? 'w-4 h-3.5' : 'w-5 h-4'
                 }`}
-                title={`다음 질문으로 · 단축키 ${navShortcutLabel}`}
-                aria-label={`다음 질문으로 이동 · 단축키 ${navShortcutLabel}`}
+                title={t('nextQuestion', { shortcut: navShortcutLabel })}
+                aria-label={t('nextQuestion', { shortcut: navShortcutLabel })}
               >
                 <svg className={isMobile ? 'w-2.5 h-2.5' : 'w-3 h-3'} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 9l-7 7-7-7" />
@@ -1673,8 +1683,8 @@ export function InputBox({ onSend, onAbort, onSafeStop, onAnswerQuestion, onJump
               className={`bg-transparent hover:bg-red-500/10 rounded-xl transition-all shrink-0 text-red-400 self-end focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400 ${
                 isMobile ? 'p-1.5 m-0.5' : 'p-2 m-1'
               }`}
-              title="즉시 중단"
-              aria-label="응답 즉시 중단"
+              title={t('stopImmediately')}
+              aria-label={t('stopImmediately')}
             >
               <svg className={isMobile ? 'w-4 h-4' : 'w-5 h-5'} fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                 <rect x="7" y="7" width="10" height="10" rx="2" />
@@ -1705,7 +1715,7 @@ export function InputBox({ onSend, onAbort, onSafeStop, onAnswerQuestion, onJump
                 isMobile ? 'p-1.5 m-0.5' : 'p-2 m-1'
               }`}
               title="Stop"
-              aria-label="응답 중단"
+              aria-label={t('stopResponse')}
             >
               <svg className={isMobile ? 'w-4 h-4' : 'w-5 h-5'} fill="currentColor" viewBox="0 0 24 24">
                 <rect x="7" y="7" width="10" height="10" rx="2" />
@@ -1725,7 +1735,7 @@ export function InputBox({ onSend, onAbort, onSafeStop, onAnswerQuestion, onJump
                   : 'bg-primary-600/90 hover:bg-primary-500 disabled:bg-transparent disabled:text-surface-600 disabled:shadow-none text-white shadow-[0_4px_12px_rgba(0,0,0,0.12)]'
               }`}
               title={isStreaming ? (isPiStreamingSession ? 'Steer current Pi turn' : 'Add to queue') : 'Send'}
-              aria-label={isStreaming ? (isPiStreamingSession ? '현재 Pi 턴에 전달' : '대기열에 추가') : '메시지 전송'}
+              aria-label={isStreaming ? (isPiStreamingSession ? t('sendToCurrentPi') : t('addToQueue')) : t('sendMessage')}
             >
               {isStreaming && (input.trim() || attachments.length > 0) ? (
                 <svg className={isMobile ? 'w-4 h-4' : 'w-5 h-5'} fill="none" stroke="currentColor" viewBox="0 0 24 24">

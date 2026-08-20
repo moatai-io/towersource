@@ -63,6 +63,8 @@ export interface WorkbenchExecutionContext {
 /** Provider seam shared by current Local Runtime and future Remote Worker adapters. */
 export interface WorkbenchExecutionProvider {
   kind: WorkbenchExecutionProviderKind;
+  /** Release selection-time capacity when broker validation fails before provider execution starts. */
+  releaseReservation?(): Promise<void>;
   executeForeground(input: WorkbenchExecutionContext & WorkbenchExecutionRequest): Promise<ExecResult>;
   enqueueJob(input: WorkbenchExecutionContext & WorkbenchExecutionRequest): Promise<WorkbenchJobRow>;
   startService(input: WorkbenchExecutionContext & WorkbenchExecutionRequest & {
@@ -126,7 +128,10 @@ export async function executeWorkbenchRequest(input: {
   provider: WorkbenchExecutionProvider;
 }): Promise<{ plan: WorkbenchExecutionPlan; execution: WorkbenchExecutionResult }> {
   const plan = planWorkbenchExecution(input.request, input.provider.kind);
-  if (plan.risk === 'review') throw new Error(`Workbench execution requires review: ${plan.reason}`);
+  if (plan.risk === 'review') {
+    await input.provider.releaseReservation?.();
+    throw new Error(`Workbench execution requires review: ${plan.reason}`);
+  }
   if (plan.lifecycle === 'service') {
     const service = await input.provider.startService({
       ...input.context,

@@ -1,4 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import i18n from '../../i18n';
 
 export interface PersonalNoteSummary {
   id: string;
@@ -17,6 +19,7 @@ interface PersonalNotePickerProps {
 
 /** Search and open user-owned Personal Space Markdown notes. */
 export function PersonalNotePicker({ token, onClose, onCreate, onOpen }: PersonalNotePickerProps) {
+  const { t } = useTranslation('layout');
   const [notes, setNotes] = useState<PersonalNoteSummary[]>([]);
   const [query, setQuery] = useState('');
   const [loading, setLoading] = useState(true);
@@ -30,16 +33,16 @@ export function PersonalNotePicker({ token, onClose, onCreate, onOpen }: Persona
     fetch('/api/personal-space/files', { headers, signal: controller.signal })
       .then(async (res) => {
         const data = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(data.error || `개인 노트를 불러오지 못했습니다 (${res.status})`);
+        if (!res.ok) throw new Error(data.error || t('personalNotePicker.loadFailedWithStatus', { status: res.status }));
         setNotes(Array.isArray(data.files) ? data.files : []);
       })
       .catch((err) => {
-        if (err?.name !== 'AbortError') setError(err instanceof Error ? err.message : '개인 노트를 불러오지 못했습니다');
+        if (err?.name !== 'AbortError') setError(err instanceof Error ? err.message : t('personalNotePicker.loadFailed'));
       })
       .finally(() => setLoading(false));
     window.requestAnimationFrame(() => searchRef.current?.focus());
     return () => controller.abort();
-  }, [token]);
+  }, [token, t]);
 
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
@@ -61,26 +64,26 @@ export function PersonalNotePicker({ token, onClose, onCreate, onOpen }: Persona
         <div className="flex items-center justify-between border-b border-surface-800 px-4 py-3">
           <div>
             <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-primary-300">Personal Space</div>
-            <h2 className="mt-0.5 text-base font-bold text-surface-100">개인 노트 열기</h2>
+            <h2 className="mt-0.5 text-base font-bold text-surface-100">{t('personalNotePicker.title')}</h2>
           </div>
-          <button type="button" onClick={onClose} className="rounded-md px-2 py-1 text-surface-400 hover:bg-surface-800 hover:text-surface-100" aria-label="닫기">×</button>
+          <button type="button" onClick={onClose} className="rounded-md px-2 py-1 text-surface-400 hover:bg-surface-800 hover:text-surface-100" aria-label={t('personalNotePicker.close')}>×</button>
         </div>
         <div className="border-b border-surface-800 p-3">
           <input
             ref={searchRef}
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="개인 노트 이름이나 경로 검색"
+            placeholder={t('personalNotePicker.searchPlaceholder')}
             className="h-10 w-full rounded-lg border border-surface-700 bg-surface-900 px-3 text-sm text-surface-100 outline-none placeholder:text-surface-500 focus:border-primary-500"
           />
         </div>
         <div className="max-h-[52vh] overflow-y-auto p-2">
           {loading ? (
-            <div className="px-3 py-10 text-center text-sm text-surface-500">개인 노트를 불러오는 중…</div>
+            <div className="px-3 py-10 text-center text-sm text-surface-500">{t('personalNotePicker.loading')}</div>
           ) : error ? (
             <div className="px-3 py-10 text-center text-sm text-red-300">{error}</div>
           ) : filtered.length === 0 ? (
-            <div className="px-3 py-10 text-center text-sm text-surface-500">검색 결과가 없습니다.</div>
+            <div className="px-3 py-10 text-center text-sm text-surface-500">{t('personalNotePicker.empty')}</div>
           ) : filtered.map((note) => (
             <button
               key={note.id}
@@ -93,14 +96,14 @@ export function PersonalNotePicker({ token, onClose, onCreate, onOpen }: Persona
                 <span className="block truncate text-sm font-semibold text-surface-100">{note.name}</span>
                 <span className="mt-0.5 block truncate text-[12px] text-surface-500">{note.relativePath}</span>
               </span>
-              <span className="shrink-0 text-[11px] text-surface-500">{new Date(note.updatedAt).toLocaleDateString('ko-KR')}</span>
+              <span className="shrink-0 text-[11px] text-surface-500">{new Date(note.updatedAt).toLocaleDateString(i18n.resolvedLanguage || i18n.language)}</span>
             </button>
           ))}
         </div>
         <div className="flex items-center justify-between border-t border-surface-800 px-3 py-3">
-          <span className="text-[12px] text-surface-500">프로젝트와 분리된 사용자 전용 공간</span>
+          <span className="text-[12px] text-surface-500">{t('personalNotePicker.privateSpace')}</span>
           <button type="button" onClick={() => { onCreate(); onClose(); }} className="rounded-lg bg-primary-500 px-3 py-2 text-sm font-semibold text-white hover:bg-primary-400">
-            + 새 개인 노트
+            {t('personalNotePicker.newNote')}
           </button>
         </div>
       </div>

@@ -49,34 +49,29 @@ function NavTabs({ onRequestFileTree }: { onRequestFileTree?: () => void }) {
   const sessions = useSessionStore((s) => s.sessions);
   const activeSessionId = useSessionStore((s) => s.activeSessionId);
   const agentFirstEnabled = useSettingsStore((s) => s.serverConfig?.agentFirstEnabled === true);
-  const workspaceAppsEnabled = useSettingsStore((s) => s.serverConfig?.workspaceAppsEnabled === true);
   const containerRef = React.useRef<HTMLDivElement>(null);
   const [indicator, setIndicator] = React.useState({ left: 0, width: 0 });
 
   // Build tab definitions
   const tabs = React.useMemo(() => {
-    const workspaceAppsTab = workspaceAppsEnabled ? [{ key: 'workspaceApps', label: t('workspaceApps') }] : [];
     if (agentFirstEnabled) {
       return [
         { key: 'ai', label: t('aiTeam') },
         { key: 'files', label: t('files') },
-        ...workspaceAppsTab,
       ];
     }
     return [
       { key: 'ai', label: t('ai') },
       { key: 'files', label: t('files') },
-      ...workspaceAppsTab,
     ];
 
-  }, [agentFirstEnabled, t, workspaceAppsEnabled]);
+  }, [agentFirstEnabled, t]);
 
   // Determine active key
   const activeKey = activeView === 'aiServices' ? ''
     : activeView === 'aiTeam' ? 'ai'
     : activeView === 'schedules' ? 'schedule'
     : activeView === 'automations' ? 'schedule'
-    : activeView === 'workspaceApps' ? 'workspaceApps'
     : activeView === 'projectFiles' ? 'files'
     : activeView === 'chat' && sidebarOpen && sidebarTab === 'files' ? 'files'
     : 'ai';
@@ -116,11 +111,6 @@ function NavTabs({ onRequestFileTree }: { onRequestFileTree?: () => void }) {
         onRequestFileTree?.();
         break;
       }
-      case 'workspaceApps':
-        if (!useSettingsStore.getState().serverConfig?.workspaceAppsEnabled) break;
-        setActiveView('workspaceApps');
-        store.setSidebarOpen(false);
-        break;
       case 'schedule':
         // Schedule is a primary workspace, not a sidebar toggle. Re-clicking the
         // active tab should keep users on Schedule instead of bouncing back to chat.
@@ -633,7 +623,7 @@ function AppMenu({
             {userRole !== 'guest' && userRole !== 'viewer' && onPersonalMaterialsClick && (
               <MenuItem
                 icon={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M6 3h9l3 3v15H6zM9 11h6M9 15h6" /></svg>}
-                label={isMobile ? '내 문서' : '내 자료'}
+                label={isMobile ? t('myDocuments') : t('myMaterials')}
                 onClick={onPersonalMaterialsClick}
               />
             )}

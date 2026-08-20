@@ -43,7 +43,7 @@ async function fetchJson<T>(url: string, opts?: RequestInit): Promise<T> {
 
 // ── Helpers ──
 
-function triggerLabel(a: Automation): string {
+function triggerLabel(a: Automation, t: (key: string, options?: Record<string, unknown>) => string): string {
   if (a.triggerType === 'manual') return '';
   if (a.triggerType === 'once' && a.onceAt) return new Date(a.onceAt).toLocaleDateString();
   if (!a.cronConfig) return '';
@@ -51,13 +51,10 @@ function triggerLabel(a: Automation): string {
   const pad = (n: number) => String(n).padStart(2, '0');
   const time = `${pad(c.hour ?? 9)}:${pad(c.minute ?? 0)}`;
   switch (c.type) {
-    case 'daily': return `매일 ${time}`;
-    case 'weekdays': return `평일 ${time}`;
-    case 'weekly': {
-      const days = ['일','월','화','수','목','금','토'];
-      return `매주 ${days[c.day ?? 1]} ${time}`;
-    }
-    case 'interval': return `${c.hours ?? 1}시간마다`;
+    case 'daily': return t('triggerDaily', { time });
+    case 'weekdays': return t('triggerWeekdays', { time });
+    case 'weekly': return t('triggerWeekly', { day: t(`day${c.day ?? 1}`), time });
+    case 'interval': return t('triggerInterval', { value: c.hours ?? 1, unit: t('hoursUnit') });
     default: return '';
   }
 }
@@ -186,7 +183,7 @@ export function AutomationPanel() {
 
   const handleToggle = async (id: string, enabled: boolean) => {
     const nextEnabled = !enabled;
-    const ok = await confirm({ title: nextEnabled ? '자동화 켜기' : '자동화 일시정지', message: nextEnabled ? '이 자동화의 예약 실행을 다시 시작할까요?' : '이 자동화의 예약 실행을 일시정지할까요?', confirmLabel: nextEnabled ? '켜기' : '일시정지' });
+    const ok = await confirm({ title: nextEnabled ? t('enableConfirmTitle') : t('pauseConfirmTitle'), message: nextEnabled ? t('enableConfirmMessage') : t('pauseConfirmMessage'), confirmLabel: nextEnabled ? t('enableAction') : t('pauseAction') });
     if (!ok) return;
     try {
       await fetchJson(`${API}/${id}/enabled`, { method: 'POST', body: JSON.stringify({ enabled: nextEnabled, confirmed: true }) });
@@ -379,7 +376,7 @@ export function AutomationPanel() {
                     onClick={() => handleCardClick(a)}
                   >
                     {/* Running signal */}
-                    <RunIndicator size="xs" label="자동화 실행 중" className="flex-shrink-0 text-blue-400" />
+                    <RunIndicator size="xs" label={t('automationRunning')} className="flex-shrink-0 text-blue-400" />
                     {/* Name */}
                     <span className="text-base text-gray-200 flex-1 truncate">{a.name}</span>
                     {/* Creator badge */}
@@ -447,7 +444,7 @@ export function AutomationPanel() {
         <AutomationWorkbenchModal
           automation={workbenchAutomation}
           onClose={() => setWorkbenchAutomation(null)}
-          onOpenLegacyEdit={() => toastError('기본 설정도 Workbench에서 변경 검토본을 만든 뒤 적용해 주세요.')}
+          onOpenLegacyEdit={() => toastError(t('workbenchEditRequired'))}
         />
       )}
     </div>
@@ -470,7 +467,7 @@ function AutomationRow({ automation: a, expanded, runs, onCardClick, onExpand, o
   onDelete: () => void;
   t: (k: string) => string;
 }) {
-  const schedule = triggerLabel(a);
+  const schedule = triggerLabel(a, t);
   const isScheduled = a.triggerType !== 'manual' && a.enabled;
   const isDisabled = a.triggerType !== 'manual' && !a.enabled;
   const isDone = a.status === 'done';
@@ -550,7 +547,7 @@ function AutomationRow({ automation: a, expanded, runs, onCardClick, onExpand, o
             onClick={(e) => { e.stopPropagation(); onCardClick(); }}
             className="col-start-3 row-span-2 row-start-1 rounded border border-surface-600 bg-surface-800 px-2 py-1 text-[12px] text-gray-400 transition-colors hover:bg-surface-700 hover:text-gray-200 sm:col-auto sm:row-auto sm:flex-shrink-0"
           >
-            View
+            {t('view')}
           </button>
         )}
 
@@ -576,7 +573,7 @@ function AutomationRow({ automation: a, expanded, runs, onCardClick, onExpand, o
           {/* Prompt — prominent */}
           {a.prompt && (
             <div className="mb-3">
-              <p className="text-[13px] text-gray-500 mb-1">Prompt</p>
+              <p className="text-[13px] text-gray-500 mb-1">{t('prompt')}</p>
               <p className="text-sm text-gray-300 leading-relaxed bg-surface-850 rounded-md px-3 py-2 border border-surface-700/30">
                 {a.prompt}
               </p>
@@ -586,10 +583,10 @@ function AutomationRow({ automation: a, expanded, runs, onCardClick, onExpand, o
           {/* Meta row */}
           <div className="flex flex-wrap gap-x-4 gap-y-1 text-[13px] text-gray-500 mb-3">
             {a.mode !== 'spawn' && (
-              <span>Mode: <span className="text-gray-400">{a.mode === 'inject' ? 'Session' : 'Channel'}</span></span>
+              <span>{t('mode')}: <span className="text-gray-400">{a.mode === 'inject' ? t('session') : t('channel')}</span></span>
             )}
             {a.lastRunAt && (
-              <span>Last run: <span className="text-gray-400">{new Date(a.lastRunAt).toLocaleString()}</span></span>
+              <span>{t('lastRun')}: <span className="text-gray-400">{new Date(a.lastRunAt).toLocaleString()}</span></span>
             )}
             {a.runCount > 0 && (
               <span>{a.runCount} {t('runs')}</span>
@@ -700,7 +697,7 @@ function AutomationFormModal({ editingId, onClose, onSaved, t }: {
         cronConfig,
       };
       if (editingId) {
-        throw new Error('기존 자동화 설정은 Workbench에서 변경 검토본을 만든 뒤 적용해 주세요.');
+        throw new Error(t('workbenchEditRequired'));
       }
       await fetchJson(API, { method: 'POST', body: JSON.stringify(body) });
       onSaved();

@@ -1,3 +1,5 @@
+import i18n from '../i18n';
+
 /**
  * Engine-pick decision logic — what should happen when a user picks a model
  * from the Header dropdown, given the active session's current engine.
@@ -123,6 +125,6 @@ export async function confirmEngineSwitch(
       status: res.status,
     };
   } catch {
-    return { ok: false, status: 0, error: { code: 'NETWORK', message: '네트워크 오류로 엔진 전환에 실패했습니다.' } };
+    return { ok: false, status: 0, error: { code: 'NETWORK', message: i18n.t('engineSwitchNetworkFailed', { ns: 'common' }) } };
   }
 }

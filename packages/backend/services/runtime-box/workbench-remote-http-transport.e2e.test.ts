@@ -14,14 +14,13 @@ afterEach(async () => {
   await Promise.all(roots.splice(0).map(root => fs.rm(root, { recursive: true, force: true })));
 });
 
-async function fixture() {
+async function fixture(projections?: Record<string, string>, operatorGitIdentity?: { name: string; email: string }) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'tower-remote-worker-'));
   roots.push(root);
   await fs.mkdir(path.join(root, 'work'), { recursive: true });
   await fs.writeFile(path.join(root, 'work', 'input.txt'), 'mounted-workspace\n');
   const token = 'test-worker-token';
-  process.env.TOWER_WORKER_BWRAP_BIN = '/usr/bin/bwrap';
-  const server = createRemoteWorkbenchWorkerServer({ workerId: 'worker-e2e', token, projects: { 'project-a': root } });
+  const server = createRemoteWorkbenchWorkerServer({ workerId: 'worker-e2e', token, projects: { 'project-a': root }, projections, operatorGitIdentity });
   servers.push(server);
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
   const address = server.address();
@@ -59,21 +58,41 @@ describe('Remote Workbench HTTP transport localhost E2E', () => {
     await expect(fs.readFile(path.join(root, 'work', 'output.txt'), 'utf8')).resolves.toBe('artifact-from-worker\n');
   });
 
-  it('injects one run-scoped Credential and redacts it from streamed and terminal output', async () => {
-    const { transport } = await fixture();
-    const stdout: string[] = [];
-    const secret = 'unique-secret-for-redaction';
-    const result = await transport.execute({
-      spec: { ...baseSpec, command: "printf '%s' \"$API_TOKEN\"", environmentKeys: ['API_TOKEN'] },
-      credentials: { API_TOKEN: secret }, signal: new AbortController().signal,
-      onStdout: chunk => stdout.push(chunk), onStderr: () => {},
-    });
-    expect(stdout.join('')).toBe('[REDACTED]');
-    expect(result.execResult.stdout).toBe('[REDACTED]');
-    expect(result.execResult.runtime_context.credential_env).toMatchObject({
-      injected: [{ credential_id: 'run-scoped', env_name: 'API_TOKEN' }], suppressed: false,
-    });
-    expect(JSON.stringify(result)).not.toContain(secret);
+  it('does not inherit Worker process secrets and only injects the run-scoped Credential with redaction', async () => {
+    const sentinels = {
+      TOWER_REMOTE_WORKER_TOKEN: 'worker-transport-sentinel',
+      DATABASE_URL: 'postgresql://worker-process-sentinel',
+      JWT_SECRET: 'worker-jwt-sentinel',
+      SECRET_STORE_MASTER_KEY: 'worker-vault-sentinel',
+    };
+    const previous = Object.fromEntries(Object.keys(sentinels).map(key => [key, process.env[key]]));
+    Object.assign(process.env, sentinels);
+    try {
+      const { transport } = await fixture();
+      const stdout: string[] = [];
+      const secret = 'unique-secret-for-redaction';
+      const result = await transport.execute({
+        spec: {
+          ...baseSpec,
+          command: "for key in TOWER_REMOTE_WORKER_TOKEN DATABASE_URL JWT_SECRET SECRET_STORE_MASTER_KEY; do eval 'value=${'\"$key\"'}'; test -z \"$value\" || exit 41; done; printf 'worker-secrets=missing\\nrun-credential=%s' \"$API_TOKEN\"",
+          environmentKeys: ['API_TOKEN'],
+        },
+        credentials: { API_TOKEN: secret }, signal: new AbortController().signal,
+        onStdout: chunk => stdout.push(chunk), onStderr: () => {},
+      });
+      expect(stdout.join('')).toBe('worker-secrets=missing\nrun-credential=[REDACTED]');
+      expect(result.execResult).toMatchObject({ exit_code: 0, stdout: 'worker-secrets=missing\nrun-credential=[REDACTED]' });
+      expect(result.execResult.runtime_context.credential_env).toMatchObject({
+        injected: [{ credential_id: 'run-scoped', env_name: 'API_TOKEN' }], suppressed: false,
+      });
+      expect(JSON.stringify(result)).not.toContain(secret);
+      for (const value of Object.values(sentinels)) expect(JSON.stringify(result)).not.toContain(value);
+    } finally {
+      for (const [key, value] of Object.entries(previous)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    }
   });
 
   it('redacts a Credential on timeout and does not write a completion artifact', async () => {
@@ -89,19 +108,16 @@ describe('Remote Workbench HTTP transport localhost E2E', () => {
     await expect(fs.access(path.join(root, 'work', 'timeout-should-not-exist.txt'))).rejects.toThrow();
   });
 
-  it('fails closed when the Worker has no bwrap runtime configured', async () => {
-    const previous = process.env.TOWER_WORKER_BWRAP_BIN;
-    delete process.env.TOWER_WORKER_BWRAP_BIN;
-    try {
-      const { transport } = await fixture();
-      delete process.env.TOWER_WORKER_BWRAP_BIN;
-      await expect(transport.execute({
-        spec: baseSpec, signal: new AbortController().signal, onStdout: () => {}, onStderr: () => {},
-      })).rejects.toThrow('REMOTE_WORKER_HTTP_400');
-    } finally {
-      if (previous === undefined) delete process.env.TOWER_WORKER_BWRAP_BIN;
-      else process.env.TOWER_WORKER_BWRAP_BIN = previous;
-    }
+  it('uses the Worker native shell without requiring a sandbox runtime', async () => {
+    const { transport } = await fixture();
+    const result = await transport.execute({
+      spec: { ...baseSpec, command: "printf '%s|%s' \"$TOWER_WORKSTATION_SHELL\" \"$HOME\"" },
+      signal: new AbortController().signal, onStdout: () => {}, onStderr: () => {},
+    });
+    expect(result.execResult.stdout).toBe(`native|${process.env.HOME}`);
+    expect(result.execResult.runtime_context.workstation).toMatchObject({
+      shell: 'native', persistent_home: true, host_tools: 'available', default_scope: 'current-project',
+    });
   });
 
   it('rejects a Credential key mismatch before execution', async () => {
@@ -112,28 +128,64 @@ describe('Remote Workbench HTTP transport localhost E2E', () => {
     })).rejects.toThrow('REMOTE_WORKER_HTTP_400');
   });
 
-  it('keeps ordinary runtime identity and DNS configuration available without exposing host home paths', async () => {
-    const { transport } = await fixture();
+
+  it('maps a registered logical projection to its native host cwd', async () => {
+    const projected = await fs.mkdtemp(path.join(os.tmpdir(), 'tower-native-projection-'));
+    roots.push(projected);
+    await fs.mkdir(path.join(projected, 'packages'), { recursive: true });
+    await fs.writeFile(path.join(projected, 'packages', 'marker.txt'), 'operator-source\n');
+    const { transport } = await fixture({ '/workspace/tower': projected });
     const result = await transport.execute({
-      spec: {
-        ...baseSpec,
-        command: "test -r /etc/passwd && test -r /etc/resolv.conf && test -d /etc/ssl && test ! -e /home/tower-private && printf runtime-ok",
-      },
+      spec: { ...baseSpec, cwd: '/workspace/tower/packages', command: 'pwd; cat marker.txt' },
       signal: new AbortController().signal, onStdout: () => {}, onStderr: () => {},
     });
-    expect(result.execResult).toMatchObject({ exit_code: 0, stdout: 'runtime-ok' });
+    expect(result.execResult.stdout).toBe(`${path.join(projected, 'packages')}\noperator-source\n`);
+    expect(result.execResult.runtime_context.cwd).toBe('/workspace/tower/packages');
   });
 
-  it('cannot read Tower host files or another Project outside /workspace', async () => {
+  it('injects commit attribution only when the dedicated operator config declares it', async () => {
+    const command = "printf '%s|%s|%s|%s' \"${GIT_AUTHOR_NAME-missing}\" \"${GIT_AUTHOR_EMAIL-missing}\" \"${GIT_COMMITTER_NAME-missing}\" \"${GIT_COMMITTER_EMAIL-missing}\"";
+    const plain = await fixture();
+    const plainResult = await plain.transport.execute({
+      spec: { ...baseSpec, command }, signal: new AbortController().signal, onStdout: () => {}, onStderr: () => {},
+    });
+    expect(plainResult.execResult.stdout).toBe('missing|missing|missing|missing');
+
+    const operator = await fixture(undefined, { name: 'Tower Operator', email: 'operator@example.com' });
+    const operatorResult = await operator.transport.execute({
+      spec: { ...baseSpec, command }, signal: new AbortController().signal, onStdout: () => {}, onStderr: () => {},
+    });
+    expect(operatorResult.execResult.stdout).toBe('Tower Operator|operator@example.com|Tower Operator|operator@example.com');
+  });
+
+  it('preserves the Worker rejection code and safe reason on HTTP 400', async () => {
+    const { transport } = await fixture();
+    await expect(transport.execute({
+      spec: { ...baseSpec, cwd: '/home/tower/tower' },
+      signal: new AbortController().signal, onStdout: () => {}, onStderr: () => {},
+    })).rejects.toThrow('REMOTE_WORKER_HTTP_400: INVALID_RUN: cwd must use a registered /workspace path');
+  });
+
+  it('starts in the real Project directory while reporting the logical Project cwd', async () => {
+    const { root, transport } = await fixture();
+    const result = await transport.execute({
+      spec: { ...baseSpec, cwd: '/workspace/work', command: 'pwd' },
+      signal: new AbortController().signal, onStdout: () => {}, onStderr: () => {},
+    });
+    expect(result.execResult.stdout.trim()).toBe(path.join(root, 'work'));
+    expect(result.execResult.runtime_context.cwd).toBe('/workspace/work');
+  });
+
+  it('can use native host identity, tools, and paths outside the default Project scope', async () => {
     const { transport } = await fixture();
     const result = await transport.execute({
       spec: {
         ...baseSpec,
-        command: "test ! -e /home/tower/tower/.env && test ! -e /home/tower/workspace/projects/other-project && test -r /workspace/work/input.txt && printf isolated",
+        command: "test -r /etc/passwd && test -r /etc/resolv.conf && command -v sh >/dev/null && cd /tmp && printf native-host",
       },
       signal: new AbortController().signal, onStdout: () => {}, onStderr: () => {},
     });
-    expect(result.execResult).toMatchObject({ exit_code: 0, stdout: 'isolated' });
+    expect(result.execResult).toMatchObject({ exit_code: 0, stdout: 'native-host' });
   });
 
   it('rejects a project that is not in the Worker-owned allowlist', async () => {

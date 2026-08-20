@@ -12,7 +12,7 @@ describe('Workspace Apps local preview flow contract', () => {
   it('lets the home surface apply draft preview without replacing the source definition', () => {
     expect(home).toContain('draftPreviewActive');
     expect(home).toContain('applyWorkspaceAppDraftPreview(definition, draftPreviewActive)');
-    expect(home).toContain('변경안 미리보기 적용 중');
+    expect(home).toContain("workspaceApps.home.previewActive");
     expect(home).toContain('setDraftPreviewActive((active) => !active)');
     expect(home).toContain('definition={definition}');
   });
@@ -29,11 +29,11 @@ describe('Workspace Apps local preview flow contract', () => {
   it('shows the validated definition in a viewer and keeps publish disabled', () => {
     expect(home).toContain('setDefinitionViewerOpen(true)');
     expect(home).toContain('WorkspaceAppDefinitionViewer');
-    expect(definitionViewer).toContain('화면 설정');
+    expect(definitionViewer).toContain("workspaceApps.definition.title");
     expect(definitionViewer).toContain('JSON.stringify(definition, null, 2)');
-    expect(definitionViewer).toContain('보기만 가능');
-    expect(builderPanel).toContain('화면에 임시로 적용해보기');
-    expect(builderPanel).toContain('화면 미리보기 끄기');
+    expect(definitionViewer).toContain("workspaceApps.definition.description");
+    expect(builderPanel).toContain("workspaceApps.builder.enablePreview");
+    expect(builderPanel).toContain("workspaceApps.builder.disablePreview");
     expect(builderPanel).toContain('disabled');
   });
 });

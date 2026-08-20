@@ -11,8 +11,9 @@ describe('Favorites hub', () => {
     expect(panel).toContain(".pin_type !== 'prompt'");
     expect(panel).toContain('pin.created_at');
     expect(panel).toContain('pin.file_path');
-    expect(panel).toContain('담당 에이전트');
+    expect(panel).toContain("t('favoritesView.agent')");
     expect(panel).toContain("project?.agent?.displayName");
+    expect(panel).toContain("i18n.resolvedLanguage || i18n.language");
     expect(panel).not.toContain("session.favorite");
     expect(panel).not.toContain("project.pinned");
   });

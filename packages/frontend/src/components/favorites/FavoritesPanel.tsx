@@ -1,4 +1,6 @@
 import React from 'react';
+import { useTranslation } from 'react-i18next';
+import i18n from '../../i18n';
 import type { Project } from '@tower/shared';
 import { usePinStore, type Pin } from '../../stores/pin-store';
 
@@ -20,10 +22,10 @@ type FavoriteItem = {
 };
 
 function formatFavoriteDate(value?: string | null): string {
-  if (!value) return '날짜 없음';
+  if (!value) return i18n.t('favoritesView.noDate', { ns: 'layout' });
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return '날짜 없음';
-  return new Intl.DateTimeFormat('ko-KR', { year: 'numeric', month: 'short', day: 'numeric' }).format(date);
+  if (Number.isNaN(date.getTime())) return i18n.t('favoritesView.noDate', { ns: 'layout' });
+  return new Intl.DateTimeFormat(i18n.resolvedLanguage || i18n.language, { year: 'numeric', month: 'short', day: 'numeric' }).format(date);
 }
 
 function projectForPath(projects: Project[], path: string): Project | undefined {
@@ -38,17 +40,18 @@ function projectForPath(projects: Project[], path: string): Project | undefined 
 }
 
 function agentLabel(project?: Project): string {
-  return project?.agent?.displayName || '공용 자료';
+  return project?.agent?.displayName || i18n.t('favoritesView.sharedMaterials', { ns: 'layout' });
 }
 
 function kindLabel(kind: FavoriteItem['kind'], detail: string): string {
-  if (kind === 'folder') return '폴더';
+  if (kind === 'folder') return i18n.t('favoritesView.folder', { ns: 'layout' });
   if (/\.html?$/i.test(detail)) return 'HTML';
-  return '파일';
+  return i18n.t('favoritesView.file', { ns: 'layout' });
 }
 
 /** Main-pane hub for the user's durable file and folder favorites. */
 export function FavoritesPanel({ projects, onOpenPin, onRemovePin }: FavoritesPanelProps) {
+  const { t } = useTranslation('layout');
   const pins = usePinStore((state) => state.pins);
 
   const items = React.useMemo<FavoriteItem[]>(() => {
@@ -74,26 +77,26 @@ export function FavoritesPanel({ projects, onOpenPin, onRemovePin }: FavoritesPa
     <section data-testid="favorites-panel" className="h-full overflow-auto bg-surface-950 px-4 py-6 sm:px-7 sm:py-8" aria-labelledby="favorites-title">
       <div className="mx-auto max-w-6xl">
         <header className="border-b border-surface-800 pb-5">
-          <p className="text-[12px] font-semibold uppercase tracking-[0.16em] text-primary-400">내 공간</p>
+          <p className="text-[12px] font-semibold uppercase tracking-[0.16em] text-primary-400">{t('favoritesView.mySpace')}</p>
           <div className="mt-1 flex flex-wrap items-end justify-between gap-3">
             <div>
-              <h1 id="favorites-title" className="text-2xl font-semibold text-surface-100">즐겨찾기</h1>
-              <p className="mt-1 text-sm text-surface-400">예전에 저장해둔 HTML·대시보드·문서를 다시 엽니다.</p>
+              <h1 id="favorites-title" className="text-2xl font-semibold text-surface-100">{t('favoritesView.title')}</h1>
+              <p className="mt-1 text-sm text-surface-400">{t('favoritesView.description')}</p>
             </div>
-            <div className="rounded-full border border-surface-700 bg-surface-900 px-3 py-1 text-[12px] font-medium text-surface-300">{items.length}개</div>
+            <div className="rounded-full border border-surface-700 bg-surface-900 px-3 py-1 text-[12px] font-medium text-surface-300">{t('favoritesView.count', { count: items.length })}</div>
           </div>
         </header>
 
         {items.length === 0 ? (
           <div className="mt-8 rounded-2xl border border-dashed border-surface-700 bg-surface-900/35 px-6 py-14 text-center">
             <div className="text-3xl" aria-hidden="true">☆</div>
-            <h2 className="mt-3 text-base font-semibold text-surface-200">아직 즐겨찾기가 없습니다</h2>
-            <p className="mt-1 text-sm text-surface-500">Viewer나 파일 목록에서 파일을 즐겨찾기에 추가해보세요.</p>
+            <h2 className="mt-3 text-base font-semibold text-surface-200">{t('favoritesView.emptyTitle')}</h2>
+            <p className="mt-1 text-sm text-surface-500">{t('favoritesView.emptyDescription')}</p>
           </div>
         ) : (
           <div className="mt-5 overflow-hidden rounded-2xl border border-surface-800 bg-surface-900/55">
             <div className="hidden grid-cols-[minmax(0,1fr)_10rem_9rem_2.5rem] gap-4 border-b border-surface-800 px-4 py-2.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-surface-500 md:grid">
-              <span>항목</span><span>담당 에이전트</span><span>날짜</span><span />
+              <span>{t('favoritesView.item')}</span><span>{t('favoritesView.agent')}</span><span>{t('favoritesView.date')}</span><span />
             </div>
             {items.map((item) => (
               <div key={item.key} className="group flex items-start gap-3 border-b border-surface-800/80 px-3 py-3 last:border-b-0 hover:bg-surface-800/60 md:grid md:grid-cols-[minmax(0,1fr)_10rem_9rem_2.5rem] md:items-center md:gap-4 md:px-4">
@@ -106,7 +109,7 @@ export function FavoritesPanel({ projects, onOpenPin, onRemovePin }: FavoritesPa
                 </button>
                 <div className="hidden truncate text-[13px] text-surface-300 md:block">{item.agent}</div>
                 <div className="hidden text-[12px] text-surface-500 md:block">{formatFavoriteDate(item.date)}</div>
-                <button type="button" onClick={item.onRemove} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-lg text-surface-500 hover:bg-surface-700 hover:text-red-300" aria-label={`${item.title} 즐겨찾기 해제`} title="즐겨찾기 해제">×</button>
+                <button type="button" onClick={item.onRemove} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-lg text-surface-500 hover:bg-surface-700 hover:text-red-300" aria-label={t('favoritesView.removeLabel', { title: item.title })} title={t('favoritesView.remove')}>×</button>
                 <div className="col-start-1 mt-2 flex gap-3 text-[11px] text-surface-500 md:hidden">
                   <span>{item.agent}</span><span>{formatFavoriteDate(item.date)}</span>
                 </div>

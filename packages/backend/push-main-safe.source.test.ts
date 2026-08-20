@@ -28,8 +28,8 @@ describe('push-main-safe source contract', () => {
     expect(verifier).toContain('flock 8');
   });
 
-  it('enqueues non-blocking single-flight prewarm after verified push', () => {
-    expect(source).toContain('TOWER_PUSH_AUTO_PREWARM');
+  it('keeps automatic prewarm opt-in and coordinates an explicitly enabled run', () => {
+    expect(source).toContain('TOWER_PUSH_AUTO_PREWARM:-0');
     expect(source).toContain('prewarm-coordinator" enqueue --source-rev "$target_sha"');
     expect(source).toContain('autoPrewarm');
     expect(coordinator).toContain('TOWER_PREWARM_DEBOUNCE_SEC:-45');
@@ -55,6 +55,8 @@ describe('push-main-safe source contract', () => {
     expect(commitPreflight).toContain('"$verifier" verify-attestation "$status_rev"');
     expect(commitPreflight).toContain('verified after an earlier background failure; no external mutation');
     expect(commitPreflight).not.toContain('git push');
+    expect(commitPreflight).toContain('TOWER_HEAVY_WORK_LOCK_FILE');
+    expect(commitPreflight).toContain('flock -w "$heavy_wait" 8');
     expect(commitPreflight).not.toContain('prewarm-production');
     expect(commitPreflight).not.toContain('fleet-deploy');
     expect(commitPreflight).not.toContain('upgrade-production');

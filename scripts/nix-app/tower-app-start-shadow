@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+app_root="${TOWER_APP_ROOT:-}"
+if [[ -z "$app_root" ]]; then
+  self="$(realpath "$0")"
+  app_root="$(dirname "$(dirname "$self")")"
+fi
+app_root="$(realpath "$app_root")"
+entrypoint="$app_root/lib/tower/dist/backend/packages/backend/artifact-shadow.js"
+manifest="$app_root/share/tower/release-manifest.json"
+[[ -f "$entrypoint" ]] || {
+  printf 'tower-app-start-shadow: missing artifact entrypoint: %s\n' "$entrypoint" >&2
+  exit 1
+}
+[[ -f "$manifest" ]] || {
+  printf 'tower-app-start-shadow: missing release manifest: %s\n' "$manifest" >&2
+  exit 1
+}
+
+# The closure manifest is the authoritative release identity for a Git-less
+# packaged runtime. Refuse operator overrides so health cannot claim metadata
+# from a different build than the entrypoint being executed.
+while IFS='=' read -r name value; do
+  [[ -n "$name" ]] || continue
+  if [[ -n "${!name:-}" && "${!name}" != "$value" ]]; then
+    printf 'tower-app-start-shadow: %s conflicts with release manifest\n' "$name" >&2
+    exit 1
+  fi
+  printf -v "$name" '%s' "$value"
+  export "$name"
+done < <(python3 - "$manifest" <<'PY'
+import json, pathlib, sys
+manifest = json.loads(pathlib.Path(sys.argv[1]).read_text())
+fields = {
+    "TOWER_VERSION": manifest.get("version"),
+    "TOWER_BASE_VERSION": manifest.get("baseVersion"),
+    "GIT_SHA": manifest.get("gitSha"),
+    "SOURCE_REV": manifest.get("sourceRev"),
+    "TOWER_COMMITS_SINCE_TAG": manifest.get("commitsSinceTag"),
+    "BUILD_TIME": manifest.get("buildTime"),
+    "FLAKE_LOCK_NAR_HASH": manifest.get("flakeLockNarHash"),
+}
+for name in ("TOWER_VERSION", "TOWER_BASE_VERSION", "GIT_SHA", "SOURCE_REV"):
+    if fields[name] is None or not str(fields[name]).strip():
+        raise SystemExit(f"tower-app-start-shadow: release manifest field is empty: {name}")
+for name, value in fields.items():
+    if value is not None:
+        print(f"{name}={value}")
+PY
+)
+
+cd "$app_root/lib/tower"
+exec node "$entrypoint"

@@ -310,7 +310,7 @@ function ChatTabItem({
                 ? 'z-0 bg-surface-900/60 text-gray-200 opacity-100 hover:text-gray-100 hover:bg-surface-900/85'
                 : 'z-0 bg-surface-900/35 text-gray-500 opacity-75 hover:opacity-100 hover:text-gray-300 hover:bg-surface-900/65'
       }`}
-      title={name ?? '채팅'}
+      title={name ?? t('chatTabFallback')}
     >
       {project ? <AgentIdentityAvatar project={project} className={`${isMobile?'h-7 w-7':'h-5 w-5'} shrink-0 rounded-md`} fallbackClassName={`${isMobile?'h-7 w-7':'h-5 w-5'} shrink-0 rounded-md`}/> : !showLeadingStatus && <span aria-hidden="true" className="inline-block h-1 w-1 shrink-0 rounded-full bg-current opacity-60" />}
       {rowState.indicator.kind === 'awaiting_user' && <AwaitingUserMark active={isActive} />}
@@ -330,7 +330,7 @@ function ChatTabItem({
           ✓
         </span>
       )}
-      <span className={`min-w-0 flex-1 truncate ${pinned?'not-italic':'italic'} ${isActive ? 'font-semibold text-gray-100' : 'font-medium'}`}>{name ?? '채팅'}</span>
+      <span className={`min-w-0 flex-1 truncate ${pinned?'not-italic':'italic'} ${isActive ? 'font-semibold text-gray-100' : 'font-medium'}`}>{name ?? t('chatTabFallback')}</span>
       <button
         onClick={(e) => { e.stopPropagation(); onClose(); }}
         aria-label={t('closeChatTab')}
@@ -462,6 +462,7 @@ function ReloadFileButton({ disabled, modified, onClick }: { disabled: boolean; 
 }
 
 function AiPanelButton({ disabled, active, title, ariaLabel, onClick }: { disabled: boolean; active: boolean; title?: string; ariaLabel?: string; onClick: () => void }) {
+  const { t } = useTranslation('layout');
   return (
     <button
       type="button"
@@ -474,8 +475,8 @@ function AiPanelButton({ disabled, active, title, ariaLabel, onClick }: { disabl
             ? 'border-primary-500/60 bg-primary-500/15 text-primary-300 hover:bg-primary-500/20'
             : 'border-surface-700/70 bg-surface-900/75 text-gray-400 hover:bg-surface-800 hover:text-primary-300'
       }`}
-      title={disabled ? '활성 세션이 없습니다' : (title || 'Session AI Panel')}
-      aria-label={ariaLabel || 'Session AI Panel'}
+      title={disabled ? t('noActiveSession') : (title || t('sessionAiPanel'))}
+      aria-label={ariaLabel || t('sessionAiPanel')}
     >
       <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.455 2.456L21.75 6l-1.036.259a3.375 3.375 0 00-2.455 2.456zM16.894 20.567L16.5 21.75l-.394-1.183a2.25 2.25 0 00-1.423-1.423L13.5 18.75l1.183-.394a2.25 2.25 0 001.423-1.423l.394-1.183.394 1.183a2.25 2.25 0 001.423 1.423l1.183.394-1.183.394a2.25 2.25 0 00-1.423 1.423z" />
@@ -664,7 +665,7 @@ export function FileTabBar({ onSelectChatSession, onRenameSession, onReloadFile 
     } else if (target.kind === 'file') {
       const project = findOwningProjectForPath(projects, target.path);
       if (!project?.rootPath) {
-        toastQuiet('이 파일이 속한 AI 팀원을 찾지 못했습니다');
+        toastQuiet(t('fileOwnerNotFound'));
         return;
       }
       sessionStore.setSidebarTab('files');
@@ -703,7 +704,7 @@ export function FileTabBar({ onSelectChatSession, onRenameSession, onReloadFile 
         }
         if (target.kind === 'file' && attempts % 10 === 0) fileStore.bumpRefreshTrigger();
         if (attempts < 60) window.setTimeout(tryReveal, 100);
-        else toastQuiet('사이드바에서 대상을 찾지 못했습니다');
+        else toastQuiet(t('sidebarTargetNotFound'));
         return;
       }
 
@@ -718,7 +719,7 @@ export function FileTabBar({ onSelectChatSession, onRenameSession, onReloadFile 
             ancestorElements.push(ancestor);
           }
         }
-        toastQuiet(`위치: ${formatSidebarLocation(target.path, project)}`);
+        toastQuiet(t('sidebarLocation', { location: formatSidebarLocation(target.path, project) }));
       }
 
       el.scrollIntoView({ block: 'center', behavior: 'smooth' });
@@ -892,7 +893,7 @@ export function FileTabBar({ onSelectChatSession, onRenameSession, onReloadFile 
                       onClose={() => handleChatClose(c.id)}
                       onPin={() => {
                         pinChatTab(c.id);
-                        toastQuiet(c.pinned ? '탭 고정 해제됨' : '탭 고정됨');
+                        toastQuiet(c.pinned ? t('tabUnpinned') : t('tabPinned'));
                       }}
                       onContextMenu={(e) => onTabContextMenu(e, 'chat', c.id, c.pinned)}
                     />
@@ -905,9 +906,9 @@ export function FileTabBar({ onSelectChatSession, onRenameSession, onReloadFile 
                 const systemTabTitle = projectHome
                   ? projectHome.agent?.displayName || projectHome.name
                   : s.kind === 'projectFiles' && s.title === '프로젝트 홈'
-                    ? '작업 공간 파일'
+                    ? t('workspaceFiles')
                     : s.title;
-                const systemTabAccessibleTitle = projectHome ? `${systemTabTitle} · AI 팀원 홈` : systemTabTitle;
+                const systemTabAccessibleTitle = projectHome ? `${systemTabTitle} · ${t('teammateHome')}` : systemTabTitle;
                 const isActive = activeMainKind === 'system' && activeSystemTabId === s.id;
                 return (
                   <SortableTabShell key={item.key} id={item.key}>
@@ -920,7 +921,7 @@ export function FileTabBar({ onSelectChatSession, onRenameSession, onReloadFile 
                       }}
                       onDoubleClick={() => {
                         pinSystemTab(s.id);
-                        toastQuiet(s.pinned ? '탭 고정 해제됨' : '탭 고정됨');
+                        toastQuiet(s.pinned ? t('tabUnpinned') : t('tabPinned'));
                       }}
                       onContextMenu={(e) => onTabContextMenu(e, 'system', s.id, s.pinned)}
                       className={`tower-main-tab group relative flex w-full min-w-0 max-w-none flex-1 items-center gap-1 px-2 ${isMobile ? 'h-10' : 'h-7'} rounded-t-xl rounded-b-none whitespace-nowrap cursor-pointer transition-[background-color,color,opacity] ${
@@ -965,7 +966,7 @@ export function FileTabBar({ onSelectChatSession, onRenameSession, onReloadFile 
                     onClose={() => handleFileClose(fileTab.id)}
                     onPin={() => {
                       pinTab(fileTab.id);
-                      toastQuiet(fileTab.pinned ? '탭 고정 해제됨' : '탭 고정됨');
+                      toastQuiet(fileTab.pinned ? t('tabUnpinned') : t('tabPinned'));
                     }}
                     onContextMenu={(e) => onTabContextMenu(e, 'file', fileTab.id, fileTab.pinned)}
                   />
@@ -1023,8 +1024,8 @@ export function FileTabBar({ onSelectChatSession, onRenameSession, onReloadFile 
           <AiPanelButton
             disabled={!activeSessionId}
             active={showSessionAiPanel}
-            title={activeFileTab ? `이 파일에 대해 AI에게 묻기: ${basename(activeFileTab.path)}` : 'Session AI Panel'}
-            ariaLabel={activeFileTab ? '현재 파일에 대해 AI에게 묻기' : 'Session AI Panel'}
+            title={activeFileTab ? t('askAiAboutFileNamed', { name: basename(activeFileTab.path) }) : t('sessionAiPanel')}
+            ariaLabel={activeFileTab ? t('askAiAboutCurrentFile') : t('sessionAiPanel')}
             onClick={handleToggleAiPanel}
           />
         </div>
@@ -1092,10 +1093,10 @@ export function FileTabBar({ onSelectChatSession, onRenameSession, onReloadFile 
                   setCtxMenu(null);
                   if (!tab) return;
                   const next = await prompt({
-                    title: '세션 이름 바꾸기',
+                    title: t('renameSession'),
                     message: t('enterNewSessionName'),
                     initialValue: session?.name ?? '',
-                    confirmLabel: '변경',
+                    confirmLabel: t('change'),
                   });
                   const trimmed = next?.trim();
                   if (trimmed && trimmed !== session?.name) {
@@ -1117,7 +1118,7 @@ export function FileTabBar({ onSelectChatSession, onRenameSession, onReloadFile 
               <button
                 onClick={() => {
                   pinChatTab(ctxMenu.id);
-                  toastQuiet(ctxMenu.pinned ? '탭 고정 해제됨' : '탭 고정됨');
+                  toastQuiet(ctxMenu.pinned ? t('tabUnpinned') : t('tabPinned'));
                   setCtxMenu(null);
                 }}
                 className="w-full min-h-[44px] px-4 py-2 text-left hover:bg-surface-800 flex items-center justify-between gap-3"
@@ -1138,7 +1139,7 @@ export function FileTabBar({ onSelectChatSession, onRenameSession, onReloadFile 
               <button
                 onClick={() => {
                   pinSystemTab(ctxMenu.id);
-                  toastQuiet(ctxMenu.pinned ? '탭 고정 해제됨' : '탭 고정됨');
+                  toastQuiet(ctxMenu.pinned ? t('tabUnpinned') : t('tabPinned'));
                   setCtxMenu(null);
                 }}
                 className="w-full min-h-[44px] px-4 py-2 text-left hover:bg-surface-800 flex items-center justify-between gap-3"
@@ -1231,7 +1232,7 @@ export function FileTabBar({ onSelectChatSession, onRenameSession, onReloadFile 
               <button
                 onClick={() => {
                   pinTab(ctxMenu.id);
-                  toastQuiet(ctxMenu.pinned ? '탭 고정 해제됨' : '탭 고정됨');
+                  toastQuiet(ctxMenu.pinned ? t('tabUnpinned') : t('tabPinned'));
                   setCtxMenu(null);
                 }}
                 className="w-full min-h-[44px] px-4 py-2 text-left hover:bg-surface-800 flex items-center justify-between gap-3"

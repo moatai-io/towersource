@@ -7,9 +7,9 @@ const preview = fs.readFileSync(path.resolve(import.meta.dirname, './AgentDraftP
 
 describe('Primary Agent Google setup during creation', () => {
   it('offers no connection, one organization account, or a dedicated Agent account', () => {
-    expect(setup).toContain('연결하지 않음');
-    expect(setup).toContain('조직 계정 사용');
-    expect(setup).toContain('이 Agent 전용 Google 계정 연결');
+    expect(setup).toContain("t('agentCreation.google.none')");
+    expect(setup).toContain("t('agentCreation.google.organization')");
+    expect(setup).toContain("t('agentCreation.google.dedicated')");
     expect(setup).toContain("metadata?.connection_type === 'organization'");
     expect(setup).toContain("credential?.kind === 'gws'");
     expect(setup).toContain("credential?.provider === 'google'");
@@ -23,8 +23,10 @@ describe('Primary Agent Google setup during creation', () => {
 
   it('starts the Agent-bound OAuth flow with the newly created Project id', () => {
     expect(preview).toContain("googleSetup.mode === 'dedicated'");
-    expect(preview).toContain('startDedicatedGoogleOAuth(project.id)');
-    expect(setup).toContain('/api/auth/google/agent?projectId=');
+    expect(preview).toContain('await startDedicatedGoogleOAuth(project.id)');
+    expect(setup).toContain('fetch(`/api/auth/google/agent?projectId=');
+    expect(setup).toContain("window.location.assign(result.url)");
+    expect(setup).not.toContain('window.location.href = `/api/auth/google/agent?projectId=');
   });
 
   it('does not expose Credential internals in visible account labels', () => {

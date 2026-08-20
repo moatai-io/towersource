@@ -78,6 +78,7 @@ import { runPiContinuationRecovery, settlePiRecoveryOutcome, type PiContinuation
 import { continuePiNativeLifecycle, isPiNativeContinuationUnavailable } from './pi/recovery/native-continuation-adapter.js';
 import { decidePiContinuationRecovery, decidePiRestartRecovery, decidePiRetryOwnership, inspectPiRecoveryState, isIncompleteToolBoundaryContinuationEnabled } from './pi/recovery/recovery-policy.js';
 import { getOrPinSessionHarnessSnapshot, getPinnedSessionHarnessSnapshot } from '../services/harness/harness-store.js';
+import { resolveWorkbenchRollout } from '../services/runtime-box/workbench-rollout-registry.js';
 import { buildHarnessRuntimeFingerprint } from '../services/harness/harness-fingerprint.js';
 
 // Pi provider transport safeguards are installed explicitly, not as hidden import side effects.
@@ -118,6 +119,12 @@ function isPiUpstreamRejectedInputFailure(message: unknown): boolean {
 export class PiEngine implements Engine {
   private sessions = new Map<string, PiSessionEntry>();
   private modelRegistryManager = new PiModelRegistryManager();
+
+  /** Rebuild the provider/model runtime after VM-level Admin setup changes. */
+  async reloadModelRegistry(): Promise<void> {
+    this.modelRegistryManager = new PiModelRegistryManager();
+    await this.modelRegistryManager.getModelRuntime();
+  }
   private interruptedSessionIds = new Set<string>();
   /**
    * Sessions whose run() is currently in the "starting" phase
@@ -200,15 +207,18 @@ export class PiEngine implements Engine {
     initialRecoveryClaimAttempt = initialClaim.attempt ?? 0;
 
     // 1. Get or create AgentSession (cached per Tower session, persisted to disk).
-    // Tool closures capture user/project authority at assembly time. If the
-    // authenticated context changed since this process cached the Session,
-    // rebuild it before the turn so owner-scoped tools do not keep using stale
-    // credentials (notably session_attachment_resolve after account migration).
+    // Tool closures capture user/project authority and the effective Workbench
+    // rollout at assembly time. Rebuild when either changes so a DB rollout
+    // enable/disable takes effect on the next turn without a backend restart.
+    const workbenchRolloutEnabled = opts.projectId
+      ? (await resolveWorkbenchRollout(opts.projectId)).enabled
+      : false;
     let entry = this.sessions.get(sessionId);
     if (entry && (
       entry.toolContext?.userId !== opts.userId
       || entry.toolContext?.userRole !== opts.userRole
       || entry.toolContext?.projectId !== opts.projectId
+      || entry.toolContext?.workbenchRolloutEnabled !== workbenchRolloutEnabled
     )) {
       console.warn(`[Pi] Rebuilding cached Session after tool context change: session=${sessionId.slice(0, 8)}`);
       this.dispose(sessionId);
@@ -2777,6 +2787,9 @@ export class PiEngine implements Engine {
         userId: opts.userId,
         userRole: opts.userRole,
         projectId: opts.projectId,
+        workbenchRolloutEnabled: opts.projectId
+          ? (await resolveWorkbenchRollout(opts.projectId)).enabled
+          : false,
       },
       abortRequested: false,
       activePrompt: null,

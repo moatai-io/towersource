@@ -21,12 +21,13 @@ describe('Workspace Apps private beta gate', () => {
     expect(backendApi).toContain('workspaceAppsMode: config.workspaceAppsMode');
   });
 
-  it('does not show or mount Workspace Apps unless serverConfig enables it', () => {
+  it('does not show or mount Workspace Apps even if serverConfig still exposes the private beta flags', () => {
     expect(settingsStore).toContain('workspaceAppsEnabled?: boolean');
     expect(settingsStore).toContain("workspaceAppsMode?: 'local-metadata' | 'frappe-connector-pilot'");
-    expect(header).toContain('serverConfig?.workspaceAppsEnabled === true');
-    expect(header).toContain("workspaceAppsEnabled ? [{ key: 'workspaceApps', label: t('workspaceApps') }] : []");
-    expect(app).toContain("activeView === 'workspaceApps' && workspaceAppsEnabled");
-    expect(app).toContain("if (!workspaceAppsEnabled && activeView === 'workspaceApps')");
+    expect(header).not.toContain('workspaceAppsEnabled');
+    expect(header).not.toContain("key: 'workspaceApps'");
+    expect(app).not.toContain('workspaceAppsEnabled');
+    expect(app).not.toContain("activeView === 'workspaceApps'");
+    expect(app).not.toContain('<WorkspaceAppsHome />');
   });
 });

@@ -250,7 +250,7 @@ router.get('/projects/:projectId/connections/catalog', async (req, res) => {
   const allowed = await assertProjectConnectionManager(req, projectId);
   if (!allowed.ok) return res.status(allowed.status).json({ error: allowed.error });
   try {
-    const [project, credentials, profiles] = await Promise.all([
+    const [project, credentials, profiles, groupedCredentials] = await Promise.all([
       query(`SELECT id, name FROM projects WHERE id = $1`, [projectId]),
       query(
         `SELECT c.id, c.provider, c.display_name, c.kind, c.metadata, c.enabled,
@@ -258,6 +258,7 @@ router.get('/projects/:projectId/connections/catalog', async (req, res) => {
            FROM workspace_credentials c
            LEFT JOIN project_credential_policies p ON p.credential_id = c.id AND p.project_id = $1
           WHERE c.enabled = true AND c.scope = 'workspace'
+            AND NULLIF(c.metadata->>'credential_group', '') IS NULL
           ORDER BY lower(c.display_name), c.id`,
         [projectId],
       ),
@@ -275,6 +276,28 @@ router.get('/projects/:projectId/connections/catalog', async (req, res) => {
           ORDER BY lower(cp.display_name), cp.id`,
         [projectId],
       ),
+      query(
+        `SELECT c.metadata->>'credential_group' AS id,
+                min(c.provider) AS provider,
+                regexp_replace(min(c.display_name), ' *(—|-).*$', '') AS display_name,
+                count(*)::int AS field_count,
+                count(*) FILTER (WHERE p.mode IN ('allow', 'override', 'inherit'))::int AS allowed_count,
+                count(*) FILTER (WHERE p.mode = 'deny')::int AS denied_count,
+                max(p.updated_at) AS policy_updated_at
+           FROM workspace_credentials c
+           LEFT JOIN project_credential_policies p ON p.credential_id = c.id AND p.project_id = $1
+          WHERE c.enabled = true
+            AND NULLIF(c.metadata->>'credential_group', '') IS NOT NULL
+            AND (
+              c.scope IN ('workspace', 'internal-default')
+              OR (c.scope = 'personal' AND c.owner_user_id = $2)
+              OR (c.scope = 'project' AND c.metadata->>'agent_project_id' = $1)
+            )
+          GROUP BY c.metadata->>'credential_group'
+         HAVING count(*) > 1
+          ORDER BY lower(regexp_replace(min(c.display_name), ' *(—|-).*$', ''))`,
+        [projectId, allowed.userId],
+      ),
     ]);
     if (!(project as any[])[0]) return res.status(404).json({ error: 'Agent not found' });
     const toItem = (row: any, source: ConnectionSource) => {
@@ -291,10 +314,29 @@ router.get('/projects/:projectId/connections/catalog', async (req, res) => {
         updatedAt: row.policy_updated_at ?? null,
       };
     };
+    const groupItems = (groupedCredentials as any[]).map(row => {
+      const manifest = connectionManifest(row.provider);
+      const complete = Number(row.allowed_count) === Number(row.field_count);
+      const blocked = Number(row.denied_count) > 0;
+      return {
+        id: `group:${row.id}`,
+        source: 'group',
+        displayName: row.display_name,
+        provider: manifest.provider,
+        connectionType: 'credential_group',
+        capabilities: manifest.capabilities,
+        status: complete ? 'connected' : blocked ? 'blocked' : 'available',
+        mode: complete ? 'allow' : blocked ? 'deny' : null,
+        updatedAt: row.policy_updated_at ?? null,
+        fieldCount: Number(row.field_count),
+        connectedFieldCount: Number(row.allowed_count),
+      };
+    });
     res.json({
       project: (project as any[])[0],
       connections: [
         ...(profiles as any[]).map(row => toItem(row, 'profile')),
+        ...groupItems,
         ...(credentials as any[]).map(row => toItem(row, 'credential')),
       ],
     });
@@ -325,12 +367,29 @@ router.post('/connections/:connectionId/preview', async (req, res) => {
                 )`,
             [connectionId.slice('profile:'.length)],
           )
-        : connectionId.startsWith('credential:')
-          ? query(`SELECT id, provider, display_name FROM workspace_credentials WHERE id = $1 AND enabled = true AND scope IN ('workspace', 'internal-default')`, [connectionId.slice('credential:'.length)])
-          : Promise.resolve([]),
+        : connectionId.startsWith('group:')
+          ? query(
+              `SELECT c.metadata->>'credential_group' AS id, min(c.provider) AS provider,
+                      regexp_replace(min(c.display_name), ' *(—|-).*$', '') AS display_name
+                 FROM workspace_credentials c
+                WHERE c.enabled = true AND c.metadata->>'credential_group' = $1
+                  AND (
+                    c.scope IN ('workspace', 'internal-default')
+                    OR (c.scope = 'personal' AND c.owner_user_id = $2)
+                    OR (c.scope = 'project' AND c.metadata->>'agent_project_id' = $3)
+                  )
+                GROUP BY c.metadata->>'credential_group'
+               HAVING count(*) > 1`,
+              [connectionId.slice('group:'.length), allowed.userId, projectId],
+            )
+          : connectionId.startsWith('credential:')
+            ? query(`SELECT id, provider, display_name FROM workspace_credentials WHERE id = $1 AND enabled = true AND scope IN ('workspace', 'internal-default')`, [connectionId.slice('credential:'.length)])
+            : Promise.resolve([]),
     ]);
     if (!(project as any[])[0]) return res.status(404).json({ error: 'Project not found' });
     if (!(source as any[])[0]) return res.status(404).json({ error: 'Connection not found' });
+    // Group intents reuse the credential source type so existing persisted intent rows remain schema-compatible.
+    // The group id is resolved to all member Credential rows only at apply time.
     const sourceType: ConnectionSource = connectionId.startsWith('profile:') ? 'profile' : 'credential';
     const sourceRow = (source as any[])[0];
     const preview = previewConnectionChange({
@@ -390,6 +449,30 @@ router.post('/connections/:connectionId/apply', async (req, res) => {
     });
     if (intent.source === 'profile') {
       await setProjectCredentialProfilePolicy({ projectId: intent.project_id, profileId: intent.source_id, mode: verified.mode, metadata: verified.metadata, actorUserId: allowed.userId });
+    } else if (String(intent.connection_id).startsWith('group:')) {
+      const members = await query<{ id: string; default_env_name: string | null }>(
+        `SELECT id, default_env_name
+           FROM workspace_credentials
+          WHERE enabled = true AND metadata->>'credential_group' = $1
+            AND (
+              scope IN ('workspace', 'internal-default')
+              OR (scope = 'personal' AND owner_user_id = $2)
+              OR (scope = 'project' AND metadata->>'agent_project_id' = $3)
+            )
+          ORDER BY id`,
+        [intent.source_id, allowed.userId, intent.project_id],
+      );
+      if (members.length < 2) throw Object.assign(new Error('Credential group is incomplete'), { code: 'CREDENTIAL_GROUP_INCOMPLETE' });
+      for (const member of members) {
+        await setProjectCredentialPolicy({
+          projectId: intent.project_id,
+          credentialId: member.id,
+          mode: verified.mode,
+          targetEnvName: member.default_env_name ?? undefined,
+          metadata: { ...verified.metadata, credential_group: intent.source_id },
+          actorUserId: allowed.userId,
+        });
+      }
     } else {
       await setProjectCredentialPolicy({ projectId: intent.project_id, credentialId: intent.source_id, mode: verified.mode, metadata: verified.metadata, actorUserId: allowed.userId });
     }
@@ -645,6 +728,70 @@ router.get('/admin-overview', async (req, res) => {
       });
     }
 
+    const credentialsByGroup = new Map<string, any[]>();
+    for (const credential of credentials as any[]) {
+      const groupId = typeof credential.metadata?.credential_group === 'string' ? credential.metadata.credential_group.trim() : '';
+      if (!groupId || referencedCredentialIds.has(credential.id)) continue;
+      const members = credentialsByGroup.get(groupId) ?? [];
+      members.push(credential);
+      credentialsByGroup.set(groupId, members);
+    }
+
+    for (const [groupId, members] of credentialsByGroup) {
+      if (members.length < 2) continue;
+      for (const member of members) referencedCredentialIds.add(member.id);
+      const memberStatesByProject = (projects as any[]).map(project => {
+        const credentialStates = members.map(member => ({ credentialId: member.id, ...effectiveCredentialStatus(project.id, member) }));
+        const connected = credentialStates.every(state => ['connected', 'inherited'].includes(state.status));
+        const blocked = credentialStates.some(state => state.status === 'blocked');
+        const disabled = credentialStates.some(state => state.status === 'disabled');
+        const status = connected ? 'connected' : blocked ? 'blocked' : disabled ? 'disabled' : credentialStates.some(state => state.status === 'connected' || state.status === 'inherited') ? 'needs_attention' : 'off';
+        return {
+          projectId: project.id,
+          projectName: project.name,
+          status,
+          reason: connected ? 'all grouped credentials connected' : blocked ? 'one or more grouped credentials blocked' : status === 'needs_attention' ? 'credential group is only partially connected' : 'credential group not granted',
+          mode: connected ? 'allow' : blocked ? 'deny' : null,
+          credentialStates,
+          lastUsedAt: credentialStates.map(state => state.lastUsedAt).filter(Boolean).sort().pop() ?? null,
+        };
+      });
+      const groupConnectionId = `group:${groupId}`;
+      const displayName = String(members[0].display_name).replace(/\s+(?:—|-)\s+.*$/, '');
+      connections.push({
+        id: groupConnectionId,
+        source: 'group',
+        groupId,
+        displayName,
+        provider: members[0].provider,
+        connectionType: 'credential_group',
+        riskLevel: riskLevel(members),
+        enabled: members.every(member => member.enabled),
+        defaultOn: false,
+        defaultScope: null,
+        defaultReason: null,
+        defaultPolicy: null,
+        publicEnvNames: [],
+        secretEnvNames: members.map(member => member.default_env_name ?? member.secret_name).filter(Boolean),
+        credentials: members.map(member => ({
+          id: member.id,
+          displayName: member.display_name,
+          provider: member.provider,
+          kind: member.kind,
+          credentialType: credentialType(member),
+          allowedActions: credentialAllowedActions({ kind: member.kind, secretName: member.secret_name, metadata: member.metadata ?? {} }),
+          envName: member.default_env_name ?? member.secret_name,
+          scope: member.scope,
+          enabled: member.enabled,
+        })),
+        projects: memberStatesByProject,
+        connectionScope: members.every(member => member.scope === 'project') ? 'agent_dedicated' : 'shared',
+        dedicatedProjectId: members.every(member => member.scope === 'project') ? String(members[0].metadata?.agent_project_id ?? '') || null : null,
+        targets: members.flatMap(member => targetsByCredential.get(member.id) ?? []),
+        warnings: memberStatesByProject.filter(state => state.status === 'needs_attention').map(state => ({ projectId: state.projectId, projectName: state.projectName, message: state.reason })),
+      });
+    }
+
     for (const credential of credentials as any[]) {
       if (referencedCredentialIds.has(credential.id)) continue;
       const fileCredential = classifyRuntimeBoxFileCredential({
@@ -698,6 +845,8 @@ router.get('/admin-overview', async (req, res) => {
           enabled: credential.enabled,
         }],
         projects: projectStates,
+        connectionScope: credential.scope === 'project' ? 'agent_dedicated' : 'shared',
+        dedicatedProjectId: credential.scope === 'project' ? String(credential.metadata?.agent_project_id ?? '') || null : null,
         targets: targetsByCredential.get(credential.id) ?? [],
         warnings,
       });

@@ -15,7 +15,7 @@ import { attachToolResultInDb, markAgentTurnCheckpoint, saveMessage, updateMessa
 import { recordPassedRuntimeEvaluation } from './activation-gate.js';
 import { buildServiceAgentRuntimePrompt, serviceIdentityFromExperience } from './service-identity.js';
 import { buildServiceKnowledgePrompt } from './source-snapshot.js';
-import { parseKnowledgeReadEvidence, validateKnowledgeAnswerCitations, type KnowledgeReadEvidence } from './knowledge-citation-validation.js';
+import { AIServiceKnowledgeCitationError, parseKnowledgeReadEvidence, validateKnowledgeAnswerCitations, type KnowledgeReadEvidence } from './knowledge-citation-validation.js';
 
 interface PreviewDeploymentRow {
   service_id: string;
@@ -344,11 +344,11 @@ export async function runAIServicePreview(input: {
   const citationValidation = validateKnowledgeAnswerCitations(text, knowledgeReadEvidence);
   if (citationValidation.invalid.length > 0) {
     const invalid = citationValidation.invalid.map((item) => `${item.path}#L${item.lineStart}-L${item.lineEnd}`).join(', ');
-    const failureMessage = `AI Service Knowledge citation validation failed: ${invalid}`;
+    const failureMessage = `AI Service Knowledge citation validation failed: ${invalid} [serviceId=${input.serviceId} deploymentId=${input.deploymentId} conversationId=${input.conversationId}]`;
     await markAgentTurnCheckpoint(rootTurnId, {
       status: 'failed', sessionId, rootTurnId, engine: harness.engine, model: runtimeModel, error: failureMessage,
     });
-    throw new Error(failureMessage);
+    throw new AIServiceKnowledgeCitationError(failureMessage);
   }
   await markAgentTurnCheckpoint(rootTurnId, {
     status: 'completed', sessionId, rootTurnId, engine: harness.engine, model: runtimeModel,

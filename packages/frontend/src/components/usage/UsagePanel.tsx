@@ -1,4 +1,6 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
+import i18n from '../../i18n';
 import { useSettingsStore } from '../../stores/settings-store';
 
 // ───── Types ─────
@@ -77,13 +79,11 @@ function colorFor(v: number, isDark: boolean): string {
   return '#f59e0b';                    // amber-500 = hot
 }
 
-const RANGE_OPTIONS = [
-  { days: 7, label: '7일' },
-  { days: 14, label: '14일' },
-  { days: 30, label: '30일' },
-  { days: 60, label: '60일' },
-  { days: 90, label: '90일' },
-];
+const RANGE_OPTIONS = [7, 14, 30, 60, 90];
+
+function tr(key: string, options?: Record<string, unknown>): string {
+  return i18n.t(key, { ns: 'common', ...options });
+}
 
 const TOP_OPTIONS = [10, 20, 30, 50];
 
@@ -105,14 +105,14 @@ function formatTokens(value: number | null | undefined): string {
 }
 
 function formatBudgetWindow(budget: AiBudgetSnapshot | undefined): string {
-  if (!budget?.ok) return '예산 정보 없음';
+  if (!budget?.ok) return tr('usage.budgetUnavailable');
   const parts: string[] = [];
-  if (budget.budgetDuration) parts.push(`예산기간 ${budget.budgetDuration}`);
+  if (budget.budgetDuration) parts.push(tr('usage.budgetDuration', { duration: budget.budgetDuration }));
   if (budget.budgetResetAt) {
     const reset = new Date(budget.budgetResetAt);
-    if (!Number.isNaN(reset.getTime())) parts.push(`${reset.toISOString().slice(0, 10)} 리셋`);
+    if (!Number.isNaN(reset.getTime())) parts.push(tr('usage.budgetReset', { date: reset.toISOString().slice(0, 10) }));
   }
-  return parts.join(' · ') || '현재 예산기간';
+  return parts.join(' · ') || tr('usage.currentBudgetWindow');
 }
 
 function weekdayIdx(iso: string): number {
@@ -125,6 +125,7 @@ interface UsagePanelProps {
 }
 
 export function UsagePanel({ embedded = false }: UsagePanelProps) {
+  useTranslation('common');
   const theme = useSettingsStore((s) => s.theme);
   const isDark = theme !== 'light';
   const [days, setDays] = useState<number>(30);
@@ -220,23 +221,23 @@ export function UsagePanel({ embedded = false }: UsagePanelProps) {
           <div>
             <h1 className="text-2xl font-bold text-gray-100">Usage</h1>
             <p className="text-[14px] text-gray-500 mt-0.5">
-              프로젝트 × 일자 집중도. 실제 사용자 턴만 집계 (tool 호출 제외).
+              {tr('usage.description')}
             </p>
           </div>
           <div className="flex items-center gap-2">
             {/* Range selector */}
             <div className="flex bg-surface-900 border border-surface-800 rounded-lg p-0.5">
-              {RANGE_OPTIONS.map((opt) => (
+              {RANGE_OPTIONS.map((optionDays) => (
                 <button
-                  key={opt.days}
-                  onClick={() => setDays(opt.days)}
+                  key={optionDays}
+                  onClick={() => setDays(optionDays)}
                   className={`px-2.5 py-1 text-[13px] rounded-md transition-colors ${
-                    days === opt.days
+                    days === optionDays
                       ? 'bg-primary-600/30 text-primary-300'
                       : 'text-gray-500 hover:text-gray-300'
                   }`}
                 >
-                  {opt.label}
+                  {tr('usage.days', { count: optionDays })}
                 </button>
               ))}
             </div>
@@ -245,7 +246,7 @@ export function UsagePanel({ embedded = false }: UsagePanelProps) {
               value={top}
               onChange={(e) => setTop(Number(e.target.value))}
               className="bg-surface-900 border border-surface-800 rounded-lg text-[13px] text-gray-300 px-2 py-1 outline-none focus:border-primary-500/50"
-              title="보여줄 프로젝트 수"
+              title={tr('usage.projectCountTitle')}
             >
               {TOP_OPTIONS.map((n) => (
                 <option key={n} value={n}>Top {n}</option>
@@ -255,7 +256,7 @@ export function UsagePanel({ embedded = false }: UsagePanelProps) {
               onClick={load}
               disabled={loading}
               className="px-2.5 py-1 text-[13px] text-gray-400 hover:text-gray-200 hover:bg-surface-800 rounded-md transition-colors disabled:opacity-50"
-              title="새로고침"
+              title={tr('usage.refresh')}
             >
               {loading ? '…' : '↻'}
             </button>
@@ -271,22 +272,22 @@ export function UsagePanel({ embedded = false }: UsagePanelProps) {
         {data && stats && (
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
             <SummaryCard
-              label="총 턴 (진짜 사용자)"
+              label={tr('usage.totalUserTurns')}
               value={data.grandTotal.toLocaleString()}
-              sub={`${days}일 · 하루 평균 ${stats.avgPerDay.toFixed(1)}`}
+              sub={tr('usage.dailyAverage', { days, average: stats.avgPerDay.toFixed(1) })}
             />
             <SummaryCard
-              label="활성 프로젝트"
+              label={tr('usage.activeProjects')}
               value={String(data.projects.length)}
-              sub={`Top ${top} 중 턴 발생`}
+              sub={tr('usage.activeProjectsSub', { top })}
             />
             <SummaryCard
-              label="피크일"
+              label={tr('usage.peakDay')}
               value={stats.hottestDay.value.toLocaleString()}
               sub={stats.hottestDay.date || '—'}
             />
             <SummaryCard
-              label="최고 강도 셀"
+              label={tr('usage.hottestCell')}
               value={String(stats.peakValue)}
               sub={stats.peakProject ? `${stats.peakProject} · ${stats.peakDate}` : '—'}
             />
@@ -296,19 +297,19 @@ export function UsagePanel({ embedded = false }: UsagePanelProps) {
         {/* ── Error ── */}
         {error && (
           <div className="mb-4 p-3 bg-red-950/30 border border-red-900/50 rounded-lg text-[14px] text-red-300">
-            로드 실패: {error}
+            {tr('usage.loadFailed', { error })}
           </div>
         )}
 
         {/* ── Loading ── */}
         {loading && !data && (
-          <div className="p-12 text-center text-gray-500 text-[14px]">불러오는 중…</div>
+          <div className="p-12 text-center text-gray-500 text-[14px]">{tr('usage.loading')}</div>
         )}
 
         {/* ── Empty ── */}
         {!loading && data && data.projects.length === 0 && (
           <div className="p-12 text-center text-gray-500 text-[14px]">
-            선택한 기간({days}일)에 기록된 사용자 턴이 없습니다.
+            {tr('usage.empty', { days })}
           </div>
         )}
 
@@ -352,7 +353,7 @@ export function UsagePanel({ embedded = false }: UsagePanelProps) {
                   </div>
                 );
               })}
-              <div className="text-[11px] text-gray-500 text-right pr-1 self-end pb-1">합계</div>
+              <div className="text-[11px] text-gray-500 text-right pr-1 self-end pb-1">{tr('usage.total')}</div>
 
               {/* Project rows */}
               {data.projects.map((p) => (
@@ -375,7 +376,7 @@ export function UsagePanel({ embedded = false }: UsagePanelProps) {
 
             {/* Legend */}
             <div className="mt-5 pt-4 border-t border-surface-800 flex items-center gap-2 text-[12px] text-gray-500">
-              <span>강도</span>
+              <span>{tr('usage.intensity')}</span>
               <LegendCell color={colorFor(0, isDark)} label="0" />
               <LegendCell color={colorFor(2, isDark)} label="1-3" />
               <LegendCell color={colorFor(7, isDark)} label="4-10" />
@@ -384,7 +385,7 @@ export function UsagePanel({ embedded = false }: UsagePanelProps) {
               <LegendCell color={colorFor(100, isDark)} label="81+" />
               <div className="flex-1" />
               <span className="text-gray-600">
-                💡 {isDark ? '노란' : '호박'} 셀 = 하루 80턴 이상 "불타는 날"
+                {tr('usage.hotDayHint', { color: isDark ? tr('usage.yellow') : tr('usage.amber') })}
               </span>
             </div>
           </div>
@@ -412,7 +413,7 @@ function Row({
     <>
       <div
         className="text-[13px] text-gray-300 text-right pr-2.5 truncate"
-        title={`${project.name} · ${project.total} turns · ${project.activeDays}일 활성`}
+        title={tr('usage.projectRowTitle', { project: project.name, turns: project.total, days: project.activeDays })}
       >
         {project.name}
       </div>
@@ -475,11 +476,11 @@ function AiUsageSection({ aiUsage, isDark }: { aiUsage: AiUsageResponse; isDark:
   return (
     <div className="mb-6 space-y-3">
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-        <SummaryCard label="Tower API 입력 토큰" value={formatTokens(totals?.inputTokens)} sub={usageSourceLabel} />
-        <SummaryCard label="Tower API 출력 토큰" value={formatTokens(totals?.outputTokens)} sub={usageSourceLabel} />
-        <SummaryCard label="캐시 읽기" value={formatTokens(totals?.cacheReadTokens)} sub={usageSourceLabel} />
-        <SummaryCard label="Tower API 예산기간 spend" value={formatMoney(budget?.spend)} sub={formatBudgetWindow(budget)} />
-        <SummaryCard label="남은 예산" value={formatMoney(budget?.remaining)} sub={formatBudgetWindow(budget)} />
+        <SummaryCard label={tr('usage.apiInputTokens')} value={formatTokens(totals?.inputTokens)} sub={usageSourceLabel} />
+        <SummaryCard label={tr('usage.apiOutputTokens')} value={formatTokens(totals?.outputTokens)} sub={usageSourceLabel} />
+        <SummaryCard label={tr('usage.cacheReads')} value={formatTokens(totals?.cacheReadTokens)} sub={usageSourceLabel} />
+        <SummaryCard label={tr('usage.budgetSpend')} value={formatMoney(budget?.spend)} sub={formatBudgetWindow(budget)} />
+        <SummaryCard label={tr('usage.remainingBudget')} value={formatMoney(budget?.remaining)} sub={formatBudgetWindow(budget)} />
       </div>
 
       {daily.length > 0 && (
@@ -490,10 +491,9 @@ function AiUsageSection({ aiUsage, isDark }: { aiUsage: AiUsageResponse; isDark:
         <div className="flex items-center gap-3">
           <span className={`w-2 h-2 rounded-full ${budgetColor}`} />
           <div className="flex-1 min-w-0">
-            <div className="text-[14px] text-gray-300 font-medium">Tower API 예산 잔량 · {budget?.customer || 'current VM'}</div>
+            <div className="text-[14px] text-gray-300 font-medium">{tr('usage.budgetRemainingTitle', { customer: budget?.customer || 'current VM' })}</div>
             <div className="text-[12px] text-gray-600 mt-0.5">
-              spend/잔량은 현재 VM의 Tower API key 예산기간 기준입니다. auto-name, 요약, inline edit 같은 API/utility 호출까지 포함합니다.
-              위 기간 버튼은 아래 토큰 차트에만 적용됩니다. 토큰 차트는 {usageSourceLabel} 기준입니다{aiUsage.usage?.note ? ` · ${aiUsage.usage.note}` : ''}.
+              {tr('usage.budgetDescription')} {tr('usage.periodDescription', { source: usageSourceLabel })}{aiUsage.usage?.note ? ` · ${aiUsage.usage.note}` : ''}.
             </div>
           </div>
           {budget?.ok ? (
@@ -539,8 +539,8 @@ function AiTokenLineChart({ data, isDark }: { data: AiUsageDay[]; isDark: boolea
   return (
     <div className="bg-surface-900 border border-surface-800 rounded-xl p-5">
       <div className="flex items-center justify-between mb-2">
-        <div className="text-[13px] text-gray-400 font-medium">Tower API 토큰 일별 사용량</div>
-        <div className="text-[12px] text-gray-600">input + output · Tower API ledger 우선</div>
+        <div className="text-[13px] text-gray-400 font-medium">{tr('usage.dailyApiTokens')}</div>
+        <div className="text-[12px] text-gray-600">{tr('usage.dailyApiTokensSub')}</div>
       </div>
       <svg viewBox={`0 0 ${width} ${height}`} className="w-full" style={{ maxHeight: 180 }}>
         {[0, 0.5, 1].map((r) => {
@@ -644,7 +644,7 @@ function DailyLineChart({ dates, values, isDark }: { dates: string[]; values: nu
 
   return (
     <div className="bg-surface-900 border border-surface-800 rounded-xl p-5 mb-4">
-      <div className="text-[13px] text-gray-400 mb-2 font-medium">전체 프로젝트 일별 턴 수</div>
+      <div className="text-[13px] text-gray-400 mb-2 font-medium">{tr('usage.allProjectsDailyTurns')}</div>
       <svg
         viewBox={`0 0 ${width} ${height}`}
         className="w-full"

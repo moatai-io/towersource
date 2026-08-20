@@ -27,7 +27,7 @@ describe('SessionItem run and subagent presentation', () => {
   it('marks long-context sessions with a compact LONG badge', () => {
     expect(source).toContain('function isLongContextSessionModel');
     expect(source).toContain('const longContext = isLongContextSessionModel(session.modelUsed);');
-    expect(source).toContain('이 세션은 롱컨텍스트 라우트로 실행됩니다. 응답 시작이 느려지고 계정 사용량이 커질 수 있습니다.');
+    expect(source).toContain("title={t('longContextRouteHint')}");
     expect(source).toContain('>\n                LONG\n              </span>');
   });
 });

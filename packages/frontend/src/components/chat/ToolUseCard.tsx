@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import i18n from '../../i18n';
 import { getToolActivityLabel, getToolLabel, getToolSummary } from '../../utils/message-parser';
 import { safeStr } from '../shared/parse-loose-json';
 import { useActiveSessionStreaming } from '../../hooks/useActiveSessionStreaming';
@@ -169,13 +170,13 @@ function makeHeadTailPreview(text: string, maxLines = TOOL_RESULT_PREVIEW_LINES,
   let preview = lineTruncated
     ? [
         ...split.slice(0, headCount),
-        `… 중간 ${Math.max(0, split.length - maxLines).toLocaleString()} lines 생략 …`,
+        i18n.t('chat:toolOutputMiddleOmitted', { count: Math.max(0, split.length - maxLines).toLocaleString() }),
         ...split.slice(-tailCount),
       ].join('\n')
     : text;
   let truncated = lineTruncated;
   if (preview.length > maxChars) {
-    preview = `${preview.slice(0, maxChars)}\n… ${Math.max(0, text.length - maxChars).toLocaleString()} chars 생략 …`;
+    preview = `${preview.slice(0, maxChars)}\n${i18n.t('chat:toolOutputCharactersOmitted', { count: Math.max(0, text.length - maxChars).toLocaleString() })}`;
     truncated = true;
   }
   return { text: preview, truncated, totalLines: split.length, totalChars: text.length };
@@ -205,7 +206,7 @@ function openToolTextInNewWindow(text: string, title = 'Tool output') {
 
   const fullTooLarge = text.length > TOOL_NEW_WINDOW_RENDER_CHARS;
   const visibleText = fullTooLarge
-    ? `${text.slice(0, TOOL_NEW_WINDOW_RENDER_CHARS)}\n… 새 창 렌더링 보호를 위해 ${Math.max(0, text.length - TOOL_NEW_WINDOW_RENDER_CHARS).toLocaleString()} chars 생략 …`
+    ? `${text.slice(0, TOOL_NEW_WINDOW_RENDER_CHARS)}\n${i18n.t('chat:toolOutputWindowCharactersOmitted', { count: Math.max(0, text.length - TOOL_NEW_WINDOW_RENDER_CHARS).toLocaleString() })}`
     : text;
   const doc = child.document;
   doc.title = title;
@@ -225,7 +226,7 @@ function openToolTextInNewWindow(text: string, title = 'Tool output') {
   heading.textContent = title;
   const meta = doc.createElement('div');
   meta.className = 'meta';
-  meta.textContent = `${visibleText.split(/\r?\n/).length.toLocaleString()} lines · ${visibleText.length.toLocaleString()} chars${fullTooLarge ? ' · 렌더링 상한 적용' : ''}`;
+  meta.textContent = i18n.t('chat:toolOutputMeta', { lines: visibleText.split(/\r?\n/).length.toLocaleString(), characters: visibleText.length.toLocaleString(), limit: fullTooLarge ? i18n.t('chat:renderLimitAppliedSuffix') : '' });
   const pre = doc.createElement('pre');
   pre.textContent = visibleText;
   header.append(heading, meta);
@@ -283,7 +284,7 @@ function ToolTextBlock({
   if (sensitive) {
     return (
       <div className={`rounded-lg border border-amber-500/20 bg-amber-950/20 p-3 text-[13px] text-amber-200/90 ${className}`}>
-        이 출력은 .env/credential 파일로 보이는 내용을 포함할 수 있어 채팅 UI에서는 숨겼습니다.
+        {i18n.t('chat:sensitiveToolOutputHidden')}
       </div>
     );
   }
@@ -292,7 +293,7 @@ function ToolTextBlock({
   if (isProbablyBinaryText(fullText)) {
     return (
       <div className={`rounded-lg border border-surface-700/50 bg-surface-950/60 p-3 text-[13px] text-gray-400 ${className}`}>
-        바이너리 또는 제어문자가 많은 출력이라 렌더링하지 않았습니다.
+        {i18n.t('chat:binaryToolOutputHidden')}
       </div>
     );
   }
@@ -301,7 +302,7 @@ function ToolTextBlock({
   const fullTooLarge = fullText.length > TOOL_FULL_RENDER_CHARS;
   const displayText = showFull
     ? (fullTooLarge
-        ? `${fullText.slice(0, TOOL_FULL_RENDER_CHARS)}\n… 렌더링 보호를 위해 ${Math.max(0, fullText.length - TOOL_FULL_RENDER_CHARS).toLocaleString()} chars 생략 …`
+        ? `${fullText.slice(0, TOOL_FULL_RENDER_CHARS)}\n${i18n.t('chat:toolOutputCharactersOmittedForRendering', { count: Math.max(0, fullText.length - TOOL_FULL_RENDER_CHARS).toLocaleString() })}`
         : fullText)
     : preview.text;
   const canExpand = preview.truncated && !showFull;
@@ -326,7 +327,7 @@ function ToolTextBlock({
       {(preview.truncated || showFull) && (
         <div className="flex flex-wrap items-center gap-2 text-[12px] text-gray-500">
           <span>
-            {showFull ? '전체 보기' : '미리보기'} · {preview.totalLines.toLocaleString()} lines · {preview.totalChars.toLocaleString()} chars
+            {i18n.t('chat:toolOutputPreviewMeta', { view: showFull ? i18n.t('chat:fullView') : i18n.t('chat:preview'), lines: preview.totalLines.toLocaleString(), characters: preview.totalChars.toLocaleString() })}
           </span>
           {canExpand && (
             <button
@@ -334,7 +335,7 @@ function ToolTextBlock({
               onClick={(e) => { e.stopPropagation(); setShowFull(true); }}
               className="rounded-md border border-surface-700/50 px-2 py-0.5 text-gray-300 hover:bg-surface-800/70"
             >
-              전체 보기
+              {i18n.t('chat:showFullOutput')}
             </button>
           )}
           {showFull && preview.truncated && (
@@ -343,7 +344,7 @@ function ToolTextBlock({
               onClick={(e) => { e.stopPropagation(); setShowFull(false); }}
               className="rounded-md border border-surface-700/50 px-2 py-0.5 text-gray-400 hover:bg-surface-800/70"
             >
-              미리보기로 접기
+              {i18n.t('chat:collapseToPreview')}
             </button>
           )}
           <button
@@ -351,17 +352,17 @@ function ToolTextBlock({
             onClick={(e) => { e.stopPropagation(); openInNewWindow(); }}
             className="rounded-md border border-surface-700/50 px-2 py-0.5 text-gray-400 hover:bg-surface-800/70"
           >
-            새 창에서 보기
+            {i18n.t('chat:openInNewWindow')}
           </button>
           <button
             type="button"
             onClick={(e) => { e.stopPropagation(); void copyVisibleText(); }}
             className="rounded-md border border-surface-700/50 px-2 py-0.5 text-gray-400 hover:bg-surface-800/70"
           >
-            {copied ? '복사됨' : '보이는 내용 복사'}
+            {copied ? i18n.t('chat:copied') : i18n.t('chat:copyVisibleContent')}
           </button>
-          {openFailed && <span className="text-amber-300/80">팝업이 차단되었습니다</span>}
-          {fullTooLarge && showFull && <span className="text-amber-300/80">렌더링 상한 {TOOL_FULL_RENDER_CHARS.toLocaleString()} chars 적용</span>}
+          {openFailed && <span className="text-amber-300/80">{i18n.t('chat:popupBlocked')}</span>}
+          {fullTooLarge && showFull && <span className="text-amber-300/80">{i18n.t('chat:renderLimitApplied', { count: TOOL_FULL_RENDER_CHARS.toLocaleString() })}</span>}
         </div>
       )}
       <div className={`bg-surface-950/60 rounded-lg p-3 font-mono text-[13px] overflow-x-auto max-h-[36rem] overflow-y-auto whitespace-pre-wrap ${className}`}>
@@ -436,7 +437,7 @@ function TodoChecklist({ todos }: { todos: TodoItem[] }) {
 
   return (
     <div className="tower-ui-block-space">
-      <div className="text-[13px] font-semibold text-gray-400">진행 단계</div>
+      <div className="text-[13px] font-semibold text-gray-400">{i18n.t('chat:workSteps')}</div>
       {/* Progress bar */}
       <div className="flex items-center tower-ui-block-gap">
         <div className="flex-1 h-1 bg-surface-800 rounded-full overflow-hidden">
@@ -789,18 +790,18 @@ function CompactAskUserQuestionHistory({ questions, history }: {
   history: NonNullable<ReturnType<typeof parseAskUserQuestionResult>>;
 }) {
   const statusLabel = history.status === 'skipped'
-    ? '건너뜀'
+    ? i18n.t('chat:questionSkipped')
     : history.status === 'timed_out'
-      ? '시간 초과'
+      ? i18n.t('chat:questionTimedOut')
       : history.status === 'error'
-        ? '응답 중단'
-        : '응답 완료';
+        ? i18n.t('chat:questionResponseStopped')
+        : i18n.t('chat:questionAnswered');
   const visibleAnswerRows = questions.map((question, questionIndex) => ({
     question: questionText(question),
     answer: history.status === 'answered'
       ? (history.answers[questionIndex]?.answer && history.answers[questionIndex].answer !== '[미응답]'
         ? history.answers[questionIndex].answer
-        : '미응답')
+        : i18n.t('chat:noAnswer'))
       : statusLabel,
   }));
   const optionCount = questions.reduce((count, question) => count + questionOptions(question).length, 0);
@@ -810,8 +811,8 @@ function CompactAskUserQuestionHistory({ questions, history }: {
   }, 0);
   const otherOptionCount = Math.max(0, optionCount - selectedOptionCount);
   const detailLabel = otherOptionCount > 0
-    ? `다른 선택지 ${otherOptionCount}개`
-    : '질문 보기';
+    ? i18n.t('chat:otherOptions', { count: otherOptionCount })
+    : i18n.t('chat:viewQuestion');
 
   return (
     <details className="group/auq border-y border-surface-800/55 py-1.5" data-testid="ask-user-question-compact-history">
@@ -851,7 +852,7 @@ function CompactAskUserQuestionHistory({ questions, history }: {
               {customAnswers.map(customAnswer => (
                 <div key={customAnswer} className="flex items-start gap-1.5 text-[12px] leading-relaxed">
                   <span className="text-surface-400">✓</span>
-                  <span className="font-medium text-surface-200">직접 입력 · {customAnswer}</span>
+                  <span className="font-medium text-surface-200">{i18n.t('chat:customAnswer', { answer: customAnswer })}</span>
                 </div>
               ))}
             </div>
@@ -865,14 +866,14 @@ function CompactAskUserQuestionHistory({ questions, history }: {
 function AskUserQuestionBadge({ questions, result, inputAnswers }: { questions: any[]; result?: string; inputAnswers?: Record<string, string> }) {
   const history = resolveAskUserQuestionHistory(questions, result, inputAnswers);
   const statusLabel = history?.status === 'skipped'
-    ? '건너뜀'
+    ? i18n.t('chat:questionSkipped')
     : history?.status === 'timed_out'
-      ? '응답 시간 초과'
+      ? i18n.t('chat:questionResponseTimedOut')
       : history?.status === 'error'
-        ? '응답 중단'
+        ? i18n.t('chat:questionResponseStopped')
         : history
-          ? '결정 완료'
-          : '응답 대기 중';
+          ? i18n.t('chat:decisionComplete')
+          : i18n.t('chat:awaitingResponse');
 
   return (
     <div className="space-y-3" data-testid="ask-user-question-history">
@@ -903,11 +904,11 @@ function AskUserQuestionBadge({ questions, result, inputAnswers }: { questions: 
                   <span className="whitespace-normal break-words font-medium text-surface-200">{answer.answer}</span>
                 </div>
               ) : history.status === 'answered' ? (
-                <div className="text-[13px] text-surface-500">미응답</div>
+                <div className="text-[13px] text-surface-500">{i18n.t('chat:noAnswer')}</div>
               ) : null}
               <details className="group/options">
                 <summary className="cursor-pointer list-none text-[12px] text-surface-500 hover:text-surface-300 marker:hidden">
-                  선택지 {options.length}개 보기
+                  {i18n.t('chat:viewOptions', { count: options.length })}
                 </summary>
                 <div className="mt-1.5 space-y-1 border-l border-surface-700/40 pl-2.5">
                   {options.map((option, optionIndex) => {
@@ -925,7 +926,7 @@ function AskUserQuestionBadge({ questions, result, inputAnswers }: { questions: 
                   {customAnswers.map(customAnswer => (
                     <div key={customAnswer} className="flex items-start gap-2 text-[12px] leading-relaxed">
                       <span className="w-3 shrink-0 text-center" style={{ color: 'var(--th-q-done-accent)' }}>✓</span>
-                      <span className="font-medium text-surface-200">직접 입력 · {customAnswer}</span>
+                      <span className="font-medium text-surface-200">{i18n.t('chat:customAnswer', { answer: customAnswer })}</span>
                     </div>
                   ))}
                 </div>

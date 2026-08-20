@@ -1,0 +1,51 @@
+{
+  "claude": [],
+  "pi": [
+    {
+      "provider": "openrouter",
+      "modelId": "openrouter/auto",
+      "name": "OpenRouter Auto",
+      "badge": "OR",
+      "enabled": true,
+      "api": "openai-completions",
+      "reasoning": false,
+      "contextWindow": 200000,
+      "maxTokens": 64000,
+      "roles": ["full", "managed", "standalone"]
+    },
+    {
+      "provider": "openai-responses-compatible",
+      "modelId": "gpt-5.1",
+      "name": "OpenAI-compatible Responses",
+      "badge": "API",
+      "enabled": true,
+      "api": "openai-responses",
+      "reasoning": true,
+      "contextWindow": 200000,
+      "maxTokens": 64000,
+      "roles": ["full", "managed", "standalone"]
+    }
+  ],
+  "local": [
+    { "id": "local-default", "name": "Local Default", "badge": "LOCAL", "enabled": true }
+  ],
+  "defaults": {
+    "session": "openrouter/openrouter/auto",
+    "ai_reply": "openrouter/openrouter/auto",
+    "ai_task": "openrouter/openrouter/auto"
+  },
+  "modelPolicies": {
+    "revision": 1,
+    "policies": {
+      "low": { "model": "openrouter/openrouter/auto", "effort": "low" },
+      "medium": { "model": "openrouter/openrouter/auto", "effort": "medium" },
+      "high": { "model": "openrouter/openrouter/auto", "effort": "high" },
+      "extra-high": { "model": "openrouter/openrouter/auto", "effort": "xhigh" },
+      "max": { "model": "openrouter/openrouter/auto", "effort": "max" },
+      "ultra": { "model": "openrouter/openrouter/auto", "effort": "max", "enabled": false },
+      "title": { "model": "openrouter/openrouter/auto", "effort": "low" },
+      "summary": { "model": "openrouter/openrouter/auto", "effort": "low" },
+      "background": { "model": "openrouter/openrouter/auto", "effort": "medium" }
+    }
+  }
+}

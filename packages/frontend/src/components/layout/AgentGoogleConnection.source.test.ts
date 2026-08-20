@@ -25,7 +25,7 @@ describe('Agent-only Google Connection UX', () => {
     expect(modal).toContain("credential.allowedActions.replacementAction === 'reauth'");
     expect(modal).toContain('reauthenticateGoogle(credential.id)');
     expect(modal).toContain('/api/auth/google/agent?projectId=');
-    expect(modal).toContain('Google 및 조직 Connection');
+    expect(modal).toContain("t('agentCredentials.connectionsTitle')");
   });
 
   it('keeps semantic theme classes and accessible controls', () => {

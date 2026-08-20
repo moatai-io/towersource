@@ -25,7 +25,7 @@ describe("file selection mode", () => {
     for (const t of [
       "void toggleFolder(entry)",
       "await loadDirectory(entry.path, false)",
-      "↑ 상위 폴더",
+      "t('workspace.parentFolder')",
       'if (parentPath === rootPath) setLibraryView("all")',
     ])
       expect(s).toContain(t);

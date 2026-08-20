@@ -18,9 +18,9 @@ describe("Project outline files", () => {
       'setFileSortMode("type")',
       'setFileSortMode("modified")',
       "kindFilter",
-      "크기",
-      "종류",
-      "수정일",
+      "workspace.size",
+      "workspace.type",
+      "workspace.modifiedDate",
     ])
       expect(s).toContain(t);
   });

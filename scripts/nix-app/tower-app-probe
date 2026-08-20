@@ -1,0 +1,86 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+app_root="${TOWER_APP_ROOT:-${1:-}}"
+if [[ -z "$app_root" ]]; then
+  printf 'usage: %s <tower-app-store-path>\n' "${0##*/}" >&2
+  exit 64
+fi
+app_root="$(realpath "$app_root")"
+lib_root="$app_root/lib/tower"
+manifest="$app_root/share/tower/release-manifest.json"
+
+fail() {
+  printf 'tower-app-probe: %s\n' "$*" >&2
+  exit 1
+}
+
+required=(
+  "$lib_root/dist/frontend/index.html"
+  "$lib_root/dist/backend/packages/backend/index.js"
+  "$lib_root/package.json"
+  "$lib_root/packages/backend/models.json"
+  "$lib_root/packages/backend/db/migrations"
+  "$lib_root/docs/tower-guide/resources"
+  "$lib_root/node_modules"
+  "$lib_root/packages/backend/node_modules"
+  "$manifest"
+)
+for target in "${required[@]}"; do
+  [[ -e "$target" ]] || fail "missing required artifact: $target"
+done
+
+for forbidden in .env .git .pi data workspace uploads published; do
+  [[ ! -e "$lib_root/$forbidden" ]] || fail "forbidden package input present: $lib_root/$forbidden"
+done
+
+python3 - "$manifest" "$app_root" <<'PY'
+import json, pathlib, sys
+manifest_path = pathlib.Path(sys.argv[1])
+app_root = pathlib.Path(sys.argv[2]).resolve()
+data = json.loads(manifest_path.read_text())
+required = {
+    "schemaVersion": 1,
+    "package": "tower-app",
+    "nodeMajor": 22,
+    "npmVersion": "10.9.4",
+}
+for key, expected in required.items():
+    if data.get(key) != expected:
+        raise SystemExit(f"tower-app-probe: manifest {key}={data.get(key)!r}, expected {expected!r}")
+for key in ("version", "baseVersion", "gitSha", "sourceRev", "flakeLockNarHash"):
+    if not str(data.get(key, "")).strip():
+        raise SystemExit(f"tower-app-probe: manifest field is empty: {key}")
+for path in app_root.rglob("*"):
+    if path.is_symlink():
+        resolved = path.resolve()
+        try:
+            resolved.relative_to(app_root)
+        except ValueError:
+            if not str(resolved).startswith("/nix/store/"):
+                raise SystemExit(f"tower-app-probe: escaping non-store symlink: {path} -> {resolved}")
+print(json.dumps({
+    "status": "ok",
+    "storePath": str(app_root),
+    "version": data["version"],
+    "sourceRev": data["sourceRev"],
+    "flakeLockNarHash": data["flakeLockNarHash"],
+}, separators=(",", ":")))
+PY
+
+TOWER_VERSION="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$manifest")" \
+TOWER_BASE_VERSION="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["baseVersion"])' "$manifest")" \
+GIT_SHA="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["gitSha"])' "$manifest")" \
+SOURCE_REV="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["sourceRev"])' "$manifest")" \
+TOWER_COMMITS_SINCE_TAG="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["commitsSinceTag"])' "$manifest")" \
+BUILD_TIME="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["buildTime"])' "$manifest")" \
+FLAKE_LOCK_NAR_HASH="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["flakeLockNarHash"])' "$manifest")" \
+node --input-type=module - "$lib_root" <<'NODE'
+const root = process.argv[2];
+process.chdir(root);
+const pkgInfo = await import(`${root}/dist/backend/packages/backend/utils/pkg-info.js`);
+const info = pkgInfo.getVersionInfo();
+if (info.metadataSource !== 'injected') throw new Error(`metadataSource=${info.metadataSource}`);
+if (info.sourceRev !== process.env.SOURCE_REV) throw new Error(`sourceRev=${info.sourceRev}`);
+console.log(JSON.stringify({metadataSource: info.metadataSource, gitSha: info.gitSha}));
+NODE

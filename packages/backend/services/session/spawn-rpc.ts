@@ -32,8 +32,9 @@ import { buildSpawnRequestFingerprint, SPAWN_DEDUPE_WINDOW_SECONDS } from './spa
 import { runSessionTurnStream } from '../agent-communication/session-turn-runner.js';
 import { recordSessionSendShadow } from '../agent-communication/send-shadow.js';
 import { recordCompletionReportShadow } from '../agent-communication/completion-shadow.js';
+import { acceptAgentMessage } from '../agent-communication/inbox-store.js';
 import { settleDeliveryShadow } from '../agent-communication/delivery-shadow.js';
-import { claimDeliveryById, settleClaimedDelivery, type DeliveryClaim } from '../agent-communication/delivery-lease-store.js';
+import { claimDeliveryById, markClaimedDeliveryStarted, settleClaimedDelivery, type DeliveryClaim } from '../agent-communication/delivery-lease-store.js';
 import type { AgentMessageRecord } from '../agent-communication/inbox-store.js';
 import type { DeliveryHandlerOutcome } from '../agent-communication/delivery-controller.js';
 
@@ -1288,6 +1289,34 @@ async function sendMessageInternal(req: SendInternalRequest): Promise<{ ok: true
 }
 
 /** Recover one accepted Agent send whose engine handoff never started before a process failure. */
+export async function recoverDurableAgentReport(message: AgentMessageRecord, claim?: DeliveryClaim): Promise<DeliveryHandlerOutcome> {
+  if (message.kind !== 'report' || message.body.sourceType !== 'persistent_worker_report') {
+    return { status: 'needs_attention', reason: `Unsupported recovery message kind/source: ${message.kind}/${String(message.body.sourceType)}` };
+  }
+  const text = typeof message.body.text === 'string' ? message.body.text : '';
+  if (!text) return { status: 'needs_attention', reason: 'Durable Agent report has no text' };
+  const report = message.body.agentReport && typeof message.body.agentReport === 'object'
+    ? message.body.agentReport as AgentReportRef
+    : { workerId: message.workerId ?? undefined, runId: message.agentRunId ?? undefined };
+  try {
+    await injectAndWake(
+      message.recipientSessionId,
+      message.senderUserId ?? 0,
+      typeof message.body.senderName === 'string' ? message.body.senderName : 'Persistent agent',
+      text,
+      report,
+      claim,
+    );
+    return { status: 'started_turn', mode: 'new-turn', alreadyMarked: true };
+  } catch (error) {
+    return {
+      status: 'retry',
+      reason: error instanceof Error ? error.message : String(error),
+      retryDelaySeconds: 10,
+    };
+  }
+}
+
 export async function recoverDurableSessionSend(message: AgentMessageRecord): Promise<DeliveryHandlerOutcome> {
   if (message.kind !== 'request' || message.body.sourceType !== 'agent_send') {
     return { status: 'needs_attention', reason: `Unsupported recovery message kind/source: ${message.kind}/${String(message.body.sourceType)}` };
@@ -1505,7 +1534,7 @@ async function runSendInBackground(
 // Tracks consecutive auto-wake events per parent. Reset by external trigger
 // (user message, explicit reset, process restart). When the cap is hit, the
 // next wake falls back to inject-only and the parent stops auto-progressing.
-const MAX_AUTO_WAKE_CHAIN = 30;
+const MAX_AUTO_WAKE_CHAIN = 10;
 const autoWakeCount = new Map<string, number>();
 
 function consumeAutoWakeBudget(parentSessionId: string): boolean {
@@ -1563,6 +1592,7 @@ async function injectAndWake(
   fromName: string,
   text: string,
   agentReport?: AgentReportRef,
+  deliveryClaim?: DeliveryClaim,
 ): Promise<void> {
   // If parent is currently streaming or a wake run is being prepared, queue
   // the wake for later flush. Do NOT consume auto-wake budget here: the cap
@@ -1615,7 +1645,7 @@ async function injectAndWake(
     return;
   }
 
-  await performWake(parentSessionId, parentUserId, fromName, text, agentReport);
+  await performWake(parentSessionId, parentUserId, fromName, text, agentReport, deliveryClaim);
 }
 
 function compactAgentReportText(text: string, max = 900): string {
@@ -1652,8 +1682,9 @@ export async function ensureAgentRunReportDelivered(input: {
   onComplete?: SendOnComplete;
   agentReport: AgentReportRef;
 }): Promise<{ delivered: boolean; skipped?: 'none' | 'empty_text' | 'duplicate' }> {
-  const mode: SendOnComplete = input.onComplete || 'wake';
-  if (mode === 'none') return { delivered: false, skipped: 'none' };
+  // Persistent worker reports are always wake/report-and-resume. The optional
+  // mode remains on the type for legacy callers, but must not strand a worker
+  // supervisor because a stale/model-selected inject value was persisted.
   if (!input.text.trim()) return { delivered: false, skipped: 'empty_text' };
 
   if (await hasParentAgentReportForRun(input.parentSessionId, input.agentReport.runId)) {
@@ -1667,23 +1698,62 @@ export async function ensureAgentRunReportDelivered(input: {
     parentSessionName: input.agentReport.parentSessionName || parent?.name || undefined,
   };
 
-  if (mode === 'wake') {
-    await injectAndWake(
-      input.parentSessionId,
-      input.parentUserId,
-      input.fromName,
-      input.text,
+  // Accept the report before attempting the wake. The inbox delivery lease is
+  // the durable retry boundary: if wake preparation/engine startup fails, the
+  // delivery pump can retry the same report without creating a duplicate card.
+  const backingSessionId = agentReport.backingSessionId || input.parentSessionId;
+  const accepted = await acceptAgentMessage({
+    id: uuidv4(),
+    senderSessionId: backingSessionId,
+    recipientSessionId: input.parentSessionId,
+    senderUserId: input.parentUserId,
+    projectId: parent?.projectId || null,
+    kind: 'report',
+    body: {
+      text: input.text,
+      senderName: input.fromName,
+      sourceType: 'persistent_worker_report',
       agentReport,
-    );
-  } else {
-    await injectIntoCallerDirect(
-      input.parentSessionId,
-      input.fromName,
-      input.text,
-      agentReport,
-    );
+    },
+    deliveryPolicy: 'wake',
+    priority: 'normal',
+    correlationId: agentReport.runId || backingSessionId,
+    rootConversationId: agentReport.runId || backingSessionId,
+    workerId: agentReport.workerId || null,
+    agentRunId: agentReport.runId || null,
+    operationId: agentReport.runId || null,
+  });
+  // An earlier attempt may have accepted this report and failed after the
+  // durable inbox write. Let its existing delivery lease/pump finish instead
+  // of creating another parent report card or another wake.
+  if (accepted.duplicate) return { delivered: false, skipped: 'duplicate' };
+  const claim = await claimDeliveryById({
+    deliveryId: accepted.deliveryId,
+    ownerBootId: config.serverEpoch,
+    leaseSeconds: 300,
+  });
+
+  try {
+    await injectAndWake(input.parentSessionId, input.parentUserId, input.fromName, input.text, agentReport, claim);
+    if (claim) {
+      // The wake runner marks the delivery as started after its start acknowledgement.
+    }
+    return { delivered: true };
+  } catch (error) {
+    if (claim) {
+      await settleClaimedDelivery({
+        deliveryId: claim.deliveryId,
+        ownerToken: claim.ownerToken,
+        ownerBootId: claim.ownerBootId,
+        state: 'retry_wait',
+        mode: 'new-turn',
+        failureClass: 'wake_start_failed',
+        error: error instanceof Error ? error.message : String(error),
+        retryDelaySeconds: 10,
+      });
+    }
+    throw error;
   }
-  return { delivered: true };
 }
 
 function stripOptionalReportSections(text: string): string {
@@ -1965,6 +2035,7 @@ async function performWake(
   fromName: string,
   text: string,
   agentReport?: AgentReportRef,
+  deliveryClaim?: DeliveryClaim,
 ): Promise<void> {
   // Reserve synchronously before the first await so concurrent reports cannot
   // both pass the idle check while engine.run is still being prepared.
@@ -1975,7 +2046,7 @@ async function performWake(
     // Trigger parent's engine.run in background, but do not acknowledge report
     // delivery until the wake runner reaches its first async iterator step.
     const startAck = createRunnerStartAcknowledgement(`wake ${parentSessionId.slice(0, 8)}`);
-    void runWakeInBackground(parentSessionId, parentUserId, injected.prompt, injected.msgId, startAck)
+    void runWakeInBackground(parentSessionId, parentUserId, injected.prompt, injected.msgId, startAck, deliveryClaim)
       .catch((err) => {
         startAck.fail(err);
         console.error(
@@ -2000,6 +2071,7 @@ async function runWakeInBackground(
   prompt: string,
   rootTurnId: string,
   startAck?: RunnerStartAcknowledgement,
+  deliveryClaim?: DeliveryClaim,
 ): Promise<void> {
   const parent = await getSession(parentSessionId);
   if (!parent) {
@@ -2091,6 +2163,17 @@ async function runWakeInBackground(
     });
   }
 
+  if (deliveryClaim && startAck) {
+    await startAck.started;
+    await markClaimedDeliveryStarted({
+      deliveryId: deliveryClaim.deliveryId,
+      ownerToken: deliveryClaim.ownerToken,
+      ownerBootId: deliveryClaim.ownerBootId,
+      mode: 'new-turn',
+      recipientRootTurnId: rootTurnId,
+    });
+  }
+
   // Phase 3 fix #6 (2026-05-10): emit session_status so frontend shows
   // streaming UI for wake-triggered turns. Without this the wake turn is a
   // "stealth turn" — backend runs SDK but frontend thinks the session is idle.
@@ -2125,6 +2208,18 @@ async function runWakeInBackground(
               engineSessionId: towerMsg.engineSessionId || runOpts.engineSessionId || null,
               error: towerMsg.error || (outcome && outcome !== 'completed' ? `Wake run ended with ${outcome}` : null),
             });
+            if (deliveryClaim) {
+              await settleClaimedDelivery({
+                deliveryId: deliveryClaim.deliveryId,
+                ownerToken: deliveryClaim.ownerToken,
+                ownerBootId: deliveryClaim.ownerBootId,
+                state: !outcome || outcome === 'completed' ? 'completed' : 'failed',
+                mode: 'new-turn',
+                recipientRootTurnId: rootTurnId,
+                failureClass: outcome && outcome !== 'completed' ? 'parent_turn_failed' : undefined,
+                error: towerMsg.error || (outcome && outcome !== 'completed' ? `Wake run ended with ${outcome}` : undefined),
+              });
+            }
             const cur = await getSession(parentSessionId);
             if (cur) {
               const newTurnCount = ((cur as any).turnCount ?? 0) + 1;

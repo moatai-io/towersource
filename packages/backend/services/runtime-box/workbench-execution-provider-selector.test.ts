@@ -148,12 +148,38 @@ describe('Workbench execution provider selector', () => {
     })).toBe(local);
   });
 
-  it('never silently changes an activated workstation Project to Runtime Box', async () => {
+  it.each([
+    ['WORKSTATION_WORKER_BUSY: tower-prod-local-01; retry after the current command finishes', 'WORKSTATION_WORKER_BUSY'],
+    ['WORKSTATION_WORKER_HEARTBEAT_STALE: tower-prod-local-01; operator action may be required', 'WORKSTATION_WORKER_HEARTBEAT_STALE'],
+    ['WORKSTATION_WORKER_DRAINING: tower-prod-local-01; maintenance', 'WORKSTATION_WORKER_DRAINING'],
+    ['WORKSTATION_WORKER_CAPACITY_CONFIG_INVALID: tower-prod-local-01; operator action is required', 'WORKSTATION_WORKER_CAPACITY_CONFIG_INVALID'],
+  ])('preserves actionable Workstation failure reasons instead of switching to Runtime Box', async (sourceError, expectedCode) => {
     await expect(selectPersistedWorkbenchExecutionProvider({
       projectId: 'p1', request: { command: 'node -v' }, env: { NODE_ENV: 'production' }, localProvider: local,
       workstationMode: true, defaultWorkerId: 'tower-prod-local-01',
-      selectPersistedWorker: async () => { throw new Error('WORKER_CAPACITY_UNAVAILABLE'); },
-    })).rejects.toThrow('WORKSTATION_WORKER_UNAVAILABLE');
+      selectPersistedWorker: async () => { throw new Error(sourceError); },
+    })).rejects.toThrow(expectedCode);
+  });
+
+  it('maps unpinned capacity exhaustion to a retryable Workstation busy error', async () => {
+    await expect(selectPersistedWorkbenchExecutionProvider({
+      projectId: 'p1', request: { command: 'node -v' }, env: { NODE_ENV: 'production' }, localProvider: local,
+      workstationMode: true, defaultWorkerId: 'tower-prod-local-01',
+      selectPersistedWorker: async () => { throw new Error('WORKER_BUSY: no Worker has enough free capacity'); },
+    })).rejects.toThrow('WORKSTATION_WORKER_BUSY');
+  });
+
+  it('reports selected Worker transport authorization failure as operator action, not recovery wait', async () => {
+    const selected = {
+      workerId: 'tower-prod-local-01', baseUrl: 'http://127.0.0.1:43325', capabilities: ['job'], projectIds: ['p1'],
+      capacity: { cpuTotal: 4, memoryMbTotal: 8192, activeRuns: 0, maxRuns: 4 },
+      registeredAt: new Date().toISOString(), heartbeatAt: new Date().toISOString(), draining: false, status: 'healthy',
+    } satisfies WorkbenchWorkerView;
+    await expect(selectPersistedWorkbenchExecutionProvider({
+      projectId: 'p1', request: { command: 'node -v' }, env: { NODE_ENV: 'production' }, localProvider: local,
+      workstationMode: true, defaultWorkerId: 'tower-prod-local-01',
+      selectPersistedWorker: async () => selected, resolvePersistedWorkerToken: async () => null,
+    })).rejects.toThrow('WORKSTATION_WORKER_AUTH_UNAVAILABLE');
   });
 
   it('falls back to the legacy binding only when the durable pool has no eligible Worker', async () => {

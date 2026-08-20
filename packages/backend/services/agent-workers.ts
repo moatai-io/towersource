@@ -152,11 +152,14 @@ function jsonParam(value: unknown): string {
   return JSON.stringify(value ?? {});
 }
 
+/**
+ * Persistent worker communication is supervisor-driven. A completed worker
+ * report must resume its parent; report-only delivery is reserved for the
+ * low-level legacy spawn API, not Agent Control Plane workers.
+ */
 function normalizeOnComplete(
-  mode?: "inject" | "wake" | "none",
+  _mode?: "inject" | "wake" | "none",
 ): SpawnCompleteMode {
-  if (mode === "none") return "none";
-  if (mode === "inject") return "inject-only";
   return "inject-and-wake";
 }
 
@@ -458,7 +461,9 @@ async function refreshWorkerFromBackingSession(
         parentUserId: worker.owner_user_id,
         fromName: worker.metadata?.identity?.name || worker.name,
         text: last.text,
-        onComplete: (latestRun?.metadata?.onComplete || "wake") as SendOnComplete,
+        // Worker reports are always wake/report-and-resume. Do not let a stale
+      // or model-selected inject/none value strand the supervisor.
+      onComplete: "wake" as SendOnComplete,
         agentReport: {
           workerId: worker.id,
           runId,
@@ -886,7 +891,8 @@ export async function sendWorker(
       sourceRole: input.callerRole,
       targetSessionId: worker.backing_session_id,
       message: input.message,
-      onComplete: input.onComplete || "wake",
+      // Persistent worker messaging always resumes the supervisor.
+      onComplete: "wake",
       effort: executionPolicy?.effectiveEffort,
       modelPolicyId: executionPolicy?.id,
       modelPolicyRevision: executionPolicy?.revision,
@@ -913,7 +919,7 @@ export async function sendWorker(
       parentSessionId: input.callerSessionId,
       sessionId: worker.backing_session_id,
       metadata: {
-        onComplete: input.onComplete || "wake",
+        onComplete: "wake",
         definitionId:
           input.agentDefinitionId || worker.metadata?.definitionId || null,
       },

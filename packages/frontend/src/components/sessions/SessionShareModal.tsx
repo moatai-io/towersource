@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { toastSuccess, toastError } from '../../utils/toast';
 
 interface User { id: number; username: string; }
@@ -25,6 +26,7 @@ function getAuthHeaders(): Record<string, string> {
 }
 
 export function SessionShareModal({ sessionId, sessionName, onClose }: Props) {
+  const { t } = useTranslation('layout');
   const [users, setUsers] = useState<User[]>([]);
   const [selectedUserId, setSelectedUserId] = useState<number | ''>('');
   const [expiresIn, setExpiresIn] = useState<'1h' | '24h' | '7d'>('24h');
@@ -57,10 +59,10 @@ export function SessionShareModal({ sessionId, sessionName, onClose }: Props) {
     try {
       await navigator.clipboard.writeText(deepLink);
       setLinkCopied(true);
-      toastSuccess('링크가 복사되었습니다');
+      toastSuccess(t('sessionShare.linkCopied'));
       setTimeout(() => setLinkCopied(false), 2000);
     } catch {
-      toastError('링크를 복사할 수 없습니다');
+      toastError(t('sessionShare.linkCopyFailed'));
     }
   };
 
@@ -76,7 +78,7 @@ export function SessionShareModal({ sessionId, sessionName, onClose }: Props) {
         const err = await res.json().catch(() => ({}));
         throw new Error(err.error || `Server error (${res.status})`);
       }
-      toastSuccess('공유 완료');
+      toastSuccess(t('sessionShare.shared'));
       setSelectedUserId('');
       loadShares();
     } catch (e: any) { toastError(e.message); }
@@ -100,9 +102,9 @@ export function SessionShareModal({ sessionId, sessionName, onClose }: Props) {
       loadShares();
       try {
         await navigator.clipboard.writeText(fullUrl);
-        toastSuccess('외부 링크 생성 및 복사 완료!');
+        toastSuccess(t('sessionShare.externalCreatedAndCopied'));
       } catch {
-        toastSuccess('외부 링크가 생성되었습니다.');
+        toastSuccess(t('sessionShare.externalCreated'));
       }
     } catch (e: any) { toastError(e.message); }
     finally { setLoading(false); }
@@ -112,7 +114,7 @@ export function SessionShareModal({ sessionId, sessionName, onClose }: Props) {
     try {
       const res = await fetch(`/api/session-shares/${shareId}`, { method: 'DELETE', headers: getAuthHeaders() });
       if (!res.ok) throw new Error((await res.json()).error);
-      toastSuccess('공유가 취소되었습니다.');
+      toastSuccess(t('sessionShare.revoked'));
       setShares(prev => prev.filter(s => s.id !== shareId));
       if (generatedUrl) setGeneratedUrl('');
     } catch (e: any) { toastError(e.message); }
@@ -123,10 +125,10 @@ export function SessionShareModal({ sessionId, sessionName, onClose }: Props) {
 
   const timeLeft = (expiresAt: string) => {
     const ms = new Date(expiresAt).getTime() - Date.now();
-    if (ms <= 0) return '만료됨';
+    if (ms <= 0) return t('sessionShare.expired');
     const h = Math.floor(ms / 3600000);
     const m = Math.floor((ms % 3600000) / 60000);
-    return h > 0 ? `${h}시간 남음` : `${m}분 남음`;
+    return h > 0 ? t('sessionShare.hoursLeft', { count: h }) : t('sessionShare.minutesLeft', { count: m });
   };
 
   return (
@@ -139,7 +141,7 @@ export function SessionShareModal({ sessionId, sessionName, onClose }: Props) {
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-surface-700">
           <div>
-            <h2 className="text-[15px] font-semibold text-white">세션 공유</h2>
+            <h2 className="text-[15px] font-semibold text-white">{t('sessionShare.title')}</h2>
             <p className="text-[13px] text-gray-500 truncate max-w-[300px]">{sessionName}</p>
           </div>
           <button onClick={onClose} className="text-gray-500 hover:text-gray-300 transition-colors">
@@ -156,7 +158,7 @@ export function SessionShareModal({ sessionId, sessionName, onClose }: Props) {
               <svg className="w-3.5 h-3.5 text-primary-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
               </svg>
-              <span className="text-[14px] text-white font-medium">공유 링크</span>
+              <span className="text-[14px] text-white font-medium">{t('sessionShare.shareLink')}</span>
             </div>
             <div className="flex items-center gap-2 bg-surface-900 rounded-lg px-3 py-2.5">
               <span className="flex-1 text-[13px] text-gray-400 truncate select-all">{deepLink}</span>
@@ -168,11 +170,11 @@ export function SessionShareModal({ sessionId, sessionName, onClose }: Props) {
                     : 'bg-primary-600/20 text-primary-400 hover:bg-primary-600/30'
                 }`}
               >
-                {linkCopied ? '복사됨' : '복사'}
+                {linkCopied ? t('sessionShare.copied') : t('sessionShare.copy')}
               </button>
             </div>
             <p className="text-[12px] text-gray-600">
-              로그인된 팀원이 이 링크로 세션에 바로 접근합니다. 같은 프로젝트 멤버이거나 아래에서 접근 권한을 부여한 유저만 볼 수 있습니다.
+              {t('sessionShare.deepLinkDescription')}
             </p>
           </div>
 
@@ -182,7 +184,7 @@ export function SessionShareModal({ sessionId, sessionName, onClose }: Props) {
               <svg className="tone-success tone-text w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z" />
               </svg>
-              <span className="text-[14px] text-white font-medium">접근 권한 부여</span>
+              <span className="text-[14px] text-white font-medium">{t('sessionShare.grantAccess')}</span>
             </div>
             <div className="flex gap-2">
               <select
@@ -190,7 +192,7 @@ export function SessionShareModal({ sessionId, sessionName, onClose }: Props) {
                 onChange={e => setSelectedUserId(Number(e.target.value) || '')}
                 className="flex-1 bg-surface-900 border border-surface-600 rounded-lg px-3 py-2 text-[14px] text-white focus:outline-none focus:border-primary-500"
               >
-                <option value="">유저 선택...</option>
+                <option value="">{t('sessionShare.selectUser')}</option>
                 {users.map(u => <option key={u.id} value={u.id}>@{u.username}</option>)}
               </select>
               <button
@@ -198,7 +200,7 @@ export function SessionShareModal({ sessionId, sessionName, onClose }: Props) {
                 disabled={loading || !selectedUserId}
                 className="px-4 py-2 rounded-lg bg-primary-600 hover:bg-primary-500 disabled:opacity-50 text-white text-[14px] font-medium transition-colors shrink-0"
               >
-                {loading ? '...' : '추가'}
+                {loading ? '...' : t('sessionShare.add')}
               </button>
             </div>
           </div>
@@ -212,7 +214,7 @@ export function SessionShareModal({ sessionId, sessionName, onClose }: Props) {
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
                   </svg>
                   <span className="flex-1 text-[13px] text-gray-400">@{s.target_username}</span>
-                  <button onClick={() => handleRevoke(s.id)} className="text-[12px] text-red-400 hover:text-red-300 shrink-0">제거</button>
+                  <button onClick={() => handleRevoke(s.id)} className="text-[12px] text-red-400 hover:text-red-300 shrink-0">{t('sessionShare.remove')}</button>
                 </div>
               ))}
             </div>
@@ -227,14 +229,14 @@ export function SessionShareModal({ sessionId, sessionName, onClose }: Props) {
               <svg className={`w-3 h-3 transition-transform ${showExternal ? 'rotate-90' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
               </svg>
-              외부 공유 링크 만들기
-              <span className="text-[12px] text-gray-600">(비로그인 접근, 스냅샷)</span>
+              {t('sessionShare.createExternalLink')}
+              <span className="text-[12px] text-gray-600">{t('sessionShare.externalLinkQualifier')}</span>
             </button>
 
             {showExternal && (
               <div className="mt-3 space-y-3 pl-1">
                 <p className="tone-card tone-warning text-[12px] rounded-lg px-3 py-2 opacity-80">
-                  외부 링크는 로그인 없이 접근 가능합니다. 공유 시점의 대화 스냅샷만 포함되며, 이후 대화는 반영되지 않습니다.
+                  {t('sessionShare.externalWarning')}
                 </p>
                 <div className="flex gap-2 items-center">
                   <div className="flex gap-1.5 flex-1">
@@ -247,7 +249,7 @@ export function SessionShareModal({ sessionId, sessionName, onClose }: Props) {
                             : 'border-surface-600 text-gray-500 hover:border-surface-500 hover:text-gray-300'
                         }`}
                       >
-                        {opt === '1h' ? '1시간' : opt === '24h' ? '24시간' : '7일'}
+                        {t(`sessionShare.duration.${opt}`)}
                       </button>
                     ))}
                   </div>
@@ -256,16 +258,16 @@ export function SessionShareModal({ sessionId, sessionName, onClose }: Props) {
                     disabled={loading}
                     className="px-4 py-1.5 rounded-lg bg-surface-700 hover:bg-surface-600 border border-surface-600 disabled:opacity-50 text-white text-[13px] font-medium transition-colors shrink-0"
                   >
-                    {loading ? '생성 중...' : '생성'}
+                    {loading ? t('sessionShare.creating') : t('sessionShare.create')}
                   </button>
                 </div>
                 {generatedUrl && (
                   <div className="flex items-center gap-2 bg-surface-900 rounded-lg px-3 py-2">
                     <span className="flex-1 text-[13px] text-gray-400 truncate">{generatedUrl}</span>
                     <button
-                      onClick={() => { navigator.clipboard.writeText(generatedUrl); toastSuccess('복사됨'); }}
+                      onClick={() => { navigator.clipboard.writeText(generatedUrl); toastSuccess(t('sessionShare.copied')); }}
                       className="text-primary-400 hover:text-primary-300 text-[12px] shrink-0 font-medium"
-                    >복사</button>
+                    >{t('sessionShare.copy')}</button>
                   </div>
                 )}
               </div>
@@ -280,9 +282,9 @@ export function SessionShareModal({ sessionId, sessionName, onClose }: Props) {
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
                     </svg>
                     <span className="flex-1 text-[13px] text-gray-400">
-                      외부 링크 · {s.expires_at ? timeLeft(s.expires_at) : ''}
+                      {t('sessionShare.externalLink')} · {s.expires_at ? timeLeft(s.expires_at) : ''}
                     </span>
-                    <button onClick={() => handleRevoke(s.id)} className="text-[12px] text-red-400 hover:text-red-300 shrink-0">취소</button>
+                    <button onClick={() => handleRevoke(s.id)} className="text-[12px] text-red-400 hover:text-red-300 shrink-0">{t('sessionShare.cancel')}</button>
                   </div>
                 ))}
               </div>

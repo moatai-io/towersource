@@ -20,7 +20,8 @@ describe('durable Agent delivery recovery wiring',()=>{
  });
  it('starts the pump only outside candidate passive mode and stops it on signals',()=>{
   expect(index).toMatch(/if \(!candidatePassiveMode\) \{[\s\S]*startDeliveryPump\(\{/);
-  expect(index).toContain('deliver: async (message) => recoverDurableSessionSend(message)');
+  expect(index).toContain('recoverDurableAgentReport');
+  expect(index).toMatch(/deliver: async \(message\) => message\.kind === 'report'[\s\S]*\? recoverDurableAgentReport\(message\)[\s\S]*: recoverDurableSessionSend\(message\)/);
   expect(index.match(/stopDeliveryPump/g)?.length).toBeGreaterThanOrEqual(2);
  });
 });

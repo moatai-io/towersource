@@ -71,6 +71,12 @@ const HEAVY_PATTERNS: RegExp[] = [
  * risky 패턴: 고위험 실행 후보 (Phase 2+ Secure Run 승격용).
  * v1 에서는 경고만 — 실행을 차단하지는 않음.
  */
+const DOCKER_PATTERN = /\bdocker\b/;
+const DOCKER_DIAGNOSTIC_ARGS = String.raw`(?:\s+(?:--?[\w.-]+)(?:[=\s]+(?:'[^']*'|"[^"]*"|[^\s]+))?)*`;
+const READ_ONLY_DOCKER_INVOCATION = new RegExp(
+  String.raw`^docker\s+(?:version${DOCKER_DIAGNOSTIC_ARGS}|info${DOCKER_DIAGNOSTIC_ARGS}|ps${DOCKER_DIAGNOSTIC_ARGS}|images${DOCKER_DIAGNOSTIC_ARGS}|inspect\b.*|compose\s+(?:version${DOCKER_DIAGNOSTIC_ARGS}|config${DOCKER_DIAGNOSTIC_ARGS}|ps${DOCKER_DIAGNOSTIC_ARGS}|images${DOCKER_DIAGNOSTIC_ARGS}))$`,
+);
+
 const RISKY_PATTERNS: RegExp[] = [
   /curl\s+.*\|\s*(bash|sh)\b/,
   /wget\s+.*\|\s*(bash|sh)\b/,
@@ -78,7 +84,7 @@ const RISKY_PATTERNS: RegExp[] = [
   /\bsudo\b/,
   /\bsu\s+-?\b/,
   /\bnsenter\b/,
-  /\bdocker\b/,       // Docker in Docker 시도
+  DOCKER_PATTERN,       // Mutating/unknown Docker commands require review.
   /\bpodman\b/,
   /\/proc\//,
   /\/sys\//,
@@ -141,11 +147,17 @@ export function shouldSuppressCredentialEnv(cmd: string): { suppress: boolean; r
   return { suppress: false };
 }
 
+function containsOnlyReadOnlyDockerInvocations(command: string): boolean {
+  const invocations = command.match(/\bdocker\s+[^\n;|&)`]+/g) ?? [];
+  return invocations.length > 0 && invocations.every((invocation) => READ_ONLY_DOCKER_INVOCATION.test(invocation.trim()));
+}
+
 export function classifyCommand(cmd: string): CommandClassification {
   const trimmed = cmd.trim();
 
   // 1. risky 먼저 (최우선)
   for (const re of RISKY_PATTERNS) {
+    if (re === DOCKER_PATTERN && containsOnlyReadOnlyDockerInvocations(trimmed)) continue;
     if (re.test(trimmed)) {
       return {
         cls: 'risky',

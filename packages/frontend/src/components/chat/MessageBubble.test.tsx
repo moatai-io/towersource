@@ -391,7 +391,7 @@ describe("MessageBubble artifact-backed Markdown card", () => {
 
     render(<MessageBubble message={message} />);
 
-    expect(screen.getByText("파일 저장 실패")).toBeInTheDocument();
+    expect(screen.getByText("파일을 저장하지 못했습니다")).toBeInTheDocument();
     expect(screen.getByText("unsafe_or_unsupported_artifact_path")).toBeInTheDocument();
   });
 });
@@ -820,6 +820,21 @@ describe("MessageBubble thinking/tool meta row", () => {
 
     expect(screen.getByText("Thinking")).toBeInTheDocument();
     expect(screen.getByText("1 tool uses")).toBeInTheDocument();
+  });
+
+  it("uses natural English copy for artifact save failures", async () => {
+    await i18n.changeLanguage("en");
+    const message: ChatMessage = {
+      id: "artifact-save-failed-en",
+      role: "assistant",
+      timestamp: Date.now(),
+      content: [{ type: "artifact_markdown", path: "report.md", status: "skipped", error: "save_failed" }],
+    };
+
+    render(<MessageBubble message={message} />);
+
+    expect(screen.getByText("Could not save file")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Open file: report.md" })).toBeInTheDocument();
   });
 
   it("hides stale empty thinking placeholders while keeping adjacent tool chips static", () => {

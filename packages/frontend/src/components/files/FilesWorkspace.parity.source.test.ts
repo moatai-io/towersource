@@ -8,8 +8,8 @@ const s = fs.readFileSync(
 describe("embedded file workspace parity", () => {
   it("supports file folder picker and drag-drop uploads", () => {
     for (const t of [
-      "파일 업로드",
-      "폴더 업로드",
+      "t('workspace.uploadFiles')",
+      "t('workspace.uploadFolder')",
       "webkitdirectory",
       "multiple",
       "readDroppedItems",
@@ -31,8 +31,8 @@ describe("embedded file workspace parity", () => {
   it("supports bulk selection and ACL-checked project copies", () => {
     for (const t of [
       "selectedPaths",
-      "보낼 AI 팀원 선택",
-      "복사해서 전달",
+      "t('workspace.selectAiTeammateToSend')",
+      "t('workspace.copyAndSend')",
       "transferFile",
       '{ scope: "project", projectId: selectedProject.id, relativePath }',
       '{ scope: "project", projectId: target.id, relativeDirectory: "uploads" }',

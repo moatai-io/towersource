@@ -1,4 +1,5 @@
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 import { useSessionStore } from '../../stores/session-store';
 import { useSettingsStore } from '../../stores/settings-store';
 import { createWorkspaceAppDraft, createWorkspaceAppPublishPreview, executeWorkspaceAppAction, fetchWorkspaceAppDefinitions, fetchWorkspaceAppDrafts, fetchWorkspaceAppQueryRows, publishWorkspaceAppDraft, type WorkspaceAppDraftRecord, type WorkspaceAppPublishPreview, type WorkspaceAppPublishResult } from './workspace-app-api';
@@ -23,6 +24,7 @@ export function WorkspaceAppsHome() {
 }
 
 function LocalMetadataWorkspaceAppsHome() {
+  const { t } = useTranslation('common');
   const confirm = useConfirm();
   const sessions = useSessionStore((s) => s.sessions);
   const activeSessionId = useSessionStore((s) => s.activeSessionId);
@@ -169,9 +171,9 @@ function LocalMetadataWorkspaceAppsHome() {
   const handlePublish = React.useCallback(async () => {
     if (!publishPreview) return;
     const confirmed = await confirm({
-      title: '앱 정의 파일에 반영',
-      message: '이 publish는 apps/sales-ops/app.yaml 같은 app definition 파일을 실제로 수정합니다. 현재 preview hash를 승인하고 반영할까요?',
-      confirmLabel: '반영',
+      title: t('workspaceApps.publishConfirm.title'),
+      message: t('workspaceApps.publishConfirm.message'),
+      confirmLabel: t('workspaceApps.publishConfirm.confirm'),
     });
     if (!confirmed) return;
     setPublishState('publishing');
@@ -190,7 +192,7 @@ function LocalMetadataWorkspaceAppsHome() {
     } catch {
       setPublishState('error');
     }
-  }, [confirm, definition.id, projectId, publishPreview]);
+  }, [confirm, definition.id, projectId, publishPreview, t]);
 
   const activeMenuItem = visibleDefinition.menu.find((item) => item.id === activeMenuId) ?? visibleDefinition.menu[0];
   const menuHasLiveTable = activeMenuId === 'dashboard' || activeMenuId === visibleDefinition.tableView.id || activeMenuId === visibleDefinition.tableView.queryId || activeMenuId === 'accounts' || activeMenuId === 'customers';
@@ -204,12 +206,12 @@ function LocalMetadataWorkspaceAppsHome() {
     return {
       ...visibleDefinition.tableView,
       id: `${visibleDefinition.tableView.id}-${activeMenuId}`,
-      title: `${activeMenuItem?.label ?? '업무'} 목록`,
-      subtitle: '아직 이 메뉴에 연결된 표가 없습니다. 세션에서 요청하면 이 화면의 컬럼과 데이터를 만들 수 있습니다.',
-      statusLabel: '준비 중',
+      title: t('workspaceApps.home.listTitle', { name: activeMenuItem?.label ?? t('workspaceApps.work') }),
+      subtitle: t('workspaceApps.home.unconnectedTable'),
+      statusLabel: t('workspaceApps.home.preparing'),
       rows: [],
     };
-  }, [activeMenuId, activeMenuItem?.label, liveRows, menuHasLiveTable, visibleDefinition.tableView]);
+  }, [activeMenuId, activeMenuItem?.label, liveRows, menuHasLiveTable, t, visibleDefinition.tableView]);
   const recordFields: WorkspaceAppField[] = React.useMemo(() => {
     if (visibleDefinition.fields?.length) return visibleDefinition.fields;
     return visibleDefinition.tableView.columns.map((column) => ({
@@ -222,8 +224,8 @@ function LocalMetadataWorkspaceAppsHome() {
   }, [visibleDefinition.fields, visibleDefinition.tableView.columns]);
 
   const sourceLabel = sourceState === 'workspace'
-    ? (liveRows ? '연결된 데이터' : '업무 화면')
-    : sourceState === 'error' ? '샘플 화면 · 연결 오류' : '샘플 화면';
+    ? (liveRows ? t('workspaceApps.home.connectedData') : t('workspaceApps.home.workScreen'))
+    : sourceState === 'error' ? t('workspaceApps.home.sampleConnectionError') : t('workspaceApps.home.sampleScreen');
 
   const handleExportCsv = React.useCallback(() => {
     const headers = tableView.columns.map((column) => column.label);
@@ -236,8 +238,8 @@ function LocalMetadataWorkspaceAppsHome() {
     anchor.download = `${definition.id}-${activeMenuId}.csv`;
     anchor.click();
     URL.revokeObjectURL(url);
-    setNotice('현재 목록을 CSV로 출력했습니다.');
-  }, [activeMenuId, definition.id, tableView.columns, tableView.rows]);
+    setNotice(t('workspaceApps.notice.exportedCsv'));
+  }, [activeMenuId, definition.id, t, tableView.columns, tableView.rows]);
 
   const actionIdByType = React.useCallback((type: 'create' | 'update' | 'change-status') => {
     return visibleDefinition.actions?.find((action) => action.type === type)?.id ?? '';
@@ -249,12 +251,12 @@ function LocalMetadataWorkspaceAppsHome() {
     const recordId = selectedRow?.[primaryKey];
     if (!actionId) {
       setRecordActionState('error');
-      setNotice('이 업무 화면에는 아직 저장 action이 등록되지 않았습니다.');
+      setNotice(t('workspaceApps.notice.noSaveAction'));
       return;
     }
     if (mode !== 'create' && !recordId) {
       setRecordActionState('error');
-      setNotice('수정할 항목의 식별자가 없습니다. 목록을 다시 불러오거나 화면 설정을 확인하세요.');
+      setNotice(t('workspaceApps.notice.missingRecordId'));
       return;
     }
     setRecordActionState('saving');
@@ -270,12 +272,12 @@ function LocalMetadataWorkspaceAppsHome() {
       setSelectedRow(null);
       setSelectedRowIndex(null);
       setActionVersion((version) => version + 1);
-      setNotice(mode === 'create' ? '신규 항목을 저장했습니다.' : mode === 'status' ? '상태를 변경했습니다.' : '선택 항목을 저장했습니다.');
+      setNotice(mode === 'create' ? t('workspaceApps.notice.created') : mode === 'status' ? t('workspaceApps.notice.statusChanged') : t('workspaceApps.notice.updated'));
     } catch {
       setRecordActionState('error');
-      setNotice('저장하지 못했습니다. 입력값, 권한, 데이터 연결을 확인하세요.');
+      setNotice(t('workspaceApps.notice.saveFailed'));
     }
-  }, [actionIdByType, definition.id, projectId, selectedRow, visibleDefinition.record?.primaryKey]);
+  }, [actionIdByType, definition.id, projectId, selectedRow, t, visibleDefinition.record?.primaryKey]);
 
   return (
     <div className="h-full overflow-auto bg-slate-100 text-slate-950 dark:bg-surface-950 dark:text-surface-100">
@@ -283,8 +285,8 @@ function LocalMetadataWorkspaceAppsHome() {
         <header className="flex flex-col gap-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-surface-800 dark:bg-surface-900/70 lg:flex-row lg:items-center lg:justify-between">
           <div className="min-w-0">
             <div className="mb-2 inline-flex items-center gap-2 rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-[12px] font-semibold text-blue-800 dark:border-primary-500/25 dark:bg-primary-500/10 dark:text-primary-200">
-              {activeMenuItem?.label ?? '업무'}
-              <span className="rounded-full bg-white px-2 py-0.5 text-[10px] text-slate-500 dark:bg-surface-950/50 dark:text-surface-400">{draftPreviewActive ? '변경안 미리보기 적용 중' : sourceLabel}</span>
+              {activeMenuItem?.label ?? t('workspaceApps.work')}
+              <span className="rounded-full bg-white px-2 py-0.5 text-[10px] text-slate-500 dark:bg-surface-950/50 dark:text-surface-400">{draftPreviewActive ? t('workspaceApps.home.previewActive') : sourceLabel}</span>
             </div>
             <h1 className="text-2xl font-bold tracking-tight text-slate-950 dark:text-surface-50">{visibleDefinition.title}</h1>
             <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600 dark:text-surface-400">{visibleDefinition.description}</p>
@@ -296,7 +298,7 @@ function LocalMetadataWorkspaceAppsHome() {
               onClick={() => setDefinitionViewerOpen(true)}
               className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 dark:border-surface-700 dark:bg-surface-850 dark:text-surface-200 dark:hover:bg-surface-800"
             >
-              관리자 설정
+              {t('workspaceApps.home.adminSettings')}
             </button>
           </div>
         </header>
@@ -318,19 +320,19 @@ function LocalMetadataWorkspaceAppsHome() {
             setRecordActionState('idle');
             setSelectedRowIndex(null);
             setSelectedRow(null);
-            setNotice('신규 등록 화면을 열었습니다. 실제 저장은 다음 단계에서 연결됩니다.');
+            setNotice(t('workspaceApps.notice.createOpened'));
           }}
           onEdit={() => {
             if (!selectedRow) return;
             setRecordMode('edit');
             setRecordActionState('idle');
-            setNotice('선택 항목 수정 화면을 열었습니다. 실제 저장은 다음 단계에서 연결됩니다.');
+            setNotice(t('workspaceApps.notice.editOpened'));
           }}
           onChangeStatus={() => {
             if (!selectedRow) return;
             setRecordMode('status');
             setRecordActionState('idle');
-            setNotice('상태 변경 화면을 열었습니다. 실제 저장은 다음 단계에서 연결됩니다.');
+            setNotice(t('workspaceApps.notice.statusOpened'));
           }}
           onExport={handleExportCsv}
         />
@@ -347,7 +349,7 @@ function LocalMetadataWorkspaceAppsHome() {
               setRecordMode('detail');
               setRecordActionState('idle');
               const item = visibleDefinition.menu.find((candidate) => candidate.id === id);
-              setNotice(item?.live ? '' : `${item?.label ?? '이 메뉴'} 화면은 아직 준비 중입니다. 필요한 컬럼과 데이터를 화면 구성에 연결할 수 있습니다.`);
+              setNotice(item?.live ? '' : t('workspaceApps.notice.menuPreparing', { name: item?.label ?? t('workspaceApps.thisMenu') }));
             }}
           />
           <WorkspaceAppTableView
@@ -359,7 +361,7 @@ function LocalMetadataWorkspaceAppsHome() {
               setSelectedRowIndex(rowIndex);
               setRecordMode('detail');
               setRecordActionState('idle');
-              setNotice('선택한 항목의 상세 정보를 오른쪽에 표시했습니다.');
+              setNotice(t('workspaceApps.notice.detailsShown'));
             }}
           />
           <div className="space-y-3">
@@ -382,7 +384,7 @@ function LocalMetadataWorkspaceAppsHome() {
               }}
             />
             <details className="rounded-xl border border-slate-200 bg-white shadow-sm dark:border-surface-800 dark:bg-surface-900/70">
-              <summary className="cursor-pointer px-4 py-3 text-[13px] font-bold text-slate-700 dark:text-surface-200">관리자용 화면 구성</summary>
+              <summary className="cursor-pointer px-4 py-3 text-[13px] font-bold text-slate-700 dark:text-surface-200">{t('workspaceApps.home.adminBuilder')}</summary>
               <div className="border-t border-slate-200 p-3 dark:border-surface-800">
                 <WorkspaceAppBuilderPanel
                   builder={definition.builder}

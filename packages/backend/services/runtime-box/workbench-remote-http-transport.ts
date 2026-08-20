@@ -39,8 +39,20 @@ export function createRemoteWorkbenchHttpTransport(
         signal,
       });
       if (!response.ok || !response.body) {
-        await response.body?.cancel().catch(() => {});
-        throw new Error(`REMOTE_WORKER_HTTP_${response.status}: Worker rejected the run`);
+        let detail = '';
+        if (response.body) {
+          try {
+            const raw = await response.text();
+            const first = raw.split('\n').find(line => line.trim());
+            if (first) {
+              const event = JSON.parse(first) as Partial<Extract<WorkerEvent, { type: 'error' }>>;
+              if (event.code && event.message) detail = `${event.code}: ${event.message}`;
+            }
+          } catch {
+            // Preserve the bounded HTTP error when a legacy Worker sends no structured body.
+          }
+        }
+        throw new Error(`REMOTE_WORKER_HTTP_${response.status}: ${detail || 'Worker rejected the run'}`);
       }
 
       const reader = response.body.getReader();

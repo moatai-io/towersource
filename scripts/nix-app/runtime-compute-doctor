@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+set -u
+manifest="${TOWER_COMPUTE_BASELINE_MANIFEST:-$(dirname "$(dirname "$(realpath "$0")")")/share/tower/compute-baseline.json}"
+[[ -f "$manifest" ]] || { echo "MISS baseline manifest: $manifest" >&2; exit 1; }
+fail=0
+check_group(){ local group="$1" cmd; while IFS= read -r cmd; do
+  if command -v "$cmd" >/dev/null 2>&1; then printf 'OK|command|%s|%s\n' "$cmd" "$(command -v "$cmd")"; else printf 'MISS|command|%s|group=%s\n' "$cmd" "$group"; fail=1; fi
+done < <(jq -r --arg g "$group" '.commands[$g][]' "$manifest"); }
+for group in core languages build documents media browser publishing tower; do check_group "$group"; done
+python_bin="$(command -v python || command -v python3 || true)"
+if [[ -z "$python_bin" ]]; then echo 'MISS|python|executable|none'; fail=1
+else
+  while IFS= read -r mod; do
+    if "$python_bin" -c "import $mod" >/dev/null 2>&1; then echo "OK|python-import|$mod"; else echo "MISS|python-import|$mod"; fail=1; fi
+  done < <(jq -r '.pythonImports[]' "$manifest")
+fi
+if command -v tesseract >/dev/null 2>&1; then
+  langs="$(tesseract --list-langs 2>/dev/null || true)"
+  while IFS= read -r lang; do grep -qx "$lang" <<<"$langs" && echo "OK|ocr|$lang" || { echo "MISS|ocr|$lang"; fail=1; }; done < <(jq -r '.ocrLanguages[]' "$manifest")
+fi
+if command -v fc-match >/dev/null 2>&1; then
+  while IFS= read -r family; do match="$(fc-match "$family" 2>/dev/null || true)"; [[ -n "$match" ]] && echo "OK|font|$family|$match" || { echo "MISS|font|$family"; fail=1; }; done < <(jq -r '.fontFamilies[]' "$manifest")
+else echo 'MISS|font|fc-match'; fail=1; fi
+[[ "$fail" == 0 ]] && echo 'OK|baseline|ready' || echo 'MISS|baseline|incomplete'
+exit "$fail"

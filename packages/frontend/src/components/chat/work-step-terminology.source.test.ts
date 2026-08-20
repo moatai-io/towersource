@@ -10,8 +10,8 @@ describe('Work Steps terminology', () => {
     expect(koChat.toolLabels.todowrite).toBe('진행 단계');
     expect(koChat.toolActivity.todo).toContain('진행 단계');
     expect(koChat.toolActivityNoun.todo).toBe('진행 단계');
-    expect(messageSource).toContain('>진행 단계</span>');
-    expect(messageSource).toContain('이전 진행 단계');
+    expect(messageSource).toContain("i18n.t('chat:workSteps')");
+    expect(messageSource).toContain("i18n.t('chat:previousWorkSteps')");
   });
 
   it('uses Work steps rather than personal todo language in fallbacks', () => {

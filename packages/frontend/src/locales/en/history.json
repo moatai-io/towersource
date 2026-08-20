@@ -18,5 +18,20 @@
   "noArchivedTasks": "No archived tasks",
   "restore": "Restore",
   "deletePermanently": "Delete permanently",
-  "deleteSessionPermanentConfirm": "Permanently deleting this session removes its conversation and work history. This cannot be undone."
+  "deleteSessionPermanentConfirm": "Permanently deleting this session removes its conversation and work history. This cannot be undone.",
+  "justNow": "Just now",
+  "minutesAgo": "{{count}}m ago",
+  "hoursAgo": "{{count}}h ago",
+  "daysAgo": "{{count}}d ago",
+  "monthsAgo": "{{count}}mo ago",
+  "unknownProject": "Unknown project",
+  "noProject": "No project",
+  "recent": "Recent",
+  "byProject": "By project",
+  "status": {
+    "done": "Done",
+    "failed": "Failed",
+    "todo": "To do",
+    "in_progress": "In progress"
+  }
 }

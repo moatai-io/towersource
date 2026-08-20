@@ -1,5 +1,6 @@
 import React, { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
+import i18n from '../../i18n';
 import { AgentIdentityAvatar } from '../../features/agent-profile/AgentIdentityAvatar';
 
 const LIVE_TURN_TIMER_INTERVAL_MS = 500;
@@ -99,7 +100,7 @@ function ArtifactMarkdownCard({ block, onFileClick }: { block: ContentBlock; onF
   if (saved && displayPath) {
     return (
       <div className="mt-2 min-w-0 max-w-full text-[13px] text-surface-400">
-        <span className="text-surface-500">파일: </span>
+        <span className="text-surface-500">{i18n.t('chat:fileLabel')}: </span>
         <button
           type="button"
           className="inline cursor-pointer break-all border-0 bg-transparent p-0 font-mono text-inherit underline decoration-current underline-offset-2 transition-opacity hover:opacity-80"
@@ -108,7 +109,7 @@ function ArtifactMarkdownCard({ block, onFileClick }: { block: ContentBlock; onF
             onFileClick?.(displayPath);
           }}
           title={`Open ${displayPath}`}
-          aria-label={`파일 열기: ${displayPath}`}
+          aria-label={i18n.t('chat:openFile', { path: displayPath })}
         >
           {displayPath}
         </button>
@@ -119,14 +120,14 @@ function ArtifactMarkdownCard({ block, onFileClick }: { block: ContentBlock; onF
   return (
     <div className="mt-2 min-w-0 max-w-full overflow-hidden rounded-xl border p-3 text-[13px] tone-card tone-warning">
       <div className="min-w-0 max-w-full">
-        <div className="font-semibold tone-text">파일 저장 실패</div>
+        <div className="font-semibold tone-text">{i18n.t('chat:fileSaveFailed')}</div>
         {displayPath && (
           <button
             type="button"
             onClick={() => onFileClick?.(displayPath)}
             className="mt-2 inline cursor-pointer break-all border-0 bg-transparent p-0 font-mono text-[12px] tone-text underline decoration-current underline-offset-2 opacity-80 transition-opacity hover:opacity-100"
             title={`Open ${displayPath}`}
-            aria-label={`파일 열기: ${displayPath}`}
+            aria-label={i18n.t('chat:openFile', { path: displayPath })}
           >
             {displayPath}
           </button>
@@ -150,7 +151,7 @@ function renderBareUserFilePaths(text: string, onFileClick?: (path: string) => v
         onFileClick(filePath);
       }}
       title={`Open ${filePath}`}
-      aria-label={`파일 열기: ${filePath}`}
+      aria-label={i18n.t('chat:openFile', { path: filePath })}
     >
       {filePath}
     </button>
@@ -174,7 +175,7 @@ function SessionAttachmentPreview({ uri, onFileClick }: { uri: string; onFileCli
       .catch(() => setMetadata(null));
   }, [attachmentId, sessionId]);
 
-  const name = metadata?.name || '첨부파일';
+  const name = metadata?.name || i18n.t('chat:attachment');
   if (metadata?.mimeType?.startsWith('image/') && contentUrl) {
     return (
       <span className="block my-2">
@@ -275,6 +276,7 @@ function CopyButton({ text, contentRef, className = '' }: {
   contentRef?: React.RefObject<HTMLDivElement | null>;
   className?: string;
 }) {
+  const { t } = useTranslation('chat');
   const [copied, setCopied] = useState(false);
 
   const handleCopy = useCallback(async (e: React.MouseEvent) => {
@@ -304,7 +306,7 @@ function CopyButton({ text, contentRef, className = '' }: {
       // Fallback for browsers that don't support ClipboardItem
       await navigator.clipboard.writeText(text);
     }
-    toastQuiet('복사됨');
+    toastQuiet(t('copied'));
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
   }, [text, contentRef]);
@@ -313,8 +315,8 @@ function CopyButton({ text, contentRef, className = '' }: {
     <button
       onClick={handleCopy}
       className={`flex min-h-11 min-w-11 items-center justify-center gap-1.5 rounded-lg px-2.5 text-surface-500 transition-colors hover:bg-surface-800 hover:text-surface-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 sm:min-h-10 sm:min-w-10 md:min-w-fit md:shrink-0 ${className}`}
-      title="복사"
-      aria-label="메시지 복사"
+      title={t('copy')}
+      aria-label={t('messageCopy')}
     >
       {copied ? (
         <svg className="tone-success tone-text w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -325,7 +327,7 @@ function CopyButton({ text, contentRef, className = '' }: {
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
         </svg>
       )}
-      <span className="hidden whitespace-nowrap text-[12px] font-medium md:inline">복사</span>
+      <span className="hidden whitespace-nowrap text-[12px] font-medium md:inline">{t('copy')}</span>
     </button>
   );
 }
@@ -361,6 +363,7 @@ function AnchorLinkButton({
   messageId: string;
   className?: string;
 }) {
+  const { t } = useTranslation('chat');
   const sessionShortCode = useSessionStore((s) => {
     const active = s.sessions.find((ss) => ss.id === s.activeSessionId);
     return active?.shortCode || s.activeSessionId;
@@ -370,7 +373,7 @@ function AnchorLinkButton({
   const handleClick = useCallback(async (e: React.MouseEvent) => {
     e.stopPropagation();
     if (!sessionShortCode) {
-      toastError('세션 정보를 찾을 수 없습니다');
+      toastError(t('sessionNotFound'));
       return;
     }
     let id = shortId;
@@ -400,7 +403,7 @@ function AnchorLinkButton({
       }
     }
     if (!id) {
-      toastQuiet('아직 링크가 발급되지 않았습니다');
+      toastQuiet(t('linkNotAvailable'));
       return;
     }
     const path = window.location.pathname.startsWith('/shared/')
@@ -409,9 +412,9 @@ function AnchorLinkButton({
     const url = `${window.location.origin}${path}#m-${id}`;
     try {
       await navigator.clipboard.writeText(url);
-      toastQuiet('메시지 링크 복사됨');
+      toastQuiet(t('messageLinkCopied'));
     } catch {
-      toastError('복사 실패 — 권한을 확인해주세요');
+      toastError(t('copyFailed'));
     }
   }, [shortId, messageId, sessionShortCode, activeSessionId]);
 
@@ -421,15 +424,15 @@ function AnchorLinkButton({
     <button
       onClick={handleClick}
       className={`flex min-h-11 min-w-11 items-center justify-center gap-1.5 rounded-lg px-2.5 text-surface-500 transition-colors hover:bg-surface-800 hover:text-surface-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 sm:min-h-10 sm:min-w-10 md:min-w-fit md:shrink-0 ${className}`}
-      title="링크"
-      aria-label="메시지 링크 복사"
+      title={t('link')}
+      aria-label={t('messageLinkCopy')}
     >
       <svg className="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.9} d="M10.75 13.25l2.5-2.5" />
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.9} d="M8.5 11.75l-1.05 1.05a3 3 0 104.25 4.25l1.05-1.05" />
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.9} d="M15.5 12.25l1.05-1.05a3 3 0 10-4.25-4.25l-1.05 1.05" />
       </svg>
-      <span className="hidden whitespace-nowrap text-[12px] font-medium md:inline">링크</span>
+      <span className="hidden whitespace-nowrap text-[12px] font-medium md:inline">{t('link')}</span>
     </button>
   );
 }
@@ -442,14 +445,16 @@ function formatMessageTime(ts: number): string {
   yesterday.setDate(yesterday.getDate() - 1);
   const isYesterday = d.toDateString() === yesterday.toDateString();
 
-  const time = d.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', hour12: false });
+  const locale = i18n.resolvedLanguage === 'ko' ? 'ko-KR' : 'en-US';
+  const time = d.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' });
   if (isToday) return time;
-  if (isYesterday) return `어제 ${time}`;
-  return `${d.getMonth() + 1}/${d.getDate()} ${time}`;
+  if (isYesterday) return i18n.t('chat:yesterdayAt', { time });
+  return d.toLocaleString(locale, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
 
 function formatCompletionTime(ts: number): string {
-  return new Date(ts).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', hour12: false });
+  const locale = i18n.resolvedLanguage === 'ko' ? 'ko-KR' : 'en-US';
+  return new Date(ts).toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' });
 }
 
 interface MessageBubbleProps {
@@ -485,7 +490,8 @@ function engineLabel(e: string): string {
 function AssistantMark({ active = false, project, onOpenHome }: { active?: boolean; project?: import('../../stores/project-store').Project | null; onOpenHome?:()=>void }) {
   if (project) {
     const content=<AgentIdentityAvatar project={project} className="h-8 w-8 rounded-lg" fallbackClassName="h-8 w-8 rounded-lg"/>;
-    return onOpenHome?<button type="button" onClick={onOpenHome} className="h-8 w-8 overflow-hidden rounded-lg border border-primary-400/20" title={`${project.agent?.displayName||project.name} 홈`} aria-label={`${project.agent?.displayName||project.name} 홈 열기`}>{content}</button>:<span className="h-8 w-8 overflow-hidden rounded-lg border border-primary-400/20">{content}</span>;
+    const name = project.agent?.displayName || project.name;
+    return onOpenHome?<button type="button" onClick={onOpenHome} className="h-8 w-8 overflow-hidden rounded-lg border border-primary-400/20" title={i18n.t('chat:agentHome', { name })} aria-label={i18n.t('chat:openAgentHome', { name })}>{content}</button>:<span className="h-8 w-8 overflow-hidden rounded-lg border border-primary-400/20">{content}</span>;
   }
   return (
     <span
@@ -530,7 +536,7 @@ function EngineSwitchMarker({ from, to, at }: { from: string; to: string; at?: s
       <div className="flex-1 h-px bg-surface-700/50" />
       <div
         className="flex items-center gap-2 text-[13px] text-gray-500 select-none whitespace-nowrap"
-        title={timeStr ? `엔진 전환됨 · ${timeStr}` : '엔진 전환됨'}
+        title={timeStr ? i18n.t('chat:engineSwitchedAt', { time: timeStr }) : i18n.t('chat:engineSwitched')}
       >
         <span>🔀</span>
         <span className="px-1.5 py-0.5 rounded bg-surface-800 border border-surface-700/60 text-gray-400">
@@ -587,11 +593,11 @@ export function MessageBubble({ message, assistantProject, onOpenAssistantHome, 
       return (
         <div
           className="flex justify-start py-1.5 px-2"
-          aria-label="이전 대화 맥락이 압축됨"
-          title="이전 대화 맥락이 압축됨"
+          aria-label={t('earlierContextSummarized')}
+          title={t('earlierContextSummarized')}
         >
           <span className="text-[12px] leading-none text-gray-400/65 dark:text-gray-600 whitespace-nowrap select-none">
-            AI의 작업 맥락이 길어져, 한번 정리하였습니다.
+            {t('contextSummaryNotice')}
           </span>
         </div>
       );
@@ -678,9 +684,9 @@ export function MessageBubble({ message, assistantProject, onOpenAssistantHome, 
         body: JSON.stringify({ mode }),
       });
       const body = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(body.error || '새 대화를 만들지 못했습니다.');
+      if (!response.ok) throw new Error(body.error || t('createConversationFailed'));
       const session = body.session;
-      if (!session?.id) throw new Error('새 대화 정보를 찾지 못했습니다.');
+      if (!session?.id) throw new Error(t('conversationDetailsMissing'));
       localStorage.removeItem(`tower:inputDraft:${session.id}`);
       useSessionStore.getState().addSession(session);
       window.dispatchEvent(new CustomEvent('kanban-select-session', { detail: { sessionId: session.id } }));
@@ -693,7 +699,7 @@ export function MessageBubble({ message, assistantProject, onOpenAssistantHome, 
       setEditingUserMessage(false);
       setEditState('idle');
     } catch (err) {
-      setEditError(err instanceof Error ? err.message : '새 대화를 만들지 못했습니다.');
+      setEditError(err instanceof Error ? err.message : t('newConversationFailed'));
       setEditState('error');
     }
   }, [activeSessionId, editState, editText, message.id]);
@@ -710,7 +716,7 @@ export function MessageBubble({ message, assistantProject, onOpenAssistantHome, 
         body: JSON.stringify({}),
       });
       const body = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(body.error || '대화를 되감지 못했습니다.');
+      if (!response.ok) throw new Error(body.error || t('rewindConversationFailed'));
       const currentMessages = useChatStore.getState().messages;
       const index = currentMessages.findIndex((item) => item.id === message.id);
       if (index >= 0) {
@@ -724,7 +730,7 @@ export function MessageBubble({ message, assistantProject, onOpenAssistantHome, 
       setEditingUserMessage(false);
       setEditState('idle');
     } catch (err) {
-      setEditError(err instanceof Error ? err.message : '대화를 되감지 못했습니다.');
+      setEditError(err instanceof Error ? err.message : t('rewindFailed'));
       setEditState('error');
     }
   }, [activeSessionId, editState, editText, message.id]);
@@ -761,7 +767,7 @@ export function MessageBubble({ message, assistantProject, onOpenAssistantHome, 
                 {displayUsername && (
                   <span
                     className="font-medium"
-                    title={`발화자: ${displayUsername}`}
+                    title={t('speaker', { name: displayUsername })}
                   >
                     {displayUsername}
                   </span>
@@ -773,7 +779,7 @@ export function MessageBubble({ message, assistantProject, onOpenAssistantHome, 
             )}
             {editingUserMessage ? (
               <div className="chat-user-bubble rounded-2xl rounded-tr-sm p-3 text-msg-size leading-relaxed">
-                <label className="mb-2 block text-[13px] font-medium text-surface-300">요청 수정</label>
+                <label className="mb-2 block text-[13px] font-medium text-surface-300">{t('requestEdit')}</label>
                 <textarea
                   ref={editTextareaRef}
                   value={editText}
@@ -789,7 +795,7 @@ export function MessageBubble({ message, assistantProject, onOpenAssistantHome, 
                     }
                   }}
                   className="min-h-28 w-full resize-y rounded-xl border border-surface-700 bg-surface-950/20 px-3 py-2 text-msg-size leading-relaxed text-surface-100 outline-none transition-colors placeholder:text-surface-500 focus:border-primary-500 focus:ring-2 focus:ring-primary-500/30"
-                  aria-label="수정할 요청 내용"
+                  aria-label={t('requestEditAria')}
                 />
                 {editError && <p className="tone-danger tone-text mt-2 text-[13px]" role="alert">{editError}</p>}
                 <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:justify-end">
@@ -797,8 +803,8 @@ export function MessageBubble({ message, assistantProject, onOpenAssistantHome, 
                     type="button"
                     onClick={cancelInlineEdit}
                     disabled={editState === 'sending'}
-                    aria-label="취소"
-                    title="취소"
+                    aria-label={t('cancel')}
+                    title={t('cancel')}
                     className="min-h-11 w-full rounded-lg border border-surface-700 px-3 text-[18px] leading-none text-surface-300 transition-colors hover:bg-surface-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 sm:min-h-10 sm:w-11 sm:px-0"
                   >
                     ×
@@ -809,7 +815,7 @@ export function MessageBubble({ message, assistantProject, onOpenAssistantHome, 
                     disabled={editState === 'sending' || editText.trim().length === 0}
                     className="min-h-11 w-full rounded-lg border border-surface-700 px-3 text-[13px] font-medium text-surface-300 transition-colors hover:bg-surface-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 disabled:opacity-50 sm:min-h-10 sm:w-auto"
                   >
-                    다시 보내기
+                    {t('resend')}
                   </button>
                   <button
                     type="button"
@@ -817,7 +823,7 @@ export function MessageBubble({ message, assistantProject, onOpenAssistantHome, 
                     disabled={editState === 'sending' || editText.trim().length === 0}
                     className="tone-accent tone-action min-h-11 w-full rounded-lg px-3 text-[13px] font-semibold disabled:opacity-50 sm:min-h-10 sm:w-auto"
                   >
-                    {editState === 'sending' ? '처리 중…' : '새 대화에서 보내기'}
+                    {editState === 'sending' ? t('processing') : t('newConversation')}
                   </button>
                 </div>
               </div>
@@ -834,7 +840,7 @@ export function MessageBubble({ message, assistantProject, onOpenAssistantHome, 
                     <span key={i}>{renderUserText(safeStr(block.text), onFileClick)}</span>
                   ))}
                 </div>
-                <div className="relative mt-1 flex min-h-11 items-center justify-end gap-1 opacity-100 transition-opacity md:absolute md:right-0 md:top-full md:z-10 md:mt-1 md:min-h-10 md:opacity-0 md:pointer-events-none md:group-hover/message:pointer-events-auto md:group-hover/message:opacity-100 md:group-focus-within/message:pointer-events-auto md:group-focus-within/message:opacity-100" aria-label="메시지 작업">
+                <div className="relative mt-1 flex min-h-11 items-center justify-end gap-1 opacity-100 transition-opacity md:absolute md:right-0 md:top-full md:z-10 md:mt-1 md:min-h-10 md:opacity-0 md:pointer-events-none md:group-hover/message:pointer-events-auto md:group-hover/message:opacity-100 md:group-focus-within/message:pointer-events-auto md:group-focus-within/message:opacity-100" aria-label={t('messageActions')}>
                   {turnRewindEnabled && activeSessionId && canBranchUserMessage && (
                     <ConversationBranchAction sessionId={activeSessionId} messageId={message.id} onEditRequested={beginInlineEdit} />
                   )}
@@ -847,13 +853,13 @@ export function MessageBubble({ message, assistantProject, onOpenAssistantHome, 
             {message.sendStatus === 'queued' && (
               <div className="chat-queued-status flex items-center gap-2 mt-1.5 text-[14px] flex-wrap">
                 <div className="chat-queued-spinner w-3 h-3 border-2 rounded-full animate-spin" />
-                <span>대기 중 · 현재 턴이 끝나면 자동 전송됩니다</span>
+                <span>{t('queuedUntilTurnCompletes')}</span>
                 {onCancelQueued && (
                   <button
                     onClick={() => onCancelQueued(message.id)}
                     className="text-current hover:text-primary-300 underline underline-offset-2 transition-colors"
                   >
-                    취소
+                    {t('cancel')}
                   </button>
                 )}
               </div>
@@ -863,7 +869,7 @@ export function MessageBubble({ message, assistantProject, onOpenAssistantHome, 
                 <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
                 </svg>
-                <span>전송 실패</span>
+                <span>{t('sendFailed')}</span>
                 {onRetry && (
                   <button
                     onClick={() => {
@@ -872,7 +878,7 @@ export function MessageBubble({ message, assistantProject, onOpenAssistantHome, 
                     }}
                     className="text-primary-400 hover:text-primary-300 underline underline-offset-2 transition-colors"
                   >
-                    다시 시도
+                    {t('retry')}
                   </button>
                 )}
               </div>
@@ -1159,7 +1165,7 @@ function TodoInlineCard({ input, isLive, collapsed }: { input: Record<string, an
       <svg className={`w-4 h-4 ${cardTone} tone-text`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
       </svg>
-      <span className={`text-[13px] font-semibold ${cardTone} tone-text opacity-85`}>진행 단계</span>
+      <span className={`text-[13px] font-semibold ${cardTone} tone-text opacity-85`}>{i18n.t('chat:workSteps')}</span>
       <span className={`text-[12px] font-mono tabular-nums ${cardTone} tone-text opacity-65`}>
         {completed}/{total}
       </span>
@@ -1228,7 +1234,7 @@ function TodoInlineCard({ input, isLive, collapsed }: { input: Record<string, an
         <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-[14px] text-gray-500 marker:hidden">
           <span className="flex items-center gap-2">
             {header}
-            <span>이전 진행 단계</span>
+            <span>{i18n.t('chat:previousWorkSteps')}</span>
           </span>
           <span className="text-[13px] tabular-nums text-gray-600">{pct}%</span>
         </summary>
@@ -1487,7 +1493,7 @@ function MessageBody({ groups, message, onFileClick, isLastAssistant, showMetric
       {showMetrics && <TurnMetricsBar message={message} isLast={!!isLastAssistant} />}
       <div
         className="flex min-h-11 items-center justify-end gap-1 opacity-100 transition-opacity md:min-h-10 md:pointer-events-none md:opacity-0 md:group-hover/message:pointer-events-auto md:group-hover/message:opacity-100 md:group-focus-within/message:pointer-events-auto md:group-focus-within/message:opacity-100"
-        aria-label="AI 메시지 작업"
+        aria-label={i18n.t('chat:aiMessageActions')}
         data-testid="assistant-message-actions"
       >
         <AnchorLinkButton shortId={message.shortId} messageId={message.id} />
@@ -1592,13 +1598,13 @@ function fmtTokens(n: number): string {
 function getStopReasonLabel(reason?: string): string | null {
   switch (reason) {
     case 'length':
-      return '출력 상한에서 종료';
+      return i18n.t('chat:stopReasonLength');
     case 'toolUse':
-      return '도구 호출로 종료';
+      return i18n.t('chat:stopReasonToolUse');
     case 'error':
-      return '오류로 종료';
+      return i18n.t('chat:stopReasonError');
     case 'aborted':
-      return '중단됨';
+      return i18n.t('chat:stopReasonAborted');
     default:
       return null;
   }
@@ -1698,7 +1704,7 @@ export function TurnMetricsBar({ message, isLast }: { message?: ChatMessage; isL
         {metrics.completedAt && !isStreaming && !isFallbackMetrics && metrics.stopReason !== 'toolUse' && (
           <>
             <span className="text-gray-600">·</span>
-            <span title="응답 완료 시각">완료 {formatCompletionTime(metrics.completedAt)}</span>
+            <span title={i18n.t('chat:responseCompletedAt')}>{i18n.t('chat:completedAt', { time: formatCompletionTime(metrics.completedAt) })}</span>
           </>
         )}
         {stopReasonLabel && (

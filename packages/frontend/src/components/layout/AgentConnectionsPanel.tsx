@@ -5,7 +5,7 @@ import { toastError, toastSuccess } from '../../utils/toast';
 
 type AgentConnection = {
   id: string;
-  source: 'profile' | 'credential';
+  source: 'profile' | 'credential' | 'group';
   displayName: string;
   provider: string;
   connectionType: string;
@@ -13,6 +13,8 @@ type AgentConnection = {
   status: 'available' | 'connected' | 'blocked';
   mode: 'allow' | 'deny' | null;
   updatedAt: string | null;
+  fieldCount?: number;
+  connectedFieldCount?: number;
 };
 
 type AgentConnectionCatalog = {
@@ -176,7 +178,7 @@ export function AgentConnectionsPanel({ projectId, spacious = false }: { project
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0">
                 <div className="truncate text-[14px] font-semibold text-surface-200">{connection.displayName}</div>
-                <div className="mt-0.5 truncate text-[12px] text-surface-500">{connection.provider}</div>
+                <div className="mt-0.5 truncate text-[12px] text-surface-500">{connection.provider}{connection.fieldCount ? ` · 필수 필드 ${connection.connectedFieldCount ?? 0}/${connection.fieldCount}` : ''}</div>
               </div>
               <span className={`tone-pill shrink-0 px-2 py-0.5 text-[11px] ${statusTone}`}>
                 {connected ? t('connected') : blocked ? t('blocked') : t('available')}

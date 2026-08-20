@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+# Run the Phase 2A renderer fixtures and assert structural PDF properties.
+set -euo pipefail
+
+FIXTURES_DIR="${TOWER_NIX_RENDER_FIXTURES_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/fixtures" && pwd)}"
+OUTPUT_DIR="${1:-$PWD/work/nix-renderer-shadow}"
+RENDERER="${TOWER_NIX_RENDER_BIN:-tower-nix-render}"
+mkdir -p "$OUTPUT_DIR"
+
+render() {
+  local name="$1" wait_ms="${2:-1000}"
+  "$RENDERER" "$FIXTURES_DIR/$name.html" "$OUTPUT_DIR/$name.pdf" --wait-ms "$wait_ms"
+}
+
+render korean-a4
+render slide-16x9
+render mermaid-ready 1200
+render multipage-report
+render mixed-script-emoji
+
+assert_pages() {
+  local file="$1" expected="$2" actual
+  actual="$(pdfinfo "$file" | awk '/^Pages:/ {print $2}')"
+  [[ "$actual" == "$expected" ]] || { echo "page mismatch: $file expected=$expected actual=$actual" >&2; exit 1; }
+}
+assert_text() {
+  local file="$1" expected="$2"
+  pdftotext "$file" - | grep -Fq "$expected" || { echo "text missing: $file expected=$expected" >&2; exit 1; }
+}
+
+assert_pages "$OUTPUT_DIR/korean-a4.pdf" 1
+assert_pages "$OUTPUT_DIR/slide-16x9.pdf" 1
+assert_pages "$OUTPUT_DIR/mermaid-ready.pdf" 1
+assert_pages "$OUTPUT_DIR/multipage-report.pdf" 3
+assert_pages "$OUTPUT_DIR/mixed-script-emoji.pdf" 1
+
+assert_text "$OUTPUT_DIR/korean-a4.pdf" '한국어 A4 점검'
+assert_text "$OUTPUT_DIR/mermaid-ready.pdf" 'MERMAID_RENDERED_OK'
+assert_text "$OUTPUT_DIR/multipage-report.pdf" 'PAGE_3_OK'
+assert_text "$OUTPUT_DIR/mixed-script-emoji.pdf" 'MIXED_SCRIPT_TEXT_OK'
+
+FONT_REPORT="$OUTPUT_DIR/pdffonts.txt"
+: > "$FONT_REPORT"
+for pdf in "$OUTPUT_DIR"/*.pdf; do
+  echo "=== $(basename "$pdf") ===" >> "$FONT_REPORT"
+  pdffonts "$pdf" >> "$FONT_REPORT"
+done
+# Chromium commonly embeds named Korean/color glyphs as Type 3. The production
+# postflight treats the risky case as *unnamed* Type 3 rows, not every Type 3
+# row. Match that contract here and require at least one named preferred font.
+if grep -Eiq '^\[none\][[:space:]]+Type[[:space:]]+3' "$FONT_REPORT"; then
+  echo "unnamed Type 3 font detected" >&2
+  exit 1
+fi
+if ! grep -Eiq 'Pretendard|NotoSansCJK|Noto Sans CJK|Nanum' "$FONT_REPORT"; then
+  echo "preferred named Korean font not found" >&2
+  exit 1
+fi
+
+printf 'fixture_count=5\npage_count=7\nfont_postflight=named-type3-ok\nfont_report=%s\nstatus=ok\n' "$FONT_REPORT"

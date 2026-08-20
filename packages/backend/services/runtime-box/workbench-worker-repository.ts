@@ -180,7 +180,20 @@ export async function reservePersistedWorkbenchWorkerSlot(input: {
     [input.projectId, [...new Set(input.requiredCapabilities ?? [])].sort(), staleAfterMs,
       input.preferredWorkerId?.trim() || null, input.deploymentId, weight],
   );
-  if (!row) throw new Error('WORKER_CAPACITY_UNAVAILABLE');
+  if (!row) {
+    const preferredWorkerId = input.preferredWorkerId?.trim();
+    if (!preferredWorkerId) throw new Error('WORKER_BUSY: no Worker has enough free capacity for this request');
+    const preferred = await getPersistedWorkbenchWorker(preferredWorkerId, { staleAfterMs });
+    if (!preferred) throw new Error(`WORKSTATION_WORKER_NOT_REGISTERED: ${preferredWorkerId}; operator action is required`);
+    if (preferred.deploymentId !== input.deploymentId) throw new Error(`WORKSTATION_WORKER_DEPLOYMENT_MISMATCH: ${preferredWorkerId}; expected ${input.deploymentId}, got ${preferred.deploymentId}`);
+    if (!preferred.projectIds.includes(input.projectId)) throw new Error(`WORKSTATION_WORKER_PROJECT_SCOPE_MISMATCH: ${preferredWorkerId}; operator action is required`);
+    const missingCapabilities = [...new Set(input.requiredCapabilities ?? [])].filter(capability => !preferred.capabilities.includes(capability));
+    if (missingCapabilities.length > 0) throw new Error(`WORKSTATION_WORKER_CAPABILITY_MISSING: ${preferredWorkerId}; missing ${missingCapabilities.join(',')}`);
+    if (preferred.draining) throw new Error(`WORKSTATION_WORKER_DRAINING: ${preferredWorkerId}; new commands are temporarily disabled for maintenance`);
+    if (preferred.status === 'stale') throw new Error(`WORKSTATION_WORKER_HEARTBEAT_STALE: ${preferredWorkerId}; operator action may be required`);
+    if (preferred.capacity.maxRuns < weight) throw new Error(`WORKSTATION_WORKER_CAPACITY_CONFIG_INVALID: ${preferredWorkerId}; request requires ${weight} capacity units but Worker maximum is ${preferred.capacity.maxRuns}; operator action is required`);
+    throw new Error(`WORKSTATION_WORKER_BUSY: ${preferredWorkerId}; ${preferred.capacity.activeRuns}/${preferred.capacity.maxRuns} capacity units are in use; retry after the current command finishes`);
+  }
   return normalizeRow(row, Date.now(), staleAfterMs);
 }
 

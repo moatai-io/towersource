@@ -1,0 +1,14 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><title>Multipage fixture</title><style>
+@page { size: A4; margin: 16mm; }
+* { box-sizing: border-box; }
+body { margin: 0; font-family: Pretendard, "Noto Sans CJK KR", sans-serif; color: #1e293b; }
+.page { break-after: page; height: 265mm; padding: 8mm; border-top: 5px solid #0f766e; overflow: hidden; }
+.page:last-child { break-after: auto; }
+h1 { font-size: 26pt; } p { font-size: 12pt; line-height: 1.8; }
+.metric { margin: 20px 0; padding: 18px; background: #ecfdf5; border-radius: 12px; font-size: 20pt; font-weight: 700; }
+</style></head><body>
+<section class="page"><h1>1. 렌더러 재현성</h1><div class="metric">PAGE_1_OK</div><p>첫 번째 페이지는 명시적인 page break와 한국어 본문 배치를 검증합니다.</p></section>
+<section class="page"><h1>2. 운영 fallback</h1><div class="metric">PAGE_2_OK</div><p>두 번째 페이지는 동일한 용지 크기와 폰트 선택이 유지되는지 검증합니다.</p></section>
+<section class="page"><h1>3. 승격 조건</h1><div class="metric">PAGE_3_OK</div><p>세 번째 페이지까지 정확히 생성되어야 하며 빈 추가 페이지가 없어야 합니다.</p></section>
+</body></html>

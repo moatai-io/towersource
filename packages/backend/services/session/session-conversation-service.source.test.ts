@@ -58,14 +58,14 @@ describe("unified addressable Session conversation contract", () => {
   it("does not expose subagent as a permanent Session badge or filter label", () => {
     expect(sessionItem).not.toContain("isPureAgentSession(session)");
     expect(sessionItem).not.toContain("Subagent session");
-    expect(toolbar).toContain("Agent 대화");
+    expect(toolbar).toContain('t("agentConversations")');
     expect(toolbar).not.toContain("{t('subagents')}");
   });
 
   it("keeps launch cards to activity while participant messages own the response", () => {
     expect(agentCards).not.toContain("agentResponse ? <AgentResultSection");
     expect(agentCards).not.toContain("function AgentResultSection");
-    expect(agentCards).toContain("송부 내용 펼치기");
-    expect(agentCards).toContain("송부 내용 접기");
+    expect(agentCards).toContain('t("agentCard.expandResponse")');
+    expect(agentCards).toContain('t("agentCard.collapseResponse")');
   });
 });

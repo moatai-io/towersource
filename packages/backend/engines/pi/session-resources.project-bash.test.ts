@@ -15,8 +15,9 @@ describe('Project bash prompt normalization', () => {
     expect(normalized).not.toContain('project_shell');
     expect(normalized).not.toContain('Runtime Box sessions');
     expect(normalized).not.toContain('host-bash `missing`');
-    expect(normalized).toContain('Use `bash` for Project commands');
-    expect(normalized).toContain('Treat `/workspace` as the Project root');
+    expect(normalized).toContain('Use `bash` as the native shell of this Project Workstation');
+    expect(normalized).toContain('Commands start in the current Project directory');
+    expect(normalized).toContain('Missing software is not a permanent platform restriction');
     expect(normalized).toContain('Never switch to another execution plane automatically');
   });
 });

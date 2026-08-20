@@ -1,5 +1,6 @@
 /** Owns: Browser microphone connection for Tower's ephemeral LiveKit voice mode. */
 import { useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Room, RoomEvent, type LocalAudioTrack, type RemoteTrack, type RemoteTrackPublication } from 'livekit-client';
 
 interface VoiceConversationButtonProps {
@@ -10,6 +11,7 @@ type VoiceState = 'idle' | 'connecting' | 'listening' | 'speaking' | 'error';
 type PlaybackStatus = 'waiting' | 'participant' | 'track' | 'playing' | 'blocked';
 
 export function VoiceConversationButton({ sessionId, inferenceTtsProvider = 'cartesia' }: VoiceConversationButtonProps) {
+  const { t } = useTranslation('chat');
   const [state, setState] = useState<VoiceState>('idle');
   const [audioLevel, setAudioLevel] = useState(0);
   const [errorMessage, setErrorMessage] = useState('');
@@ -64,7 +66,7 @@ export function VoiceConversationButton({ sessionId, inferenceTtsProvider = 'car
     if (!sessionId || (state !== 'idle' && state !== 'error')) return;
     setErrorMessage('');
     setState('connecting');
-    let connectStage = '음성 세션 시작 요청';
+    let connectStage = t('voice.stage.startRequest');
     try {
       const token = localStorage.getItem('token');
       const response = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/voice/start`, {
@@ -78,14 +80,14 @@ export function VoiceConversationButton({ sessionId, inferenceTtsProvider = 'car
         try {
           result = JSON.parse(responseText);
         } catch {
-          throw new Error(`음성 서버가 올바르지 않은 응답을 보냈습니다. (${response.status})`);
+          throw new Error(t('voice.invalidResponse', { status: response.status }));
         }
       }
       if (!response.ok || !result.livekit?.url || !result.livekit?.token) {
-        throw new Error(result.error || `음성 서버가 응답하지 않았습니다. (${response.status})`);
+        throw new Error(result.error || t('voice.noResponse', { status: response.status }));
       }
 
-      connectStage = 'LiveKit 방 연결';
+      connectStage = t('voice.stage.liveKit');
       const room = new Room({ adaptiveStream: false, dynacast: false });
       roomRef.current = room;
       voiceSessionIdRef.current = result.voiceSession.id;
@@ -102,7 +104,7 @@ export function VoiceConversationButton({ sessionId, inferenceTtsProvider = 'car
       room.on(RoomEvent.TrackSubscriptionFailed, (_trackSid, error) => {
         console.warn('[voice] remote audio subscription failed', error);
         setPlaybackStatus('blocked');
-        setErrorMessage('AI 오디오 구독에 실패했습니다. 다시 연결해 주세요.');
+        setErrorMessage(t('voice.audioSubscriptionFailed'));
       });
       room.on(RoomEvent.TrackSubscribed, (track: RemoteTrack) => {
         if (track.kind !== 'audio') return;
@@ -125,7 +127,7 @@ export function VoiceConversationButton({ sessionId, inferenceTtsProvider = 'car
             console.warn('[voice] remote audio autoplay blocked', playError);
             setPlaybackBlocked(true);
             setPlaybackStatus('blocked');
-            setErrorMessage('소리 켜기를 눌러 AI 음성을 재생하세요.');
+            setErrorMessage(t('voice.enablePlaybackHint'));
           });
       });
       room.on(RoomEvent.TrackUnsubscribed, (track: RemoteTrack) => {
@@ -138,7 +140,7 @@ export function VoiceConversationButton({ sessionId, inferenceTtsProvider = 'car
         setState((current) => current === 'error' || current === 'connecting' ? current : remoteSpeaking ? 'speaking' : 'listening');
       });
       await room.connect(result.livekit.url, result.livekit.token, { autoSubscribe: true });
-      connectStage = '마이크 게시';
+      connectStage = t('voice.stage.microphone')
       const recoverRemoteAudio = () => {
         room.remoteParticipants.forEach((participant) => {
           setPlaybackStatus('participant');
@@ -162,7 +164,7 @@ export function VoiceConversationButton({ sessionId, inferenceTtsProvider = 'car
       await room.startAudio();
       room.on(RoomEvent.AudioPlaybackStatusChanged, () => {
         setPlaybackBlocked(!room.canPlaybackAudio);
-        if (!room.canPlaybackAudio) setErrorMessage('소리 켜기를 눌러 AI 음성을 재생하세요.');
+        if (!room.canPlaybackAudio) setErrorMessage(t('voice.enablePlaybackHint'));
       });
       const microphonePublication = await room.localParticipant.setMicrophoneEnabled(true, {
         echoCancellation: true,
@@ -170,7 +172,7 @@ export function VoiceConversationButton({ sessionId, inferenceTtsProvider = 'car
         autoGainControl: true,
       });
       const microphone = microphonePublication?.audioTrack as LocalAudioTrack | undefined;
-      if (!microphonePublication || !microphone || microphonePublication.isMuted) throw new Error('마이크 트랙을 게시하지 못했습니다. 브라우저 마이크 권한을 확인해 주세요.');
+      if (!microphonePublication || !microphone || microphonePublication.isMuted) throw new Error(t('voice.microphonePublishFailed'));
       setMicrophonePublished(true);
 
       const audioContext = new AudioContext();
@@ -193,8 +195,8 @@ export function VoiceConversationButton({ sessionId, inferenceTtsProvider = 'car
       setState('listening');
     } catch (error) {
       console.error('[voice] connection failed', { stage: connectStage, error });
-      const detail = error instanceof Error ? error.message : '알 수 없는 오류';
-      const message = `${connectStage} 단계에서 실패했습니다: ${detail}`;
+      const detail = error instanceof Error ? error.message : t('voice.unknownError');
+      const message = t('voice.stageFailed', { stage: connectStage, detail });
       await stop();
       setErrorMessage(message);
       setState('error');
@@ -214,7 +216,7 @@ export function VoiceConversationButton({ sessionId, inferenceTtsProvider = 'car
       setErrorMessage('');
     } catch (error) {
       console.warn('[voice] explicit audio playback failed', error);
-      setErrorMessage('스피커 재생을 시작하지 못했습니다. 브라우저 권한을 확인해 주세요.');
+      setErrorMessage(t('voice.speakerPlaybackFailed'));
     }
   };
 
@@ -241,8 +243,8 @@ export function VoiceConversationButton({ sessionId, inferenceTtsProvider = 'car
       type="button"
       onClick={playbackBlocked ? enablePlayback : active ? stop : start}
       disabled={!sessionId || state === 'connecting'}
-      aria-label={playbackBlocked ? 'AI 음성 재생 켜기' : active ? '음성 대화 종료' : '음성 대화 시작'}
-      title={state === 'error' ? errorMessage || '음성 연결에 실패했습니다' : active ? '대화 종료' : 'Seojun과 대화'}
+      aria-label={playbackBlocked ? t('voice.enableAiPlayback') : active ? t('voice.endConversation') : t('voice.startConversation')}
+      title={state === 'error' ? errorMessage || t('voice.connectionFailed') : active ? t('voice.endConversation') : t('voice.talkWithSeojun')}
       className={`inline-flex min-h-12 min-w-32 touch-manipulation items-center justify-center gap-2 rounded-xl px-5 text-base font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
         active
           ? 'bg-red-500/15 text-red-700 hover:bg-red-500/25 dark:text-red-200'
@@ -267,7 +269,7 @@ export function VoiceConversationButton({ sessionId, inferenceTtsProvider = 'car
           ))}
         </span>
       )}
-      <span>{state === 'connecting' ? '연결 중' : playbackBlocked ? '소리 켜기' : state === 'speaking' ? '답변 중' : active ? '듣는 중' : state === 'error' ? '다시 연결' : '대화'}</span>
+      <span>{state === 'connecting' ? t('voice.connecting') : playbackBlocked ? t('voice.enableSound') : state === 'speaking' ? t('voice.answering') : active ? t('voice.listening') : state === 'error' ? t('voice.reconnect') : t('voice.conversation')}</span>
     </button>
     {(active || state === 'connecting' || state === 'error') && (
       <div className={`absolute bottom-full right-0 mb-2 whitespace-nowrap rounded-lg border px-3 py-2 text-xs shadow-lg ${
@@ -275,16 +277,16 @@ export function VoiceConversationButton({ sessionId, inferenceTtsProvider = 'car
           ? 'border-red-500/25 bg-surface-900 text-red-300'
           : 'border-primary-500/20 bg-surface-900 text-surface-100'
       }`} role="status" aria-live="polite">
-        {state === 'connecting' && 'Seojun 음성 대화에 연결하고 있어요.'}
-        {state === 'listening' && (errorMessage || (!microphonePublished ? '마이크 연결을 확인하고 있어요.' : audioLevel > 0.08 ? '마이크 소리를 보내고 있어요.' : '마이크 게시됨 · 조금 크게 말씀해 주세요.'))}
-        {state === 'speaking' && 'Seojun이 답하고 있어요.'}
+        {state === 'connecting' && t('voice.connectingToSeojun')}
+        {state === 'listening' && (errorMessage || (!microphonePublished ? t('voice.checkingMicrophone') : audioLevel > 0.08 ? t('voice.sendingMicrophoneAudio') : t('voice.microphoneReady')))}
+        {state === 'speaking' && t('voice.seojunAnswering')}
         {active && (
           <div className="mt-1 flex items-center gap-2 border-t border-surface-700 pt-1 text-[11px] text-surface-300">
-            <span>출력: {playbackStatus === 'waiting' ? '대기' : playbackStatus === 'participant' ? 'AI 참가' : playbackStatus === 'track' ? '오디오 수신' : playbackStatus === 'playing' ? '재생 중' : '차단됨'}</span>
-            <button type="button" className="underline hover:text-surface-100" onClick={(event) => { event.stopPropagation(); void testSpeaker(); }}>스피커 테스트</button>
+            <span>{t('voice.output', { status: t(`voice.playback.${playbackStatus}`) })}</span>
+            <button type="button" className="underline hover:text-surface-100" onClick={(event) => { event.stopPropagation(); void testSpeaker(); }}>{t('voice.testSpeaker')}</button>
           </div>
         )}
-        {state === 'error' && `연결 실패 · ${errorMessage || '설정을 확인해 주세요.'}`}
+        {state === 'error' && t('voice.connectionFailureDetail', { detail: errorMessage || t('voice.checkSettings') })}
       </div>
     )}
       <audio ref={remoteAudioRef} autoPlay playsInline className="absolute h-px w-px opacity-0" aria-hidden="true" />

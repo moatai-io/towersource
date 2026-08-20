@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+app_root="${TOWER_APP_ROOT:-}"
+if [[ -z "$app_root" ]]; then
+  self="$(realpath "$0")"
+  app_root="$(dirname "$(dirname "$self")")"
+fi
+app_root="$(realpath "$app_root")"
+entrypoint="$app_root/lib/tower/dist/backend/packages/backend/isolated-db-shadow.js"
+[[ -f "$entrypoint" ]] || {
+  printf 'tower-app-probe-isolated-db: missing entrypoint: %s\n' "$entrypoint" >&2
+  exit 1
+}
+
+export TOWER_MIGRATION_DIR="${TOWER_MIGRATION_DIR:-$app_root/lib/tower/packages/backend/db/migrations}"
+cd "$app_root/lib/tower"
+exec node "$entrypoint"

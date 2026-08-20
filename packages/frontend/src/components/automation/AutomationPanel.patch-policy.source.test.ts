@@ -15,7 +15,7 @@ describe('automation frontend PATCH migration', () => {
   it('does not directly PATCH automation config from active forms', () => {
     expect(automationPanel).not.toContain('`${API}/${editingId}`, { method: \'PATCH\'');
     expect(schedulePanel).not.toContain('`${API}/${job.id}`, { method: \'PATCH\'');
-    expect(automationPanel).toContain('Workbench에서 변경 검토본을 만든 뒤 적용');
-    expect(schedulePanel).toContain('Workbench에서 변경 검토본을 만든 뒤 적용');
+    expect(automationPanel).toContain("t('workbenchEditRequired')");
+    expect(schedulePanel).toContain("t('editRequiresReview')");
   });
 });

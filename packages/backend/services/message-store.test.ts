@@ -32,6 +32,44 @@ describe('message-store content compaction', () => {
     generateShortCode.mockClear();
   });
 
+  it('truncates Pi-style tool_use.result before persisting assistant traces', async () => {
+    const hugeResult = `HEAD\n${Array.from({ length: 5000 }, (_, i) => `line ${i}: ordinary shell output with spaces and punctuation`).join('\n')}\nTAIL`;
+
+    await saveMessage('session-1', {
+      id: 'assistant-tool-1',
+      role: 'assistant',
+      content: [{
+        type: 'tool_use',
+        id: 'tool-1',
+        name: 'bash',
+        input: { command: 'generate-large-output' },
+        result: hugeResult,
+      }],
+    });
+
+    const insertParams = execute.mock.calls[0][1];
+    const persisted = JSON.parse(insertParams[3]);
+    const storedResult = persisted[0].result as string;
+
+    expect(storedResult.length).toBeLessThanOrEqual(50 * 1024);
+    expect(storedResult).toMatch(/tool output truncated \d+KB → 50KB/);
+    expect(storedResult).toMatch(/^HEAD\n/);
+    expect(storedResult).toMatch(/\nTAIL$/);
+    expect(storedResult).not.toBe(hugeResult);
+  });
+
+  it('keeps Pi-style tool_use.result unchanged when it is within the limit', async () => {
+    await saveMessage('session-1', {
+      id: 'assistant-tool-2',
+      role: 'assistant',
+      content: [{ type: 'tool_use', id: 'tool-2', name: 'bash', input: {}, result: 'small output' }],
+    });
+
+    const insertParams = execute.mock.calls[0][1];
+    const persisted = JSON.parse(insertParams[3]);
+    expect(persisted[0].result).toBe('small output');
+  });
+
   it('persists user-visible commentary while stripping thinking and hidden commentary', async () => {
     await saveMessage('session-1', {
       id: 'assistant-1',

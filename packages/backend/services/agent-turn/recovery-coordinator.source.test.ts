@@ -57,4 +57,12 @@ describe('root turn recovery ownership', () => {
     expect(engine).toContain('Pi execution skipped because the durable root turn identity is missing.');
     expect(engine).toContain('recovery skipped without rootTurnId');
   });
+
+  it('terminally fences a retry turn when its native engine session identity is missing', () => {
+    expect(ws).toContain('stop reason=missing_engine_session_id');
+    expect(ws).toContain("failureClass: 'missing_engine_session_id'");
+    expect(ws).toContain("status: 'needs_attention'");
+    expect(ws).toContain('forceNeedsAttention: true');
+    expect(ws).not.toContain('has no engineSessionId for engine=${engineName} — skipping');
+  });
 });

@@ -1,0 +1,78 @@
+#!/usr/bin/env bash
+# Manage a user-scoped GC root/profile for Tower's optional Nix PDF renderer.
+# This script never edits PM2, .env, or production renderer settings.
+set -euo pipefail
+
+usage() {
+  cat >&2 <<'EOF'
+Usage:
+  scripts/nix-renderer/manage-profile activate [flake-ref]
+  scripts/nix-renderer/manage-profile status
+  scripts/nix-renderer/manage-profile deactivate
+
+Environment:
+  TOWER_NIX_RENDERER_PROFILE  Override profile path.
+
+The default profile is ~/.local/state/tower/nix-profiles/pdf-renderer.
+Activation prints the environment values operators can explicitly apply later;
+it does not modify a shell, .env, PM2, or systemd configuration.
+EOF
+}
+
+ACTION="${1:-}"
+FLAKE_REF="${2:-.#towerNixRender}"
+PROFILE="${TOWER_NIX_RENDERER_PROFILE:-$HOME/.local/state/tower/nix-profiles/pdf-renderer}"
+NIX=(nix --extra-experimental-features "nix-command flakes")
+
+ensure_nix() {
+  command -v nix >/dev/null 2>&1 || {
+    echo "manage-profile: nix command not found" >&2
+    exit 1
+  }
+}
+
+renderer_bin() {
+  printf '%s/bin/tower-nix-render' "$(readlink -f "$PROFILE")"
+}
+
+case "$ACTION" in
+  activate)
+    ensure_nix
+    mkdir -p "$(dirname "$PROFILE")"
+    # --profile creates a durable GC root symlink. Re-running atomically moves
+    # the profile to the closure selected by the current flake lock.
+    "${NIX[@]}" build "$FLAKE_REF" --profile "$PROFILE"
+    BIN="$(renderer_bin)"
+    [[ -x "$BIN" ]] || { echo "manage-profile: renderer missing after activation: $BIN" >&2; exit 1; }
+    printf 'status=active\nprofile=%s\nstore_path=%s\nrenderer_bin=%s\n' \
+      "$PROFILE" "$(readlink -f "$PROFILE")" "$BIN"
+    printf 'PDF_EXPORT_RENDERER_MODE=nix\nNIX_RENDERER_BIN=%s\n' "$BIN"
+    ;;
+  status)
+    if [[ -L "$PROFILE" && -e "$PROFILE" ]]; then
+      BIN="$(renderer_bin)"
+      printf 'status=active\nprofile=%s\nstore_path=%s\nrenderer_bin=%s\nrenderer_executable=%s\n' \
+        "$PROFILE" "$(readlink -f "$PROFILE")" "$BIN" "$([[ -x "$BIN" ]] && echo yes || echo no)"
+    elif [[ -e "$PROFILE" || -L "$PROFILE" ]]; then
+      printf 'status=broken\nprofile=%s\n' "$PROFILE"
+      exit 1
+    else
+      printf 'status=inactive\nprofile=%s\n' "$PROFILE"
+    fi
+    ;;
+  deactivate)
+    # Removing the profile only removes the GC root. It does not run GC and
+    # therefore does not immediately delete the closure or affect a live job.
+    rm -f "$PROFILE"
+    printf 'status=inactive\nprofile=%s\ngc_run=no\n' "$PROFILE"
+    ;;
+  -h|--help|'')
+    usage
+    [[ -n "$ACTION" ]] || exit 2
+    ;;
+  *)
+    echo "manage-profile: unknown action: $ACTION" >&2
+    usage
+    exit 2
+    ;;
+esac

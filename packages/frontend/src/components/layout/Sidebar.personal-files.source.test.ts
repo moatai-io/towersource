@@ -19,7 +19,7 @@ describe('Sidebar Personal Space entry', () => {
   it('keeps membership-scoped projects available to the mobile project picker', () => {
     expect(source).toContain('Always show every project returned by the membership-scoped projects API.');
     expect(source).toContain('return [...allProjects].sort');
-    expect(source).toContain('aria-label="파일을 볼 프로젝트 선택"');
+    expect(source).toContain("aria-label={t('selectProjectForFiles')}");
     expect(source).toContain('{false && <FilesDropZone projects={allProjects}');
   });
 

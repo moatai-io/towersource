@@ -2,6 +2,7 @@
 // Public API: <FilesWorkspace onFileClick onRequestFileTree />.
 // See also: Sidebar's compact FileTree for quick navigation.
 import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import type { FileEntry } from "../../stores/file-store";
 import { useFileStore, type FileEntrySortMode } from "../../stores/file-store";
 import { useProjectStore, type Project } from "../../stores/project-store";
@@ -83,7 +84,7 @@ function formatModified(value?: string): string {
   if (!value) return "—";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "—";
-  return new Intl.DateTimeFormat("ko-KR", {
+  return new Intl.DateTimeFormat(undefined, {
     month: "short",
     day: "numeric",
     hour: "2-digit",
@@ -216,6 +217,7 @@ export function FilesWorkspace({
   revealPath,
   onRevealComplete,
 }: FilesWorkspaceProps) {
+  const { t, i18n } = useTranslation("files");
   const confirm = useConfirm();
   const prompt = usePrompt();
   const projects = useProjectStore((s) => s.projects);
@@ -354,7 +356,7 @@ export function FilesWorkspace({
             return;
           }
           throw new Error(
-            data.error || `파일 목록을 불러오지 못했습니다 (${res.status})`,
+            data.error || t('workspace.loadListFailed') + ` (${res.status})`,
           );
         }
         const nextEntries = Array.isArray(data.entries) ? data.entries : [];
@@ -365,7 +367,7 @@ export function FilesWorkspace({
         toastError(
           err instanceof Error
             ? err.message
-            : "파일 목록을 불러오지 못했습니다",
+            : t('workspace.loadListFailed'),
         );
         if (replaceRootEntries) setEntries([]);
       } finally {
@@ -389,7 +391,7 @@ export function FilesWorkspace({
         if (showHidden) params.set('showHidden', 'true');
         const res = await fetch(`/api/files/reveal?${params.toString()}`, { headers: authHeaders() });
         const data = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(data.error || '파일 위치를 불러오지 못했습니다');
+        if (!res.ok) throw new Error(data.error || t('workspace.loadLocationFailed'));
         const ancestors = Array.isArray(data.ancestors) ? data.ancestors as string[] : [];
         const entriesByPath = data.entriesByPath && typeof data.entriesByPath === 'object' ? data.entriesByPath as Record<string, FileEntry[]> : {};
         if (cancelled) return;
@@ -408,7 +410,7 @@ export function FilesWorkspace({
           window.setTimeout(() => element.classList.remove('tower-sidebar-reveal-highlight-file'), 2200);
         }, 80);
       } catch (error) {
-        toastError(error instanceof Error ? error.message : '파일 위치를 불러오지 못했습니다');
+        toastError(error instanceof Error ? error.message : t('workspace.loadLocationFailed'));
       } finally {
         if (!cancelled) onRevealComplete?.();
       }
@@ -430,10 +432,10 @@ export function FilesWorkspace({
       )
         .then(async (res) => {
           const data = await res.json();
-          if (!res.ok) throw new Error(data.error || "검색 실패");
+          if (!res.ok) throw new Error(data.error || t('workspace.searchFailed'));
           setSearchResults(Array.isArray(data.results) ? data.results : []);
         })
-        .catch((error) => toastError(error.message || "검색 실패"));
+        .catch((error) => toastError(error.message || t('workspace.searchFailed')));
     }, 250);
     return () => clearTimeout(timer);
   }, [query, rootPath, showHidden]);
@@ -525,7 +527,7 @@ export function FilesWorkspace({
     if (!items.length) return;
     setBusyAction("upload");
     const totalBytes = items.reduce((sum, item) => sum + item.file.size, 0);
-    setUploadProgress({ phase: 'uploading', loadedBytes: 0, totalBytes, percent: 0, completedFiles: 0, totalFiles: items.length, currentFileName: items[0]?.relativePath || '파일' });
+    setUploadProgress({ phase: 'uploading', loadedBytes: 0, totalBytes, percent: 0, completedFiles: 0, totalFiles: items.length, currentFileName: items[0]?.relativePath || t('workspace.fileFallback') });
     try {
       const result = await runFileMutation({
         action: () => uploadDroppedFiles(targetPath, items, setUploadProgress),
@@ -534,7 +536,7 @@ export function FilesWorkspace({
       const targetName = targetPath.split("/").filter(Boolean).pop();
       notifyUploadResult(
         { ok: result.ok, fail: result.fail },
-        targetPath === currentPath ? undefined : (targetName || "선택한 폴더"),
+        targetPath === currentPath ? undefined : (targetName || t('workspace.selectedFolder')),
       );
     } finally {
       setBusyAction(null);
@@ -580,7 +582,7 @@ export function FilesWorkspace({
         setExpandedPaths((current) => new Set(current).add(targetDir));
       }
     } catch (error) {
-      toastError(error instanceof Error ? error.message : "만들지 못했습니다");
+      toastError(error instanceof Error ? error.message : t('workspace.createFailed'));
     } finally {
       setBusyAction(null);
     }
@@ -592,14 +594,14 @@ export function FilesWorkspace({
       body: JSON.stringify(body),
     });
     const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.error || "작업 실패");
+    if (!res.ok) throw new Error(data.error || t('workspace.operationFailed'));
     return data;
   };
   const renameSelected = async () => {
     if (selectedPaths.size !== 1) return;
     const oldPath = [...selectedPaths][0];
     const oldName = oldPath.split("/").pop() || "";
-    const name = await prompt({ title: "이름 변경", message: "새 이름을 입력하세요.", initialValue: oldName, confirmLabel: "변경" });
+    const name = await prompt({ title: t('workspace.renameTitle'), message: t('workspace.renameMessage'), initialValue: oldName, confirmLabel: t('workspace.renameConfirm') });
     if (!name?.trim() || name === oldName) return;
     const newPath = `${oldPath.split("/").slice(0, -1).join("/")}/${name.trim()}`;
     try {
@@ -611,7 +613,7 @@ export function FilesWorkspace({
       setFileHistory((items) =>
         [
           {
-            label: `${oldName} 이름 변경`,
+            label: t('workspace.renameHistory', { name: oldName }),
             undo: async () => {
               await runFileMutation({
                 action: () => postJson("/api/files/rename", {
@@ -628,16 +630,16 @@ export function FilesWorkspace({
       );
       setSelectedPaths(new Set());
     } catch (e) {
-      toastError(e instanceof Error ? e.message : "이름 변경 실패");
+      toastError(e instanceof Error ? e.message : t('workspace.renameFailed'));
     }
   };
   const deleteSelected = async () => {
     const paths = [...selectedPaths];
     if (!paths.length) return;
     const approved = await confirm({
-      title: "항목 삭제",
-      message: `${paths.length}개 항목을 삭제할까요? 이 작업은 되돌릴 수 없습니다.`,
-      confirmLabel: "삭제",
+      title: t('workspace.deleteTitle'),
+      message: t('workspace.deleteMessage', { count: paths.length }),
+      confirmLabel: t('workspace.delete'),
       danger: true,
     });
     if (!approved) return;
@@ -655,16 +657,16 @@ export function FilesWorkspace({
       affectedDirectories: paths.map(parentDirectory),
       removedPaths: deletedPaths,
     });
-    toastSuccess(`${ok}개 항목 삭제`);
+    toastSuccess(t('workspace.deletedHistory', { count: ok }));
     setFileHistory((items) =>
-      [{ label: `${ok}개 항목 삭제` }, ...items].slice(0, 8),
+      [{ label: t('workspace.deletedHistory', { count: ok }) }, ...items].slice(0, 8),
     );
     setSelectedPaths(new Set());
   };
   const moveSelected = async () => {
-    const targetDir = await prompt({ title: "항목 이동", message: "Project 내부 대상 폴더 경로를 입력하세요.", initialValue: rootPath, confirmLabel: "이동" });
+    const targetDir = await prompt({ title: t('workspace.moveTitle'), message: t('workspace.moveMessage'), initialValue: rootPath, confirmLabel: t('workspace.move') });
     if (!targetDir?.startsWith(rootPath))
-      return toastError("현재 Project 내부 경로를 입력하세요");
+      return toastError(t('workspace.invalidProjectPath'));
     const moves = [...selectedPaths].map((oldPath) => ({
       oldPath,
       newPath: `${targetDir}/${oldPath.split("/").pop()}`,
@@ -681,7 +683,7 @@ export function FilesWorkspace({
     setFileHistory((items) =>
       [
         {
-          label: `${moves.length}개 항목 이동`,
+          label: t('workspace.movedHistory', { count: moves.length }),
           undo: async () => {
             await runFileMutation({
               action: async () => {
@@ -728,9 +730,9 @@ export function FilesWorkspace({
     if (!paths.length) return;
     try {
       await navigator.clipboard.writeText(paths.join("\n"));
-      toastSuccess(`${paths.length}개 경로 복사`);
+      toastSuccess(t('workspace.pathsCopied', { count: paths.length }));
     } catch {
-      toastError("경로를 복사하지 못했습니다");
+      toastError(t('workspace.copyPathsFailed'));
     }
   };
   const copySelectedLinks = async () => {
@@ -739,9 +741,9 @@ export function FilesWorkspace({
         [...selectedPaths].map(createTowerFileShortLink),
       );
       await navigator.clipboard.writeText(links.join("\n"));
-      toastSuccess(`${links.length}개 내부 링크 복사`);
+      toastSuccess(t('workspace.linksCopied', { count: links.length }));
     } catch {
-      toastError("내부 링크를 복사하지 못했습니다");
+      toastError(t('workspace.copyLinksFailed'));
     }
   };
   const copySelectedToProject = async () => {
@@ -751,11 +753,11 @@ export function FilesWorkspace({
       const entry = flattenEntries(entries).find((item) => item.path === selectedPath);
       return entry && !entry.isDirectory;
     });
-    if (!selectedFiles.length) return toastError("저장 범위 간 전달은 파일만 지원합니다.");
+    if (!selectedFiles.length) return toastError(t('workspace.filesOnlyTransfer'));
     const approved = await confirm({
-      title: "AI 팀원에게 파일 전달",
-      message: `${selectedFiles.length}개 파일의 독립된 사본을 ${target.agent?.displayName || target.name} 작업공간에 저장할까요?`,
-      confirmLabel: "복사해서 전달",
+      title: t('workspace.transferTitle'),
+      message: t('workspace.transferMessage', { count: selectedFiles.length, name: target.agent?.displayName || target.name }),
+      confirmLabel: t('workspace.copyAndSend'),
     });
     if (!approved) return;
     setBusyAction("copy");
@@ -769,12 +771,12 @@ export function FilesWorkspace({
           async () => true,
         );
         if (receipt?.status === "completed") copied += 1;
-        else throw new Error(receipt?.status === "stale" ? "전달 중 원본 파일이 변경되었습니다." : "현재 권한으로 전달할 수 없습니다.");
+        else throw new Error(receipt?.status === "stale" ? t('workspace.sourceChanged') : t('workspace.transferDenied'));
       }
-      toastSuccess(`${copied}개 파일을 ${target.agent?.displayName || target.name}에 전달했습니다`);
+      toastSuccess(t('workspace.transferSuccess', { count: copied, name: target.agent?.displayName || target.name }));
       setSelectedPaths(new Set());
     } catch (error) {
-      toastError(error instanceof Error ? error.message : "복사 실패");
+      toastError(error instanceof Error ? error.message : t('workspace.copyFailed'));
     } finally {
       setBusyAction(null);
     }
@@ -794,14 +796,14 @@ export function FilesWorkspace({
             });
             const data = await res.json().catch(() => ({}));
             if (!res.ok)
-              throw new Error(data.error || "파일을 이동하지 못했습니다");
+              throw new Error(data.error || t('workspace.moveFileFailed'));
           },
           affectedDirectories: [parentDirectory(entry.path), targetDir],
           pathReplacements: [{ from: entry.path, to: newPath }],
         });
       } catch (error) {
         toastError(
-          error instanceof Error ? error.message : "파일을 이동하지 못했습니다",
+          error instanceof Error ? error.message : t('workspace.moveFileFailed'),
         );
       }
     },
@@ -876,7 +878,7 @@ export function FilesWorkspace({
                 .then((items) => uploadItems(items, entry.path))
                 .catch((error) => {
                   console.error("[FilesWorkspace] folder drop failed", error);
-                  toastError("드롭한 파일·폴더를 읽지 못했습니다");
+                  toastError(t('workspace.readDropFailed'));
                 });
             }
           },
@@ -997,13 +999,13 @@ export function FilesWorkspace({
         method: "DELETE",
         headers: authHeaders(),
       });
-      if (!res.ok) throw new Error("공유 링크를 내리지 못했습니다");
+      if (!res.ok) throw new Error(t('workspace.revokeShareFailed'));
       setSharedFiles((items) => items.filter((item) => item.id !== share.id));
     } catch (error) {
       toastError(
         error instanceof Error
           ? error.message
-          : "공유 링크를 내리지 못했습니다",
+          : t('workspace.revokeShareFailed'),
       );
     }
   };
@@ -1013,7 +1015,7 @@ export function FilesWorkspace({
     try {
       await navigator.clipboard.writeText(url);
     } catch {
-      toastError("링크를 복사하지 못했습니다");
+      toastError(t('workspace.copyLinkFailed'));
     }
   };
 
@@ -1055,7 +1057,7 @@ export function FilesWorkspace({
       const data = await res.json().catch(() => ({}));
       if (!res.ok)
         throw new Error(
-          data.error || `프로젝트 지침을 불러오지 못했습니다 (${res.status})`,
+          data.error || t('workspace.loadInstructionsFailed') + ` (${res.status})`,
         );
       setInstructionsContent(
         typeof data.content === "string" ? data.content : "",
@@ -1066,12 +1068,12 @@ export function FilesWorkspace({
       setInstructionsError(
         err instanceof Error
           ? err.message
-          : "프로젝트 지침을 불러오지 못했습니다",
+          : t('workspace.loadInstructionsFailed'),
       );
     } finally {
       setInstructionsLoading(false);
     }
-  }, [rootPath]);
+  }, [rootPath, t]);
 
   const canGoUp =
     !!rootPath &&
@@ -1086,11 +1088,10 @@ export function FilesWorkspace({
       <div className="relative z-10 flex h-full flex-col items-center justify-center p-10 text-center">
         <div className="mb-3 text-5xl">📁</div>
         <h2 className="text-xl font-semibold text-gray-100">
-          열 수 있는 프로젝트 파일이 없습니다
+          {t('workspace.noProjectFiles')}
         </h2>
         <p className="mt-2 max-w-md text-sm text-surface-500">
-          프로젝트가 생기면 Files 화면에서 넓은 파일 브라우저로 탐색할 수
-          있습니다.
+          {t('workspace.noProjectFilesDescription')}
         </p>
       </div>
     );
@@ -1103,12 +1104,12 @@ export function FilesWorkspace({
           <div className="mb-3 flex items-center gap-2.5 rounded-xl border border-surface-800 bg-surface-900/75 p-2.5">
             <AgentIdentityAvatar project={selectedProject} variant="list" showListAccent={false} className="h-9 w-9 shrink-0 rounded-xl border border-surface-700/60" fallbackClassName="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-surface-800 text-xs" />
             <label className="min-w-0 flex-1">
-              <span className="block text-[10px] font-bold uppercase tracking-[0.14em] text-surface-600">현재 문서 작업공간</span>
+              <span className="block text-[10px] font-bold uppercase tracking-[0.14em] text-surface-600">{t('workspace.currentDocumentWorkspace')}</span>
               <select
                 value={selectedProject.id}
                 onChange={(event) => switchProject(event.target.value)}
                 className="mt-0.5 h-7 w-full truncate bg-transparent text-[15px] font-bold text-surface-100 outline-none"
-                aria-label="문서를 볼 AI 팀원 선택"
+                aria-label={t('workspace.selectAiTeammateForDocuments')}
               >
                 {sortedProjects.map((project) => (
                   <option key={project.id} value={project.id}>
@@ -1123,7 +1124,7 @@ export function FilesWorkspace({
         <div className="flex flex-wrap items-center gap-3">
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2 text-[12px] font-semibold text-surface-500">
-              <span>{displayedEntries.length}개 항목</span>
+              <span>{t('workspace.itemCount', { count: displayedEntries.length })}</span>
               <span className="h-1 w-1 rounded-full bg-surface-700" />
               <span className="truncate font-mono" title={currentPath}>
                 {relativePath(currentPath, rootPath)}
@@ -1131,7 +1132,7 @@ export function FilesWorkspace({
             </div>
             {!embedded && (
               <h1 className="mt-1 truncate text-2xl font-bold text-gray-100">
-                프로젝트 파일
+                {t('workspace.projectFiles')}
               </h1>
             )}
           </div>
@@ -1140,37 +1141,37 @@ export function FilesWorkspace({
             <button
               onClick={openProjectInstructions}
               className="rounded-lg border border-surface-700 bg-surface-900 px-3 py-2 text-[13px] font-semibold text-surface-300 hover:border-primary-500/50 hover:text-primary-300"
-              title="이 프로젝트에서 AI가 따르는 지침 보기"
+              title={t('workspace.viewProjectInstructions')}
             >
-              프로젝트 지침
+              {t('workspace.projectInstructions')}
             </button>
           )}
           <div className="relative flex flex-wrap items-center gap-1.5">
             <button
               onClick={() => setCreateMenuOpen((open) => !open)}
               disabled={!!busyAction}
-              aria-label="추가"
-              title="추가"
+              aria-label={t('workspace.add')}
+              title={t('workspace.add')}
               className="flex h-9 items-center justify-center gap-1.5 rounded-lg border border-surface-700 bg-surface-900 px-2.5 text-lg font-semibold text-surface-300 disabled:opacity-40"
             >
-              <span aria-hidden="true">+</span><span className="hidden text-[12px] sm:inline">추가</span>
+              <span aria-hidden="true">+</span><span className="hidden text-[12px] sm:inline">{t('workspace.add')}</span>
             </button>
             {createMenuOpen && (
               <>
-                {isMobile && <button type="button" aria-label="추가 메뉴 닫기" className="fixed inset-0 z-40 bg-black/30" onClick={() => setCreateMenuOpen(false)} />}
+                {isMobile && <button type="button" aria-label={t('workspace.closeAddMenu')} className="fixed inset-0 z-40 bg-black/30" onClick={() => setCreateMenuOpen(false)} />}
                 <div className={`${isMobile ? "fixed inset-x-3 bottom-[max(12px,env(safe-area-inset-bottom))] z-50 rounded-2xl p-2" : "absolute right-0 top-11 z-30 w-40 rounded-lg p-1"} overflow-hidden border border-surface-700 bg-surface-900 shadow-xl`}>
-                  {isMobile && <div className="px-3 pb-2 pt-1 text-[12px] font-bold text-surface-500">추가</div>}
+                  {isMobile && <div className="px-3 pb-2 pt-1 text-[12px] font-bold text-surface-500">{t('workspace.add')}</div>}
                 <button
                   onClick={() => beginCreate("file")}
                   className="block w-full rounded px-3 py-2 text-left text-xs text-surface-300 hover:bg-surface-800"
                 >
-                  새 파일
+                  {t('workspace.newFile')}
                 </button>
                 <button
                   onClick={() => beginCreate("folder")}
                   className="block w-full rounded px-3 py-2 text-left text-xs text-surface-300 hover:bg-surface-800"
                 >
-                  새 폴더
+                  {t('workspace.newFolder')}
                 </button>
                 <button
                   onClick={() => {
@@ -1179,7 +1180,7 @@ export function FilesWorkspace({
                   }}
                   className="block w-full rounded px-3 py-2 text-left text-xs text-surface-300 hover:bg-surface-800"
                 >
-                  파일 업로드
+                  {t('workspace.uploadFiles')}
                 </button>
                 <button
                   onClick={() => {
@@ -1188,39 +1189,39 @@ export function FilesWorkspace({
                   }}
                   className="block w-full rounded px-3 py-2 text-left text-xs text-surface-300 hover:bg-surface-800"
                 >
-                  폴더 업로드
+                  {t('workspace.uploadFolder')}
                 </button>
                 </div>
               </>
             )}
             <button
               onClick={() => searchOpen ? closeSearch() : setSearchOpen(true)}
-              aria-label={searchOpen ? "검색 닫기" : "검색"}
+              aria-label={searchOpen ? t('workspace.closeSearch') : t('workspace.search')}
               aria-pressed={searchOpen}
-              title={searchOpen ? "검색 닫기" : "검색"}
+              title={searchOpen ? t('workspace.closeSearch') : t('workspace.search')}
               className={`flex h-9 items-center justify-center gap-1.5 rounded-lg border px-2.5 text-[12px] font-semibold ${searchOpen ? "border-primary-500/40 bg-primary-500/10 text-primary-700 dark:text-primary-200" : "border-surface-700 bg-surface-900 text-surface-300"}`}
             >
-              <span aria-hidden="true">⌕</span><span className="hidden sm:inline">검색</span>
+              <span aria-hidden="true">⌕</span><span className="hidden sm:inline">{t('workspace.search')}</span>
             </button>
             <button
               onClick={() => selectionMode ? clearSelection() : setSelectionMode(true)}
-              aria-label={selectionMode ? "선택 취소" : "선택"}
+              aria-label={selectionMode ? t('workspace.cancelSelection') : t('workspace.select')}
               aria-pressed={selectionMode}
-              title={selectionMode ? "선택 취소" : "선택"}
+              title={selectionMode ? t('workspace.cancelSelection') : t('workspace.select')}
               className={`flex h-9 items-center justify-center gap-1.5 rounded-lg border px-2.5 text-[12px] font-semibold ${selectionMode ? "border-primary-500/40 bg-primary-500/10 text-primary-700 dark:text-primary-200" : "border-surface-700 bg-surface-900 text-surface-300"}`}
             >
-              <span aria-hidden="true">✓</span><span className="hidden sm:inline">{selectionMode ? "취소" : "선택"}</span>
+              <span aria-hidden="true">✓</span><span className="hidden sm:inline">{selectionMode ? t('workspace.cancel') : t('workspace.select')}</span>
             </button>
             <button
               onClick={() => {
                 onRequestFileTree?.(currentPath);
                 void loadDirectory(currentPath);
               }}
-              aria-label="새로고침"
-              title="새로고침"
+              aria-label={t('workspace.refresh')}
+              title={t('workspace.refresh')}
               className="hidden h-9 items-center rounded-lg border border-surface-700 bg-surface-900 px-2.5 text-[12px] font-semibold text-surface-300 sm:flex"
             >
-              새로고침
+              {t('workspace.refresh')}
             </button>
             {uploadProgress && <UploadProgressChip progress={uploadProgress} className="ml-1" />}
             <input
@@ -1284,21 +1285,21 @@ export function FilesWorkspace({
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               onKeyDown={(event) => { if (event.key === "Escape") closeSearch(); }}
-              placeholder="Project 전체에서 파일명/경로 검색"
+              placeholder={t('workspace.searchProjectFiles')}
               className="h-10 w-full rounded-xl border border-surface-700 bg-surface-900 pl-9 pr-10 text-sm text-gray-200 outline-none placeholder:text-surface-600 focus:border-primary-500/70"
             />
-            <button type="button" onClick={closeSearch} aria-label="검색 닫기" className="absolute right-2 top-1/2 -translate-y-1/2 rounded px-2 py-1 text-xs text-surface-500 hover:text-surface-100">×</button>
+            <button type="button" onClick={closeSearch} aria-label={t('workspace.closeSearch')} className="absolute right-2 top-1/2 -translate-y-1/2 rounded px-2 py-1 text-xs text-surface-500 hover:text-surface-100">×</button>
           </div>}
         </div>}
 
         <div className="mt-2 flex items-center gap-1 overflow-x-auto border-b border-surface-800/70 pb-2 text-[13px] sm:mt-3 sm:flex-wrap">
           {(
             [
-              ["all", "전체 파일"],
-              ["published", "공개 자료"],
-              ["sharedFiles", "공유 파일"],
-              ["projectSkills", "만든 스킬"],
-              ["sharedSkills", "공유된 스킬"],
+              ["all", t("workspace.allFiles")],
+              ["published", t("workspace.publishedMaterials")],
+              ["sharedFiles", t("workspace.sharedFiles")],
+              ["projectSkills", t("workspace.createdSkills")],
+              ["sharedSkills", t("workspace.sharedSkills")],
             ] as const
           ).map(([value, label]) => (
             <button
@@ -1313,51 +1314,51 @@ export function FilesWorkspace({
         {selectionMode && (
           <div className="mt-2 flex items-center gap-2 rounded-lg border border-primary-500/25 bg-primary-500/8 px-3 py-2 text-xs">
             <span className="font-bold text-primary-700 dark:text-primary-200">
-              {selectedPaths.size}개 선택
+              {t('workspace.selectedCount', { count: selectedPaths.size })}
             </span>
             <button
               disabled={selectedPaths.size !== 1}
               onClick={() => void renameSelected()}
               className="rounded border border-surface-700 px-2 py-1 disabled:opacity-40"
             >
-              이름 변경
+              {t('workspace.rename')}
             </button>
             <button
               onClick={() => void moveSelected()}
               className="rounded border border-surface-700 px-2 py-1"
             >
-              이동
+              {t('workspace.move')}
             </button>
             <button
               onClick={downloadSelected}
               className="rounded border border-surface-700 px-2 py-1"
             >
-              다운로드
+              {t('workspace.download')}
             </button>
             <button
               onClick={() => void copySelectedPaths()}
               className="rounded border border-surface-700 px-2 py-1"
             >
-              경로 복사
+              {t('workspace.copyPath')}
             </button>
             <button
               onClick={() => void copySelectedLinks()}
               className="rounded border border-surface-700 px-2 py-1"
             >
-              내부 링크 복사
+              {t('workspace.copyInternalLink')}
             </button>
             <button
               onClick={() => void deleteSelected()}
               className="rounded border border-red-500/30 px-2 py-1 text-red-500 dark:text-red-300"
             >
-              삭제
+              {t('workspace.delete')}
             </button>
             <select
               value={transferProjectId}
               onChange={(event) => setTransferProjectId(event.target.value)}
               className="ml-auto rounded border border-surface-700 bg-surface-900 px-2 py-1 text-surface-700 dark:text-surface-300"
             >
-              <option value="">보낼 AI 팀원 선택</option>
+              <option value="">{t('workspace.selectAiTeammateToSend')}</option>
               {sortedProjects
                 .filter((project) => project.id !== selectedProject.id)
                 .map((project) => (
@@ -1371,19 +1372,19 @@ export function FilesWorkspace({
               onClick={() => void copySelectedToProject()}
               className="rounded border border-primary-500/30 px-2 py-1 font-bold text-primary-700 disabled:opacity-40 dark:text-primary-200"
             >
-              복사해서 전달
+              {t('workspace.copyAndSend')}
             </button>
             <button
               onClick={clearSelection}
               className="px-2 py-1 text-surface-600"
             >
-              선택 취소
+              {t('workspace.cancelSelection')}
             </button>
           </div>
         )}
         {fileHistory.length > 0 && (
           <div className="mt-2 flex items-center gap-2 overflow-x-auto text-[11px] text-surface-600">
-            <span className="font-semibold">최근 작업</span>
+            <span className="font-semibold">{t('workspace.recentActions')}</span>
             {fileHistory.map((item, index) => (
               <span
                 key={`${item.label}-${index}`}
@@ -1398,12 +1399,12 @@ export function FilesWorkspace({
                           setFileHistory((history) => history.slice(1)),
                         )
                         .catch((error) =>
-                          toastError(error.message || "되돌리기 실패"),
+                          toastError(error.message || t('workspace.undoFailed')),
                         )
                     }
                     className="ml-2 font-bold text-primary-700 dark:text-primary-300"
                   >
-                    되돌리기
+                    {t('workspace.undo')}
                   </button>
                 )}
               </span>
@@ -1422,7 +1423,7 @@ export function FilesWorkspace({
             }}
             className="shrink-0 rounded-lg border border-surface-800 bg-surface-900/80 px-2.5 py-1.5 font-semibold text-surface-700 dark:text-surface-300 disabled:cursor-not-allowed disabled:opacity-35 hover:enabled:border-surface-600 hover:enabled:text-gray-200"
           >
-            ↑ 상위 폴더
+            ↑ {t('workspace.parentFolder')}
           </button>
           <div className="flex min-w-max flex-1 items-center gap-1 text-surface-500 sm:min-w-0 sm:flex-wrap">
             {breadcrumbs.map((crumb, index) => (
@@ -1447,17 +1448,17 @@ export function FilesWorkspace({
             }
             className="hidden shrink-0 rounded-lg border border-surface-800 bg-surface-900/80 px-2.5 py-1.5 font-semibold text-surface-700 dark:text-surface-300 outline-none sm:block"
           >
-            <option value="all">전체</option>
-            <option value="folders">폴더만</option>
-            <option value="files">파일만</option>
+            <option value="all">{t('workspace.all')}</option>
+            <option value="folders">{t('workspace.foldersOnly')}</option>
+            <option value="files">{t('workspace.filesOnly')}</option>
           </select>
           <button
             onClick={toggleShowHidden}
             className={`hidden shrink-0 rounded-lg border px-2.5 py-1.5 font-semibold transition-colors sm:block ${showHidden ? "border-primary-500/40 bg-primary-500/10 text-primary-700 dark:text-primary-200" : "border-surface-800 bg-surface-900/80 text-surface-500 hover:border-surface-700 hover:bg-surface-900 hover:text-surface-100"}`}
-            title={showHidden ? "숨김파일 감추기" : "숨김파일 보기"}
+            title={showHidden ? t('workspace.hideHiddenFiles') : t('workspace.showHiddenFiles')}
             aria-pressed={showHidden}
           >
-            {showHidden ? "숨김파일 표시 중" : "숨김파일 보기"}
+            {showHidden ? t('workspace.hiddenFilesShown') : t('workspace.showHiddenFiles')}
           </button>
         </div>
       </div>
@@ -1477,29 +1478,28 @@ export function FilesWorkspace({
                   Project Instructions
                 </div>
                 <h2 className="mt-1 text-lg font-bold text-gray-100">
-                  프로젝트 지침
+                  {t('workspace.projectInstructions')}
                 </h2>
                 <p className="mt-1 text-sm text-surface-500">
-                  이 프로젝트에서 AI가 따르는 규칙입니다. 기본 문서함에서는
-                  숨기고 이 전용 화면에서 보여줍니다.
+                  {t('workspace.instructionsDescription')}
                 </p>
               </div>
               <button
                 onClick={() => setInstructionsOpen(false)}
                 className="rounded-lg border border-surface-700 bg-surface-900 px-3 py-1.5 text-sm font-semibold text-surface-300 hover:text-gray-100"
               >
-                닫기
+                {t('workspace.close')}
               </button>
             </div>
             <div className="min-h-0 flex-1 overflow-auto px-6 py-5">
               {instructionsLoading ? (
                 <div className="py-16 text-center text-sm text-surface-500">
-                  프로젝트 지침을 불러오는 중…
+                  {t('workspace.loadingInstructions')}
                 </div>
               ) : instructionsError ? (
                 <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-200">
                   <div className="font-semibold">
-                    프로젝트 지침을 열 수 없습니다
+                    {t('workspace.openInstructionsFailed')}
                   </div>
                   <div className="mt-1 text-red-200/80">
                     {instructionsError}
@@ -1513,7 +1513,7 @@ export function FilesWorkspace({
                 />
               ) : (
                 <div className="rounded-xl border border-surface-800 bg-surface-900/70 p-4 text-sm text-surface-400">
-                  이 프로젝트에는 아직 AGENTS.md 지침 파일이 없습니다.
+                  {t('workspace.noInstructions')}
                 </div>
               )}
             </div>
@@ -1548,24 +1548,24 @@ export function FilesWorkspace({
       >
         {dropActive && (
           <div className="pointer-events-none absolute inset-4 z-20 grid place-items-center rounded-xl border-2 border-dashed border-primary-500 bg-primary-500/10 text-sm font-bold text-primary-700 dark:text-primary-200">
-            현재 폴더에 파일·폴더 놓기
+            {t('workspace.dropHere')}
           </div>
         )}
         {libraryView === "sharedFiles" && (
           <section className="mb-4 overflow-hidden rounded-xl border border-surface-800 bg-surface-900/60">
             <div className="grid grid-cols-[minmax(0,1fr)_100px_130px_auto] border-b border-surface-800 bg-surface-900 px-3 py-2 text-[11px] font-bold text-surface-500">
-              <span>공유 파일</span>
-              <span>상태</span>
-              <span>만료</span>
-              <span>작업</span>
+              <span>{t('workspace.sharedFiles')}</span>
+              <span>{t('workspace.status')}</span>
+              <span>{t('workspace.expires')}</span>
+              <span>{t('workspace.actions')}</span>
             </div>
             {sharesLoading ? (
               <div className="px-3 py-5 text-sm text-surface-500">
-                공유 파일을 불러오는 중…
+                {t('workspace.loadingSharedFiles')}
               </div>
             ) : sharedFiles.length === 0 ? (
               <div className="px-3 py-8 text-center text-sm text-surface-500">
-                이 Project에서 만든 외부 공유 링크가 없습니다.
+                {t('workspace.noSharedLinks')}
               </div>
             ) : (
               sharedFiles.map((share) => (
@@ -1587,12 +1587,12 @@ export function FilesWorkspace({
                   <span
                     className={`text-xs font-semibold ${share.expired || share.revoked ? "text-red-300" : "text-emerald-300"}`}
                   >
-                    {share.revoked ? "내림" : share.expired ? "만료" : "유효"}
+                    {share.revoked ? t('workspace.revoked') : share.expired ? t('workspace.expired') : t('workspace.valid')}
                   </span>
                   <span className="text-xs text-surface-500">
                     {share.expires_at
                       ? formatModified(share.expires_at)
-                      : "기한 없음"}
+                      : t('workspace.noExpiry')}
                   </span>
                   <div className="flex gap-1">
                     <button
@@ -1600,13 +1600,13 @@ export function FilesWorkspace({
                       disabled={!share.url}
                       className="rounded border border-surface-700 px-2 py-1 text-[11px] text-surface-300 disabled:opacity-40"
                     >
-                      복사
+                      {t('workspace.copy')}
                     </button>
                     <button
                       onClick={() => void revokeSharedFile(share)}
                       className="rounded border border-red-500/25 px-2 py-1 text-[11px] text-red-300"
                     >
-                      내리기
+                      {t('workspace.revoke')}
                     </button>
                   </div>
                 </div>
@@ -1622,7 +1622,7 @@ export function FilesWorkspace({
               </div>
               {publishLoading ? (
                 <div className="px-3 py-4 text-sm text-surface-500">
-                  공개 자료 상태를 불러오는 중…
+                  {t('workspace.loadingPublished')}
                 </div>
               ) : (
                 publishedSites.map((site) => (
@@ -1654,19 +1654,18 @@ export function FilesWorkspace({
                       >
                         HTML
                       </button>
-                      {(site.external_url || site.slug) && (
+                      {site.external_url && (
                         <button
                           onClick={() =>
                             window.open(
-                              site.external_url ||
-                                `https://${site.slug}.tower.tower.example.com/`,
+                              site.external_url,
                               "_blank",
                               "noopener,noreferrer",
                             )
                           }
                           className="rounded border border-primary-500/30 bg-primary-500/10 px-2 py-1 text-[11px] font-semibold text-primary-300"
                         >
-                          라이브
+                          {t('workspace.live')}
                         </button>
                       )}
                     </div>
@@ -1691,25 +1690,25 @@ export function FilesWorkspace({
             <div className="mb-3 text-4xl">{query ? "🔎" : "📂"}</div>
             <div className="text-lg font-semibold text-gray-200">
               {query
-                ? "검색 결과가 없습니다"
+                ? t('workspace.noSearchResults')
                 : libraryView === "projectSkills"
-                  ? "이 Project에서 만든 스킬이 없습니다"
+                  ? t('workspace.noProjectSkills')
                   : libraryView === "sharedSkills"
-                    ? "공유된 스킬이 없습니다"
+                    ? t('workspace.noSharedSkills')
                     : libraryView === "published"
-                      ? "공개된 자료가 없습니다"
-                      : "빈 폴더입니다"}
+                      ? t('workspace.noPublishedMaterials')
+                      : t('workspace.emptyFolder')}
             </div>
             <div className="mt-1 text-sm text-surface-500">
               {query
-                ? "다른 파일명이나 경로 조각으로 검색해보세요."
+                ? t('workspace.searchHint')
                 : libraryView === "published"
-                  ? "자료를 publish하면 URL과 기반 파일이 여기에 표시됩니다."
+                  ? t('workspace.publishedHint')
                   : libraryView === "projectSkills"
-                    ? "Project 전용 스킬을 만들면 여기에 표시됩니다."
+                    ? t('workspace.projectSkillsHint')
                     : libraryView === "sharedSkills"
-                      ? "이 Project에 배포된 공용 스킬이 여기에 표시됩니다."
-                      : "AI 산출물을 생성하면 여기에 표시됩니다."}
+                      ? t('workspace.sharedSkillsHint')
+                      : t('workspace.emptyFolderHint')}
             </div>
           </div>
         ) : (
@@ -1719,20 +1718,20 @@ export function FilesWorkspace({
                 className={`text-left hover:text-primary-300 ${fileSortMode === "name" ? "text-primary-300" : ""}`}
                 onClick={() => setFileSortMode("name")}
               >
-                이름 {fileSortMode === "name" ? "↓" : ""}
+                {t('workspace.name')} {fileSortMode === "name" ? "↓" : ""}
               </button>
-              <span className="hidden sm:block">크기</span>
+              <span className="hidden sm:block">{t('workspace.size')}</span>
               <button
                 className={`hidden text-left hover:text-primary-300 sm:block ${fileSortMode === "type" ? "text-primary-300" : ""}`}
                 onClick={() => setFileSortMode("type")}
               >
-                종류 {fileSortMode === "type" ? "↓" : ""}
+                {t('workspace.type')} {fileSortMode === "type" ? "↓" : ""}
               </button>
               <button
                 className={`text-right hover:text-primary-300 sm:text-left ${fileSortMode === "modified" ? "text-primary-300" : ""}`}
                 onClick={() => setFileSortMode("modified")}
               >
-                수정일 {fileSortMode === "modified" ? "↓" : ""}
+                {t('workspace.modifiedDate')} {fileSortMode === "modified" ? "↓" : ""}
               </button>
             </div>
             {inlineCreate && (
@@ -1747,7 +1746,7 @@ export function FilesWorkspace({
                   className="max-w-[260px] truncate text-xs font-semibold text-primary-700 dark:text-primary-300"
                   title={inlineCreateTargetPath || currentPath}
                 >
-                  {inlineCreate === "folder" ? "새 폴더" : "새 파일"}
+                  {inlineCreate === "folder" ? t('workspace.newFolder') : t('workspace.newFile')}
                   <span className="ml-1 font-normal text-surface-500">
                     @ {relativePath(inlineCreateTargetPath || currentPath, rootPath)}
                   </span>
@@ -1760,7 +1759,7 @@ export function FilesWorkspace({
                     if (event.key === "Escape") cancelCreate();
                   }}
                   placeholder={
-                    inlineCreate === "folder" ? "폴더 이름" : "파일 이름"
+                    inlineCreate === "folder" ? t('workspace.folderName') : t('workspace.fileName')
                   }
                   className="min-w-0 flex-1 rounded border border-surface-700 bg-surface-950 px-2 py-1 text-sm text-surface-200 outline-none focus:border-primary-500"
                 />
@@ -1768,14 +1767,14 @@ export function FilesWorkspace({
                   disabled={!inlineCreateName.trim()}
                   className="rounded border border-primary-500/30 px-2 py-1 text-xs font-bold text-primary-700 disabled:opacity-40 dark:text-primary-300"
                 >
-                  만들기
+                  {t('workspace.create')}
                 </button>
                 <button
                   type="button"
                   onClick={cancelCreate}
                   className="px-2 py-1 text-xs text-surface-500"
                 >
-                  취소
+                  {t('workspace.cancel')}
                 </button>
               </form>
             )}
@@ -1783,7 +1782,7 @@ export function FilesWorkspace({
               <div key={entry.path} data-files-workspace-path={entry.path} className="group relative">
                 <input
                   type="checkbox"
-                  aria-label={`${entry.name} 선택`}
+                  aria-label={t('workspace.selectEntry', { name: entry.name })}
                   checked={selectedPaths.has(entry.path)}
                   onChange={() => toggleSelection(entry.path)}
                   onClick={(event) => event.stopPropagation()}
@@ -1804,12 +1803,12 @@ export function FilesWorkspace({
                   className={`grid w-full grid-cols-[minmax(0,1fr)_72px] items-center border-b px-3 py-2 text-left last:border-b-0 sm:grid-cols-[minmax(0,1fr)_90px_100px_126px] sm:py-1.5 ${dragOverPath === entry.path ? "relative z-30 border-primary-500 bg-primary-500/15 ring-2 ring-inset ring-primary-500/70" : "border-surface-800/45 hover:bg-surface-800/65"}`}
                   title={
                     dragOverPath === entry.path
-                      ? `${entry.name} 폴더에 놓기`
+                      ? t('workspace.dropOnFolder', { name: entry.name })
                       : entry.path
                   }
                   aria-label={
                     dragOverPath === entry.path
-                      ? `${entry.name} 폴더에 파일 놓기`
+                      ? t('workspace.dropFilesOnFolder', { name: entry.name })
                       : entry.name
                   }
                 >
@@ -1834,7 +1833,7 @@ export function FilesWorkspace({
                     </span>
                     {dragOverPath === entry.path && (
                       <span className="shrink-0 rounded bg-primary-600 px-1.5 py-0.5 text-[10px] font-bold text-white dark:bg-primary-500 dark:text-surface-950">
-                        이 폴더에 놓기
+                        {t('workspace.dropInThisFolder')}
                       </span>
                     )}
                   </span>
@@ -1843,10 +1842,10 @@ export function FilesWorkspace({
                   </span>
                   <span className="hidden truncate text-[12px] text-surface-500 sm:block">
                     {entry.isDirectory
-                      ? "폴더"
+                      ? t('workspace.folder')
                       : entry.extension ||
                         entry.name.split(".").pop() ||
-                        "파일"}
+                        t('workspace.file')}
                   </span>
                   <span className="truncate text-right text-[11px] text-surface-600 sm:text-left sm:text-[12px] sm:text-surface-500">
                     {formatModified(entry.modified)}
@@ -1878,7 +1877,7 @@ export function FilesWorkspace({
               }}
               className="block w-full rounded px-3 py-2 text-left text-xs text-surface-300 hover:bg-surface-800"
             >
-              {contextMenu.entry.isDirectory ? "펼치기 / 접기" : "열기"}
+              {contextMenu.entry.isDirectory ? t('workspace.expandCollapse') : t('workspace.open')}
             </button>
             {contextMenu.entry.isDirectory && (
               <>
@@ -1889,7 +1888,7 @@ export function FilesWorkspace({
                   }}
                   className="block w-full rounded px-3 py-2 text-left text-xs text-surface-300 hover:bg-surface-800"
                 >
-                  여기에 새 폴더
+                  {t('workspace.newFolderHere')}
                 </button>
                 <button
                   onClick={() => {
@@ -1898,7 +1897,7 @@ export function FilesWorkspace({
                   }}
                   className="block w-full rounded px-3 py-2 text-left text-xs text-surface-300 hover:bg-surface-800"
                 >
-                  여기에 새 파일
+                  {t('workspace.newFileHere')}
                 </button>
                 <button
                   onClick={() => {
@@ -1908,7 +1907,7 @@ export function FilesWorkspace({
                   }}
                   className="block w-full rounded px-3 py-2 text-left text-xs text-surface-300 hover:bg-surface-800"
                 >
-                  이 폴더로 이동
+                  {t('workspace.moveToFolder')}
                 </button>
               </>
             )}
@@ -1920,7 +1919,7 @@ export function FilesWorkspace({
               }}
               className="block w-full rounded px-3 py-2 text-left text-xs text-surface-300 hover:bg-surface-800"
             >
-              선택 작업
+              {t('workspace.selectionActions')}
             </button>
             <button
               onClick={() => {
@@ -1929,14 +1928,14 @@ export function FilesWorkspace({
               }}
               className="block w-full rounded px-3 py-2 text-left text-xs text-surface-300 hover:bg-surface-800"
             >
-              경로 복사
+              {t('workspace.copyPath')}
             </button>
           </ViewportContextMenu>
         </>
       )}
       {isOperatorOrAdmin() && rootPath && (
         <div className="shrink-0 border-t border-surface-800/80 bg-surface-950/90 px-5 py-2 text-[12px] text-surface-600">
-          현재 경로:{" "}
+          {t('workspace.currentPath')}:{" "}
           <span className="font-mono text-surface-400">{currentPath}</span>
         </div>
       )}

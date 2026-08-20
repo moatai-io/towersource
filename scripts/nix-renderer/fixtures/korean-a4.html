@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>Korean A4 renderer fixture</title>
+<style>
+@page { size: A4; margin: 18mm; }
+* { box-sizing: border-box; }
+body { margin: 0; color: #172033; font-family: Pretendard, "Noto Sans CJK KR", NanumGothic, sans-serif; }
+header { border-bottom: 3px solid #2563eb; padding-bottom: 12px; }
+h1 { margin: 0; font-size: 28pt; letter-spacing: -0.05em; }
+p { font-size: 12pt; line-height: 1.75; }
+.card { margin-top: 20px; padding: 18px; border-radius: 14px; background: #eff6ff; }
+strong { font-weight: 700; }
+</style>
+</head>
+<body>
+<header><h1>Tower Nix 렌더러 — 한국어 A4 점검</h1></header>
+<p>이 문서는 Pretendard, Noto Sans CJK KR, NanumGothic 순서의 폰트 대체와 한국어 텍스트 추출을 검증합니다.</p>
+<section class="card"><strong>성공 조건</strong><p>한글이 네모로 깨지지 않고, 굵은 글씨와 본문이 분리되며, PDF에서 이 문장을 다시 추출할 수 있어야 합니다.</p></section>
+</body>
+</html>

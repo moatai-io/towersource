@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { getInitialLanguage } from '../i18n';
 
 export interface ServerConfig {
   version: string;
@@ -88,7 +89,7 @@ export const useSettingsStore = create<SettingsState>((set) => ({
   helpOpen: false,
   capabilityProjectId: null,
   theme: readSavedTheme(),
-  language: (localStorage.getItem('tower:lang') as LangId) || (navigator.language.startsWith('ko') ? 'ko' : 'en'),
+  language: getInitialLanguage(),
   fontSize: (localStorage.getItem('tower:font-size') as FontSize) || 'medium',
   serverConfig: null,
   updateAvailable: false,

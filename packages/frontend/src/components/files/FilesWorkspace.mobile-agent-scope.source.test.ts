@@ -6,9 +6,9 @@ const source = fs.readFileSync(path.resolve(import.meta.dirname, './FilesWorkspa
 
 describe('FilesWorkspace mobile Agent scope', () => {
   it('shows one owning Agent selector and suppresses the duplicate project selector on mobile', () => {
-    expect(source).toContain('현재 문서 작업공간');
+    expect(source).toContain("t('workspace.currentDocumentWorkspace')");
     expect(source).toContain('<AgentIdentityAvatar project={selectedProject}');
-    expect(source).toContain('aria-label="문서를 볼 AI 팀원 선택"');
+    expect(source).toContain("aria-label={t('workspace.selectAiTeammateForDocuments')}");
     expect(source).toContain('{!embedded && !isMobile && (');
     expect(source).toContain('{project.agent?.displayName || project.name}');
   });

@@ -37,6 +37,12 @@ describe('AI service authenticated API', () => {
     for (const routePath of ['/submit', '/approve', '/activate', '/pause', '/rollback', '/revoke']) expect(route).toContain(routePath);
   });
 
+  it('can explicitly recapture the current Primary Agent identity for a new immutable deployment version', () => {
+    expect(route).toContain('refreshIdentityFromSourceAgent');
+    expect(route).toContain('delete experience.identity');
+    expect(route.indexOf('delete experience.identity')).toBeLessThan(route.lastIndexOf('canonicalizeServiceExperienceSnapshot'));
+  });
+
   it('runs isolated Preview conversations through the pinned Harness runtime', () => {
     expect(route).toContain('/preview/conversations');
     expect(route).toContain('tenantKey:`preview:${a.userId}`');

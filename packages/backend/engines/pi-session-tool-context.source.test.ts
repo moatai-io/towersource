@@ -11,12 +11,15 @@ describe('Pi cached tool authority context', () => {
     expect(engine).toContain('userId: opts.userId');
     expect(engine).toContain('userRole: opts.userRole');
     expect(engine).toContain('projectId: opts.projectId');
+    expect(engine).toContain('workbenchRolloutEnabled: opts.projectId');
   });
 
-  it('rebuilds a cached SDK Session before a turn when authority changes', () => {
+  it('rebuilds a cached SDK Session before a turn when authority or Workbench rollout changes', () => {
     expect(engine).toContain('entry.toolContext?.userId !== opts.userId');
     expect(engine).toContain('entry.toolContext?.userRole !== opts.userRole');
     expect(engine).toContain('entry.toolContext?.projectId !== opts.projectId');
+    expect(engine).toContain('entry.toolContext?.workbenchRolloutEnabled !== workbenchRolloutEnabled');
+    expect(engine).toContain('await resolveWorkbenchRollout(opts.projectId)');
     expect(engine).toContain('this.dispose(sessionId);');
   });
 });

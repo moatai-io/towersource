@@ -13,7 +13,7 @@ describe('external deployment Session presentation', () => {
 
   it('offers a dedicated external deployment filter', () => {
     expect(sidebar).toContain(`setKindFilter("external")`);
-    expect(sidebar).toContain('외부 배포 (ext)');
+    expect(sidebar).toContain('t("externalDeploymentsWithExtension")');
     expect(sidebar).toContain(`sessionKindFilter === "external"`);
   });
 });

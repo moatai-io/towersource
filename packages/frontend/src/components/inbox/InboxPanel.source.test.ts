@@ -14,7 +14,7 @@ describe('InboxPanel Latest contracts', () => {
 
   it('offers dismiss-from-Latest even while a card is running', () => {
     const src = fs.readFileSync(INBOX_PATH, 'utf-8');
-    expect(src).toContain('aria-label="최신에서 안 보기"');
+    expect(src).toContain("aria-label={t('pendingRepliesView.dismiss')}");
     expect(src).not.toMatch(/isUnread\s*&&\s*\(\s*<button onClick=\{onDismiss\}/);
     expect(src).not.toMatch(/!isStreaming\s*&&\s*\(\s*<button onClick=\{onDismiss\}/);
   });

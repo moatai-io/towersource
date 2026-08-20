@@ -17,8 +17,8 @@ describe('FileTabBar source contracts', () => {
     const src = fs.readFileSync(FILE_TAB_BAR_PATH, 'utf-8');
     expect(src).toContain("const projectHome = s.kind === 'projectFiles' && s.refId ? projects.find((project) => project.id === s.refId) : null");
     expect(src).toContain("s.kind === 'projectFiles' && s.title === '프로젝트 홈'");
-    expect(src).toContain("? '작업 공간 파일'");
-    expect(src).toContain('const systemTabAccessibleTitle = projectHome ? `${systemTabTitle} · AI 팀원 홈` : systemTabTitle');
+    expect(src).toContain("? t('workspaceFiles')");
+    expect(src).toContain("const systemTabAccessibleTitle = projectHome ? `${systemTabTitle} · ${t('teammateHome')}` : systemTabTitle");
     expect(src).toContain('title={systemTabAccessibleTitle}');
     expect(src).toContain('<AgentIdentityAvatar project={projectHome}');
     expect(src).toContain('tone-accent tone-pill');

@@ -1,0 +1,160 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+fail(){ printf 'install-system-workbench-worker-units: %s\n' "$*" >&2; exit 1; }
+[[ "${EUID:-$(id -u)}" -eq 0 ]] || fail 'must run as root'
+
+app_root="${TOWER_APP_ROOT:-${1:-}}"
+[[ -n "$app_root" ]] || fail 'TOWER_APP_ROOT or first argument is required'
+app_root="$(realpath "$app_root")"
+worker_bin="$app_root/bin/tower-workbench-worker"
+heartbeat_bin="$app_root/bin/tower-workbench-worker-heartbeat"
+[[ -x "$worker_bin" && -x "$heartbeat_bin" ]] || fail 'Worker launchers are missing from the Nix closure'
+
+execution_user="${TOWER_EXECUTION_USER:-tower-worker}"
+execution_group="${TOWER_EXECUTION_GROUP:-$execution_user}"
+worker_id="${TOWER_LOCAL_WORKER_ID:-tower-prod-local-01}"
+deployment_id="${TOWER_LOCAL_WORKER_DEPLOYMENT_ID:-production}"
+authority_mode="${TOWER_LOCAL_WORKER_AUTHORITY_MODE:-project}"
+base_url="${TOWER_LOCAL_WORKER_BASE_URL:-http://127.0.0.1:43125}"
+control_plane_url="${TOWER_LOCAL_WORKER_CONTROL_PLANE_URL:-http://127.0.0.1:32364}"
+config_file="${TOWER_LOCAL_WORKER_CONFIG_FILE:-/etc/tower-workers/$worker_id.json}"
+env_file="${TOWER_LOCAL_WORKER_ENV_FILE:-/etc/tower-workers/$worker_id.env}"
+identity_file="${TOWER_LOCAL_WORKER_IDENTITY_FILE:-/etc/tower-workers/$worker_id.identity.jwt}"
+project_ids="${TOWER_LOCAL_WORKER_PROJECT_IDS:-}"
+worker_capabilities="${TOWER_LOCAL_WORKER_CAPABILITIES:-job,service,shell}"
+worker_pool_cpu_quota="${TOWER_WORKER_POOL_CPU_QUOTA:-300%}"
+worker_pool_memory_high="${TOWER_WORKER_POOL_MEMORY_HIGH:-6G}"
+worker_pool_memory_max="${TOWER_WORKER_POOL_MEMORY_MAX:-8G}"
+worker_pool_tasks_max="${TOWER_WORKER_POOL_TASKS_MAX:-2048}"
+worker_memory_max="${TOWER_LOCAL_WORKER_MEMORY_MAX:-6G}"
+worker_tasks_max="${TOWER_LOCAL_WORKER_TASKS_MAX:-1024}"
+worker_max_runs="${TOWER_LOCAL_WORKER_MAX_RUNS:-4}"
+[[ "$worker_max_runs" =~ ^[0-9]+$ && "$worker_max_runs" -ge 3 ]] || fail 'TOWER_LOCAL_WORKER_MAX_RUNS must be at least 3 capacity units'
+
+getent passwd "$execution_user" >/dev/null || fail "execution user does not exist: $execution_user"
+getent group "$execution_group" >/dev/null || fail "execution group does not exist: $execution_group"
+[[ -f "$config_file" ]] || fail "Worker config missing: $config_file"
+[[ -f "$env_file" ]] || fail "Worker transport env missing: $env_file"
+[[ -f "$identity_file" ]] || fail "Worker identity missing: $identity_file"
+[[ -n "$project_ids" ]] || fail 'TOWER_LOCAL_WORKER_PROJECT_IDS is required'
+[[ "$authority_mode" == "project" || "$authority_mode" == "operator-plane" ]] || fail 'TOWER_LOCAL_WORKER_AUTHORITY_MODE must be project or operator-plane'
+if [[ "$authority_mode" == "operator-plane" ]]; then
+  [[ ",$worker_capabilities," == *,operator-plane,* ]] || fail 'Operator Worker capabilities must include operator-plane'
+fi
+
+execution_home="$(getent passwd "$execution_user" | cut -d: -f6)"
+[[ -n "$execution_home" && -d "$execution_home" ]] || fail "execution HOME is missing: $execution_home"
+
+mapfile -t project_roots < <(node - "$config_file" <<'NODE'
+const fs = require('node:fs');
+const config = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+for (const root of Object.values(config.projects || {})) console.log(root);
+NODE
+)
+[[ ${#project_roots[@]} -gt 0 ]] || fail 'Worker config has no Project roots'
+for project_root in "${project_roots[@]}"; do
+  [[ -d "$project_root" ]] || fail "Project root missing: $project_root"
+  runuser -u "$execution_user" -- test -r "$project_root" || fail "execution user cannot read Project root: $project_root"
+  runuser -u "$execution_user" -- test -w "$project_root" || fail "execution user cannot write Project root: $project_root"
+done
+if [[ "$authority_mode" == "operator-plane" ]]; then
+  mapfile -t operator_projections < <(node - "$config_file" <<'NODE'
+const fs = require('node:fs');
+const config = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+for (const target of ['/workspace/tower', '/workspace/workspace']) {
+  const source = config.projections?.[target];
+  if (!source) process.exit(2);
+  console.log(`${target}\t${source}`);
+}
+NODE
+  ) || fail 'Operator Worker config requires /workspace/tower and /workspace/workspace projections'
+  for projection in "${operator_projections[@]}"; do
+    source="${projection#*$'\t'}"
+    [[ -d "$source" ]] || fail "Operator projection source missing: $source"
+    runuser -u "$execution_user" -- test -r "$source" || fail "execution user cannot read Operator projection: $source"
+    runuser -u "$execution_user" -- test -w "$source" || fail "execution user cannot write Operator projection: $source"
+  done
+fi
+for protected in "$config_file" "$env_file" "$identity_file"; do
+  runuser -u "$execution_user" -- test -r "$protected" || fail "execution user cannot read protected Worker input: $protected"
+done
+
+unit_dir=/etc/systemd/system
+slice_unit="$unit_dir/tower-execution.slice"
+worker_unit_name="tower-workbench-worker-$worker_id.service"
+heartbeat_unit_name="tower-workbench-worker-$worker_id-heartbeat.service"
+worker_unit="$unit_dir/$worker_unit_name"
+heartbeat_unit="$unit_dir/$heartbeat_unit_name"
+
+cat >"$slice_unit" <<EOF
+[Unit]
+Description=Tower AX execution plane resource budget
+
+[Slice]
+CPUQuota=$worker_pool_cpu_quota
+MemoryHigh=$worker_pool_memory_high
+MemoryMax=$worker_pool_memory_max
+TasksMax=$worker_pool_tasks_max
+EOF
+
+cat >"$worker_unit" <<EOF
+[Unit]
+Description=Tower native Project Workstation Worker ($worker_id)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=$execution_user
+Group=$execution_group
+WorkingDirectory=$execution_home
+Slice=tower-execution.slice
+MemoryMax=$worker_memory_max
+TasksMax=$worker_tasks_max
+Environment=HOME=$execution_home
+Environment=TOWER_REMOTE_WORKER_CONFIG=$config_file
+EnvironmentFile=$env_file
+ExecStart=$worker_bin
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+cat >"$heartbeat_unit" <<EOF
+[Unit]
+Description=Tower native Project Workstation Worker heartbeat ($worker_id)
+After=$worker_unit_name
+Requires=$worker_unit_name
+
+[Service]
+Type=simple
+User=$execution_user
+Group=$execution_group
+WorkingDirectory=$execution_home
+Slice=tower-execution.slice
+MemoryMax=256M
+TasksMax=128
+Environment=HOME=$execution_home
+Environment=TOWER_LOCAL_WORKER_ID=$worker_id
+Environment=TOWER_LOCAL_WORKER_DEPLOYMENT_ID=$deployment_id
+Environment=TOWER_LOCAL_WORKER_BASE_URL=$base_url
+Environment=TOWER_LOCAL_WORKER_CONTROL_PLANE_URL=$control_plane_url
+Environment=TOWER_LOCAL_WORKER_PROJECT_IDS=$project_ids
+Environment=TOWER_LOCAL_WORKER_CAPABILITIES=$worker_capabilities
+Environment=TOWER_LOCAL_WORKER_MAX_RUNS=$worker_max_runs
+Environment=TOWER_LOCAL_WORKER_IDENTITY_FILE=$identity_file
+ExecStart=$heartbeat_bin
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+systemctl daemon-reload
+systemctl enable "$worker_unit_name" "$heartbeat_unit_name"
+printf '{"status":"installed","executionUser":"%s","workerId":"%s","deploymentId":"%s","authorityMode":"%s","workerUnit":"%s","heartbeatUnit":"%s","slice":"tower-execution.slice","projectRoots":%s,"started":false}\n' \
+  "$execution_user" "$worker_id" "$deployment_id" "$authority_mode" "$worker_unit_name" "$heartbeat_unit_name" "${#project_roots[@]}"

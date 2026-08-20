@@ -43,6 +43,7 @@ export interface AIServiceSummary {
   ownerProjectRootPath?: string | null;
   ownerAgentName?: string;
   ownerAgentFace?: string;
+  ownerAgentProfileVersion?: number;
   serviceType: 'customer' | 'partner' | 'employee' | 'public' | 'api';
   status: AIServiceStatus;
   currentDeployment?: { id: string; version: number; status: string; sourceSnapshot?: { kind?: string; refs?: Array<{ path?: string; title?: string; size?: number; sha256?: string }> }; policySnapshot?: { harnessBinding?: { harnessId?: string; harnessVersion?: number; runtimeProfileId?: string; runtimeProfileVersion?: number; engine?: string; model?: string; status?: string }; allowedTools?: string[]; [key: string]: unknown }; experienceSnapshot?: Record<string, unknown>; evaluationSnapshot?: Record<string, unknown>; deployedAt?: string | null; createdAt?: string } | null;
@@ -73,7 +74,7 @@ interface AIServiceState {
   submitDeployment: (serviceId: string, deploymentId: string) => Promise<void>;
   approveDeployment: (serviceId: string, deploymentId: string) => Promise<void>;
   activateDeployment: (serviceId: string, deploymentId: string) => Promise<void>;
-  createDeployment: (serviceId: string, snapshots: { sourceSnapshot: unknown; policySnapshot: unknown; experienceSnapshot: unknown; evaluationSnapshot: unknown }) => Promise<{ id: string; version: number; status: string }>;
+  createDeployment: (serviceId: string, snapshots: { sourceSnapshot: unknown; policySnapshot: unknown; experienceSnapshot: unknown; evaluationSnapshot: unknown; refreshIdentityFromSourceAgent?: boolean }) => Promise<{ id: string; version: number; status: string }>;
   deployNow: (serviceId: string, deploymentId?: string) => Promise<void>;
   rollbackDeployment: (serviceId: string, deploymentId: string) => Promise<void>;
   checkActivationReadiness: (serviceId: string, deploymentId: string) => Promise<AIServiceActivationReadiness>;

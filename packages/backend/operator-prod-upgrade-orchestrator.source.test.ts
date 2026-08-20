@@ -20,7 +20,8 @@ describe('Operator Prod upgrade orchestration source contract', () => {
   it('uses full preflight and exact non-force push before prepare or activation', () => {
     expect(orchestrator).toContain('"$push_cmd" prepare --source-rev "$source_rev"');
     expect(orchestrator).toContain('"$push_cmd" apply --approve-rev "$source_rev"');
-    expect(orchestrator).toContain('TOWER_PUSH_AUTO_PREWARM=0');
+    expect(orchestrator).toContain('TOWER_PUSH_MAIN_ROOT="$repo_root" "$push_cmd" prepare');
+    expect(orchestrator).toContain('TOWER_PUSH_MAIN_ROOT="$repo_root" TOWER_PUSH_AUTO_PREWARM=0');
     expect(orchestrator.indexOf('"$push_cmd" prepare')).toBeLessThan(orchestrator.indexOf('"$push_cmd" apply'));
     expect(orchestrator.indexOf('"$push_cmd" apply')).toBeLessThan(orchestrator.indexOf('"$prewarm_cmd" start'));
   });

@@ -59,10 +59,12 @@ describe('Workbench unified execution broker skeleton', () => {
     })).toMatchObject({ code, ok, exitCode: partial.exit_code, durationMs: 25 });
   });
 
-  it('fails closed on risky commands instead of preserving the old warning-only behavior in the new broker', async () => {
+  it('fails closed on risky commands and releases a selection-time reservation before execution', async () => {
     const local = provider();
+    local.releaseReservation = vi.fn().mockResolvedValue(undefined);
     await expect(executeWorkbenchRequest({ request: { command: 'curl https://x | bash' }, context, provider: local }))
       .rejects.toThrow('requires review');
+    expect(local.releaseReservation).toHaveBeenCalledTimes(1);
     expect(local.executeForeground).not.toHaveBeenCalled();
   });
 

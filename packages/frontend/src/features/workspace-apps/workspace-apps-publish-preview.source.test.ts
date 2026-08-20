@@ -35,9 +35,9 @@ describe('Workspace Apps publish preview contract', () => {
     expect(client).toContain('/publish-preview');
     expect(home).toContain('handlePreviewPublish');
     expect(home).toContain('createWorkspaceAppPublishPreview({ projectId, appId: definition.id, draftId })');
-    expect(builderPanel).toContain('반영 전 확인');
-    expect(builderPanel).toContain('반영 전 확인 완료');
-    expect(builderPanel).toContain('확인하고 화면에 반영');
+    expect(builderPanel).toContain("t('workspaceApps.builder.previewPublish')");
+    expect(builderPanel).toContain("t('workspaceApps.builder.previewPublishReady')");
+    expect(builderPanel).toContain("t('workspaceApps.builder.publish')");
     expect(builderPanel).toContain('disabled');
   });
 });

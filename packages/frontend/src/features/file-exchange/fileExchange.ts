@@ -1,4 +1,6 @@
 // Owns: typed browser refs, drag codec, and inspect→confirm→execute client flow. See README.md.
+import i18n from '../../i18n';
+
 export const FILE_EXCHANGE_DRAG_TYPE = 'application/x-tower-file-exchange';
 
 export type ExchangeSourceRef =
@@ -51,7 +53,7 @@ function authHeaders(): Record<string, string> {
 async function jsonRequest<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, init);
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || '파일 전달에 실패했습니다.');
+  if (!res.ok) throw new Error(data.error || i18n.t('fileExchange.transferFailed', { ns: 'files' }));
   return data as T;
 }
 

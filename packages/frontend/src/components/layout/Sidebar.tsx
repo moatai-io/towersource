@@ -372,7 +372,7 @@ function AgentTeamFormationTicket({ projects }: { projects: Project[] }) {
         <span className="sidebar-team-ticket-header relative flex min-w-0 items-center justify-between gap-2 pl-1">
           <span className="sidebar-team-ticket-kicker min-w-0 truncate whitespace-nowrap text-[9px] font-extrabold uppercase tracking-[0.18em] text-primary-700 dark:text-primary-300">{t('teamWorkspace')}</span>
           <span className="sidebar-team-ticket-count shrink-0 whitespace-nowrap rounded-full border border-primary-500/20 bg-primary-500/10 px-2 py-0.5 text-[9px] font-bold tabular-nums text-primary-800 dark:text-primary-200">
-            {teammateCount}명
+            {t('teammateCountCompact', { count: teammateCount })}
           </span>
         </span>
 
@@ -478,7 +478,7 @@ export function Sidebar({
     if (filterLabels) labels.push(t('decks'));
     if (sessionKindFilter === 'agents') labels.push('Subagents');
     if (sessionKindFilter === 'runs') labels.push('Runs');
-    if (sessionKindFilter === 'external') labels.push('외부 배포');
+    if (sessionKindFilter === 'external') labels.push(t('externalDeployment'));
     if (sessionKindFilter === 'all') labels.push('All');
     return labels;
   }, [filterMy, filterFav, filterDone, filterLabels, sessionKindFilter, t]);
@@ -734,10 +734,10 @@ export function Sidebar({
       if (token) headers.Authorization = `Bearer ${token}`;
       const res = await fetch('/api/personal-space/files', { headers });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || `내 파일을 불러오지 못했습니다 (${res.status})`);
+      if (!res.ok) throw new Error(data.error || t('personalFilesLoadFailedWithStatus', { status: res.status }));
       setPersonalFiles(Array.isArray(data.files) ? data.files : []);
     } catch (error) {
-      setPersonalFilesError(error instanceof Error ? error.message : '내 파일을 불러오지 못했습니다');
+      setPersonalFilesError(error instanceof Error ? error.message : t('personalFilesLoadFailed'));
     } finally {
       setPersonalFilesLoading(false);
     }
@@ -766,9 +766,9 @@ export function Sidebar({
         method: 'POST', headers, body: JSON.stringify({ uri: personalRenameFile.uri, nextPath: `${parent}${nextName}` }),
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || `이름을 바꾸지 못했습니다 (${res.status})`);
+      if (!res.ok) throw new Error(data.error || t('personalFileRenameFailedWithStatus', { status: res.status }));
       setPersonalRenameFile(null);
-      toastSuccess('개인 파일 이름을 바꿨습니다');
+      toastSuccess(t('personalFileRenamed'));
       await loadPersonalFiles();
     } catch (error) {
       emitProductNotice({ code: 'sidebar.personal.rename.failed', technicalDetail: error });
@@ -777,9 +777,9 @@ export function Sidebar({
 
   const archivePersonalSidebarFile = useCallback(async (file: { uri: string; name: string }) => {
     const ok = await confirmPersonalFileAction({
-      title: '개인 파일 보관',
+      title: t('archivePersonalFileTitle'),
       message: t('confirmArchivePersonalFile', { name: file.name }),
-      confirmLabel: '보관',
+      confirmLabel: t('common:archive'),
       danger: true,
     });
     if (!ok) return;
@@ -789,9 +789,9 @@ export function Sidebar({
     try {
       const res = await fetch('/api/personal-space/files/archive', { method: 'POST', headers, body: JSON.stringify({ uri: file.uri }) });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || `보관하지 못했습니다 (${res.status})`);
+      if (!res.ok) throw new Error(data.error || t('archiveFailedWithStatus', { status: res.status }));
       setPersonalFileMenu(null);
-      toastSuccess('개인 파일을 보관했습니다');
+      toastSuccess(t('personalFileArchived'));
       await loadPersonalFiles();
     } catch (error) {
       emitProductNotice({ code: 'sidebar.personal.archive.failed', technicalDetail: error });
@@ -894,12 +894,12 @@ export function Sidebar({
           (Array.isArray(project.challenges) ? project.challenges : []).map((workstream: any) => ({
             id: String(workstream.id || workstream.title),
             workstreamKey: String(workstream.workstreamKey || workstream.id || workstream.title),
-            title: String(workstream.title || '이름 없는 업무'),
+            title: String(workstream.title || t('untitledWork')),
             status: String(workstream.status || 'active'),
             lastAt: String(workstream.lastAt || ''),
             todoLeft: Number(workstream.todoLeft || 0),
             projectId: project.id ? String(project.id) : null,
-            projectName: String(project.name || '공통 업무'),
+            projectName: String(project.name || t('sharedWork')),
           })),
         ).sort((a: any, b: any) => tsToMs(b.lastAt) - tsToMs(a.lastAt)).slice(0, 10);
         setTeamRecentWorkstreams(workstreams);
@@ -1301,8 +1301,8 @@ export function Sidebar({
                   type="button"
                   onClick={toggleAgentNavExpanded}
                   className="mb-1 flex h-8 w-10 shrink-0 items-center justify-center rounded-md text-surface-600 transition-colors hover:bg-surface-800 hover:text-surface-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/70"
-                  aria-label={agentNavExpanded ? 'AI 이름 목록 접기' : 'AI 이름 목록 펼치기'}
-                  title={agentNavExpanded ? 'AI 이름 목록 접기' : 'AI 이름 목록 펼치기'}
+                  aria-label={agentNavExpanded ? t('collapseAiNameList') : t('expandAiNameList')}
+                  title={agentNavExpanded ? t('collapseAiNameList') : t('expandAiNameList')}
                   aria-expanded={agentNavExpanded}
                 >
                   <svg className={`h-3.5 w-3.5 transition-transform ${agentNavExpanded ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="m9 5 7 7-7 7" /></svg>
@@ -1387,7 +1387,7 @@ export function Sidebar({
                   onNewChat={() => onNewSession(project.id)}
                   onOpenHome={() => {
                     rememberAgentWorkspaceLocation(project.id, 'home');
-                    useFileStore.getState().openSystemTab('projectFiles', { refId: project.id, title: `${project.agent?.displayName || project.name} 홈`, icon: project.agent?.face || '✨' });
+                    useFileStore.getState().openSystemTab('projectFiles', { refId: project.id, title: t('agentHomeTabTitle', { name: project.agent?.displayName || project.name }), icon: project.agent?.face || '✨' });
                     useSessionStore.getState().setActiveView('chat');
                   }}
                   sessionCount={projectSessions.length}
@@ -1469,7 +1469,7 @@ export function Sidebar({
                         window.requestAnimationFrame(() => window.dispatchEvent(new CustomEvent('tower-open-project-work', { detail: { projectId: workstream.projectId || undefined, workstreamKey: workstream.workstreamKey, rangeHours: 24 * 30 } })));
                       }} className="group flex w-full items-start gap-2 rounded-lg px-2 py-2 text-left hover:bg-surface-800/80">
                         <span className={`mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full ${workstream.status === 'resolved' ? 'bg-surface-600' : workstream.status === 'waiting' ? 'bg-amber-400' : 'bg-emerald-400'}`} aria-hidden="true" />
-                        <span className="min-w-0 flex-1"><span className="block truncate text-[13px] font-semibold text-surface-300 group-hover:text-surface-100">{workstream.title}</span><span className="mt-0.5 block truncate text-[10.5px] text-surface-650">{workstream.projectName}{workstream.todoLeft > 0 ? ` · 남은 일 ${workstream.todoLeft}` : ''}</span></span>
+                        <span className="min-w-0 flex-1"><span className="block truncate text-[13px] font-semibold text-surface-300 group-hover:text-surface-100">{workstream.title}</span><span className="mt-0.5 block truncate text-[10.5px] text-surface-650">{workstream.projectName}{workstream.todoLeft > 0 ? t('remainingWork', { count: workstream.todoLeft }) : ''}</span></span>
                         <span className="shrink-0 pt-0.5 text-[10px] text-surface-700">{workstream.lastAt ? new Date(workstream.lastAt).toLocaleDateString('ko-KR', { month: 'numeric', day: 'numeric' }) : ''}</span>
                       </button>
                     ))}
@@ -1490,7 +1490,7 @@ export function Sidebar({
                     type="button"
                     onClick={() => {
                       rememberAgentWorkspaceLocation(project.id, 'home');
-                      useFileStore.getState().openSystemTab('projectFiles', { refId: project.id, title: `${project.agent?.displayName || project.name} 홈`, icon: project.agent?.face || '✨' });
+                      useFileStore.getState().openSystemTab('projectFiles', { refId: project.id, title: t('agentHomeTabTitle', { name: project.agent?.displayName || project.name }), icon: project.agent?.face || '✨' });
                       useSessionStore.getState().setActiveView('chat');
                       if (useSessionStore.getState().isMobile) useSessionStore.getState().setSidebarOpen(false);
                     }}
@@ -1511,7 +1511,7 @@ export function Sidebar({
                         useSessionStore.getState().setActiveView('projectFiles');
                         useSessionStore.getState().setSidebarOpen(false);
                       } else {
-                        useFileStore.getState().openSystemTab('projectFiles', { refId: project.id, title: `${project.agent?.displayName || project.name} 파일`, icon: '📁' });
+                        useFileStore.getState().openSystemTab('projectFiles', { refId: project.id, title: t('agentFilesTabTitle', { name: project.agent?.displayName || project.name }), icon: '📁' });
                         useSessionStore.getState().setActiveView('chat');
                       }
                     }}
@@ -1914,7 +1914,7 @@ export function Sidebar({
                           <span className="truncate">{r.projectName ? `${r.projectName} · ${r.memoryTitle || r.sessionName}` : (r.memoryTitle || r.sessionName)}</span>
                           {r.archived && (
                             <span className="text-[11px] text-surface-600 bg-surface-800 px-1 py-px rounded shrink-0">
-                              {t('archivedBadge', { defaultValue: '보관됨' })}
+                              {t('archivedBadge')}
                             </span>
                           )}
                         </span>
@@ -1952,7 +1952,7 @@ export function Sidebar({
                           <span className="truncate">{r.projectName ? `${r.projectName} · ${r.sessionName}` : r.sessionName}</span>
                           {r.archived && (
                             <span className="text-[11px] text-surface-600 bg-surface-800 px-1 py-px rounded shrink-0">
-                              {t('archivedBadge', { defaultValue: '보관됨' })}
+                              {t('archivedBadge')}
                             </span>
                           )}
                         </span>
@@ -1971,10 +1971,10 @@ export function Sidebar({
         ) : sidebarTab === 'files' ? (
           <div className={`min-h-full ${isMobile ? 'flex flex-col' : 'grid h-full min-h-0 grid-cols-[176px_minmax(0,1fr)] overflow-hidden'}`}>
             {!isMobile && (
-              <nav className="flex min-h-0 flex-col border-r border-surface-800/80 bg-surface-900/95 px-2 py-2" aria-label="프로젝트 폴더 선택">
+              <nav className="flex min-h-0 flex-col border-r border-surface-800/80 bg-surface-900/95 px-2 py-2" aria-label={t('selectProjectFolder')}>
                 <div className="relative mb-2 shrink-0">
                   <svg className="pointer-events-none absolute left-2.5 top-2.5 h-3.5 w-3.5 text-surface-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8} aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" d="m21 21-4.35-4.35m2.1-5.4a7.5 7.5 0 1 1-15 0 7.5 7.5 0 0 1 15 0Z" /></svg>
-                  <input value={folderProjectQuery} onChange={(event) => setFolderProjectQuery(event.target.value)} placeholder="프로젝트 검색" className="h-8 w-full rounded-lg border border-surface-800 bg-surface-950 pl-8 pr-2 text-[12px] text-surface-200 outline-none placeholder:text-surface-650 focus:border-primary-500/60" aria-label="폴더 프로젝트 검색" />
+                  <input value={folderProjectQuery} onChange={(event) => setFolderProjectQuery(event.target.value)} placeholder={t('searchProjects')} className="h-8 w-full rounded-lg border border-surface-800 bg-surface-950 pl-8 pr-2 text-[12px] text-surface-200 outline-none placeholder:text-surface-650 focus:border-primary-500/60" aria-label={t('searchFolderProjects')} />
                 </div>
                 <div className="scrollbar-none min-h-0 flex-1 space-y-1 overflow-y-auto">
                   {folderProjects.map((project) => {
@@ -1989,18 +1989,18 @@ export function Sidebar({
                       <span className="min-w-0 flex-1 truncate text-[12px] font-semibold">{project.agent?.displayName || project.name}</span>
                     </button>;
                   })}
-                  {folderProjects.length === 0 && <p className="px-2 py-4 text-[12px] text-surface-600">일치하는 프로젝트가 없습니다.</p>}
+                  {folderProjects.length === 0 && <p className="px-2 py-4 text-[12px] text-surface-600">{t('noMatchingProjects')}</p>}
                 </div>
               </nav>
             )}
             <div className="flex min-h-0 min-w-0 flex-col overflow-y-auto">
             {isMobile && mobileProjectPickerOpen && (
               <section className="min-h-full px-3 py-3">
-                <button type="button" onClick={() => { setMobileProjectPickerOpen(false); setMobileProjectQuery(''); }} className="mb-2 flex min-h-9 items-center gap-1 rounded-lg px-1 text-sm font-semibold text-surface-300 active:bg-surface-800"><span aria-hidden="true">‹</span><span>파일</span></button>
-                <h2 className="px-1 text-base font-bold text-surface-100">프로젝트 선택</h2>
+                <button type="button" onClick={() => { setMobileProjectPickerOpen(false); setMobileProjectQuery(''); }} className="mb-2 flex min-h-9 items-center gap-1 rounded-lg px-1 text-sm font-semibold text-surface-300 active:bg-surface-800"><span aria-hidden="true">‹</span><span>{t('files')}</span></button>
+                <h2 className="px-1 text-base font-bold text-surface-100">{t('selectProject')}</h2>
                 <div className="relative mt-3">
                   <svg className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-surface-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="m21 21-4.35-4.35m2.1-5.4a7.5 7.5 0 1 1-15 0 7.5 7.5 0 0 1 15 0Z" /></svg>
-                  <input value={mobileProjectQuery} onChange={(event) => setMobileProjectQuery(event.target.value)} placeholder="프로젝트 검색" className="h-10 w-full rounded-xl border border-surface-800 bg-surface-950 pl-10 pr-3 text-sm text-surface-200 outline-none placeholder:text-surface-650 focus:border-primary-500/60" aria-label="파일 프로젝트 검색" />
+                  <input value={mobileProjectQuery} onChange={(event) => setMobileProjectQuery(event.target.value)} placeholder={t('searchProjects')} className="h-10 w-full rounded-xl border border-surface-800 bg-surface-950 pl-10 pr-3 text-sm text-surface-200 outline-none placeholder:text-surface-650 focus:border-primary-500/60" aria-label={t('searchFileProjects')} />
                 </div>
                 <div className="mt-2 divide-y divide-surface-800/80">
                   {projectsSortedForFiles.filter((project) => project.rootPath && !project.archived && `${project.agent?.displayName || ''} ${project.name}`.toLowerCase().includes(mobileProjectQuery.trim().toLowerCase())).map((project) => {
@@ -2022,32 +2022,32 @@ export function Sidebar({
             )}
             {isMobile && !mobileProjectPickerOpen && mobileQuickFilesView === null && (
               <section className="border-b border-surface-800 px-3 py-3">
-                <div className="mb-2 px-0.5 text-[11px] font-bold uppercase tracking-[0.12em] text-surface-600">빠른 파일</div>
+                <div className="mb-2 px-0.5 text-[11px] font-bold uppercase tracking-[0.12em] text-surface-600">{t('quickFiles')}</div>
                 <div className="grid grid-cols-2 gap-2">
-                  <button type="button" onClick={() => setMobileQuickFilesView('session')} className="flex min-h-12 items-center gap-2 rounded-xl border border-surface-800 bg-surface-900 px-3 text-left active:bg-surface-800"><span className="min-w-0 flex-1 text-[12px] font-semibold text-surface-200">이 세션의 파일</span><span className="text-surface-600">›</span></button>
-                  <button type="button" onClick={() => setMobileQuickFilesView('recent')} disabled={mobileDocumentRecents.length === 0} className="flex min-h-12 items-center gap-2 rounded-xl border border-surface-800 bg-surface-900 px-3 text-left active:bg-surface-800 disabled:opacity-45"><span className="min-w-0 flex-1 text-[12px] font-semibold text-surface-200">최근 문서</span><span className="text-xs tabular-nums text-surface-600">{mobileDocumentRecents.length} ›</span></button>
+                  <button type="button" onClick={() => setMobileQuickFilesView('session')} className="flex min-h-12 items-center gap-2 rounded-xl border border-surface-800 bg-surface-900 px-3 text-left active:bg-surface-800"><span className="min-w-0 flex-1 text-[12px] font-semibold text-surface-200">{t('thisConversationFiles')}</span><span className="text-surface-600">›</span></button>
+                  <button type="button" onClick={() => setMobileQuickFilesView('recent')} disabled={mobileDocumentRecents.length === 0} className="flex min-h-12 items-center gap-2 rounded-xl border border-surface-800 bg-surface-900 px-3 text-left active:bg-surface-800 disabled:opacity-45"><span className="min-w-0 flex-1 text-[12px] font-semibold text-surface-200">{t('recentDocuments')}</span><span className="text-xs tabular-nums text-surface-600">{mobileDocumentRecents.length} ›</span></button>
                 </div>
               </section>
             )}
             {isMobile && !mobileProjectPickerOpen && mobileQuickFilesView === 'recent' && (
               <section className="min-h-full px-3 py-3">
-                <button type="button" onClick={() => setMobileQuickFilesView(null)} className="mb-2 flex min-h-9 items-center gap-1 rounded-lg px-1 text-sm font-semibold text-surface-300 active:bg-surface-800"><span aria-hidden="true">‹</span><span>파일</span></button>
-                <h2 className="px-1 text-base font-bold text-surface-100">최근 문서</h2>
+                <button type="button" onClick={() => setMobileQuickFilesView(null)} className="mb-2 flex min-h-9 items-center gap-1 rounded-lg px-1 text-sm font-semibold text-surface-300 active:bg-surface-800"><span aria-hidden="true">‹</span><span>{t('files')}</span></button>
+                <h2 className="px-1 text-base font-bold text-surface-100">{t('recentDocuments')}</h2>
                 <div className="mt-2 divide-y divide-surface-800/80">{mobileDocumentRecents.map((document) => <button key={document.path} type="button" onClick={() => onFileClick(document.path)} className="flex w-full items-center gap-2 px-1 py-3 text-left active:bg-surface-800" title={document.path}><span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-primary-500/10 text-sm text-primary-300" aria-hidden="true">📄</span><span className="min-w-0 flex-1"><span className="block truncate text-sm font-semibold text-surface-200">{document.name}</span><span className="block truncate text-[10px] text-surface-600">{document.path}</span></span></button>)}</div>
               </section>
             )}
             {isMobile && !mobileProjectPickerOpen && mobileQuickFilesView === 'session' && <SessionFilesMenuSection activeSessionId={activeSessionId} placement="inline" isMobile onInlineBack={() => setMobileQuickFilesView(null)} onFileClick={onFileClick} />}
             {isMobile && !mobileProjectPickerOpen && mobileQuickFilesView === null && (
               <div className="border-b border-surface-800 bg-surface-900 px-3 py-3">
-                <div className="mb-2 px-0.5 text-[12px] font-bold text-surface-400">프로젝트 파일</div>
-                <div className="block text-[11px] font-bold text-surface-500">프로젝트
+                <div className="mb-2 px-0.5 text-[12px] font-bold text-surface-400">{t('projectFiles')}</div>
+                <div className="block text-[11px] font-bold text-surface-500">{t('project')}
                   <button
                     type="button"
                     onClick={() => setMobileProjectPickerOpen(true)}
                     className="mt-1.5 flex min-h-10 w-full items-center gap-2 rounded-xl border border-surface-700 bg-surface-950 px-3 text-left text-sm font-bold text-surface-100 outline-none focus:border-primary-500"
-                    aria-label="파일을 볼 프로젝트 선택"
+                    aria-label={t('selectProjectForFiles')}
                   >
-                    <span className="min-w-0 flex-1 truncate">{activeFileProject?.agent?.displayName || activeFileProject?.name || '프로젝트 선택'}</span>
+                    <span className="min-w-0 flex-1 truncate">{activeFileProject?.agent?.displayName || activeFileProject?.name || t('selectProject')}</span>
                     <span className="shrink-0 text-surface-500" aria-hidden="true">›</span>
                   </button>
                 </div>
@@ -2153,7 +2153,7 @@ export function Sidebar({
                 </div>
               </>
               ) : (
-                <div className="mx-2 mt-3 rounded-lg border border-surface-800 px-3 py-4 text-sm text-surface-500">먼저 파일을 볼 AI 팀원을 선택하세요.</div>
+                <div className="mx-2 mt-3 rounded-lg border border-surface-800 px-3 py-4 text-sm text-surface-500">{t('selectAiTeammateForFiles')}</div>
               )}
 
               <>
@@ -3214,7 +3214,7 @@ function ProjectGroup({
         onDrop={handleDrop}
       >
         {/* In Agent-first, chevron/avatar/name share one expand contract. Home navigation stays explicit. */}
-        <button type="button" onClick={(event) => { event.stopPropagation(); onToggleCollapsed(); }} className="grid h-6 w-6 shrink-0 place-items-center rounded hover:bg-surface-700/50" aria-label={collapsed ? 'AI 팀원 펼치기' : 'AI 팀원 접기'}>
+        <button type="button" onClick={(event) => { event.stopPropagation(); onToggleCollapsed(); }} className="grid h-6 w-6 shrink-0 place-items-center rounded hover:bg-surface-700/50" aria-label={collapsed ? t('expandAiTeammate') : t('collapseAiTeammate')}>
           {hasActivity ? (
             <RunIndicator size="xs" label={t('workspaceHasRunningSessions')} className="tone-success tone-text shrink-0" />
           ) : (
@@ -3237,7 +3237,7 @@ function ProjectGroup({
             />
           ) : (
             <div className="flex min-h-8 min-w-0 items-center gap-1">
-              {agentFirstEnabled && <button type="button" className="mr-2 shrink-0 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/70" onClick={(event) => { event.stopPropagation(); onToggleCollapsed(); }} aria-label={collapsed ? `${project.agent?.displayName || project.name} 대화 펼치기` : `${project.agent?.displayName || project.name} 대화 접기`}><AgentIdentityAvatar project={project} variant="list" showListAccent={false} className="h-6 w-6 max-[768px]:h-9 max-[768px]:w-9 shrink-0 rounded-lg" fallbackClassName="grid h-6 w-6 max-[768px]:h-9 max-[768px]:w-9 shrink-0 place-items-center rounded-lg bg-surface-800 text-[10px]" /></button>}
+              {agentFirstEnabled && <button type="button" className="mr-2 shrink-0 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/70" onClick={(event) => { event.stopPropagation(); onToggleCollapsed(); }} aria-label={collapsed ? t('expandNamedConversations', { name: project.agent?.displayName || project.name }) : t('collapseNamedConversations', { name: project.agent?.displayName || project.name })}><AgentIdentityAvatar project={project} variant="list" showListAccent={false} className="h-6 w-6 max-[768px]:h-9 max-[768px]:w-9 shrink-0 rounded-lg" fallbackClassName="grid h-6 w-6 max-[768px]:h-9 max-[768px]:w-9 shrink-0 place-items-center rounded-lg bg-surface-800 text-[10px]" /></button>}
               <button
                 type="button"
                 onClick={(event) => {
@@ -3247,7 +3247,7 @@ function ProjectGroup({
                 }}
                 className={`min-h-8 min-w-0 flex-1 truncate text-left text-[14px] font-semibold leading-8 tracking-[-0.01em] ${projectNameTone} ${agentFirstEnabled ? 'hover:text-primary-300' : ''}`}
                 style={{ color: projectNameColor }}
-                title={agentFirstEnabled ? (collapsed ? '대화 펼치기' : '대화 접기') : project.name}
+                title={agentFirstEnabled ? (collapsed ? t('expandConversations') : t('collapseConversations')) : project.name}
                 aria-expanded={agentFirstEnabled ? !collapsed : undefined}
               >
                 {agentFirstEnabled ? (project.agent?.displayName || project.name) : project.name}
@@ -3268,7 +3268,7 @@ function ProjectGroup({
                   onClick={(event) => {
                     event.stopPropagation();
                     rememberAgentWorkspaceLocation(project.id, 'home');
-                    useFileStore.getState().openSystemTab('projectFiles', { refId: project.id, title: `${project.agent?.displayName || project.name} 홈`, icon: project.agent?.face || '✨' });
+                    useFileStore.getState().openSystemTab('projectFiles', { refId: project.id, title: t('agentHomeTabTitle', { name: project.agent?.displayName || project.name }), icon: project.agent?.face || '✨' });
                     useSessionStore.getState().setActiveView('chat');
                     if (useSessionStore.getState().isMobile) useSessionStore.getState().setSidebarOpen(false);
                   }}
@@ -3460,7 +3460,7 @@ function ProjectGroup({
           onNewChat={onNewSession}
           onOpenHome={() => {
             rememberAgentWorkspaceLocation(project.id, 'home');
-            useFileStore.getState().openSystemTab('projectFiles', { refId: project.id, title: `${project.agent?.displayName || project.name} 홈`, icon: project.agent?.face || '✨' });
+            useFileStore.getState().openSystemTab('projectFiles', { refId: project.id, title: t('agentHomeTabTitle', { name: project.agent?.displayName || project.name }), icon: project.agent?.face || '✨' });
             useSessionStore.getState().setActiveView('chat');
             if (useSessionStore.getState().isMobile) useSessionStore.getState().setSidebarOpen(false);
           }}
@@ -3824,7 +3824,7 @@ function ProjectContextMenu({
         <svg className="h-3.5 w-3.5 text-primary-300" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2} aria-hidden="true">
           <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 5.25a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM5.25 21a6.75 6.75 0 0113.5 0M17.25 9.75l1.5 1.5 3-3" />
         </svg>
-        Credential 관리
+        {t('agentCredentials.title')}
       </button>
       {/* Settings */}
       <button role="menuitem" className={itemClass} onClick={() => setShowSettings(true)}>
@@ -3844,11 +3844,11 @@ function ProjectContextMenu({
       </button>
       <div className="border-t border-surface-700/50 my-1" />
       <button role="menuitem" className={`${itemClass} !text-red-400 hover:!bg-red-950/30`} onClick={async () => {
-        const detail = sessionCount > 0 ? ` 대화 ${sessionCount}개와 프로젝트 파일은 그대로 보존됩니다.` : ' 대화와 프로젝트 파일은 그대로 보존됩니다.';
+        const detail = sessionCount > 0 ? t('archiveAgentDetailWithCount', { count: sessionCount }) : t('archiveAgentDetail');
         const ok = await confirm({
-          title: `“${project.name}” 에이전트를 폐기할까요?`,
-          message: `에이전트 활동과 새 실행을 중단하고 목록에서 숨깁니다.${detail} 관리자가 복구하거나 별도 관리 화면에서 영구 삭제할 수 있습니다.`,
-          confirmLabel: '에이전트 폐기',
+          title: t('archiveAgentTitle', { name: project.name }),
+          message: t('archiveAgentMessage', { detail }),
+          confirmLabel: t('archiveAgentConfirm'),
           danger: true,
         });
         if (ok) { onDelete(); onClose(); }
@@ -4718,7 +4718,7 @@ const LABEL_PREVIEW_COUNT = 5;
 function labelDisplay(label: string, t?: (key: string, options?: any) => string): { name: string } {
   const map: Record<string, string> = {
     'channel_ai': 'Channel AI',
-    'temp': t ? t('defaultDeck') : '기본',
+    'temp': t ? t('defaultDeck') : 'Default',
     'task': '⚡ Tasks',
   };
   return { name: map[label] || label };
@@ -5011,7 +5011,7 @@ function LabelGroup({ label, sessions, projectId, isCollapsed, onToggle, onDropS
             }}
             data-sidebar-session-showall-label={remainingCount > 0 ? `${projectId}::${label}` : undefined}
             className="text-[12px] tabular-nums shrink-0 cursor-pointer transition-colors text-surface-600 hover:text-primary-400 max-[768px]:text-gray-500 ml-auto"
-            title={remainingCount > 0 ? `다음 ${nextBatchCount}개 보기` : `${LABEL_PREVIEW_COUNT}개만 보기`}
+            title={remainingCount > 0 ? t('showNextSessions', { count: nextBatchCount }) : t('showOnlySessions', { count: LABEL_PREVIEW_COUNT })}
           >
             {remainingCount > 0 ? `${displayedCount}/${sessions.length}` : sessions.length}
           </span>

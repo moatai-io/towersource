@@ -1,0 +1,74 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+image="${RUNTIME_BOX_IMAGE:-}"
+timeout_seconds="${TOWER_RUNTIME_BOX_SMOKE_TIMEOUT_SECONDS:-120}"
+process_pid="${TOWER_RUNTIME_BOX_SMOKE_PROCESS_PID:-}"
+sudo_bin="${TOWER_RUNTIME_BOX_SMOKE_SUDO_BIN:-}"
+
+[[ "$image" =~ ^sha256:[0-9a-f]{64}$ ]] || {
+  echo 'tower-app-runtime-box-smoke: RUNTIME_BOX_IMAGE must be an exact sha256 image ID' >&2
+  exit 1
+}
+
+command -v docker >/dev/null 2>&1 || {
+  echo 'tower-app-runtime-box-smoke: docker CLI is unavailable' >&2
+  exit 1
+}
+[[ "$process_pid" =~ ^[1-9][0-9]*$ && -r "/proc/$process_pid/status" ]] || {
+  echo 'tower-app-runtime-box-smoke: TOWER_RUNTIME_BOX_SMOKE_PROCESS_PID must identify the live Tower process' >&2
+  exit 1
+}
+
+read -r process_uid process_gid < <(awk '/^Uid:/{uid=$2} /^Gid:/{gid=$2} END{print uid, gid}' "/proc/$process_pid/status")
+process_groups="$(awk '/^Groups:/{for(i=2;i<=NF;i++) printf "%s%s", (i==2?"":","), $i}' "/proc/$process_pid/status")"
+[[ -n "$process_uid" && -n "$process_gid" && -n "$process_groups" ]] || {
+  echo 'tower-app-runtime-box-smoke: could not read Tower process credentials' >&2
+  exit 1
+}
+
+if [[ -z "$sudo_bin" ]]; then
+  if [[ -x /usr/bin/sudo ]]; then
+    sudo_bin=/usr/bin/sudo
+  else
+    sudo_bin="$(command -v sudo || true)"
+  fi
+fi
+[[ -n "$sudo_bin" && -x "$sudo_bin" ]] || {
+  echo 'tower-app-runtime-box-smoke: host sudo is unavailable' >&2
+  exit 1
+}
+
+docker_config_dir="$(mktemp -d /tmp/tower-runtime-box-docker-config.XXXXXX)"
+cleanup() { rm -rf "$docker_config_dir"; }
+trap cleanup EXIT
+chmod 0755 "$docker_config_dir"
+
+run_as_tower_process() {
+  "$sudo_bin" -n setpriv --reuid "$process_uid" --regid "$process_gid" --groups "$process_groups" -- \
+    env HOME=/tmp DOCKER_CONFIG="$docker_config_dir" "$@"
+}
+
+run_as_tower_process docker version --format '{{json .Server.Version}}' >/dev/null
+configured_id="$(run_as_tower_process docker image inspect "$image" --format '{{.Id}}')"
+[[ "$configured_id" = "$image" ]] || {
+  echo "tower-app-runtime-box-smoke: configured image ID mismatch: configured=$image actual=$configured_id" >&2
+  exit 1
+}
+
+run_as_tower_process timeout "$timeout_seconds" docker run --rm --pull never \
+  --label tower.runtime-box.release-smoke=true \
+  --mount type=tmpfs,destination=/workspace \
+  "$image" bash -lc '
+    set -euo pipefail
+    test -d /workspace
+    command -v runtime-box-doctor >/dev/null
+    command -v node python3 chromium mmdc pandoc typst >/dev/null
+    runtime-box-doctor >/tmp/runtime-box-doctor.out 2>&1
+    grep -q "Runtime Box readiness looks good" /tmp/runtime-box-doctor.out
+    printf runtime-box-functional-smoke-ok > /workspace/.tower-release-smoke
+    test "$(cat /workspace/.tower-release-smoke)" = runtime-box-functional-smoke-ok
+    rm -f /workspace/.tower-release-smoke
+  '
+
+printf '{"status":"ok","dockerApi":"ok","containerStart":"ok","workspace":"ok","doctor":"ok","processPid":%s,"image":"%s","imageId":"%s"}\n' "$process_pid" "$image" "$configured_id"

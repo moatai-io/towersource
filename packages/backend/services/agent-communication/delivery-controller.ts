@@ -4,7 +4,7 @@
  * See README.md.
  */
 
-import { claimNextDelivery, settleClaimedDelivery, type DeliveryClaim } from './delivery-lease-store.js';
+import { claimNextDelivery, markClaimedDeliveryStarted, settleClaimedDelivery, type DeliveryClaim } from './delivery-lease-store.js';
 import { getAgentMessage, type AgentMessageRecord } from './inbox-store.js';
 
 export type DeliveryPolicyDecision =
@@ -13,6 +13,7 @@ export type DeliveryPolicyDecision =
   | { action: 'refuse'; reason: string };
 
 export type DeliveryHandlerOutcome =
+  | { status: 'started_turn'; mode: 'steer' | 'queued-after-turn' | 'new-turn'; recipientRootTurnId?: string; alreadyMarked?: boolean }
   | { status: 'completed'; mode: 'steer' | 'queued-after-turn' | 'new-turn' | 'stored'; recipientRootTurnId?: string; responseMessageId?: string }
   | { status: 'retry'; reason: string; retryDelaySeconds?: number }
   | { status: 'needs_attention'; reason: string };
@@ -20,13 +21,14 @@ export type DeliveryHandlerOutcome =
 export interface ProcessRecipientInboxDependencies {
   claimNext: typeof claimNextDelivery;
   getMessage: typeof getAgentMessage;
+  markStarted: typeof markClaimedDeliveryStarted;
   settleClaim: typeof settleClaimedDelivery;
   decidePolicy(message: AgentMessageRecord): Promise<DeliveryPolicyDecision>;
   deliver(message: AgentMessageRecord, claim: DeliveryClaim): Promise<DeliveryHandlerOutcome>;
 }
 
 export interface InboxProcessSummary {
-  outcome: 'idle' | 'completed' | 'held' | 'refused' | 'retry_wait' | 'needs_attention' | 'claim_lost';
+  outcome: 'idle' | 'started_turn' | 'completed' | 'held' | 'refused' | 'retry_wait' | 'needs_attention' | 'claim_lost';
   messageId?: string;
   deliveryId?: string;
 }
@@ -34,6 +36,7 @@ export interface InboxProcessSummary {
 const defaultDependencies: ProcessRecipientInboxDependencies = {
   claimNext: claimNextDelivery,
   getMessage: getAgentMessage,
+  markStarted: markClaimedDeliveryStarted,
   settleClaim: settleClaimedDelivery,
   decidePolicy: async () => ({ action: 'deliver' }),
   deliver: async () => ({ status: 'needs_attention', reason: 'No delivery adapter configured' }),
@@ -88,6 +91,14 @@ export async function processRecipientInbox(input: {
     delivery = await deps.deliver(message, claim);
   } catch (error) {
     delivery = { status: 'retry', reason: (error as Error).message || String(error) };
+  }
+
+  if (delivery.status === 'started_turn') {
+    const marked = delivery.alreadyMarked || await deps.markStarted({
+      deliveryId: claim.deliveryId, ownerToken: claim.ownerToken, ownerBootId: claim.ownerBootId,
+      mode: delivery.mode, recipientRootTurnId: delivery.recipientRootTurnId,
+    });
+    return { outcome: marked ? 'started_turn' : 'claim_lost', messageId: message.id, deliveryId: claim.deliveryId };
   }
 
   if (delivery.status === 'completed') {

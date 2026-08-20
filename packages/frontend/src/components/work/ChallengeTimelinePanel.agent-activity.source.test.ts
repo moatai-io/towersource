@@ -6,9 +6,9 @@ const source = fs.readFileSync(path.resolve(import.meta.dirname, './ChallengeTim
 
 describe('My Work agent activity projection', () => {
   it('presents delegated runs as a user-centric chronological activity briefing', () => {
-    expect(source).toContain('AI 팀 활동');
-    expect(source).toContain('최근 활동');
-    expect(source).toContain('같은 AI 팀원의 업무를 묶어 최근 항목부터 보여줍니다.');
+    expect(source).toContain("tr('challenge.timeline.title')");
+    expect(source).toContain("tr('challenge.timeline.recentActivity')");
+    expect(source).toContain("tr('challenge.timeline.groupDescription')");
     expect(source).toContain('expandedAgents');
     expect(source).toContain('group.items.slice(0, 3)');
     expect(source).toContain(".sort((a, b) => new Date(b.session.lastAt).getTime() - new Date(a.session.lastAt).getTime())");

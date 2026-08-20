@@ -22,6 +22,8 @@ export interface PiSessionEntry {
     userId?: number;
     userRole?: string;
     projectId?: string;
+    /** Effective DB/env rollout used to choose Worker bash vs compatibility Runtime Box bash. */
+    workbenchRolloutEnabled?: boolean;
   };
   /** Secret-free fingerprint of the effective tool surface assembled for this Session. */
   harnessFingerprint?: HarnessRuntimeFingerprint;

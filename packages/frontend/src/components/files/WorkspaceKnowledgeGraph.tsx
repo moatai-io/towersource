@@ -3,6 +3,7 @@
  * Uses MIT force-graph; data and access control remain Tower-owned.
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import ForceGraph from 'force-graph';
 import type { ForceGraphGeneric } from 'force-graph';
 import { ProjectActivityGraph } from './ProjectActivityGraph';
@@ -108,6 +109,7 @@ export function WorkspaceKnowledgeGraph({
   onOpenFile: (absolutePath: string) => void;
   onOpenSession: (sessionId: string) => void;
 }) {
+  const { t } = useTranslation('files');
   const containerRef = useRef<HTMLDivElement>(null);
   const graphRef = useRef<ForceGraphApi | null>(null);
   const selectedIdRef = useRef<string | null>(null);
@@ -134,7 +136,7 @@ export function WorkspaceKnowledgeGraph({
     void fetch(`/api/files/knowledge-graph?${params.toString()}`, { headers: authHeaders() })
       .then(async (res) => {
         const body = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(body.error || `그래프를 불러오지 못했습니다 (${res.status})`);
+        if (!res.ok) throw new Error(body.error || t('knowledgeGraph.loadFailedStatus', { status: res.status }));
         return body as GraphResponse;
       })
       .then((body) => {
@@ -143,10 +145,10 @@ export function WorkspaceKnowledgeGraph({
         const firstConnected = body.nodes.find((node) => node.degree > 0 && !node.unresolved);
         setSelectedId(firstConnected?.id || body.nodes[0]?.id || null);
       })
-      .catch((err) => { if (!cancelled) setError(err instanceof Error ? err.message : '그래프를 불러오지 못했습니다'); })
+      .catch((err) => { if (!cancelled) setError(err instanceof Error ? err.message : t('knowledgeGraph.loadFailed')); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [rootPath]);
+  }, [rootPath, t]);
 
   const selectedNode = useMemo(() => data?.nodes.find((node) => node.id === selectedId) || null, [data, selectedId]);
   const selectedConnections = useMemo(() => {
@@ -159,9 +161,7 @@ export function WorkspaceKnowledgeGraph({
     }
     return { incoming, outgoing };
   }, [data, selectedId]);
-  const selectedKindLabel = selectedNode?.unresolved ? '미작성 링크' : ({
-    decision: '결정', research: '리서치', record: '기록', final: '최종', source: '원본', guide: '가이드', system: '시스템', unknown: '문서',
-  } as Record<string, string>)[selectedNode?.inferredType || 'unknown'] || '문서';
+  const selectedKindLabel = t(`knowledgeGraph.nodeKind.${selectedNode?.unresolved ? 'unresolved' : selectedNode?.inferredType || 'unknown'}`);
   const graphData = useMemo(() => {
     if (!data) return { nodes: [] as GraphNode[], links: [] as GraphEdge[] };
     const q = query.trim().toLocaleLowerCase();
@@ -278,38 +278,38 @@ export function WorkspaceKnowledgeGraph({
       detail: {
         projectId,
         prompt,
-        sessionName: creating ? '연결 문서 만들기' : '연결 문서 업그레이드',
-        label: '문서',
+        sessionName: creating ? t('knowledgeGraph.createConnectedDocs') : t('knowledgeGraph.upgradeConnectedDocs'),
+        label: t('knowledgeGraph.documentLabel'),
       },
     }));
   };
 
-  if (graphKind === 'activity') return <div className="relative h-full"><div className="absolute left-4 top-4 z-20 flex rounded-lg border border-surface-700 bg-surface-900/95 p-0.5"><button type="button" onClick={() => setGraphKind('documents')} className="rounded-md px-3 py-1.5 text-xs font-semibold text-surface-400 hover:text-surface-100">문서 관계</button><button type="button" className="tone-accent tone-action rounded-md px-3 py-1.5 text-xs font-semibold">작업 흔적</button></div><ProjectActivityGraph projectId={projectId} onOpenFile={onOpenFile} onOpenSession={onOpenSession} /></div>;
-  if (loading) return <div className="grid h-full min-h-[560px] place-items-center text-sm text-surface-500">프로젝트 연결 지도를 만드는 중…</div>;
+  if (graphKind === 'activity') return <div className="relative h-full"><div className="absolute left-4 top-4 z-20 flex rounded-lg border border-surface-700 bg-surface-900/95 p-0.5"><button type="button" onClick={() => setGraphKind('documents')} className="rounded-md px-3 py-1.5 text-xs font-semibold text-surface-400 hover:text-surface-100">{t('knowledgeGraph.documentRelations')}</button><button type="button" className="tone-accent tone-action rounded-md px-3 py-1.5 text-xs font-semibold">{t('knowledgeGraph.activity')}</button></div><ProjectActivityGraph projectId={projectId} onOpenFile={onOpenFile} onOpenSession={onOpenSession} /></div>;
+  if (loading) return <div className="grid h-full min-h-[560px] place-items-center text-sm text-surface-500">{t('knowledgeGraph.loading')}</div>;
   if (error) return <div className="grid h-full min-h-[560px] place-items-center px-6 text-center text-sm text-red-400">{error}</div>;
   if (!data) return null;
 
   return (
     <div className="relative h-full min-h-[560px] overflow-hidden bg-surface-950">
       <div className="absolute left-4 right-4 top-4 z-10 flex flex-wrap items-center gap-2 rounded-2xl border border-surface-700 bg-surface-900/95 p-2 shadow-xl backdrop-blur">
-        <div className="flex rounded-lg border border-surface-700 p-0.5"><button type="button" className="tone-accent tone-action rounded-md px-3 py-1.5 text-xs font-semibold">문서 관계</button><button type="button" onClick={() => setGraphKind('activity')} className="rounded-md px-3 py-1.5 text-xs font-semibold text-surface-400 hover:text-surface-100">작업 흔적</button></div>
+        <div className="flex rounded-lg border border-surface-700 p-0.5"><button type="button" className="tone-accent tone-action rounded-md px-3 py-1.5 text-xs font-semibold">{t('knowledgeGraph.documentRelations')}</button><button type="button" onClick={() => setGraphKind('activity')} className="rounded-md px-3 py-1.5 text-xs font-semibold text-surface-400 hover:text-surface-100">{t('knowledgeGraph.activity')}</button></div>
         <div className="flex rounded-lg border border-surface-700 p-0.5">
-          <button type="button" onClick={() => setMode('global')} className={`rounded-md px-3 py-1.5 text-xs font-semibold ${mode === 'global' ? 'tone-accent tone-action' : 'text-surface-400 hover:text-surface-100'}`}>전체</button>
-          <button type="button" disabled={!selectedId} onClick={() => setMode('local')} className={`rounded-md px-3 py-1.5 text-xs font-semibold ${mode === 'local' ? 'tone-accent tone-action' : 'text-surface-400 hover:text-surface-100 disabled:opacity-40'}`}>주변</button>
+          <button type="button" onClick={() => setMode('global')} className={`rounded-md px-3 py-1.5 text-xs font-semibold ${mode === 'global' ? 'tone-accent tone-action' : 'text-surface-400 hover:text-surface-100'}`}>{t('knowledgeGraph.all')}</button>
+          <button type="button" disabled={!selectedId} onClick={() => setMode('local')} className={`rounded-md px-3 py-1.5 text-xs font-semibold ${mode === 'local' ? 'tone-accent tone-action' : 'text-surface-400 hover:text-surface-100 disabled:opacity-40'}`}>{t('knowledgeGraph.nearby')}</button>
         </div>
-        {mode === 'local' && <select value={depth} onChange={(event) => setDepth(Number(event.target.value))} className="rounded-lg border border-surface-700 bg-surface-950 px-2 py-1.5 text-xs text-surface-200"><option value={1}>1단계</option><option value={2}>2단계</option><option value={3}>3단계</option></select>}
-        <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="문서 제목·경로 검색" className="min-w-48 flex-1 rounded-lg border border-surface-700 bg-surface-950 px-3 py-1.5 text-xs text-surface-100 outline-none placeholder:text-surface-600 focus:border-primary-500" />
-        <label className="flex items-center gap-1.5 text-[11px] text-surface-400"><input type="checkbox" checked={hideOrphans} onChange={(event) => setHideOrphans(event.target.checked)} />고립 숨김</label>
-        <label className="flex items-center gap-1.5 text-[11px] text-surface-400"><input type="checkbox" checked={showUnresolved} onChange={(event) => setShowUnresolved(event.target.checked)} />미작성 표시</label>
-        <span className="text-[11px] text-surface-500">{graphData.nodes.length} 노드 · {graphData.links.length} 연결 · {layoutSettled ? '배치 고정' : '정리 중'}</span>
-        <button type="button" onClick={() => startConnectedDocsSession(data.summary.edges > 0 ? 'upgrade' : 'create')} className="rounded-lg border border-primary-500/35 bg-primary-500/10 px-2.5 py-1.5 text-[11px] font-semibold text-primary-700 hover:bg-primary-500/15 dark:text-primary-200">{data.summary.edges > 0 ? '연결 문서 업그레이드' : '연결 문서 만들기'}</button>
-        <button type="button" onClick={() => { setLayoutSettled(false); graphRef.current?.d3ReheatSimulation(); }} className="rounded-lg border border-surface-700 px-2.5 py-1.5 text-[11px] font-semibold text-surface-300 hover:bg-surface-800 hover:text-surface-100">배치 다시 정리</button>
+        {mode === 'local' && <select value={depth} onChange={(event) => setDepth(Number(event.target.value))} className="rounded-lg border border-surface-700 bg-surface-950 px-2 py-1.5 text-xs text-surface-200"><option value={1}>{t('knowledgeGraph.depth',{count:1})}</option><option value={2}>{t('knowledgeGraph.depth',{count:2})}</option><option value={3}>{t('knowledgeGraph.depth',{count:3})}</option></select>}
+        <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t('knowledgeGraph.searchPlaceholder')} className="min-w-48 flex-1 rounded-lg border border-surface-700 bg-surface-950 px-3 py-1.5 text-xs text-surface-100 outline-none placeholder:text-surface-600 focus:border-primary-500" />
+        <label className="flex items-center gap-1.5 text-[11px] text-surface-400"><input type="checkbox" checked={hideOrphans} onChange={(event) => setHideOrphans(event.target.checked)} />{t('knowledgeGraph.hideOrphans')}</label>
+        <label className="flex items-center gap-1.5 text-[11px] text-surface-400"><input type="checkbox" checked={showUnresolved} onChange={(event) => setShowUnresolved(event.target.checked)} />{t('knowledgeGraph.showUnresolved')}</label>
+        <span className="text-[11px] text-surface-500">{t('knowledgeGraph.summary',{nodes:graphData.nodes.length,links:graphData.links.length,status:layoutSettled?t('knowledgeGraph.settled'):t('knowledgeGraph.settling')})}</span>
+        <button type="button" onClick={() => startConnectedDocsSession(data.summary.edges > 0 ? 'upgrade' : 'create')} className="rounded-lg border border-primary-500/35 bg-primary-500/10 px-2.5 py-1.5 text-[11px] font-semibold text-primary-700 hover:bg-primary-500/15 dark:text-primary-200">{data.summary.edges > 0?t('knowledgeGraph.upgradeConnectedDocs'):t('knowledgeGraph.createConnectedDocs')}</button>
+        <button type="button" onClick={() => { setLayoutSettled(false); graphRef.current?.d3ReheatSimulation(); }} className="rounded-lg border border-surface-700 px-2.5 py-1.5 text-[11px] font-semibold text-surface-300 hover:bg-surface-800 hover:text-surface-100">{t('knowledgeGraph.relayout')}</button>
       </div>
 
       <div ref={containerRef} className="h-full min-h-[560px] w-full" />
 
       <div className="pointer-events-none absolute bottom-4 left-4 z-10 rounded-xl border border-surface-800 bg-surface-900/90 px-3 py-2 text-[10px] text-surface-500 backdrop-blur">
-        주황 결정 · 보라 리서치 · 초록 최종 · 파랑 근거 연결 · 회색 테두리 미작성
+        {t('knowledgeGraph.legend')}
       </div>
 
       {selectedNode && (
@@ -318,12 +318,12 @@ export function WorkspaceKnowledgeGraph({
             <div className="min-w-0">
               <div className="truncate text-sm font-semibold text-surface-100">{selectedNode.label}</div>
               <div className="mt-1 break-all font-mono text-[10px] text-surface-500">{selectedNode.path}</div>
-              <div className="mt-2 text-[11px] text-surface-400">{selectedKindLabel} · 들어오는 연결 {selectedConnections.incoming} · 나가는 연결 {selectedConnections.outgoing}</div>
+              <div className="mt-2 text-[11px] text-surface-400">{t('knowledgeGraph.selectedSummary',{kind:selectedKindLabel,incoming:selectedConnections.incoming,outgoing:selectedConnections.outgoing})}</div>
             </div>
           </div>
           <div className="mt-3 flex gap-2">
-            {!selectedNode.unresolved && <button type="button" onClick={() => onOpenFile(`${rootPath}/${selectedNode.path}`)} className="tone-accent tone-action rounded-lg px-3 py-2 text-xs font-semibold">문서 열기</button>}
-            <button type="button" onClick={() => { setMode('local'); setDepth(1); }} className="rounded-lg border border-surface-700 px-3 py-2 text-xs font-semibold text-surface-300 hover:bg-surface-800 hover:text-surface-100">이 문서 중심으로 보기</button>
+            {!selectedNode.unresolved && <button type="button" onClick={() => onOpenFile(`${rootPath}/${selectedNode.path}`)} className="tone-accent tone-action rounded-lg px-3 py-2 text-xs font-semibold">{t('knowledgeGraph.openDocument')}</button>}
+            <button type="button" onClick={() => { setMode('local'); setDepth(1); }} className="rounded-lg border border-surface-700 px-3 py-2 text-xs font-semibold text-surface-300 hover:bg-surface-800 hover:text-surface-100">{t('knowledgeGraph.focusDocument')}</button>
           </div>
         </aside>
       )}

@@ -16,9 +16,10 @@ describe('AI team home and ACL', () => {
   });
 
   it('shows team state, direct creation, helper consultation and per-agent usage', () => {
-    for (const copy of ['AI 팀 운영', '지금 확인할 팀 상태', '다음 직급 진행 중', '14일 미사용', '새 AI 팀원 만들기', 'Tower 사용·자동화 상담하기', '최근 7일 turns', '세션 {sessionCount}', 'turns']) {
-      expect(home).toContain(copy);
+    for (const key of ['aiTeamHomeTitle', 'aiTeamHomeDescription', 'aiTeamHelper', 'aiTeammateCount', 'aiTeammateList']) {
+      expect(home).toContain(`t('${key}')`);
     }
+    expect(home).toContain('turns');
     expect(home).not.toContain('AI 인재팀');
   });
 });

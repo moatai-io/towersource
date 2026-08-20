@@ -26,6 +26,10 @@ export interface RemoteWorkbenchWorkerServerOptions {
   workerId: string;
   token: string;
   projects: Record<string, string>;
+  /** Operator-owned host roots projected at fixed /workspace paths. Requests cannot add mounts. */
+  projections?: Record<string, string>;
+  /** Non-secret commit attribution for this dedicated Tower development Workstation only. */
+  operatorGitIdentity?: { name: string; email: string };
 }
 
 type WorkerEvent =
@@ -186,10 +190,21 @@ function resolveWorkspaceRoot(projectRoot: string, workspaceId?: string): string
   return workspaceRoot;
 }
 
-function resolveCwd(projectRoot: string, requested?: string): string {
+function resolveCwd(projectRoot: string, requested?: string, projections: Record<string, string> = {}): string {
   const root = path.resolve(projectRoot);
   if (!requested || requested === '/workspace') return root;
-  if (!requested.startsWith('/workspace/')) throw new Error('cwd must be under /workspace');
+  if (!requested.startsWith('/workspace/')) throw new Error('cwd must use a registered /workspace path');
+  const projection = Object.entries(projections)
+    .sort(([a], [b]) => b.length - a.length)
+    .find(([target]) => requested === target || requested.startsWith(`${target}/`));
+  if (projection) {
+    const [target, source] = projection;
+    const sourceRoot = path.resolve(source);
+    const suffix = requested.slice(target.length).replace(/^\/+/, '');
+    const resolved = path.resolve(sourceRoot, suffix);
+    if (resolved !== sourceRoot && !resolved.startsWith(`${sourceRoot}${path.sep}`)) throw new Error('cwd escapes registered projection');
+    return resolved;
+  }
   const resolved = path.resolve(root, requested.slice('/workspace/'.length));
   if (resolved !== root && !resolved.startsWith(`${root}${path.sep}`)) throw new Error('cwd escapes project root');
   return resolved;
@@ -225,12 +240,25 @@ async function collectArtifactManifest(
   return manifest;
 }
 
-function runtimeContext(spec: RemoteWorkbenchJobSpec, cwd: string): RuntimeContext {
+function runtimeContext(spec: RemoteWorkbenchJobSpec, cwd: string, projectRoot: string, projections: Record<string, string>): RuntimeContext {
+  const projection = Object.entries(projections)
+    .sort(([, a], [, b]) => path.resolve(b).length - path.resolve(a).length)
+    .find(([, source]) => cwd === path.resolve(source) || cwd.startsWith(`${path.resolve(source)}${path.sep}`));
+  const logicalCwd = projection
+    ? `${projection[0]}${cwd === path.resolve(projection[1]) ? '' : `/${path.relative(path.resolve(projection[1]), cwd).split(path.sep).join('/')}`}`
+    : cwd === projectRoot ? '/workspace' : `/workspace/${path.relative(projectRoot, cwd).split(path.sep).join('/')}`;
   return {
     runtime: 'workbench-worker',
+    workstation: {
+      shell: 'native',
+      persistent_home: true,
+      host_tools: 'available',
+      default_scope: 'current-project',
+      guidance: 'This is the Project Workstation native shell. Start in the current Project and normally keep work there; use host tools or leave the Project directory when the task requires it. Warn before broad host changes and confirm destructive or external actions.',
+    },
     project_id: spec.projectId,
     project_name: spec.projectId,
-    cwd,
+    cwd: logicalCwd,
     mount: 'project rw',
     services_running: [],
     box_limits: { memory_mb: 0, cpu: 0, idle_stop_minutes: 0 },
@@ -339,8 +367,10 @@ async function executeRun(
   spec: RemoteWorkbenchJobSpec,
   projectRoot: string,
   credentials: Record<string, string>,
+  projections: Record<string, string> = {},
+  operatorGitIdentity?: { name: string; email: string },
 ): Promise<void> {
-  const cwd = resolveCwd(projectRoot, spec.cwd);
+  const cwd = resolveCwd(projectRoot, spec.cwd, projections);
   const started = Date.now();
   let stdout = '';
   let stderr = '';
@@ -357,38 +387,31 @@ async function executeRun(
     catch { delete processCredentials.SSL_CERT_FILE; }
   }
   const workerPath = process.env.PATH || '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin';
-  const sandboxPath = (value: string): string => value === projectRoot
-    ? '/workspace'
-    : value.startsWith(`${projectRoot}${path.sep}`)
-      ? `/workspace/${path.relative(projectRoot, value).split(path.sep).join('/')}`
-      : value;
-  const sandboxGwsEnv = Object.fromEntries(Object.entries(gws.env).map(([key, value]) => [key, sandboxPath(value)]));
-  const commandEnv = { PATH: workerPath, HOME: '/workspace', LANG: 'C.UTF-8', TOWER_REMOTE_WORKER: '1', ...processCredentials, ...sandboxGwsEnv };
-  const bwrap = process.env.TOWER_WORKER_BWRAP_BIN?.trim();
-  if (!bwrap || !path.isAbsolute(bwrap)) throw new Error('WORKER_BWRAP_REQUIRED');
-  const sandboxCwd = cwd === projectRoot ? '/workspace' : `/workspace/${path.relative(projectRoot, cwd).split(path.sep).join('/')}`;
-  const bwrapArgs = [
-    '--die-with-parent', '--new-session', '--unshare-user-try', '--unshare-ipc', '--unshare-uts', '--unshare-cgroup-try',
-    '--ro-bind', '/nix/store', '/nix/store',
-    '--ro-bind-try', '/bin', '/bin', '--ro-bind-try', '/usr', '/usr',
-    '--ro-bind-try', '/lib', '/lib', '--ro-bind-try', '/lib64', '/lib64',
-    '--proc', '/proc', '--dev', '/dev', '--tmpfs', '/tmp',
-    '--dir', '/etc', '--ro-bind-try', '/etc/resolv.conf', '/etc/resolv.conf',
-    '--ro-bind-try', '/etc/hosts', '/etc/hosts', '--ro-bind-try', '/etc/nsswitch.conf', '/etc/nsswitch.conf',
-    '--ro-bind-try', '/etc/passwd', '/etc/passwd', '--ro-bind-try', '/etc/group', '/etc/group',
-    '--ro-bind-try', '/etc/ssl', '/etc/ssl', '--ro-bind-try', '/etc/localtime', '/etc/localtime',
-    '--bind', projectRoot, '/workspace', '--chdir', sandboxCwd,
-    '--setenv', 'PATH', commandEnv.PATH, '--setenv', 'HOME', commandEnv.HOME,
-    '--setenv', 'LANG', commandEnv.LANG, '--setenv', 'TOWER_REMOTE_WORKER', commandEnv.TOWER_REMOTE_WORKER,
-  ];
-  for (const [key, value] of Object.entries(commandEnv)) {
-    if (['PATH', 'HOME', 'LANG', 'TOWER_REMOTE_WORKER'].includes(key)) continue;
-    bwrapArgs.push('--setenv', key, value);
+  const inheritedEnv: NodeJS.ProcessEnv = {};
+  for (const key of ['LANG', 'LC_ALL', 'LC_CTYPE', 'TERM', 'COLORTERM', 'TZ', 'TMPDIR', 'SSL_CERT_FILE'] as const) {
+    const value = process.env[key];
+    if (value) inheritedEnv[key] = value;
   }
-  bwrapArgs.push('sh', '-c', spec.command);
-  const child = spawn('setsid', ['--wait', bwrap, ...bwrapArgs], {
-    cwd: projectRoot,
-    env: { PATH: workerPath, LANG: 'C.UTF-8' },
+  const commandEnv: NodeJS.ProcessEnv = {
+    ...inheritedEnv,
+    PATH: workerPath,
+    HOME: process.env.HOME || projectRoot,
+    LANG: inheritedEnv.LANG || 'C.UTF-8',
+    TOWER_REMOTE_WORKER: '1',
+    TOWER_WORKSTATION_SHELL: 'native',
+    TOWER_PROJECT_ROOT: projectRoot,
+    ...processCredentials,
+    ...(operatorGitIdentity ? {
+      GIT_AUTHOR_NAME: operatorGitIdentity.name,
+      GIT_AUTHOR_EMAIL: operatorGitIdentity.email,
+      GIT_COMMITTER_NAME: operatorGitIdentity.name,
+      GIT_COMMITTER_EMAIL: operatorGitIdentity.email,
+    } : {}),
+    ...gws.env,
+  };
+  const child = spawn('setsid', ['--wait', 'sh', '-c', spec.command], {
+    cwd,
+    env: commandEnv,
     stdio: ['ignore', 'pipe', 'pipe'],
   });
 
@@ -436,7 +459,7 @@ async function executeRun(
       duration_ms: Date.now() - started,
       timed_out: timedOut,
       oom_killed: !cancelled && exitCode === 137,
-      runtime_context: runtimeContext(spec, cwd),
+      runtime_context: runtimeContext(spec, cwd, projectRoot, projections),
     };
     const artifacts = execResult.exit_code === 0 ? await collectArtifactManifest(projectRoot, spec) : [];
     jsonLine(response, {
@@ -569,7 +592,7 @@ export function createRemoteWorkbenchWorkerServer(options: RemoteWorkbenchWorker
       const workspaceStat = await fs.stat(workspaceRoot);
       if (!workspaceStat.isDirectory()) throw new Error('prepared workspace is not a directory');
       response.statusCode = 200;
-      await executeRun(request, response, body.spec, workspaceRoot, credentials as Record<string, string>);
+      await executeRun(request, response, body.spec, workspaceRoot, credentials as Record<string, string>, options.projections, options.operatorGitIdentity);
     } catch (error) {
       if (!response.headersSent) response.statusCode = 400;
       if (!response.writableEnded && !response.destroyed) {

@@ -10,6 +10,7 @@
  * (older browsers, programmatic drops).
  */
 
+import i18n from '../i18n';
 import { useProjectStore } from '../stores/project-store';
 import { useUploadStore } from '../stores/upload-store';
 import { calculateUploadPercent, type UploadProgressSnapshot } from './upload-with-progress';
@@ -135,7 +136,7 @@ async function uploadDroppedFilesMultipart(
   }
 
   const totalBytes = items.reduce((sum, item) => sum + item.file.size, 0);
-  const currentFileName = items.length === 1 ? items[0].relativePath : `${items[0].relativePath} 외 ${items.length - 1}개`;
+  const currentFileName = items.length === 1 ? items[0].relativePath : i18n.t('uploadNotice.additionalFiles', { ns: 'common', name: items[0].relativePath, count: items.length - 1 });
   const res = await postFormDataWithProgress('/api/files/upload', formData, {
     totalBytes,
     totalFiles: items.length,
@@ -333,9 +334,9 @@ function postFormDataWithProgress(
     xhr.addEventListener('load', () => {
       const data = xhr.response ?? (() => { try { return JSON.parse(xhr.responseText); } catch { return {}; } })();
       if (xhr.status >= 200 && xhr.status < 300) resolve(data);
-      else reject(new Error(data?.error || (xhr.status === 413 ? '파일이 업로드 허용 크기를 초과했습니다.' : `Upload failed (${xhr.status})`)));
+      else reject(new Error(data?.error || (xhr.status === 413 ? i18n.t('uploadNotice.tooLarge', { ns: 'common' }) : `Upload failed (${xhr.status})`)));
     });
-    xhr.addEventListener('error', () => reject(new Error('네트워크 연결로 파일을 업로드하지 못했습니다.')));
+    xhr.addEventListener('error', () => reject(new Error(i18n.t('uploadNotice.networkFailed', { ns: 'common' }))));
     xhr.send(formData);
   });
 }

@@ -120,8 +120,8 @@ describe('AI Service Preview pinned Harness runtime', () => {
     })());
 
     await expect(runAIServicePreview({ serviceId: 'svc-1', deploymentId: 'dep-1', conversationId: 'conv-1', prompt: '질문', userId: 7 }))
-      .rejects.toThrow('Knowledge citation validation failed: knowledge/guide.md#L4-L8');
-    expect(markAgentTurnCheckpoint).toHaveBeenLastCalledWith(expect.any(String), expect.objectContaining({ status: 'failed', error: expect.stringContaining('knowledge/guide.md#L4-L8') }));
+      .rejects.toMatchObject({ code: 'AI_SERVICE_KNOWLEDGE_CITATION_INVALID', publicMessage: '답변의 출처를 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.', message: expect.stringContaining('knowledge/guide.md#L4-L8') });
+    expect(markAgentTurnCheckpoint).toHaveBeenLastCalledWith(expect.any(String), expect.objectContaining({ status: 'failed', error: expect.stringContaining('serviceId=svc-1 deploymentId=dep-1 conversationId=conv-1') }));
     expect(recordPassedRuntimeEvaluation).not.toHaveBeenCalled();
   });
 

@@ -13,7 +13,7 @@ const overview = fs.readFileSync(
 describe("AI teammate home surface", () => {
   it("presents the teammate work home without legacy project-home sections", () => {
     expect(source).toContain("<AgentHomeOverview");
-    expect(source).toContain('aria-label="AI 팀원 홈 보기"');
+    expect(source).toContain("aria-label={t('projectHome.navigationLabel')}");
     for (const removed of [
       "AI Teammate Index",
       "Project Guidance",
@@ -27,12 +27,12 @@ describe("AI teammate home surface", () => {
 
   it("centers shared work, growth, usage, skills, and conversations without a separate Approval result surface", () => {
     for (const value of [
-      "함께 고민한 업무",
-      "성장",
-      "최근 30일 활용",
-      "Skill 역량",
-      "최근 대화",
-      "협업 멤버별 활용",
+      "agentHome.sharedWork",
+      "agentHome.growth",
+      "agentHome.recentUsage",
+      "agentHome.skillCapability",
+      "agentHome.recentConversations",
+      "agentHome.memberUsage",
     ])
       expect(overview).toContain(value);
     expect(overview).not.toContain("최근 결과");

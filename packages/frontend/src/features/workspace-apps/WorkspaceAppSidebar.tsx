@@ -1,4 +1,5 @@
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 import type { WorkspaceAppMenuItem } from './workspace-app-definition';
 
 export function WorkspaceAppSidebar({
@@ -12,6 +13,7 @@ export function WorkspaceAppSidebar({
   activeId: string;
   onSelect: (id: string) => void;
 }) {
+  const { t } = useTranslation('common');
   return (
     <aside className="rounded-xl border border-slate-200 bg-white p-2 shadow-sm dark:border-surface-800 dark:bg-surface-900/70">
       <div className="px-2 pb-2 text-[11px] font-bold uppercase tracking-[0.12em] text-slate-500 dark:text-surface-500">{title}</div>
@@ -27,7 +29,7 @@ export function WorkspaceAppSidebar({
               : 'border-transparent text-slate-600 hover:border-slate-200 hover:bg-slate-50 hover:text-slate-950 dark:text-surface-400 dark:hover:border-surface-800 dark:hover:bg-surface-850/70 dark:hover:text-surface-100'}`}
           >
             <span>{item.label}</span>
-            {item.live && <span className="rounded-full bg-emerald-100 px-1.5 py-0.5 text-[10px] font-bold text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-200">연결됨</span>}
+            {item.live && <span className="rounded-full bg-emerald-100 px-1.5 py-0.5 text-[10px] font-bold text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-200">{t('workspaceApps.connected')}</span>}
           </button>
         );
       })}

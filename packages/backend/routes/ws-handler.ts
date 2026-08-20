@@ -3155,7 +3155,20 @@ async function resumeInterruptedDetails(rawDetails: InterruptedTurnDetail[]) {
 
         const engineSessionId = savedClaudeSessionId || getEngineSessionId(dbSession) || undefined;
         if (!engineSessionId) {
-          console.log(`[auto-resume] session=${sessionId.slice(0, 8)} has no engineSessionId for engine=${engineName} — skipping`);
+          const error = `Automatic ${engineName} recovery cannot continue because the native engine session identity is missing.`;
+          console.warn(`[auto-resume] stop reason=missing_engine_session_id session=${sessionId.slice(0, 8)} engine=${engineName}`);
+          if (userMessageId) {
+            await markAgentTurnCheckpoint(userMessageId, {
+              status: 'needs_attention',
+              sessionId,
+              engine: engineName,
+              model: autoResumeModel || null,
+              engineSessionId: null,
+              error,
+              failureClass: 'missing_engine_session_id',
+              forceNeedsAttention: true,
+            });
+          }
           return;
         }
         if (userMessageId && await rootTurnAlreadyHasTerminalAssistantText(sessionId, userMessageId)) {

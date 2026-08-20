@@ -4,7 +4,7 @@ const queryOne = vi.fn();
 const execute = vi.fn();
 vi.mock('../../db/pg-repo.js', () => ({ queryOne, execute }));
 
-const { claimDeliveryById, claimNextDelivery, quarantineClaimsFromPreviousBoot, renewDeliveryClaim, settleClaimedDelivery } = await import('./delivery-lease-store.js');
+const { claimDeliveryById, claimNextDelivery, markClaimedDeliveryStarted, quarantineClaimsFromPreviousBoot, renewDeliveryClaim, settleClaimedDelivery } = await import('./delivery-lease-store.js');
 
 describe('Delivery lease store', () => {
   beforeEach(() => {
@@ -60,6 +60,16 @@ describe('Delivery lease store', () => {
     expect(execute.mock.calls[0][1][3]).toBe(15);
   });
 
+  it('marks a claimed delivery when the recipient turn actually starts', async () => {
+    execute.mockResolvedValueOnce({ changes: 1 });
+    await expect(markClaimedDeliveryStarted({
+      deliveryId: 'delivery-1', ownerToken: 'token-1', ownerBootId: 'boot-1',
+      mode: 'new-turn', recipientRootTurnId: 'turn-1',
+    })).resolves.toBe(true);
+    expect(String(execute.mock.calls[0][0])).toContain("SET state = 'started_turn'");
+    expect(execute.mock.calls[0][1]).toEqual(['delivery-1', 'token-1', 'boot-1', 'new-turn', 'turn-1']);
+  });
+
   it('fences settlement and schedules retry_wait without marking it terminal', async () => {
     execute.mockResolvedValueOnce({ changes: 1 });
     await expect(settleClaimedDelivery({
@@ -70,7 +80,8 @@ describe('Delivery lease store', () => {
     const sql = String(execute.mock.calls[0][0]);
     expect(sql).toContain("next_attempt_at = CASE WHEN $4 = 'retry_wait'");
     expect(sql).toContain("completed_at = CASE WHEN $4 IN ('completed', 'failed', 'needs_attention')");
-    expect(sql).toContain("owner_token = $2 AND owner_boot_id = $3 AND state = 'claimed'");
+    expect(sql).toContain("owner_token = $2 AND owner_boot_id = $3");
+    expect(sql).toContain("state IN ('claimed', 'started_turn', 'processing', 'responded')");
     expect(execute.mock.calls[0][1][9]).toBe(300);
   });
 });

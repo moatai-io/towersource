@@ -1,5 +1,6 @@
 import i18n from '../../i18n';
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 
 interface PersonalUsageProject {
   id: string;
@@ -52,6 +53,7 @@ const HEATMAP_LEGEND_LEVELS = [0, 0.08, 0.22, 0.42, 0.68, 1];
 
 /** Authenticated user's own AI usage; never shows VM-wide budget or another user's rows. */
 export function PersonalUsageSummary() {
+  const { t } = useTranslation('common');
   const [days, setDays] = React.useState(30);
   const [data, setData] = React.useState<PersonalUsageResponse | null>(null);
   const [loading, setLoading] = React.useState(true);
@@ -63,14 +65,14 @@ export function PersonalUsageSummary() {
     try {
       const res = await fetch(`/api/metrics/my-ai-usage?days=${days}`, { headers: authHeaders() });
       const json = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(json.error || '개인 사용량을 불러오지 못했습니다.');
+      if (!res.ok) throw new Error(json.error || t('personalUsage.error.load'));
       setData(json as PersonalUsageResponse);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : '개인 사용량을 불러오지 못했습니다.');
+      setError(cause instanceof Error ? cause.message : t('personalUsage.error.load'));
     } finally {
       setLoading(false);
     }
-  }, [days]);
+  }, [days, t]);
 
   React.useEffect(() => { void load(); }, [load]);
 
@@ -78,56 +80,57 @@ export function PersonalUsageSummary() {
     <section aria-labelledby="personal-usage-title" className="mb-5 overflow-hidden rounded-xl border border-surface-800 bg-surface-900/45">
       <div className="flex flex-wrap items-start justify-between gap-3 border-b border-surface-800 px-4 py-3">
         <div>
-          <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-emerald-300/80">My usage</div>
-          <h2 id="personal-usage-title" className="mt-0.5 text-[17px] font-semibold text-surface-100">내 AI 사용량</h2>
-          <p className="mt-1 text-[12px] leading-5 text-surface-500">내가 만든 세션의 사용량과 공급자가 기록한 추정 비용입니다.</p>
+          <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-emerald-300/80">{t('personalUsage.eyebrow')}</div>
+          <h2 id="personal-usage-title" className="mt-0.5 text-[17px] font-semibold text-surface-100">{t('personalUsage.title')}</h2>
+          <p className="mt-1 text-[12px] leading-5 text-surface-500">{t('personalUsage.description')}</p>
         </div>
         <div className="flex items-center gap-2">
           <select value={days} onChange={(event) => setDays(Number(event.target.value))} className="h-8 rounded-md border border-surface-700 bg-surface-950 px-2 text-[12px] text-surface-300">
-            <option value={7}>최근 7일</option>
-            <option value={30}>최근 30일</option>
-            <option value={90}>최근 90일</option>
+            <option value={7}>{t('personalUsage.recentDays', { count: 7 })}</option>
+            <option value={30}>{t('personalUsage.recentDays', { count: 30 })}</option>
+            <option value={90}>{t('personalUsage.recentDays', { count: 90 })}</option>
           </select>
-          <button type="button" onClick={() => void load()} disabled={loading} className="h-8 rounded-md border border-surface-700 px-2.5 text-[12px] text-surface-300 disabled:opacity-50">{loading ? '…' : '새로고침'}</button>
+          <button type="button" onClick={() => void load()} disabled={loading} className="h-8 rounded-md border border-surface-700 px-2.5 text-[12px] text-surface-300 disabled:opacity-50">{loading ? '…' : t('personalUsage.refresh')}</button>
         </div>
       </div>
 
       {error ? (
-        <div className="flex items-center justify-between gap-3 px-4 py-4 text-[12px] text-amber-200"><span>{error}</span><button type="button" onClick={() => void load()} className="font-semibold">다시 시도</button></div>
+        <div className="flex items-center justify-between gap-3 px-4 py-4 text-[12px] text-amber-200"><span>{error}</span><button type="button" onClick={() => void load()} className="font-semibold">{t('personalUsage.retry')}</button></div>
       ) : (
         <>
           <div className="grid grid-cols-2 divide-x divide-y divide-surface-800 sm:grid-cols-4 sm:divide-y-0">
-            <UsageValue label="세션" value={loading || !data ? '—' : data.totals.sessions.toLocaleString('ko-KR')} />
-            <UsageValue label="대화 턴" value={loading || !data ? '—' : data.totals.turns.toLocaleString('ko-KR')} />
-            <UsageValue label="토큰" value={loading || !data ? '—' : formatTokens(data.totals.totalTokens)} />
-            <UsageValue label="추정 비용" value={loading || !data ? '—' : data.costAvailable ? formatCost(data.totals.costUsd) : '집계 없음'} emphasis={!!data?.costAvailable} />
+            <UsageValue label={t('personalUsage.sessions')} value={loading || !data ? '—' : data.totals.sessions.toLocaleString(i18n.resolvedLanguage || i18n.language)} />
+            <UsageValue label={t('personalUsage.turns')} value={loading || !data ? '—' : data.totals.turns.toLocaleString(i18n.resolvedLanguage || i18n.language)} />
+            <UsageValue label={t('personalUsage.tokens')} value={loading || !data ? '—' : formatTokens(data.totals.totalTokens)} />
+            <UsageValue label={t('personalUsage.estimatedCost')} value={loading || !data ? '—' : data.costAvailable ? formatCost(data.totals.costUsd) : t('personalUsage.unavailable')} emphasis={!!data?.costAvailable} />
           </div>
           {data && data.projects.length > 0 && <PersonalUsageHeatmap data={data} />}
         </>
       )}
-      <div className="border-t border-surface-800 px-4 py-2 text-[10px] leading-4 text-surface-600">비용이 제공되는 모델 호출만 집계합니다. Claude 구독형 실행처럼 공급자 비용이 없는 호출은 ‘집계 없음’으로 표시될 수 있습니다.</div>
+      <div className="border-t border-surface-800 px-4 py-2 text-[10px] leading-4 text-surface-600">{t('personalUsage.costNote')}</div>
     </section>
   );
 }
 
 function PersonalUsageHeatmap({ data }: { data: PersonalUsageResponse }) {
+  const { t } = useTranslation('common');
   const max = Math.max(1, ...data.projects.flatMap((project) => project.values));
   const step = data.days <= 14 ? 1 : data.days <= 30 ? 3 : 7;
   return (
     <div className="overflow-x-auto border-t border-surface-800 px-4 py-3">
       <div className="min-w-[520px]">
         <div className="mb-2 flex items-center justify-between gap-3">
-          <div className="text-[11px] font-semibold text-surface-400">프로젝트별 대화 강도</div>
-          <div className="flex items-center gap-1.5 text-[10px] text-surface-500" aria-label="대화 강도 범례"><span>적게</span><div className="flex items-center gap-1">{HEATMAP_LEGEND_LEVELS.map((ratio) => <span key={ratio} className={`h-3 w-3 rounded-full border transition-transform ${intensityClass(ratio === 0 ? 0 : Math.max(1, max * ratio), max)}`} />)}</div><span className="font-semibold text-cyan-200">많이</span><span className="ml-1 text-surface-600">최대 {max}턴/일</span></div>
+          <div className="text-[11px] font-semibold text-surface-400">{t('personalUsage.heatmapTitle')}</div>
+          <div className="flex items-center gap-1.5 text-[10px] text-surface-500" aria-label={t('personalUsage.legend')}><span>{t('personalUsage.less')}</span><div className="flex items-center gap-1">{HEATMAP_LEGEND_LEVELS.map((ratio) => <span key={ratio} className={`h-3 w-3 rounded-full border transition-transform ${intensityClass(ratio === 0 ? 0 : Math.max(1, max * ratio), max)}`} />)}</div><span className="font-semibold text-cyan-200">{t('personalUsage.more')}</span><span className="ml-1 text-surface-600">{t('personalUsage.maxTurnsPerDay', { count: max })}</span></div>
         </div>
         <div className="grid items-center gap-1" style={{ gridTemplateColumns: `140px repeat(${data.dates.length}, minmax(6px, 1fr)) 38px` }}>
           <span />
           {data.dates.map((date, index) => <span key={date} className="h-4 text-center text-[8px] text-surface-700">{index % step === 0 ? date.slice(5) : ''}</span>)}
-          <span className="text-right text-[9px] text-surface-600">합계</span>
+          <span className="text-right text-[9px] text-surface-600">{t('personalUsage.total')}</span>
           {data.projects.map((project) => (
             <React.Fragment key={project.id}>
               <span className="truncate pr-2 text-[10px] text-surface-400" title={project.name}>{project.name}</span>
-              {project.values.map((value, index) => <span key={`${project.id}:${data.dates[index]}`} title={`${project.name} · ${data.dates[index]} · ${value}턴`} aria-label={`${project.name} ${data.dates[index]} ${value}턴`} className={`h-3.5 rounded-full border transition duration-150 hover:z-10 hover:scale-125 hover:brightness-125 ${intensityClass(value, max)}`} />)}
+              {project.values.map((value, index) => <span key={`${project.id}:${data.dates[index]}`} title={t('personalUsage.cellTitle', { project: project.name, date: data.dates[index], count: value })} aria-label={t('personalUsage.cellAria', { project: project.name, date: data.dates[index], count: value })} className={`h-3.5 rounded-full border transition duration-150 hover:z-10 hover:scale-125 hover:brightness-125 ${intensityClass(value, max)}`} />)}
               <span className="text-right text-[10px] tabular-nums text-surface-400">{project.total}</span>
             </React.Fragment>
           ))}

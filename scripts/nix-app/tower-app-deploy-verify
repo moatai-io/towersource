@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+app_root="${TOWER_APP_ROOT:?TOWER_APP_ROOT is required}"
+exec node "$app_root/lib/tower/scripts/deploy-verify.mjs" "$@"

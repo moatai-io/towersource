@@ -35,10 +35,32 @@ describe('Workbench Worker slot reservation', () => {
     expect(params).toEqual(['p1', ['job'], 15000, 'tower-prod-local-01', 'production', 2]);
   });
 
-  it('reports capacity unavailable when no slot can be atomically reserved', async () => {
+  it('reports generic busy when no unpinned Worker has enough free capacity', async () => {
     vi.mocked(queryOne).mockResolvedValue(undefined);
     await expect(reservePersistedWorkbenchWorkerSlot({ projectId: 'p1', deploymentId: 'production' }))
-      .rejects.toThrow('WORKER_CAPACITY_UNAVAILABLE');
+      .rejects.toThrow('WORKER_BUSY');
+  });
+
+  it.each([
+    [{ ...row, active_runs: 0, max_runs: 1 }, 2, 'WORKSTATION_WORKER_CAPACITY_CONFIG_INVALID'],
+    [{ ...row, active_runs: 5, max_runs: 5 }, 1, 'WORKSTATION_WORKER_BUSY'],
+    [{ ...row, active_runs: 0, draining: true }, 1, 'WORKSTATION_WORKER_DRAINING'],
+    [{ ...row, active_runs: 0, heartbeat_at: new Date(0).toISOString() }, 1, 'WORKSTATION_WORKER_HEARTBEAT_STALE'],
+    [{ ...row, active_runs: 0, project_ids: ['other'] }, 1, 'WORKSTATION_WORKER_PROJECT_SCOPE_MISMATCH'],
+    [{ ...row, active_runs: 0, capabilities: [] }, 1, 'WORKSTATION_WORKER_CAPABILITY_MISSING'],
+    [{ ...row, active_runs: 0, metadata_json: { deploymentId: 'development' } }, 1, 'WORKSTATION_WORKER_DEPLOYMENT_MISMATCH'],
+  ] as const)('diagnoses pinned Worker reservation failures', async (diagnosticRow, weight, expectedCode) => {
+    vi.mocked(queryOne).mockResolvedValueOnce(undefined).mockResolvedValueOnce(diagnosticRow);
+    await expect(reservePersistedWorkbenchWorkerSlot({
+      projectId: 'p1', deploymentId: 'production', requiredCapabilities: ['job'], preferredWorkerId: 'tower-prod-local-01', weight,
+    })).rejects.toThrow(expectedCode);
+  });
+
+  it('reports an unregistered pinned Worker separately', async () => {
+    vi.mocked(queryOne).mockResolvedValueOnce(undefined).mockResolvedValueOnce(undefined);
+    await expect(reservePersistedWorkbenchWorkerSlot({
+      projectId: 'p1', deploymentId: 'production', preferredWorkerId: 'missing-worker',
+    })).rejects.toThrow('WORKSTATION_WORKER_NOT_REGISTERED');
   });
 
   it('returns weighted capacity without decrementing below zero', async () => {

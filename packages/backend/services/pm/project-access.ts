@@ -467,7 +467,7 @@ export async function getUserAccessiblePaths(
  */
 function extractAbsolutePathsFromBashCommand(command: string): string[] {
   const matches = command.match(
-    /(?:^|\s)(\/(?!dev\/null|dev\/stderr|dev\/stdout|tmp\/|usr\/bin\/|bin\/|proc\/|sys\/)[^\s;&|>"']+)/g,
+    /(?:^|\s)(\/(?!\/|dev\/null|dev\/stderr|dev\/stdout|tmp\/|usr\/bin\/|bin\/|proc\/|sys\/)[^\s;&|>"']+)/g,
   );
   if (!matches) return [];
   return matches
@@ -1138,24 +1138,29 @@ export function buildToolGuard(opts: {
     const gpc = ghostProjectCheck(toolName, input);
     if (!gpc.allowed) return gpc;
 
-    // 6. Legacy per-user path enforcement (coarse containment).
-    // Multi-root because member sessions have legacy workspace/projects plus
-    // shared docs/decisions from the active ACL. ProjectPathCheck below remains
-    // the precise ACL and read-only policy gate.
-    if (coarsePathCheck) {
-      const pc = coarsePathCheck(toolName, input);
-      if (!pc.allowed) return pc;
-    }
+    // 6–7. File/path containment remains mandatory for members and for all
+    // structured file tools. A privileged native Bash session is the explicit
+    // host-operation surface: admin/operator may use /etc, systemd, Docker,
+    // package managers, and paths outside the Project when the task requires it.
+    // Damage, secret, ghost-project, confirmation, and audit guards above still run.
+    const privilegedNativeBash = toolName === 'Bash' && isAdminOrOperator(opts.role);
+    if (!privilegedNativeBash) {
+      // Legacy per-user path enforcement (coarse containment).
+      if (coarsePathCheck) {
+        const pc = coarsePathCheck(toolName, input);
+        if (!pc.allowed) return pc;
+      }
 
-    // 7. Project-based path enforcement (user-level accessible paths)
-    if (projectPathCheck) {
-      const ppc = projectPathCheck(toolName, input);
-      if (!ppc.allowed) {
-        if (grantPathCheck) {
-          const grantCheck = grantPathCheck(toolName, input);
-          if (grantCheck.allowed) return { allowed: true };
+      // Project-based path enforcement (user-level accessible paths).
+      if (projectPathCheck) {
+        const ppc = projectPathCheck(toolName, input);
+        if (!ppc.allowed) {
+          if (grantPathCheck) {
+            const grantCheck = grantPathCheck(toolName, input);
+            if (grantCheck.allowed) return { allowed: true };
+          }
+          return ppc;
         }
-        return ppc;
       }
     }
 
@@ -1245,11 +1250,9 @@ export function buildGhostProjectGuard(
       const cmd = input.command;
       const looksMutating = BASH_MUTATOR_RE.test(cmd) || BASH_REDIRECT_RE.test(cmd);
       if (looksMutating) {
-        // Absolute paths
-        const absPaths = cmd.match(
-          /(?:^|\s)(\/(?!dev\/null|dev\/stderr|dev\/stdout|tmp\/|usr\/bin\/|bin\/|proc\/|sys\/)[^\s;&|>"']+)/g,
-        );
-        if (absPaths) candidates.push(...absPaths.map(s => s.trim()));
+        // Absolute paths. Keep this shared with the normal Bash ACL parser so
+        // comments, URLs, slash commands, and host paths receive one contract.
+        candidates.push(...extractAbsolutePathsFromBashCommand(cmd));
         // ~/workspace/... (tilde-prefixed)
         const tildePaths = cmd.match(/(?:^|\s)(~\/workspace\/[^\s;&|>"']+)/g);
         if (tildePaths) candidates.push(...tildePaths.map(s => s.trim()));

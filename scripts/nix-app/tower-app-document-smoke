@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+python3 - <<'PY'
+import json
+import os
+import tempfile
+
+import fitz
+import numpy
+import openpyxl
+import pandas
+import pdfplumber
+from PIL import Image
+
+with tempfile.TemporaryDirectory(prefix="tower-document-smoke-") as temp_dir:
+    pdf_path = os.path.join(temp_dir, "smoke.pdf")
+    doc = fitz.open()
+    page = doc.new_page()
+    page.insert_text((72, 72), "Tower document analysis smoke")
+    doc.save(pdf_path)
+    doc.close()
+
+    rendered = fitz.open(pdf_path)
+    pages = rendered.page_count
+    rendered.close()
+    with pdfplumber.open(pdf_path) as parsed:
+        text = parsed.pages[0].extract_text() or ""
+
+    workbook = openpyxl.Workbook()
+    workbook.active.append(["value", 1])
+    frame = pandas.DataFrame({"value": numpy.array([1, 2])})
+    image = Image.new("RGB", (1, 1), "white")
+
+    if pages != 1 or "Tower document analysis smoke" not in text:
+        raise SystemExit("PDF render/read verification failed")
+    if workbook.active.max_row != 1 or int(frame["value"].sum()) != 3 or image.size != (1, 1):
+        raise SystemExit("spreadsheet/image dependency verification failed")
+
+print(json.dumps({
+    "python": "nix-document-runtime",
+    "pdf_view": "ok",
+    "pdf_read": "ok",
+    "excel": "ok"
+}, separators=(",", ":")))
+PY

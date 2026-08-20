@@ -122,14 +122,14 @@ export function MyProfileModal({
 
         <div className="flex justify-end gap-2 pt-2">
           <button onClick={onClose} className="px-4 py-2 text-[14px] text-gray-400 hover:text-gray-200 transition-colors rounded-md">
-            {t('common:cancel', { defaultValue: 'Cancel' })}
+            {t('common:cancel')}
           </button>
           <button
             onClick={handleSave}
             disabled={saving || !profile}
             className="px-4 py-2 text-[14px] bg-primary-600 hover:bg-primary-500 text-white rounded-md transition-colors font-medium disabled:opacity-40 disabled:cursor-not-allowed"
           >
-            {t('common:save', { defaultValue: 'Save' })}
+            {t('common:save')}
           </button>
         </div>
       </div>
@@ -237,14 +237,14 @@ export function ChangePasswordModal({
 
         <div className="flex justify-end gap-2 pt-2">
           <button type="button" onClick={onClose} className="px-4 py-2 text-[14px] text-gray-400 hover:text-gray-200 transition-colors rounded-md">
-            {t('common:cancel', { defaultValue: 'Cancel' })}
+            {t('common:cancel')}
           </button>
           <button
             type="submit"
             disabled={saving || !oldPassword || !newPassword || !confirmPassword}
             className="px-4 py-2 text-[14px] bg-primary-600 hover:bg-primary-500 text-white rounded-md transition-colors font-medium disabled:opacity-40 disabled:cursor-not-allowed"
           >
-            {saving ? t('common:processing', { defaultValue: 'Processing...' }) : t('changePassword')}
+            {saving ? t('common:processing') : t('changePassword')}
           </button>
         </div>
       </form>

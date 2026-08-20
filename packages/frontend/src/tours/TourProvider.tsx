@@ -1,4 +1,5 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { getTourDefinition, type TourDefinition, type TourScene, type TourStep } from './tourRegistry';
 import { markTourCompleted, markTowerGuideSeen } from './tourState';
 import { useSessionStore } from '../stores/session-store';
@@ -132,6 +133,7 @@ function TourOverlay({
     cardTop = clamp(cardTop, 16, window.innerHeight - 210);
   }
 
+  const { t } = useTranslation('layout');
   const isFirst = stepIndex === 0;
   const isLast = stepIndex >= activeTour.steps.length - 1;
 
@@ -156,7 +158,7 @@ function TourOverlay({
             onClick={endTour}
             className="tower-tour-button tower-tour-button--ghost"
           >
-            닫기
+            {t('tour.close')}
           </button>
           <div className="tower-tour-nav-actions">
             <button
@@ -165,14 +167,14 @@ function TourOverlay({
               disabled={isFirst}
               className="tower-tour-button tower-tour-button--secondary"
             >
-              이전
+              {t('tour.previous')}
             </button>
             <button
               type="button"
               onClick={nextStep}
               className="tower-tour-button tower-tour-button--primary"
             >
-              {isLast ? '완료' : '다음'}
+              {isLast ? t('tour.finish') : t('tour.next')}
             </button>
           </div>
         </div>

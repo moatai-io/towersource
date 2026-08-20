@@ -30,6 +30,13 @@ const sidebar = fs.readFileSync(path.join(__dirname, 'Sidebar.tsx'), 'utf8');
     expect(source).not.toMatch(/(?:text|bg|border)-(?:gray|slate)-/);
   });
 
+  it('renders a credential group as one Connection with field completeness', () => {
+    expect(source).toContain("source: 'profile' | 'credential' | 'group'");
+    expect(source).toContain('fieldCount?: number');
+    expect(source).toContain('connectedFieldCount?: number');
+    expect(source).toContain('필수 필드 ${connection.connectedFieldCount ?? 0}/${connection.fieldCount}');
+  });
+
   it('moves Connection management out of compact Agent settings into the dedicated Credential surface', () => {
     expect(sidebar).toContain("import { AgentCredentialsModal } from './AgentCredentialsModal'");
     expect(sidebar).toContain('<AgentCredentialsModal project={project} onClose={onClose} />');

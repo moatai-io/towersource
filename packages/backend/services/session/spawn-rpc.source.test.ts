@@ -151,7 +151,7 @@ describe('spawn-rpc agent report steering contract', () => {
     expect(SRC).toContain('rootTurnId: userMsgId');
     expect(SRC).toContain('runSendInBackground(req, target, wrappedPrompt, userMsgId, startAck, sendShadow?.deliveryId, durableClaim)');
     expect(SRC).toMatch(/async function runSendInBackground\([\s\S]*rootTurnId: string[\s\S]*rootTurnId,[\s\S]*\};/);
-    expect(SRC).toContain('runWakeInBackground(parentSessionId, parentUserId, injected.prompt, injected.msgId, startAck)');
+    expect(SRC).toContain('runWakeInBackground(parentSessionId, parentUserId, injected.prompt, injected.msgId, startAck, deliveryClaim)');
     expect(SRC).toMatch(/await saveMessage\(childSessionId,[\s\S]*await markAgentTurnCheckpoint\(userMsgId,[\s\S]*status: 'started'[\s\S]*runSessionTurnStream\(\{[\s\S]*sessionId: childSessionId/);
     expect(SRC).toMatch(/async function runSendInBackground[\s\S]*await markAgentTurnCheckpoint\(rootTurnId,[\s\S]*status: 'started'[\s\S]*runSessionTurnStream\(\{[\s\S]*sessionId: req\.targetSessionId/);
     expect(SRC).toMatch(/async function runWakeInBackground[\s\S]*await markAgentTurnCheckpoint\(rootTurnId,[\s\S]*status: 'started'[\s\S]*runSessionTurnStream\(\{[\s\S]*sessionId: parentSessionId/);
@@ -172,11 +172,12 @@ describe('spawn-rpc agent report steering contract', () => {
     expect(SRC).toContain('function hasParentAgentReportForRun');
     expect(SRC).toMatch(/metadata->'agentWake'->>'runId' = \$2/);
     expect(SRC).toMatch(/metadata->'agentReport'->>'runId' = \$2/);
-    expect(SRC).toContain("if (mode === 'none') return { delivered: false, skipped: 'none' }");
     expect(SRC).toContain("if (!input.text.trim()) return { delivered: false, skipped: 'empty_text' }");
     expect(SRC).toContain("return { delivered: false, skipped: 'duplicate' }");
-    expect(SRC).toMatch(/if \(mode === 'wake'\) \{[\s\S]*await injectAndWake/);
-    expect(SRC).toMatch(/\} else \{[\s\S]*await injectIntoCallerDirect/);
+    expect(SRC).toContain("deliveryPolicy: 'wake'");
+    expect(SRC).toContain('Accept the report before attempting the wake');
+    expect(SRC).toMatch(/await injectAndWake\(input\.parentSessionId/);
+    expect(SRC).toContain("state: 'retry_wait'");
   });
 
   it('injects persistent agent reports as compact parent-facing summaries, not full transcripts', () => {

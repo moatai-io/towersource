@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useConfirm } from '../../hooks/useDialog';
 import { isOperatorOrAdmin } from '../../utils/auth';
+import i18n from '../../i18n';
 
 // Legacy manifests still carry these values. The normal Publishing Hub no longer
 // presents them as user-facing sharing modes: every listed artifact uses the
@@ -102,22 +103,17 @@ const API_BASE = '/api/publish';
 const PUBLIC_HOST = window.location.host;
 
 type SortMode = 'date-desc' | 'date-asc' | 'name-asc' | 'name-desc';
-const SORT_LABELS: Record<SortMode, string> = {
-  'date-desc': '최신순',
-  'date-asc':  '오래된순',
-  'name-asc':  '이름 A→Z',
-  'name-desc': '이름 Z→A',
-};
+function sortLabel(mode: SortMode): string {
+  return i18n.t(`publish.sort.${mode}`);
+}
 
 const UNTRACKED_GROUP = '__untracked__';
 const UNTAGGED_GROUP = '__untagged__';
 
 type GroupMode = 'project' | 'tag' | 'none';
-const GROUP_LABELS: Record<GroupMode, string> = {
-  project: '프로젝트',
-  tag:     '태그',
-  none:    '없음',
-};
+function groupLabel(mode: GroupMode): string {
+  return i18n.t(`publish.group.${mode}`);
+}
 
 // Persist UI prefs across sessions so the user doesn't have to re-pick on every open.
 const PREF_KEY = 'publishPanel.prefs.v1';
@@ -229,8 +225,8 @@ export function PublishPanel({ open, onClose, variant = 'modal' }: PublishPanelP
         fetch(`${API_BASE}/sites/tags`, { headers }),
         fetch('/api/shares/external', { headers }),
       ]);
-      if (statusRes.status === 401) throw new Error('Login required');
-      if (!statusRes.ok) throw new Error('Publishing service unavailable');
+      if (statusRes.status === 401) throw new Error(i18n.t('publish.loginRequired'));
+      if (!statusRes.ok) throw new Error(i18n.t('publish.serviceUnavailable'));
       const health = await statusRes.json();
       const info = await infoRes.json().catch(() => null);
       const tagsJson = await tagsRes.json().catch(() => ({ tags: [] }));
@@ -251,7 +247,7 @@ export function PublishPanel({ open, onClose, variant = 'modal' }: PublishPanelP
         }
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load publish status');
+      setError(err instanceof Error ? err.message : i18n.t('publish.loadFailed'));
     } finally {
       setLoading(false);
     }
@@ -265,9 +261,9 @@ export function PublishPanel({ open, onClose, variant = 'modal' }: PublishPanelP
   const archiveOne = useCallback(async (slug: string, siteName: string) => {
     if (!canEditAccess) return;
     const ok = await confirm({
-      title: '사이트 휴지통으로 이동',
-      message: `'${siteName}' 을 휴지통으로 옮깁니다.\n공개 URL 은 즉시 응답하지 않게 되지만, 원본 파일은 보존되어 언제든 복원할 수 있습니다.\n진행할까요?`,
-      confirmLabel: '휴지통으로',
+      title: i18n.t('publish.archive.title'),
+      message: i18n.t('publish.archive.message', { name: siteName }),
+      confirmLabel: i18n.t('publish.archive.confirm'),
     });
     if (!ok) return;
     setAccessBusy(true);
@@ -283,7 +279,7 @@ export function PublishPanel({ open, onClose, variant = 'modal' }: PublishPanelP
       }
       await fetchData();
     } catch (e: any) {
-      setError(`휴지통 이동 실패: ${e?.message || e}`);
+      setError(i18n.t('publish.errors.archive', { error: e?.message || e }));
     } finally {
       setAccessBusy(false);
     }
@@ -304,7 +300,7 @@ export function PublishPanel({ open, onClose, variant = 'modal' }: PublishPanelP
       }
       await fetchData();
     } catch (e: any) {
-      setError(`복원 실패: ${e?.message || e}`);
+      setError(i18n.t('publish.errors.restore', { error: e?.message || e }));
     } finally {
       setAccessBusy(false);
     }
@@ -314,9 +310,9 @@ export function PublishPanel({ open, onClose, variant = 'modal' }: PublishPanelP
     if (!canEditAccess || selectedSlugs.size === 0) return;
     const n = selectedSlugs.size;
     const ok = await confirm({
-      title: '사이트 일괄 휴지통 이동',
-      message: `선택한 ${n}개 사이트를 휴지통으로 옮깁니다.\n원본 파일은 보존되며 복원 가능합니다.\n진행할까요?`,
-      confirmLabel: '휴지통으로',
+      title: i18n.t('publish.archive.bulkTitle'),
+      message: i18n.t('publish.archive.bulkMessage', { count: n }),
+      confirmLabel: i18n.t('publish.archive.confirm'),
     });
     if (!ok) return;
     setAccessBusy(true);
@@ -334,7 +330,7 @@ export function PublishPanel({ open, onClose, variant = 'modal' }: PublishPanelP
       setSelectedSlugs(new Set());
       await fetchData();
     } catch (e: any) {
-      setError(`일괄 휴지통 이동 실패: ${e?.message || e}`);
+      setError(i18n.t('publish.errors.bulkArchive', { error: e?.message || e }));
     } finally {
       setAccessBusy(false);
     }
@@ -356,7 +352,7 @@ export function PublishPanel({ open, onClose, variant = 'modal' }: PublishPanelP
       }
       await fetchData();
     } catch (e: any) {
-      setError(`태그 변경 실패: ${e?.message || e}`);
+      setError(i18n.t('publish.errors.tags', { error: e?.message || e }));
     } finally {
       setAccessBusy(false);
     }
@@ -385,7 +381,7 @@ export function PublishPanel({ open, onClose, variant = 'modal' }: PublishPanelP
     .filter(d => !sites.some(s => s.name === d.name || s.name === d.name.replace(customerPrefix, '')))
     .map<Site>(d => ({
       name: d.name.replace(customerPrefix, ''),
-      description: `Gateway 배포 · ${d.target || 'cloudflare-pages'}`,
+      description: i18n.t('publish.gatewayDeployment', { target: d.target || 'cloudflare-pages' }),
       access: 'public',
       created_at: d.at,
       status: 'live',
@@ -397,7 +393,7 @@ export function PublishPanel({ open, onClose, variant = 'modal' }: PublishPanelP
     .filter(d => !apps.some(a => a.name === d.name || a.name === d.name.replace(customerPrefix, '')))
     .map<App>(d => ({
       name: d.name.replace(customerPrefix, ''),
-      description: `Gateway 배포 · ${d.target || 'azure-container-apps'}`,
+      description: i18n.t('publish.gatewayDeployment', { target: d.target || 'azure-container-apps' }),
       access: 'public',
       created_at: d.at,
       status: 'external',
@@ -488,16 +484,16 @@ export function PublishPanel({ open, onClose, variant = 'modal' }: PublishPanelP
   };
 
   const sharingBadge = (
-    <span className="tone-pill tone-info text-[11px] px-1 py-px rounded shrink-0" title="링크를 가진 사람은 열 수 있으며 검색엔진에는 표시되지 않습니다">
-      링크 공유
+    <span className="tone-pill tone-info text-[11px] px-1 py-px rounded shrink-0" title={i18n.t('publish.linkSharingHint')}>
+      {i18n.t('publish.linkSharing')}
     </span>
   );
 
   const revokeSharedFile = useCallback(async (share: SharedFile) => {
     const ok = await confirm({
-      title: '공유 링크 즉시 내리기',
-      message: `'${share.fileName || share.name}' 공유 링크를 즉시 만료시킵니다.\n링크를 가진 사람도 더 이상 열 수 없습니다. 원본 파일은 삭제되지 않습니다.`,
-      confirmLabel: '내리기',
+      title: i18n.t('publish.share.revokeTitle'),
+      message: i18n.t('publish.share.revokeMessage', { name: share.fileName || share.name }),
+      confirmLabel: i18n.t('publish.share.revoke'),
     });
     if (!ok) return;
     setShareBusyId(share.id);
@@ -513,7 +509,7 @@ export function PublishPanel({ open, onClose, variant = 'modal' }: PublishPanelP
       }
       await fetchData();
     } catch (e: any) {
-      setError(`공유 링크 내리기 실패: ${e?.message || e}`);
+      setError(i18n.t('publish.errors.revokeShare', { error: e?.message || e }));
     } finally {
       setShareBusyId(null);
     }
@@ -556,7 +552,7 @@ export function PublishPanel({ open, onClose, variant = 'modal' }: PublishPanelP
 
   const isEmbedded = variant === 'embedded';
   const panel = (
-      <div data-testid="publishing-hub" aria-label="Publishing Hub" className={`${variant === 'modal' ? 'relative bg-neutral-900 border border-neutral-700 rounded-xl shadow-2xl w-[820px] max-w-[95vw] h-[640px] max-h-[90vh]' : 'publish-panel-embedded h-full w-full bg-neutral-900'} flex flex-col overflow-hidden`}>
+      <div data-testid="publishing-hub" aria-label={i18n.t('publish.hubTitle')} className={`${variant === 'modal' ? 'relative bg-neutral-900 border border-neutral-700 rounded-xl shadow-2xl w-[820px] max-w-[95vw] h-[640px] max-h-[90vh]' : 'publish-panel-embedded h-full w-full bg-neutral-900'} flex flex-col overflow-hidden`}>
         {/* Header */}
         <div className={`${isEmbedded ? 'px-7 py-4' : 'px-5 py-3'} flex items-center justify-between border-b border-neutral-800 shrink-0`}>
           <div className="flex items-center gap-3">
@@ -567,7 +563,7 @@ export function PublishPanel({ open, onClose, variant = 'modal' }: PublishPanelP
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <p className={`${isEmbedded ? 'text-2xl' : 'text-base'} font-semibold text-neutral-100`}>Publishing</p>
+                <p className={`${isEmbedded ? 'text-2xl' : 'text-base'} font-semibold text-neutral-100`}>{i18n.t('publish.title')}</p>
                 {publishInfo && (
                   <span className={`text-[11px] px-1.5 py-0.5 rounded-full font-medium uppercase tracking-wider ${
                     publishInfo.role === 'full' ? 'bg-violet-500/15 text-violet-400 border border-violet-500/30' :
@@ -584,7 +580,7 @@ export function PublishPanel({ open, onClose, variant = 'modal' }: PublishPanelP
               onClick={fetchData}
               disabled={loading}
               className="p-1.5 text-neutral-500 hover:text-neutral-300 transition-colors disabled:opacity-40"
-              title="Refresh"
+              title={i18n.t('publish.refresh')}
             >
               <svg className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
@@ -601,10 +597,10 @@ export function PublishPanel({ open, onClose, variant = 'modal' }: PublishPanelP
         {/* Stats + tab + sort/group controls */}
         <div className={`${isEmbedded ? 'gap-3 px-7 py-3.5' : 'gap-2 px-5 py-2.5'} flex flex-wrap items-center border-b border-neutral-800/50 shrink-0`}>
           {[
-            { label: 'Sites', value: totalSites, color: 'text-blue-400' },
-            { label: 'Apps', value: totalApps, color: 'text-purple-400' },
-            { label: 'Shared', value: totalSharedFiles, color: 'text-sky-400' },
-            { label: 'Online', value: `${appsUp}/${totalApps}`, color: appsUp === totalApps ? 'tone-success tone-text' : 'tone-warning tone-text' },
+            { label: i18n.t('publish.sites'), value: totalSites, color: 'text-blue-400' },
+            { label: i18n.t('publish.apps'), value: totalApps, color: 'text-purple-400' },
+            { label: i18n.t('publish.shared'), value: totalSharedFiles, color: 'text-sky-400' },
+            { label: i18n.t('publish.online'), value: `${appsUp}/${totalApps}`, color: appsUp === totalApps ? 'tone-success tone-text' : 'tone-warning tone-text' },
           ].map(s => (
             <div key={s.label} className={`${isEmbedded ? 'px-4 py-2 rounded-lg' : 'px-2.5 py-1 rounded-md'} flex items-center gap-2 bg-neutral-800/50`}>
               <span className={`${isEmbedded ? 'text-sm' : 'text-[12px]'} text-neutral-400 uppercase tracking-wider`}>{s.label}</span>
@@ -620,7 +616,7 @@ export function PublishPanel({ open, onClose, variant = 'modal' }: PublishPanelP
               {(archivedCount > 0 || prefs.showArchived) && (
                 <button
                   onClick={toggleShowArchived}
-                  title={prefs.showArchived ? '휴지통 항목 숨기기' : '휴지통 항목 함께 보기'}
+                  title={prefs.showArchived ? i18n.t('publish.hideTrash') : i18n.t('publish.showTrash')}
                   className={`flex items-center gap-1 px-2 py-1 text-[13px] rounded-md border transition-colors ${
                     prefs.showArchived
                       ? 'bg-neutral-700 text-neutral-200 border-neutral-500'
@@ -630,7 +626,7 @@ export function PublishPanel({ open, onClose, variant = 'modal' }: PublishPanelP
                   <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M1 7h22M9 7V4a1 1 0 011-1h4a1 1 0 011 1v3" />
                   </svg>
-                  <span>휴지통</span>
+                  <span>{i18n.t('publish.trash')}</span>
                   <span className="text-[11px] opacity-70">{archivedCount}</span>
                 </button>
               )}
@@ -640,10 +636,10 @@ export function PublishPanel({ open, onClose, variant = 'modal' }: PublishPanelP
                 value={prefs.groupBy}
                 onChange={(e) => setGroupBy(e.target.value as GroupMode)}
                 className="px-2 py-1 text-[13px] bg-neutral-800/60 text-neutral-300 border border-neutral-700 rounded-md hover:border-neutral-600 focus:outline-none focus:border-primary-500/40 cursor-pointer"
-                title="그룹화 기준"
+                title={i18n.t('publish.groupBy')}
               >
-                {(Object.keys(GROUP_LABELS) as GroupMode[]).map(m => (
-                  <option key={m} value={m}>그룹: {GROUP_LABELS[m]}</option>
+                {(['project', 'tag', 'none'] as GroupMode[]).map(m => (
+                  <option key={m} value={m}>{i18n.t('publish.groupOption', { label: groupLabel(m) })}</option>
                 ))}
               </select>
 
@@ -651,10 +647,10 @@ export function PublishPanel({ open, onClose, variant = 'modal' }: PublishPanelP
                 value={prefs.sort}
                 onChange={(e) => setSort(e.target.value as SortMode)}
                 className="px-2 py-1 text-[13px] bg-neutral-800/60 text-neutral-300 border border-neutral-700 rounded-md hover:border-neutral-600 focus:outline-none focus:border-primary-500/40 cursor-pointer"
-                title="정렬"
+                title={i18n.t('publish.sortBy')}
               >
-                {(Object.keys(SORT_LABELS) as SortMode[]).map(m => (
-                  <option key={m} value={m}>{SORT_LABELS[m]}</option>
+                {(['date-desc', 'date-asc', 'name-asc', 'name-desc'] as SortMode[]).map(m => (
+                  <option key={m} value={m}>{sortLabel(m)}</option>
                 ))}
               </select>
             </>
@@ -664,41 +660,41 @@ export function PublishPanel({ open, onClose, variant = 'modal' }: PublishPanelP
             <button
               onClick={() => setTab('sites')}
               className={`px-2.5 py-1 text-[13px] font-medium rounded transition-colors ${tab === 'sites' ? 'bg-neutral-700 text-white' : 'text-neutral-500 hover:text-neutral-300'}`}
-            >Sites</button>
+            >{i18n.t('publish.sites')}</button>
             <button
               onClick={() => setTab('files')}
               className={`px-2.5 py-1 text-[13px] font-medium rounded transition-colors ${tab === 'files' ? 'bg-neutral-700 text-white' : 'text-neutral-500 hover:text-neutral-300'}`}
-            >Files</button>
+            >{i18n.t('publish.files')}</button>
           </div>
         </div>
 
         {tab === 'sites' && (
           <div className="flex flex-wrap items-center gap-2 px-5 py-2 border-b border-neutral-800/50 shrink-0">
             <p className="text-[12px] text-neutral-400">
-              이 Hub에는 참여 중인 프로젝트의 산출물만 표시됩니다. 게시 링크를 가진 사람은 열 수 있으며 검색엔진에는 표시되지 않습니다.
+              {i18n.t('publish.hubScopeDescription')}
             </p>
             <div className="flex-1" />
             {canEditAccess && selectedSlugs.size > 0 && (
               <>
-                <span className="text-[12px] text-neutral-400">선택 <span className="font-bold text-neutral-200">{selectedSlugs.size}</span>개</span>
+                <span className="text-[12px] text-neutral-400">{i18n.t('publish.selectedCount', { count: selectedSlugs.size })}</span>
                 <button
                   key="bulk-archive"
                   onClick={() => archiveBulk()}
                   disabled={accessBusy}
                   className="flex items-center gap-1 px-2 py-0.5 text-[12px] rounded border bg-red-500/10 text-red-300 border-red-500/30 hover:bg-red-500/20 hover:text-red-200 transition-colors disabled:opacity-40"
-                  title="선택한 사이트를 휴지통으로 (URL 응답 중지, 파일은 보존)"
+                  title={i18n.t('publish.archive.selectedHint')}
                 >
                   <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M1 7h22M9 7V4a1 1 0 011-1h4a1 1 0 011 1v3" />
                   </svg>
-                  휴지통
+                  {i18n.t('publish.trash')}
                 </button>
                 <button
                   onClick={() => setSelectedSlugs(new Set())}
                   disabled={accessBusy}
                   className="text-[12px] text-neutral-500 hover:text-neutral-300 underline underline-offset-2 ml-1"
                 >
-                  선택 해제
+                  {i18n.t('publish.clearSelection')}
                 </button>
               </>
             )}
@@ -710,7 +706,7 @@ export function PublishPanel({ open, onClose, variant = 'modal' }: PublishPanelP
             semantics (matches the AI-friendly "click to narrow" mental model). */}
         {tab === 'sites' && allTags.length > 0 && (
           <div className={`${isEmbedded ? 'gap-2 px-7 py-3' : 'gap-1.5 px-5 py-1.5'} flex flex-wrap items-center border-b border-neutral-800/50 shrink-0`}>
-            <span className={`${isEmbedded ? 'text-sm' : 'text-[12px]'} text-neutral-400 uppercase tracking-wider mr-1`}>태그</span>
+            <span className={`${isEmbedded ? 'text-sm' : 'text-[12px]'} text-neutral-400 uppercase tracking-wider mr-1`}>{i18n.t('publish.tags')}</span>
             {allTags.slice(0, 16).map(({ tag, count }) => {
               const on = tagFilter.has(tag);
               return (
@@ -722,7 +718,7 @@ export function PublishPanel({ open, onClose, variant = 'modal' }: PublishPanelP
                       ? 'bg-violet-500/20 text-violet-200 border-violet-500/40'
                       : 'bg-violet-500/5 text-violet-400/70 border-violet-500/15 hover:text-violet-300 hover:bg-violet-500/10'
                   }`}
-                  title={on ? `${tag} 필터 해제` : `${tag} 만 보기 (다른 태그와 함께 토글 가능)`}
+                  title={on ? i18n.t('publish.disableTagFilter', { tag }) : i18n.t('publish.enableTagFilter', { tag })}
                 >
                   <span>{tag}</span>
                   <span className="text-[11px] opacity-60">{count}</span>
@@ -737,7 +733,7 @@ export function PublishPanel({ open, onClose, variant = 'modal' }: PublishPanelP
                 onClick={() => setTagFilter(new Set())}
                 className="text-[12px] text-neutral-500 hover:text-neutral-300 underline underline-offset-2"
               >
-                태그 해제
+                {i18n.t('publish.clearTags')}
               </button>
             )}
           </div>
@@ -758,7 +754,7 @@ export function PublishPanel({ open, onClose, variant = 'modal' }: PublishPanelP
               </svg>
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
-                  <p className="text-[13px] font-medium text-sky-300">Local Publishing</p>
+                  <p className="text-[13px] font-medium text-sky-300">{i18n.t('publish.localPublishing')}</p>
                   <span className="text-[11px] text-neutral-500">{PUBLIC_HOST}</span>
                 </div>
               </div>
@@ -781,10 +777,10 @@ export function PublishPanel({ open, onClose, variant = 'modal' }: PublishPanelP
                   className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] text-neutral-500 hover:text-neutral-300 transition-colors disabled:opacity-40"
                   title={
                     gatewayStatus?.connected
-                      ? `Gateway 연결됨${gatewayStatus.latencyMs !== undefined ? ` (${gatewayStatus.latencyMs}ms)` : ''}`
+                      ? i18n.t('publish.gatewayConnected', { latency: gatewayStatus.latencyMs !== undefined ? ` (${gatewayStatus.latencyMs}ms)` : '' })
                       : gatewayStatus?.error
-                        ? `Gateway 오류: ${gatewayStatus.error}`
-                        : 'Gateway 상태 확인'
+                        ? i18n.t('publish.gatewayError', { error: gatewayStatus.error })
+                        : i18n.t('publish.gatewayCheck')
                   }
                 >
                   <span className={`inline-block w-1.5 h-1.5 rounded-full ${
@@ -794,7 +790,7 @@ export function PublishPanel({ open, onClose, variant = 'modal' }: PublishPanelP
                         ? 'tone-danger tone-bg'
                         : 'bg-neutral-600'
                   } ${gwLoading ? 'animate-pulse' : ''}`} />
-                  <span>gateway</span>
+                  <span>{i18n.t('publish.gateway')}</span>
                 </button>
               )}
             </div>
@@ -802,22 +798,22 @@ export function PublishPanel({ open, onClose, variant = 'modal' }: PublishPanelP
             {/* Local stats + last deploy — sourced from the same manifest as the header */}
             <div className="flex items-center gap-3 mt-2 pt-2 border-t border-sky-500/10 text-[12px]">
               <div className="flex items-center gap-1.5">
-                <span className="text-neutral-500">Sites</span>
+                <span className="text-neutral-500">{i18n.t('publish.sites')}</span>
                 <span className="font-medium text-sky-300">{totalSites}</span>
               </div>
               <div className="flex items-center gap-1.5">
-                <span className="text-neutral-500">Apps</span>
+                <span className="text-neutral-500">{i18n.t('publish.apps')}</span>
                 <span className="font-medium text-sky-300">{totalApps}</span>
               </div>
               {localLastDeploy && (
                 <>
                   <div className="w-px h-3 bg-sky-500/20" />
                   <div className="flex items-center gap-1.5 min-w-0">
-                    <span className="text-neutral-500">최근</span>
+                    <span className="text-neutral-500">{i18n.t('publish.recent')}</span>
                     <span className="text-sky-400/80 truncate">{localLastDeploy.name}</span>
                     {localLastDeploy.at && (
                       <span className="text-[11px] text-neutral-600 shrink-0">
-                        {new Date(localLastDeploy.at).toLocaleDateString('ko-KR')}
+                        {new Date(localLastDeploy.at).toLocaleDateString(i18n.resolvedLanguage || i18n.language)}
                       </span>
                     )}
                   </div>
@@ -832,8 +828,8 @@ export function PublishPanel({ open, onClose, variant = 'modal' }: PublishPanelP
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2" />
             </svg>
             <div className="flex-1">
-              <p className="text-[13px] text-violet-300">Central Gateway Active</p>
-              <p className="text-[12px] text-violet-400/60">자체 호스팅 서버의 배포 요청을 처리하는 중입니다.</p>
+              <p className="text-[13px] text-violet-300">{i18n.t('publish.centralGatewayActive')}</p>
+              <p className="text-[12px] text-violet-400/60">{i18n.t('publish.gatewayProcessing')}</p>
             </div>
           </div>
         )}
@@ -849,16 +845,16 @@ export function PublishPanel({ open, onClose, variant = 'modal' }: PublishPanelP
               </div>
               <p className="text-base text-neutral-400">{error}</p>
               <button onClick={fetchData} className="px-4 py-2 text-sm bg-neutral-800 hover:bg-neutral-700 rounded-lg text-neutral-300 transition-colors">
-                Retry
+                {i18n.t('publish.retry')}
               </button>
             </div>
           ) : tab === 'sites' ? (
             <div className="space-y-5">
               {/* Sites */}
               <Section
-                title="Sites"
-                hint="Static HTML / Files"
-                emptyText="No sites published yet. Ask Tower to create one!"
+                title={i18n.t('publish.sites')}
+                hint={i18n.t('publish.sitesHint')}
+                emptyText={i18n.t('publish.emptySites')}
                 groups={groupedSites}
                 groupBy={prefs.groupBy !== 'none'}
                 collapsed={prefs.collapsed}
@@ -867,7 +863,7 @@ export function PublishPanel({ open, onClose, variant = 'modal' }: PublishPanelP
                   const site = s as Site;
                   const url = siteUrlFor(site);
                   const justCopied = copiedKey === url;
-                  const isGateway = site.description?.startsWith('Gateway 배포');
+                  const isGateway = site.description?.startsWith(i18n.t('publish.gatewayDeploymentPrefix'));
                   const slugKey = site.slug || site.name;
                   // Gateway-routed sites live on CF/ACA — visibility is governed
                   // by the external platform, not our manifest. Hide the editor
@@ -901,9 +897,9 @@ export function PublishPanel({ open, onClose, variant = 'modal' }: PublishPanelP
 
               {/* Apps */}
               <Section
-                title="Apps"
-                hint="Dynamic Services"
-                emptyText="No apps running yet."
+                title={i18n.t('publish.apps')}
+                hint={i18n.t('publish.appsHint')}
+                emptyText={i18n.t('publish.emptyApps')}
                 groups={groupedApps}
                 groupBy={prefs.groupBy !== 'none'}
                 collapsed={prefs.collapsed}
@@ -912,7 +908,7 @@ export function PublishPanel({ open, onClose, variant = 'modal' }: PublishPanelP
                   const app = a as App;
                   const url = appUrlFor(app);
                   const isExternal = !!app.external_url;
-                  const isGateway = app.description?.startsWith('Gateway 배포');
+                  const isGateway = app.description?.startsWith(i18n.t('publish.gatewayDeploymentPrefix'));
                   return (
                     <AppRow
                       key={app.name}
@@ -931,9 +927,9 @@ export function PublishPanel({ open, onClose, variant = 'modal' }: PublishPanelP
           ) : (
             <div className="space-y-5">
               <Section
-                title="Shared Files"
-                hint="Temporary file links"
-                emptyText="No shared files yet. Use File → Share → External link."
+                title={i18n.t('publish.sharedFiles')}
+                hint={i18n.t('publish.sharedFilesHint')}
+                emptyText={i18n.t('publish.emptySharedFiles')}
                 groups={groupedSharedFiles}
                 groupBy={prefs.groupBy !== 'none' && prefs.groupBy !== 'tag'}
                 collapsed={prefs.collapsed}
@@ -1029,8 +1025,8 @@ function groupAndSort<T extends { name?: string; fileName?: string; created_at: 
     // Falls back to folder for unknown folders (project deleted, manifest
     // pre-promotion entries, etc.). Tag mode passes through verbatim.
     let label: string;
-    if (key === UNTRACKED_GROUP) label = '미분류';
-    else if (key === UNTAGGED_GROUP) label = '태그 없음';
+    if (key === UNTRACKED_GROUP) label = i18n.t('publish.untracked');
+    else if (key === UNTAGGED_GROUP) label = i18n.t('publish.noTags');
     else if (groupBy === 'project') label = projectDisplayMap[key] || key;
     else label = key;
     const entry: GroupedItems<T> = { key, label, items: arr };
@@ -1173,7 +1169,7 @@ function SiteRow({
           onChange={() => onToggleSelect?.()}
           onClick={(e) => e.stopPropagation()}
           className="shrink-0 w-3 h-3 accent-primary-500 cursor-pointer"
-          title={selected ? '선택 해제' : '선택 (다중 변경용)'}
+          title={selected ? i18n.t('publish.clearSelection') : i18n.t('publish.selectMultiple')}
         />
       )}
       <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${statusDot}`} />
@@ -1183,10 +1179,10 @@ function SiteRow({
           alt=""
           loading="lazy"
           className="publish-thumbnail w-12 h-7 rounded object-cover bg-neutral-800 border border-neutral-700/70 shrink-0"
-          title={site.thumbnail_status === 'failed' ? `썸네일 생성 실패: ${site.thumbnail_error || ''}` : '게시 미리보기'}
+          title={site.thumbnail_status === 'failed' ? i18n.t('publish.thumbnail.failed', { error: site.thumbnail_error || '' }) : i18n.t('publish.thumbnail.preview')}
         />
       ) : (
-        <div className="publish-thumbnail w-12 h-7 rounded bg-neutral-800/70 border border-neutral-700/50 shrink-0" title="썸네일 없음" />
+        <div className="publish-thumbnail w-12 h-7 rounded bg-neutral-800/70 border border-neutral-700/50 shrink-0" title={i18n.t('publish.thumbnail.none')} />
       )}
       <span className={`text-[15px] font-medium truncate min-w-0 ${
         isArchived
@@ -1197,7 +1193,7 @@ function SiteRow({
       </span>
       {isArchived && (
         <span className="text-[11px] px-1 py-px rounded border bg-neutral-700/40 text-neutral-400 border-neutral-600 shrink-0">
-          휴지통
+          {i18n.t('publish.trash')}
         </span>
       )}
       {accessBadge}
@@ -1223,7 +1219,7 @@ function SiteRow({
             <span
               key={t}
               className="publish-tag-chip text-[12px] px-1.5 py-0.5 rounded-md border bg-violet-500/10 text-violet-200 border-violet-500/30"
-              title={`태그: ${t}`}
+              title={i18n.t('publish.tagTitle', { tag: t })}
             >
               {t}
             </span>
@@ -1237,9 +1233,9 @@ function SiteRow({
             <button
               onClick={(e) => { stop(e); onStartEditTags?.(); }}
               className="publish-tag-edit-button text-sm px-2 py-1 text-neutral-400 border border-violet-500/20 hover:text-violet-200 hover:bg-violet-500/15 hover:border-violet-500/40 rounded-md transition-colors"
-              title={tags.length > 0 ? '태그 편집' : '태그 추가'}
+              title={tags.length > 0 ? i18n.t('publish.editTags') : i18n.t('publish.addTags')}
             >
-              {tags.length > 0 ? '태그' : '+ 태그'}
+              {tags.length > 0 ? i18n.t('publish.tags') : i18n.t('publish.addTagShort')}
             </button>
           )}
         </span>
@@ -1262,17 +1258,17 @@ function SiteRow({
           {site.deploy_target === 'azure-container-apps' ? '☁️ Azure' : '☁️ CF'}
         </span>
       ) : typeof site.files === 'number' ? (
-        <span className="text-[12px] text-neutral-600 shrink-0 tabular-nums">{site.files} files</span>
+        <span className="text-[12px] text-neutral-600 shrink-0 tabular-nums">{i18n.t('publish.fileCount', { count: site.files })}</span>
       ) : null}
       {site.created_at && (
         <span className="text-[12px] text-neutral-600 shrink-0 tabular-nums">
-          {new Date(site.created_at).toLocaleDateString('ko-KR', { month: '2-digit', day: '2-digit' })}
+          {new Date(site.created_at).toLocaleDateString(i18n.resolvedLanguage || i18n.language, { month: '2-digit', day: '2-digit' })}
         </span>
       )}
 
       <button
         onClick={(e) => { e.preventDefault(); e.stopPropagation(); onCopy(); }}
-        title="Copy URL"
+        title={i18n.t('publish.copyUrl')}
         className={`shrink-0 p-1 rounded transition-colors ${
           justCopied
             ? 'tone-success tone-bg-soft tone-text'
@@ -1293,7 +1289,7 @@ function SiteRow({
           <button
             onClick={(e) => { stop(e); onRestore?.(); }}
             disabled={accessBusy}
-            title="복원 (휴지통에서 꺼내기)"
+            title={i18n.t('publish.restoreHint')}
             className="tone-success shrink-0 p-1 rounded text-neutral-600 tone-hover transition-colors disabled:opacity-40"
           >
             <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1304,7 +1300,7 @@ function SiteRow({
           <button
             onClick={(e) => { stop(e); onArchive?.(); }}
             disabled={accessBusy}
-            title="휴지통으로 (URL 응답 중지, 파일은 보존)"
+            title={i18n.t('publish.archive.hint')}
             className="shrink-0 p-1 rounded text-neutral-600 hover:text-red-400 hover:bg-red-500/10 transition-colors disabled:opacity-40"
           >
             <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1375,7 +1371,7 @@ function TagEditor({ current, allTags, busy, onSave, onCancel }: TagEditorProps)
           <button
             onClick={(e) => { e.preventDefault(); e.stopPropagation(); removeAt(i); }}
             className="text-violet-400 hover:text-red-400"
-            title="제거"
+            title={i18n.t('publish.remove')}
           >×</button>
         </span>
       ))}
@@ -1396,7 +1392,7 @@ function TagEditor({ current, allTags, busy, onSave, onCancel }: TagEditorProps)
               key={s}
               onClick={(e) => { e.preventDefault(); e.stopPropagation(); tryAdd(s); }}
               className="text-sm px-2 py-1 rounded-md border bg-neutral-800/70 text-neutral-300 border-neutral-600 hover:bg-violet-500/15 hover:text-violet-200 hover:border-violet-500/40"
-              title={`기존 태그 추가: ${s}`}
+              title={i18n.t('publish.addExistingTag', { tag: s })}
             >
               {s}
             </button>
@@ -1407,13 +1403,13 @@ function TagEditor({ current, allTags, busy, onSave, onCancel }: TagEditorProps)
         onClick={(e) => { e.preventDefault(); e.stopPropagation(); onSave(draft); }}
         disabled={busy}
         className="text-sm px-2.5 py-1 rounded-md bg-violet-600/40 text-violet-100 border border-violet-500/50 hover:bg-violet-600/60 disabled:opacity-40 ml-1"
-        title="저장 (Enter)"
-      >저장</button>
+        title={i18n.t('publish.saveEnter')}
+      >{i18n.t('publish.save')}</button>
       <button
         onClick={(e) => { e.preventDefault(); e.stopPropagation(); onCancel(); }}
         disabled={busy}
         className="text-sm px-2 py-1 text-neutral-400 hover:text-neutral-200 disabled:opacity-40"
-        title="취소 (Esc)"
+        title={i18n.t('publish.cancelEsc')}
       >✕</button>
     </span>
   );
@@ -1429,15 +1425,15 @@ interface AppRowProps {
 }
 
 function timeLeft(expiresAt?: string): string {
-  if (!expiresAt) return '만료 없음';
+  if (!expiresAt) return i18n.t('publish.expiry.none');
   const ms = new Date(expiresAt).getTime() - Date.now();
-  if (ms <= 0) return '만료됨';
+  if (ms <= 0) return i18n.t('publish.expiry.expired');
   const days = Math.floor(ms / 86_400_000);
-  if (days > 0) return `${days}일 남음`;
+  if (days > 0) return i18n.t('publish.expiry.days', { count: days });
   const hours = Math.floor(ms / 3_600_000);
-  if (hours > 0) return `${hours}시간 남음`;
+  if (hours > 0) return i18n.t('publish.expiry.hours', { count: hours });
   const minutes = Math.max(1, Math.floor(ms / 60_000));
-  return `${minutes}분 남음`;
+  return i18n.t('publish.expiry.minutes', { count: minutes });
 }
 
 interface SharedFileRowProps {
@@ -1460,13 +1456,13 @@ function SharedFileRow({ file, url, justCopied, busy, onCopy, onRevoke }: Shared
     >
       <div className="w-1.5 h-1.5 rounded-full shrink-0 bg-sky-400" />
       <span className="flex h-7 w-12 shrink-0 items-center justify-center rounded border border-sky-500/20 bg-sky-500/10 text-[12px] font-semibold uppercase text-sky-300">
-        {file.ext || 'file'}
+        {file.ext || i18n.t('publish.file')}
       </span>
       <span className="min-w-0 truncate text-[15px] font-medium text-neutral-100 group-hover:text-white">
         {file.fileName || file.name}
       </span>
       <span className="text-[11px] px-1 py-px rounded border bg-sky-500/10 text-sky-400 border-sky-500/20 shrink-0">
-        shared
+        {i18n.t('publish.shared')}
       </span>
       <div className="flex-1" />
       <span className="hidden md:inline text-[13px] text-neutral-500 truncate max-w-[320px]" title={file.file_path}>
@@ -1477,12 +1473,12 @@ function SharedFileRow({ file, url, justCopied, busy, onCopy, onRevoke }: Shared
       </span>
       {file.created_at && (
         <span className="text-[12px] text-neutral-600 shrink-0 tabular-nums">
-          {new Date(file.created_at).toLocaleDateString('ko-KR', { month: '2-digit', day: '2-digit' })}
+          {new Date(file.created_at).toLocaleDateString(i18n.resolvedLanguage || i18n.language, { month: '2-digit', day: '2-digit' })}
         </span>
       )}
       <button
         onClick={(e) => { e.preventDefault(); e.stopPropagation(); onCopy(); }}
-        title="Copy URL"
+        title={i18n.t('publish.copyUrl')}
         className={`shrink-0 p-1 rounded transition-colors ${
           justCopied
             ? 'tone-success tone-bg-soft tone-text'
@@ -1500,10 +1496,10 @@ function SharedFileRow({ file, url, justCopied, busy, onCopy, onRevoke }: Shared
       <button
         onClick={(e) => { e.preventDefault(); e.stopPropagation(); onRevoke(); }}
         disabled={busy}
-        title="공유 링크 즉시 내리기"
+        title={i18n.t('publish.share.revokeTitle')}
         className="shrink-0 px-2 py-1 rounded border border-red-500/25 bg-red-500/10 text-[12px] text-red-300 hover:bg-red-500/20 hover:text-red-200 disabled:opacity-40 transition-colors"
       >
-        {busy ? '내리는 중…' : '내리기'}
+        {busy ? i18n.t('publish.share.revoking') : i18n.t('publish.share.revoke')}
       </button>
       <svg className="w-3 h-3 text-neutral-700 group-hover:text-neutral-400 shrink-0 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
@@ -1555,7 +1551,7 @@ function AppRow({ app, url, isExternal, isGateway, statusDot, accessBadge }: App
       )}
       {app.created_at && (
         <span className="text-[12px] text-neutral-600 shrink-0 tabular-nums">
-          {new Date(app.created_at).toLocaleDateString('ko-KR', { month: '2-digit', day: '2-digit' })}
+          {new Date(app.created_at).toLocaleDateString(i18n.resolvedLanguage || i18n.language, { month: '2-digit', day: '2-digit' })}
         </span>
       )}
 

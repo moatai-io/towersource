@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>16:9 slide renderer fixture</title>
+<style>
+@page { size: 13.333in 7.5in; margin: 0; }
+html, body { width: 13.333in; height: 7.5in; margin: 0; overflow: hidden; }
+body { font-family: Pretendard, "Noto Sans CJK KR", sans-serif; background: #07111f; color: white; }
+.slide { width: 13.333in; height: 7.5in; padding: 0.52in 0.72in; overflow: hidden; position: relative; background: radial-gradient(circle at 80% 15%, #2563eb 0, transparent 32%), linear-gradient(135deg, #07111f, #172554); }
+h1 { font-size: 52pt; letter-spacing: -0.06em; margin: 0.55in 0 0.18in; }
+p { font-size: 21pt; color: #bfdbfe; }
+svg { position: absolute; right: 0.8in; bottom: 0.55in; width: 3.8in; height: 1.8in; }
+</style>
+</head>
+<body><main class="slide"><div>FIXTURE 02 · CSS + SVG</div><h1>고정된 도구,<br>예측 가능한 출력</h1><p>13.333 × 7.5 inch · 16:9 presentation page</p><svg viewBox="0 0 400 200" aria-label="renderer flow"><defs><linearGradient id="g"><stop stop-color="#38bdf8"/><stop offset="1" stop-color="#818cf8"/></linearGradient></defs><path d="M20 150 C110 20 240 210 380 50" fill="none" stroke="url(#g)" stroke-width="18" stroke-linecap="round"/><circle cx="380" cy="50" r="24" fill="#f8fafc"/></svg></main></body>
+</html>

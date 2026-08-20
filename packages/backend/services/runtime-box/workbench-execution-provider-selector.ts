@@ -224,13 +224,27 @@ export async function selectPersistedWorkbenchExecutionProvider(input: Workbench
     const token = persistedToken ?? (binding?.workerId === worker.workerId ? binding.token : null);
     if (!token) {
       if (reservesSlot && !input.selectPersistedWorker) await releasePersistedWorkbenchWorkerSlot(worker.workerId, capacityWeight);
-      if (input.workstationMode) throw new Error(`DEFAULT_WORKER_AUTH_UNAVAILABLE: ${worker.workerId}`);
+      if (input.workstationMode) throw new Error(`WORKSTATION_WORKER_AUTH_UNAVAILABLE: ${worker.workerId}; the Worker is healthy but Tower cannot authorize this command; operator action is required`);
       return local;
     }
     return createScheduledRemoteProvider({ ...input, worker, token, slotReserved: reservesSlot && !input.selectPersistedWorker, capacityWeight });
   } catch (error) {
-    if (!(error instanceof Error) || !['NO_ELIGIBLE_WORKER', 'WORKER_CAPACITY_UNAVAILABLE', 'relation "runtime_box_workbench_workers" does not exist'].some(message => error.message.includes(message))) throw error;
-    if (input.workstationMode) throw new Error(`WORKSTATION_WORKER_UNAVAILABLE: ${resolveDefaultWorkbenchWorkerId(input) ?? 'unbound'}; the Project shell fails closed and does not switch execution planes automatically`);
+    if (!(error instanceof Error)) throw error;
+    const expectedSelectionFailure = error.message === 'NO_ELIGIBLE_WORKER'
+      || error.message.startsWith('WORKER_BUSY:')
+      || error.message.startsWith('WORKSTATION_WORKER_')
+      || error.message.includes('relation "runtime_box_workbench_workers" does not exist');
+    if (!expectedSelectionFailure) throw error;
+    if (input.workstationMode) {
+      if (error.message.startsWith('WORKSTATION_WORKER_')) throw error;
+      if (error.message.startsWith('WORKER_BUSY:')) {
+        throw new Error(`WORKSTATION_WORKER_BUSY: ${resolveDefaultWorkbenchWorkerId(input) ?? 'unbound'}; no eligible Worker has enough free capacity; retry after the current command finishes`);
+      }
+      if (error.message.includes('relation "runtime_box_workbench_workers" does not exist')) {
+        throw new Error(`WORKSTATION_WORKER_REGISTRY_UNAVAILABLE: ${resolveDefaultWorkbenchWorkerId(input) ?? 'unbound'}; operator action is required`);
+      }
+      throw new Error(`WORKSTATION_WORKER_NOT_ELIGIBLE: ${resolveDefaultWorkbenchWorkerId(input) ?? 'unbound'}; check Worker health, Project scope, deployment, and capabilities; operator action is required`);
+    }
     return selectWorkbenchExecutionProvider(input);
   }
 }
@@ -251,9 +265,10 @@ function createScheduledRemoteProvider(input: WorkbenchProviderSelectionInput & 
       await releasePersistedWorkbenchWorkerSlot(input.worker.workerId, input.capacityWeight);
     },
   } : undefined;
-  return createRemoteWorkbenchExecutionProvider(createRemoteWorkbenchHttpTransport({
+  const provider = createRemoteWorkbenchExecutionProvider(createRemoteWorkbenchHttpTransport({
     workerId: input.worker.workerId, baseUrl: input.worker.baseUrl, token: input.token,
   }), workspaceBridge, slot);
+  return slot ? { ...provider, releaseReservation: slot.release } : provider;
 }
 
 function createMigrationWorkspaceBridge(input: WorkbenchProviderSelectionInput, config: {

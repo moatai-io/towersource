@@ -23,11 +23,11 @@ describe('Workspace Apps builder draft preview contract', () => {
 
   it('renders preview-only diff cards and keeps publish disabled', () => {
     expect(builderPanel).toContain('draftPreview');
-    expect(builderPanel).toContain('아직 미반영');
-    expect(builderPanel).toContain('현재');
-    expect(builderPanel).toContain('변경');
+    expect(builderPanel).toContain("t('workspaceApps.builder.notApplied')");
+    expect(builderPanel).toContain("t('workspaceApps.builder.current')");
+    expect(builderPanel).toContain("t('workspaceApps.builder.changed')");
     expect(builderPanel).toContain('disabled');
-    expect(builderPanel).toContain('확인하고 화면에 반영');
+    expect(builderPanel).toContain("t('workspaceApps.builder.publish')");
   });
 
   it('ships a sales-ops draft preview example in sample fallback metadata', () => {

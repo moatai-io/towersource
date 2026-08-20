@@ -1,0 +1,134 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+fail() {
+  printf 'tower-app-start-production: %s\n' "$*" >&2
+  exit 1
+}
+
+required() {
+  local name="$1"
+  [[ -n "${!name:-}" ]] || fail "$name must be set explicitly"
+}
+
+absolute_external_dir() {
+  local name="$1" value="${!1}"
+  [[ "$value" = /* ]] || fail "$name must be an absolute path"
+  value="$(realpath "$value")"
+  [[ "$value" != /nix/store && "$value" != /nix/store/* ]] || fail "$name must be outside /nix/store"
+  [[ -d "$value" ]] || fail "$name must be an existing directory"
+  [[ -w "$value" ]] || fail "$name must be writable"
+  printf -v "$name" '%s' "$value"
+  export "$name"
+}
+
+app_root="${TOWER_APP_ROOT:-}"
+if [[ -z "$app_root" ]]; then
+  self="$(realpath "$0")"
+  app_root="$(dirname "$(dirname "$self")")"
+fi
+app_root="$(realpath "$app_root")"
+entrypoint="$app_root/lib/tower/dist/backend/packages/backend/index.js"
+manifest="$app_root/share/tower/release-manifest.json"
+renderer_bin="$app_root/bin/tower-nix-render"
+[[ -f "$entrypoint" ]] || fail "missing production entrypoint: $entrypoint"
+[[ -f "$manifest" ]] || fail "missing release manifest: $manifest"
+[[ -x "$renderer_bin" ]] || fail "missing integrated Nix PDF renderer: $renderer_bin"
+export PDF_EXPORT_RENDERER_MODE=nix
+export NIX_RENDERER_BIN="$renderer_bin"
+
+required TOWER_RUN_MODE
+[[ "$TOWER_RUN_MODE" = nix-production ]] || fail 'TOWER_RUN_MODE must equal nix-production'
+required TOWER_NIX_PRODUCTION_PROFILE
+[[ "$TOWER_NIX_PRODUCTION_PROFILE" = authority || "$TOWER_NIX_PRODUCTION_PROFILE" = canary ]] \
+  || fail 'TOWER_NIX_PRODUCTION_PROFILE must equal authority or canary'
+required NODE_ENV
+[[ "$NODE_ENV" = production ]] || fail 'NODE_ENV must equal production'
+required HOST
+required PORT
+[[ "$PORT" =~ ^[0-9]+$ && "$PORT" -ge 1024 && "$PORT" -le 65535 ]] || fail 'PORT must be an integer between 1024 and 65535'
+required PUBLIC_URL
+required DATABASE_URL
+[[ "$DATABASE_URL" = postgres://* || "$DATABASE_URL" = postgresql://* ]] || fail 'DATABASE_URL must use PostgreSQL'
+required JWT_SECRET
+[[ "$JWT_SECRET" != tower-secret-change-me && ${#JWT_SECRET} -ge 16 ]] || fail 'JWT_SECRET must be non-default and at least 16 characters'
+
+if [[ "$TOWER_NIX_PRODUCTION_PROFILE" = authority ]]; then
+  [[ "$HOST" = 0.0.0.0 || "$HOST" = :: ]] || fail 'authority HOST must be an explicit production bind address'
+  [[ "$PORT" = 32364 ]] || fail 'authority PORT must equal the existing Tower production port 32364'
+  [[ "$PUBLIC_URL" = https://* ]] || fail 'authority PUBLIC_URL must use https'
+else
+  [[ "$HOST" = 127.0.0.1 || "$HOST" = ::1 ]] || fail 'canary HOST must be loopback'
+  [[ "$PORT" != 32354 && "$PORT" != 32364 ]] || fail 'canary PORT must not use a Tower authority port'
+  [[ "$PUBLIC_URL" = http://127.0.0.1:* || "$PUBLIC_URL" = http://\[::1\]:* ]] \
+    || fail 'canary PUBLIC_URL must be explicit loopback HTTP'
+  [[ "$DATABASE_URL" = *"@127.0.0.1:"* || "$DATABASE_URL" = *"@[::1]:"* ]] \
+    || fail 'canary DATABASE_URL must use loopback PostgreSQL'
+  required TOWER_NIX_CANARY_MARKER
+  [[ "$TOWER_NIX_CANARY_MARKER" =~ ^[a-z0-9_]{8,64}$ ]] || fail 'TOWER_NIX_CANARY_MARKER must be an 8-64 character slug'
+  [[ "$DATABASE_URL" = *"$TOWER_NIX_CANARY_MARKER"* ]] \
+    || fail 'canary DATABASE_URL must contain TOWER_NIX_CANARY_MARKER'
+fi
+
+for name in TOWER_RUNTIME_CWD TOWER_DATA_DIR WORKSPACE_ROOT DEFAULT_CWD; do
+  required "$name"
+  absolute_external_dir "$name"
+done
+[[ "$DEFAULT_CWD" = "$WORKSPACE_ROOT" || "$DEFAULT_CWD" = "$WORKSPACE_ROOT"/* ]] \
+  || fail 'DEFAULT_CWD must be within WORKSPACE_ROOT'
+
+required TOWER_HOST_ROLLBACK_ENTRYPOINT
+[[ "$TOWER_HOST_ROLLBACK_ENTRYPOINT" = /* ]] || fail 'TOWER_HOST_ROLLBACK_ENTRYPOINT must be an absolute path'
+TOWER_HOST_ROLLBACK_ENTRYPOINT="$(realpath "$TOWER_HOST_ROLLBACK_ENTRYPOINT")"
+[[ "$TOWER_HOST_ROLLBACK_ENTRYPOINT" != /nix/store/* ]] || fail 'rollback entrypoint must be a host artifact outside /nix/store'
+[[ -f "$TOWER_HOST_ROLLBACK_ENTRYPOINT" ]] || fail 'rollback entrypoint must exist before Nix production startup'
+export TOWER_HOST_ROLLBACK_ENTRYPOINT
+
+# A Git-less closure must report its own immutable identity. Refuse conflicting
+# operator overrides rather than allowing health to claim a different release.
+while IFS='=' read -r name value; do
+  [[ -n "$name" ]] || continue
+  if [[ -n "${!name:-}" && "${!name}" != "$value" ]]; then
+    fail "$name conflicts with release manifest"
+  fi
+  printf -v "$name" '%s' "$value"
+  export "$name"
+done < <(python3 - "$manifest" <<'PY'
+import json, pathlib, sys
+manifest = json.loads(pathlib.Path(sys.argv[1]).read_text())
+fields = {
+    "TOWER_VERSION": manifest.get("version"),
+    "TOWER_BASE_VERSION": manifest.get("baseVersion"),
+    "GIT_SHA": manifest.get("gitSha"),
+    "SOURCE_REV": manifest.get("sourceRev"),
+    "TOWER_COMMITS_SINCE_TAG": manifest.get("commitsSinceTag"),
+    "BUILD_TIME": manifest.get("buildTime"),
+    "FLAKE_LOCK_NAR_HASH": manifest.get("flakeLockNarHash"),
+}
+for name in ("TOWER_VERSION", "TOWER_BASE_VERSION", "GIT_SHA", "SOURCE_REV"):
+    if fields[name] is None or not str(fields[name]).strip():
+        raise SystemExit(f"tower-app-start-production: release manifest field is empty: {name}")
+for name, value in fields.items():
+    if value is not None:
+        print(f"{name}={value}")
+PY
+)
+export TOWER_PACKAGED_RELEASE=true
+
+action="${1:-check}"
+case "$action" in
+  check)
+    printf '{"status":"ok","action":"check","profile":"%s","sourceRev":"%s","entrypoint":"%s","runtimeCwd":"%s","rollbackReady":true,"pdfRendererMode":"nix","pdfRendererBin":"%s"}\n' \
+      "$TOWER_NIX_PRODUCTION_PROFILE" "$SOURCE_REV" "$entrypoint" "$TOWER_RUNTIME_CWD" "$renderer_bin"
+    ;;
+  run)
+    required TOWER_NIX_PRODUCTION_ACK
+    [[ "$TOWER_NIX_PRODUCTION_ACK" = "$SOURCE_REV" ]] \
+      || fail 'TOWER_NIX_PRODUCTION_ACK must equal the closure SOURCE_REV'
+    cd "$TOWER_RUNTIME_CWD"
+    exec node "$entrypoint"
+    ;;
+  *)
+    fail 'action must be check or run'
+    ;;
+esac

@@ -17,6 +17,7 @@ import {
   type ProjectWorkerAssignmentDesire,
 } from '../services/runtime-box/workbench-project-worker-assignment.js';
 import { reconcileClaimedProjectWorkerAssignment } from '../services/runtime-box/workbench-project-worker-assignment-reconciler.js';
+import { activateProjectWorkerFirstWithClient } from '../services/runtime-box/workbench-project-worker-first-activation.js';
 
 const run = promisify(execFile);
 const deploymentId = process.env.TOWER_ASSIGNMENT_DEPLOYMENT_ID?.trim() || 'production';
@@ -89,7 +90,15 @@ async function activate(assignment: ProjectWorkerAssignmentDesire): Promise<void
   await transaction(async client => {
     const current = await client.query(`SELECT status,lease_owner FROM project_worker_assignment_desires WHERE project_id=$1 AND deployment_id=$2 FOR UPDATE`, [assignment.project_id, deploymentId]);
     if (current.rows[0]?.status !== 'preparing' || current.rows[0]?.lease_owner !== assignment.lease_owner) throw new Error('ASSIGNMENT_LEASE_LOST');
-    await client.query(`INSERT INTO project_compute_deployment_bindings(project_id,deployment_id,default_worker_id,workstation_mode,authority_mode,updated_by_user_id) VALUES($1,$2,$3,TRUE,'project',$4) ON CONFLICT(project_id,deployment_id) DO UPDATE SET default_worker_id=EXCLUDED.default_worker_id,workstation_mode=TRUE,authority_mode='project',updated_by_user_id=EXCLUDED.updated_by_user_id,updated_at=NOW()`, [assignment.project_id, deploymentId, workerId, actorUserId]);
+    await activateProjectWorkerFirstWithClient(client, {
+      projectId: assignment.project_id,
+      deploymentId,
+      workerId,
+      authorityMode: 'project',
+      actorUserId,
+      rolloutCohort: 'primary-worker-assignment',
+      reason: `Automatic primary Worker-first activation for ${deploymentId}`,
+    });
   });
 }
 

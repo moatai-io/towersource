@@ -8,9 +8,9 @@ describe('Pi OpenRouter emergency Vault override contract', () => {
   it('resolves project-granted OPENROUTER_API_KEY for explicit OpenRouter sessions', () => {
     expect(registry).toContain('resolveProjectApiKeySecretValue');
     expect(registry).toContain("envName: 'OPENROUTER_API_KEY'");
-    expect(registry).toContain("targetType: 'pi-model-runtime:openrouter'");
-    expect(registry).toContain("runtime.setRuntimeApiKey('openrouter', resolved.value");
-    expect(registry).toContain("opts.model?.startsWith('openrouter/')");
+    expect(registry).toContain('targetType: `pi-model-runtime:${provider}`');
+    expect(registry).toContain('runtime.setRuntimeApiKey(target.runtimeProvider, resolved.value');
+    expect(registry).toContain("provider === 'openrouter'");
   });
 
   it('applies the Vault override before create-session model resolution and model switching', () => {

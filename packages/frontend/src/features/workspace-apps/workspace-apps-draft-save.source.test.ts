@@ -43,8 +43,8 @@ describe('Workspace Apps draft save contract', () => {
     expect(home).toContain('fetchWorkspaceAppDrafts({ projectId, appId: definition.id, limit: 5 })');
     expect(home).toContain('handleSaveDraft');
     expect(home).toContain('createWorkspaceAppDraft({ projectId, appId: definition.id, draftPreview: definition.builder.draftPreview })');
-    expect(builderPanel).toContain('저장된 변경안');
-    expect(builderPanel).toContain('변경안 저장');
-    expect(builderPanel).toContain('확인하고 화면에 반영');
+    expect(builderPanel).toContain("t('workspaceApps.builder.savedDrafts')");
+    expect(builderPanel).toContain("t('workspaceApps.builder.saveDraft')");
+    expect(builderPanel).toContain("t('workspaceApps.builder.publish')");
   });
 });

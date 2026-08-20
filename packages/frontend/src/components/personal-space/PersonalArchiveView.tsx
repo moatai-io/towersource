@@ -1,4 +1,5 @@
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 import { toastError, toastSuccess } from '../../utils/toast';
 
 interface ArchivedPersonalFile {
@@ -19,6 +20,7 @@ function openPersonalMaterials() {
 }
 
 export function PersonalArchiveView() {
+  const { t } = useTranslation('layout');
   const [files, setFiles] = React.useState<ArchivedPersonalFile[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [restoringId, setRestoringId] = React.useState<string | null>(null);
@@ -28,14 +30,14 @@ export function PersonalArchiveView() {
     try {
       const res = await fetch('/api/personal-space/files/archived', { headers: authHeaders() });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || '보관함을 불러오지 못했습니다.');
+      if (!res.ok) throw new Error(data.error || t('personalArchive.loadFailed'));
       setFiles(Array.isArray(data.files) ? data.files : []);
     } catch (error) {
-      toastError(error instanceof Error ? error.message : '보관함을 불러오지 못했습니다.');
+      toastError(error instanceof Error ? error.message : t('personalArchive.loadFailed'));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [t]);
 
   React.useEffect(() => { void load(); }, [load]);
 
@@ -44,11 +46,11 @@ export function PersonalArchiveView() {
     try {
       const res = await fetch(`/api/personal-space/files/${encodeURIComponent(file.id)}/restore`, { method: 'POST', headers: authHeaders(true) });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || '파일을 복원하지 못했습니다.');
+      if (!res.ok) throw new Error(data.error || t('personalArchive.restoreFailed'));
       setFiles(current => current.filter(item => item.id !== file.id));
-      toastSuccess(`${file.name}을 복원했습니다.`);
+      toastSuccess(t('personalArchive.restored', { name: file.name }));
     } catch (error) {
-      toastError(error instanceof Error ? error.message : '파일을 복원하지 못했습니다.');
+      toastError(error instanceof Error ? error.message : t('personalArchive.restoreFailed'));
     } finally {
       setRestoringId(null);
     }
@@ -57,15 +59,15 @@ export function PersonalArchiveView() {
   return (
     <div className="flex h-full min-h-0 flex-col bg-surface-950 text-surface-100">
       <header className="shrink-0 border-b border-surface-800 px-5 py-4">
-        <button type="button" onClick={openPersonalMaterials} className="mb-3 inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[12px] font-medium text-surface-400 transition-colors hover:bg-surface-800 hover:text-surface-100" aria-label="내 자료로 돌아가기">
-          <span aria-hidden="true">←</span><span>내 자료</span>
+        <button type="button" onClick={openPersonalMaterials} className="mb-3 inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[12px] font-medium text-surface-400 transition-colors hover:bg-surface-800 hover:text-surface-100" aria-label={t('backToMyMaterials')}>
+          <span aria-hidden="true">←</span><span>{t('myMaterials')}</span>
         </button>
-        <h2 className="text-xl font-bold">보관함</h2>
-        <p className="mt-1 text-[12px] leading-5 text-surface-500">보관한 파일은 내 파일 목록에서 숨겨집니다. 필요할 때 원래 위치로 복원하세요.</p>
+        <h2 className="text-xl font-bold">{t('personalArchive.title')}</h2>
+        <p className="mt-1 text-[12px] leading-5 text-surface-500">{t('personalArchive.description')}</p>
       </header>
       <div className="min-h-0 flex-1 overflow-y-auto p-4">
-        {loading ? <p className="py-12 text-center text-sm text-surface-500">보관함을 불러오는 중…</p> : files.length === 0 ? (
-          <p className="rounded-xl border border-dashed border-surface-700 py-12 text-center text-sm text-surface-500">보관한 파일이 없습니다.</p>
+        {loading ? <p className="py-12 text-center text-sm text-surface-500">{t('personalArchive.loading')}</p> : files.length === 0 ? (
+          <p className="rounded-xl border border-dashed border-surface-700 py-12 text-center text-sm text-surface-500">{t('personalArchive.empty')}</p>
         ) : (
           <div className="divide-y divide-surface-800 border-y border-surface-800">
             {files.map(file => (
@@ -73,9 +75,9 @@ export function PersonalArchiveView() {
                 <span className="text-lg" aria-hidden="true">{file.kind === 'note' ? '▤' : '□'}</span>
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-[13px] font-semibold text-surface-200">{file.name}</p>
-                  <p className="mt-0.5 truncate text-[11px] text-surface-600">원래 위치 · {file.relativePath}</p>
+                  <p className="mt-0.5 truncate text-[11px] text-surface-600">{t('personalArchive.originalLocation', { path: file.relativePath })}</p>
                 </div>
-                <button type="button" disabled={restoringId === file.id} onClick={() => { void restore(file); }} className="rounded-md border border-surface-700 px-3 py-1.5 text-[12px] font-semibold text-surface-300 hover:border-primary-500/50 hover:text-primary-300 disabled:opacity-50">{restoringId === file.id ? '복원 중…' : '복원'}</button>
+                <button type="button" disabled={restoringId === file.id} onClick={() => { void restore(file); }} className="rounded-md border border-surface-700 px-3 py-1.5 text-[12px] font-semibold text-surface-300 hover:border-primary-500/50 hover:text-primary-300 disabled:opacity-50">{restoringId === file.id ? t('personalArchive.restoring') : t('personalArchive.restore')}</button>
               </div>
             ))}
           </div>

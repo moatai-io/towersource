@@ -1,3 +1,5 @@
+import i18n from '../i18n';
+
 export type UploadProgressPhase = 'uploading' | 'processing';
 
 export interface UploadProgressSnapshot {
@@ -41,7 +43,7 @@ export function uploadFileBatchWithProgress({
     const formData = new FormData();
     files.forEach((file) => formData.append('files', file));
     const batchBytes = files.reduce((sum, file) => sum + file.size, 0);
-    const currentFileName = files.length === 1 ? files[0].name : `${files[0].name} 외 ${files.length - 1}개`;
+    const currentFileName = files.length === 1 ? files[0].name : i18n.t('uploadNotice.additionalFiles', { ns: 'common', name: files[0].name, count: files.length - 1 });
 
     xhr.open('POST', url);
     xhr.responseType = 'json';
@@ -76,9 +78,9 @@ export function uploadFileBatchWithProgress({
         try { return JSON.parse(xhr.responseText); } catch { return {}; }
       })();
       if (xhr.status >= 200 && xhr.status < 300) resolve(data);
-      else reject(new Error(data?.error || (xhr.status === 413 ? '파일이 업로드 허용 크기를 초과했습니다.' : '파일을 업로드하지 못했습니다.')));
+      else reject(new Error(data?.error || (xhr.status === 413 ? i18n.t('uploadNotice.tooLarge', { ns: 'common' }) : i18n.t('uploadNotice.failedGeneric', { ns: 'common' }))));
     });
-    xhr.addEventListener('error', () => reject(new Error('네트워크 연결로 파일을 업로드하지 못했습니다.')));
+    xhr.addEventListener('error', () => reject(new Error(i18n.t('uploadNotice.networkFailed', { ns: 'common' }))));
     xhr.addEventListener('abort', () => reject(new DOMException('Upload aborted', 'AbortError')));
     xhr.send(formData);
   });

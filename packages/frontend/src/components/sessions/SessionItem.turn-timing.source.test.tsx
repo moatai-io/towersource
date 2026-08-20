@@ -14,13 +14,13 @@ describe('session turn elapsed time UI contract', () => {
   });
 
   it('shows the latest tool activity with elapsed time for running sessions', () => {
-    expect(sessionItem).toContain(`rowState.indicator.summary || "응답 작성 중"`);
+    expect(sessionItem).toContain(`rowState.indicator.summary || t("writingResponse")`);
     expect(sessionItem).toContain('{runningActivity}');
     expect(sessionItem).toContain('· {runningElapsed}');
     expect(sessionItem).not.toContain('작업 중 · {runningElapsed}');
     expect(sessionItem).toContain(`rowState.elapsed !== "none" && turnState?.startedAt`);
-    expect(sessionItem).toContain('답변 필요{turnElapsed ? ` · ${turnElapsed}` : ""}');
+    expect(sessionItem).toContain("{t('answerNeeded')}{turnElapsed ? ` · ${turnElapsed}` : \"\"}");
     expect(sessionItem).toContain('!runningElapsed && conversationTurnCount > 0');
-    expect(sessionItem).toContain('title="최근 활동"');
+    expect(sessionItem).toContain("title={t('recentActivity')}");
   });
 });

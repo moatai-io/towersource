@@ -11,8 +11,8 @@ describe("Primary Agent skill settings", () => {
   it("edits disabled skills inside teammate settings and persists them with the profile", () => {
     expect(source).toContain("disabledSkills: [] as string[]");
     expect(source).toContain("project?.agent?.toolPolicy?.disabledSkills");
-    expect(source).toContain("이 팀원이 사용할 Skill");
-    expect(source).toContain("이 AI 팀원의 새 대화부터 제외됩니다.");
+    expect(source).toContain("t('projectHome.skillsForTeammate')");
+    expect(source).toContain("t('projectHome.disabledSkillHint')");
     expect(source).toContain("body: JSON.stringify(teammateDraft)");
   });
 });

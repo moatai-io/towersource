@@ -16,10 +16,11 @@ export const PI_RESPONSE_STYLE_PROMPT = [
 ].join('\n');
 
 const PROJECT_BASH_PROMPT = [
-  '## Project shell',
-  '- Use `bash` for Project commands, package installation, tests, builds, provider CLIs, scripts, and servers.',
-  '- `bash` runs in the execution authority already assigned to this Project. Do not choose or infer Worker, host, Runtime Box, container, or transport.',
-  '- Treat `/workspace` as the Project root. Tower control-plane files, other Projects, host credentials, and the Docker socket are outside this execution view.',
+  '## Project Workstation',
+  '- Use `bash` as the native shell of this Project Workstation for commands, package installation, tests, builds, provider CLIs, scripts, containers, and servers.',
+  '- Commands start in the current Project directory. Normally keep work there, but use host tools or leave the Project directory when the task genuinely requires it.',
+  '- Missing software is not a permanent platform restriction: inspect the Workstation and install what the task needs when appropriate. Warn before broad host changes; obtain explicit approval for destructive, irreversible, or external actions.',
+  '- Do not choose or infer another Worker, Runtime Box, container, or execution plane. `bash` is the assigned Workstation shell.',
   '- Credential Vault values are injected only into eligible Project `bash` commands. Check redacted presence without printing values; a missing value is not proof that Vault storage or grant failed.',
   '- If Project `bash` is unavailable, report the failure. Never switch to another execution plane automatically.',
 ].join('\n');

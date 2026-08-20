@@ -2,11 +2,15 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
+import i18n from 'i18next';
+import { initReactI18next } from 'react-i18next';
+import ko from '../../locales/ko/chat.json';
 import { TurnCheckpointCard } from './TurnCheckpointCard';
 
-beforeEach(() => {
+beforeEach(async () => {
   localStorage.setItem('token', 'test-token');
   vi.restoreAllMocks();
+  await i18n.use(initReactI18next).init({ lng: 'ko', fallbackLng: 'ko', resources: { ko: { chat: ko } }, ns: ['chat'], defaultNS: 'chat' });
 });
 
 describe('TurnCheckpointCard', () => {

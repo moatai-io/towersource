@@ -41,6 +41,14 @@ const productionUpgrade = fs.readFileSync(
 );
 
 describe('Phase 6A Nix production launcher source contract', () => {
+  it('serializes heavy release work and limits Nix parallelism on small VMs', () => {
+    expect(productionUpgrade).toContain('TOWER_HEAVY_WORK_LOCK_FILE');
+    expect(productionUpgrade).toContain('flock -w "$heavy_wait" 8');
+    expect(productionUpgrade).toContain('TOWER_NIX_MAX_JOBS:-1');
+    expect(productionUpgrade).toContain('TOWER_NIX_CORES:-2');
+    expect(productionUpgrade).toContain('--option max-jobs "$nix_max_jobs" --option cores "$nix_cores"');
+  });
+
   it('requires an explicit production acknowledgement before backend startup', () => {
     expect(launcher).toContain('TOWER_RUN_MODE must equal nix-production');
     expect(launcher).toContain('TOWER_NIX_PRODUCTION_PROFILE must equal authority or canary');
@@ -168,12 +176,19 @@ describe('Phase 6A Nix production launcher source contract', () => {
     expect(fullBackendCanary).toContain('TOWER_NIX_PRODUCTION_PROFILE=canary');
   });
 
-  it('derives a reproducible +N display version from the release tag boundary', () => {
-    expect(flake).toContain('releaseBaseVersion = "1.70.43"');
+  it('keeps private +N versions while public exports use explicit release metadata', () => {
+    expect(flake).toContain('publicRelease = if builtins.pathExists ./PUBLIC_RELEASE.json');
+    expect(flake).toContain('then builtins.fromJSON (builtins.readFile ./PUBLIC_RELEASE.json)');
+    expect(flake).toContain('releaseChannel = if publicRelease != null');
+    expect(flake).toContain('releaseBaseVersion = if publicRelease != null');
+    expect(flake).toContain('then publicRelease.version');
+    expect(flake).toContain('else "1.70.43"');
     expect(flake).toContain('releaseBaseRevCount = 2186');
     expect(flake).toContain('sourceRevCount = self.revCount or releaseBaseRevCount');
-    expect(flake).toContain('releaseCommitsSinceTag = sourceRevCount - releaseBaseRevCount');
+    expect(flake).toContain('then publicRelease.commitsSinceRelease or 0');
+    expect(flake).toContain('else sourceRevCount - releaseBaseRevCount');
     expect(flake).toContain('then "${releaseBaseVersion}+${toString releaseCommitsSinceTag}"');
+    expect(flake).toContain('releaseId = if publicRelease != null');
     expect(flake).not.toContain('releaseCommitsSinceTag = null');
     expect(flake).not.toContain('releaseVersion = "1.70.42"');
   });

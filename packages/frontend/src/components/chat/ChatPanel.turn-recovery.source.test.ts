@@ -30,8 +30,8 @@ describe('Chat recovery surface contract', () => {
   });
 
   it('keeps the existing real continue action', () => {
-    expect(inputBox).toContain("onClick={() => sendQuickReply('계속 진행해줘')}");
-    expect(inputBox).toContain('계속 진행');
+    expect(inputBox).toContain("onClick={() => sendQuickReply(t('continueRequest'))}");
+    expect(inputBox).toContain("t('quickContinue')");
     expect(inputBox).not.toContain("'turn-recovery'");
   });
 

@@ -1,4 +1,6 @@
 import React, { useEffect, useState, useMemo, useRef, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
+import i18n from '../../i18n';
 import { useSessionStore } from '../../stores/session-store';
 import { useProjectStore } from '../../stores/project-store';
 import { useKanbanStore } from '../../stores/kanban-store';
@@ -54,6 +56,7 @@ function joinAssistantPreviewText(parts: string[]): string {
 }
 
 export function InboxPanel({ onSelectSession }: InboxPanelProps = {}) {
+  const { t } = useTranslation('layout');
   const sessions = useSessionStore((s) => s.sessions);
   const unreadSessions = useSessionStore((s) => s.unreadSessions);
   const streamingSessions = useSessionStore((s) => s.streamingSessions);
@@ -363,7 +366,7 @@ export function InboxPanel({ onSelectSession }: InboxPanelProps = {}) {
         <svg className="w-10 h-10 opacity-30" fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M17 8h2a2 2 0 012 2v6a2 2 0 01-2 2h-2v4l-4-4H9a1.994 1.994 0 01-1.414-.586m0 0L11 14h4a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2v4l.586-.586z" />
         </svg>
-        <p className="text-[16px]">No latest sessions</p>
+        <p className="text-[16px]">{t('pendingRepliesView.empty')}</p>
       </div>
     );
   }
@@ -383,16 +386,16 @@ export function InboxPanel({ onSelectSession }: InboxPanelProps = {}) {
             </svg>
           </div>
           <div>
-            <h2 className="text-[20px] font-bold text-gray-100 leading-tight">Latest</h2>
+            <h2 className="text-[20px] font-bold text-gray-100 leading-tight">{t('pendingRepliesView.title')}</h2>
             <p className="text-[14px] text-surface-500 leading-tight">
               {unreadCount > 0
-                ? `${unreadCount} unread · ${allCards.length} latest sessions`
-                : `${allCards.length} latest sessions`}
+                ? t('pendingRepliesView.summaryUnread', { unread: unreadCount, total: allCards.length })
+                : t('pendingRepliesView.summary', { total: allCards.length })}
             </p>
           </div>
           {unreadCount > 0 && (
             <span className="ml-auto text-[13px] font-semibold bg-primary-500/20 text-primary-300 rounded-full px-2.5 py-1 leading-none">
-              {unreadCount} new
+              {t('pendingRepliesView.newCount', { count: unreadCount })}
             </span>
           )}
         </div>
@@ -462,6 +465,7 @@ function InboxCard({
   onArchive: () => void;
   onSendReply: (t: string) => void;
 }) {
+  const { t } = useTranslation('layout');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -499,7 +503,7 @@ function InboxCard({
       <div className="flex items-center gap-2 px-4 py-2.5 group">
         {isProactive && <span className="text-[14px] shrink-0">💬</span>}
         {!isProactive && isUnread && <div className="w-2 h-2 rounded-full bg-primary-400 shrink-0" />}
-        {isStreaming && <RunIndicator size="xs" label="세션 실행 중" className="tone-success tone-text shrink-0" />}
+        {isStreaming && <RunIndicator size="xs" label={t('pendingRepliesView.sessionRunning')} className="tone-success tone-text shrink-0" />}
         <div className="flex-1 min-w-0">
           <div className="flex items-baseline gap-1.5">
             <span className={`text-[15px] truncate ${isUnread ? 'font-bold text-gray-100' : 'font-medium text-gray-300'}`}>
@@ -512,7 +516,7 @@ function InboxCard({
             )}
           </div>
           {isProactive && (
-            <div className="text-[12px] text-blue-400/70 leading-tight">AI가 시작한 대화</div>
+            <div className="text-[12px] text-blue-400/70 leading-tight">{t('pendingRepliesView.aiStartedConversation')}</div>
           )}
         </div>
         <span className="text-[13px] text-surface-500 shrink-0">
@@ -520,12 +524,12 @@ function InboxCard({
         </span>
         {/* Hover actions */}
         <div className="flex items-center gap-0.5 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
-          <button onClick={onDismiss} className="p-1 text-surface-500 hover:text-gray-300 rounded hover:bg-surface-700/50 transition-colors" title="최신에서 안 보기" aria-label="최신에서 안 보기">
+          <button onClick={onDismiss} className="p-1 text-surface-500 hover:text-gray-300 rounded hover:bg-surface-700/50 transition-colors" title={t('pendingRepliesView.dismiss')} aria-label={t('pendingRepliesView.dismiss')}>
             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 5v14m0 0l-5-5m5 5l5-5" />
             </svg>
           </button>
-          <button onClick={onArchive} className="tone-warning p-1 text-surface-500 hover:text-[var(--tone-text)] rounded hover:bg-surface-700/50 transition-colors" title="Archive">
+          <button onClick={onArchive} className="tone-warning p-1 text-surface-500 hover:text-[var(--tone-text)] rounded hover:bg-surface-700/50 transition-colors" title={t('pendingRepliesView.archive')}>
             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M20.25 7.5l-.625 10.632a2.25 2.25 0 01-2.247 2.118H6.622a2.25 2.25 0 01-2.247-2.118L3.75 7.5m8.25 3v6.75m0 0l-3-3m3 3l3-3M3.375 7.5h17.25c.621 0 1.125-.504 1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125z" />
             </svg>
@@ -535,7 +539,7 @@ function InboxCard({
           onClick={onOpenSession}
           className="text-[13px] text-primary-400 hover:text-primary-300 transition-colors shrink-0 ml-1"
         >
-          Open →
+          {t('pendingRepliesView.open')} →
         </button>
       </div>
 
@@ -547,7 +551,7 @@ function InboxCard({
             <span className={`text-[12px] uppercase tracking-wider mb-1 block ${
               lastMessage.role === 'user' ? 'text-blue-400/60' : 'text-surface-500'
             }`}>
-              {lastMessage.role === 'user' ? 'You' : 'AI'}
+              {lastMessage.role === 'user' ? t('pendingRepliesView.you') : t('pendingRepliesView.ai')}
             </span>
             {lastMessage.role === 'user' ? (
               <div className="text-msg-sub-size leading-relaxed whitespace-pre-wrap text-blue-300/80">
@@ -569,14 +573,14 @@ function InboxCard({
         {isStreaming && (
           <div className="tone-success tone-text flex items-center gap-2 mt-2 text-[13px] opacity-70">
             <div className="w-3 h-3 border-2 border-[var(--tone-border)] border-t-[var(--tone-text)] rounded-full animate-spin" />
-            Processing...
+            {t('pendingRepliesView.processing')}
           </div>
         )}
 
         {/* Sent confirmation */}
         {wasSent && !isStreaming && lastMessage?.role === 'user' && (
           <div className="text-[13px] text-surface-500 mt-1">
-            Sent — waiting for response...
+            {t('pendingRepliesView.sentWaiting')}
           </div>
         )}
       </div>
@@ -589,7 +593,7 @@ function InboxCard({
             value={replyText}
             onChange={handleInput}
             onKeyDown={handleKeyDown}
-            placeholder="Reply... (Enter to send)"
+            placeholder={t('pendingRepliesView.replyPlaceholder')}
             rows={1}
             className="flex-1 bg-transparent text-input-size text-gray-300 placeholder-surface-600 resize-none outline-none py-1 leading-relaxed"
             style={{ maxHeight: '120px' }}
@@ -599,7 +603,7 @@ function InboxCard({
               onClick={() => onSendReply(replyText.trim())}
               className="shrink-0 text-[14px] text-primary-400 hover:text-primary-300 font-medium pb-1 transition-colors"
             >
-              Send
+              {t('pendingRepliesView.send')}
             </button>
           )}
         </div>
@@ -616,9 +620,9 @@ function relativeTime(dateStr: string): string {
   const diff = Date.now() - new Date(normalized).getTime();
   if (isNaN(diff)) return '';
   const mins = Math.floor(diff / 60_000);
-  if (mins < 1) return 'just now';
-  if (mins < 60) return `${mins}m ago`;
+  if (mins < 1) return i18n.t('pendingRepliesView.justNow', { ns: 'layout' });
+  if (mins < 60) return i18n.t('pendingRepliesView.minutesAgo', { ns: 'layout', count: mins });
   const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours}h ago`;
-  return `${Math.floor(hours / 24)}d ago`;
+  if (hours < 24) return i18n.t('pendingRepliesView.hoursAgo', { ns: 'layout', count: hours });
+  return i18n.t('pendingRepliesView.daysAgo', { ns: 'layout', count: Math.floor(hours / 24) });
 }

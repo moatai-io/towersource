@@ -14,12 +14,10 @@ describe('AI Service first-class operations home', () => {
   });
 
   it('provides operator-facing access filters and emergency controls', () => {
-    expect(source).toContain("['active', '운영 중']");
-    expect(source).toContain("['draft', '배포 준비']");
-    expect(source).toContain("['review', '검토 중']");
-    expect(source).toContain("['paused', '접근 중지']");
-    expect(source).toContain('외부 접근 중지');
-    expect(source).toContain('에이전트 삭제');
+    expect(source).toContain("const FILTER_IDS = ['all', 'active', 'draft', 'review', 'paused']");
+    expect(source).toContain('aiServices.home.filters.${id}');
+    expect(source).toContain("i18n.t('aiServices.home.ui.accessStopped')");
+    expect(source).toContain("i18n.t('aiServices.home.ui.deleteAgent')");
     expect(source).not.toContain('>회수<');
   });
 
@@ -36,75 +34,83 @@ describe('AI Service first-class operations home', () => {
     expect(source).toContain('harnessId: effective.id');
     expect(source).toContain('runtimeProfileId: effective.runtimeProfileId');
     expect(source).toContain('item.runtime_profile_id');
-    expect(source).toContain('완전한 Harness runtime profile binding');
+    expect(source).toContain("aiServices.home.runtimeBindingRequired");
     expect(source).not.toContain('<HarnessChoice');
     expect(source).not.toContain('API serving channel');
-    expect(source).toContain('배포할 AI 팀원');
-    expect(source).toContain('기존 AI 팀원 외부 배포');
+    expect(source).toContain("i18n.t('aiServices.home.ui.selectTeammate')");
+    expect(source).toContain("aiServices.home.copy.createTitle");
     expect(source).toContain('/deploy-now`');
   });
 
   it('shows the published Harness capability surface and actual tool bindings', () => {
     expect(source).toContain("'web.search': { tool: 'WebSearch'");
     expect(source).toContain("'web.fetch': { tool: 'WebFetch'");
-    expect(source).toContain('Registry 발행본');
+    expect(source).toContain("aiServices.home.ui.currentCapability");
   });
 
   it('routes missing tools into a separate Harness draft instead of an inline grant', () => {
-    expect(source).toContain('새 실행 도구 체계 만들기');
+    expect(source).toContain("aiServices.home.copy.newToolSystemTitle");
     expect(source).toContain('HarnessDraftHandoff');
     expect(source).toContain("fetch('/api/harnesses/drafts'");
     expect(source).toContain('/validate`');
     expect(source).toContain('/publish`');
-    expect(source).toContain('검증하고 발행');
+    expect(source).toContain("aiServices.home.ui.validatePublish");
   });
 
   it('shows a single three-step journey instead of technical readiness cards', () => {
-    expect(source).toContain('1. AI 팀원 선택');
-    expect(source).toContain('2. 답변 자료 확인');
-    expect(source).toContain('3. 이용 범위 설정 후 테스트');
+    expect(source).toContain("aiServices.home.copy.stepOne");
+    expect(source).toContain("aiServices.home.copy.stepTwo");
+    expect(source).toContain("aiServices.home.copy.stepThree");
     expect(source).not.toContain('외부 배포 준비도');
   });
 
   it('captures selected Project documents as immutable deployment materials', () => {
-    expect(source).toContain('답변에 사용할 자료');
-    expect(source).toContain('원본 파일이 바뀌어도 새로 배포하기 전에는 외부 응답이 달라지지 않습니다');
-    expect(source).toContain('Finder에서 자료 선택');
+    expect(source).toContain("i18n.t('aiServices.home.ui.answerMaterials')");
+    expect(source).toContain("aiServices.home.copy.materialsDescription");
+    expect(source).toContain("i18n.t('aiServices.home.ui.selectInFinder')");
     expect(source).toContain('KnowledgeFilePicker');
     expect(source).toContain('/api/files/tree?path=');
-    expect(source).toContain('예상 {estimatedTokens.toLocaleString()} tokens');
+    expect(source).toContain("aiServices.home.ui.knowledgeConfig");
     expect(source).toContain('KNOWLEDGE_PROMPT_TOKEN_LIMIT');
-    expect(source).toContain('고급 · 경로 직접 입력');
+    expect(source).toContain("i18n.t('aiServices.home.ui.advancedPath')");
     expect(source).toContain('knowledgePaths.split');
     expect(source).toContain("kind: 'knowledge'");
     expect(source).toContain('refs: selectedKnowledgePaths.map((path) => ({ path }))');
     expect(source).toContain("kind: 'none'");
-    expect(source).toContain("userFacingLabel: '연결된 배포 자료 없음'");
-    expect(source).toContain('Project 경계·symlink·파일 형식·크기');
+    expect(source).toContain("aiServices.home.noDeploymentMaterials");
+    expect(source).toContain("aiServices.home.copy.materialsSafety");
     expect(source).not.toContain('Knowledge Snapshot');
   });
 
+  it('shows profile version drift and lets a new deployment recapture the current Primary Agent identity', () => {
+    expect(source).toContain('sourceAgentProfileVersion');
+    expect(source).toContain('ownerAgentProfileVersion');
+    expect(source).toContain('refreshIdentityFromSourceAgent');
+    expect(source).toContain('최신 상담 지침을 새 버전에 반영');
+    expect(store).toContain('refreshIdentityFromSourceAgent?: boolean');
+  });
+
   it('shows a human-readable capability and approval policy prototype', () => {
-    expect(source).toContain('자료와 시스템');
-    expect(source).toContain('가능한 일');
-    expect(source).toContain('확인이 필요한 일');
-    expect(source).toContain('자료를 찾아 답변');
-    expect(source).toContain('업무 데이터 조회');
-    expect(source).toContain('실행안 제안');
-    expect(source).toContain('실제 업무 실행');
-    expect(source).toContain('권한 설계 미리보기');
-    expect(source).toContain('매번 승인');
-    expect(source).toContain('정책 안에서 자동');
-    expect(source).toContain('실행 허용 안 함');
-    expect(source).toContain('외부 배포 승인 요약');
-    expect(source).toContain('자유 SQL');
+    expect(source).toContain("i18n.t('aiServices.home.ui.materialsSystems')");
+    expect(source).toContain("i18n.t('aiServices.home.ui.capabilities')");
+    expect(source).toContain("i18n.t('aiServices.home.ui.approvalNeeded')");
+    expect(source).toContain("i18n.t('aiServices.home.ui.capabilityKnowledgeTitle')");
+    expect(source).toContain("i18n.t('aiServices.home.ui.capabilityDataTitle')");
+    expect(source).toContain("i18n.t('aiServices.home.ui.capabilityProposeTitle')");
+    expect(source).toContain("i18n.t('aiServices.home.ui.capabilityExecuteTitle')");
+    expect(source).toContain("i18n.t('aiServices.home.ui.permissionPreview')");
+    expect(source).toContain("i18n.t('aiServices.home.ui.approvalEveryTitle')");
+    expect(source).toContain("i18n.t('aiServices.home.ui.approvalPolicyTitle')");
+    expect(source).toContain("i18n.t('aiServices.home.ui.approvalDisabledTitle')");
+    expect(source).toContain("i18n.t('aiServices.home.ui.deploymentSummary')");
+    expect(source).toContain("i18n.t('aiServices.home.ui.impossibleActions')");
   });
 
   it('uses a one-click deploy flow and hides review/approval from the primary UI', () => {
     expect(source).toContain('DeploymentFlowPanel');
-    expect(source).toContain('아직 외부 배포되지 않았습니다');
-    expect(source).toContain('버튼 한 번이면 필요한 준비를 자동으로 끝내고 테스트 링크를 만듭니다');
-    expect(source).toContain("mutating ? '외부 배포 중…' : service.status === 'paused' ? '다시 운영하기' : '에이전트 외부 배포'");
+    expect(source).toContain("aiServices.home.copy.notPublishedHint");
+    expect(source).toContain("aiServices.home.copy.notPublishedHint");
+    expect(source).toContain("aiServices.home.ui.deploying");
     expect(source).not.toContain('내부 배포 상세 보기');
     expect(source).not.toContain('검토 요청');
     expect(source).not.toContain('검토·승인');
@@ -123,22 +129,22 @@ describe('AI Service first-class operations home', () => {
   it('derives externally accessible state from both deployment and Channel access mode', () => {
     expect(source).toContain("function isExternallyAccessible(service: AIServiceSummary, channel?: ChannelSummary)");
     expect(source).toContain("channelAccessMode(channel) !== 'disabled'");
-    expect(source).toContain('외부 접근 중지');
-    expect(source).toContain('외부 접근 재개');
-    expect(source).toContain('접근 차단');
-    expect(source).toContain("channelAccessMode(channel) === 'disabled' ? '접근 중지'");
+    expect(source).toContain("i18n.t('aiServices.home.ui.accessStopped')");
+    expect(source).toContain("i18n.t('aiServices.home.ui.resumeAccess')");
+    expect(source).toContain("i18n.t('aiServices.home.ui.accessStopped')");
+    expect(source).toContain("aiServices.home.ui.accessStopped");
   });
 
   it('shows Channel usage, quota status and editable limits from the service row', () => {
     expect(source).toContain('ChannelUsagePanel');
-    expect(source).toContain('사용량 · 로그');
-    expect(source).toContain('최근 이용 현황과 사용 한도');
-    expect(source).toContain('고급 이용 한도 설정');
-    expect(source).toContain('사용 한도 저장');
+    expect(source).toContain("i18n.t('aiServices.home.ui.usageLogs')");
+    expect(source).toContain("i18n.t('aiServices.home.ui.usageDescription')");
+    expect(source).toContain("i18n.t('aiServices.home.ui.advancedQuota')");
+    expect(source).toContain("aiServices.home.ui.saveQuota");
     expect(source).toContain('tenantDailyLimit');
     expect(source).toContain('tokenLimit');
-    expect(source).toContain('토큰 사용량');
-    expect(source).toContain('전체 토큰 한도');
+    expect(source).toContain("i18n.t('aiServices.home.ui.tokenUsage')");
+    expect(source).toContain("i18n.t('aiServices.home.ui.totalTokenLimit')");
     expect(source).toContain('quota.channelRemaining');
     expect(store).toContain('AIServiceChannelUsageSummary');
     expect(store).toContain('getChannelUsage');
@@ -151,56 +157,54 @@ describe('AI Service first-class operations home', () => {
 
   it('lets the operator send one honest test question to the current deployment before sharing', () => {
     expect(source).toContain('previewAnswerText');
-    expect(source).toContain('현재 고객 답변 확인');
-    expect(source).toContain('테스트 질문 보내기');
+    expect(source).toContain("aiServices.home.copy.currentAnswerCheck");
+    expect(source).toContain("aiServices.home.ui.sendTest");
     expect(source).toContain('/preview/conversations`');
     expect(source).toContain('/preview/conversations/${encodeURIComponent(conversation.id)}/messages`');
-    expect(source).toContain('테스트는 끝났지만 답변이 비어 있습니다');
-    expect(source).toContain('테스트 실패 · 공유 전에 확인 필요');
-    expect(source).toContain('정상 답변');
+    expect(source).toContain("aiServices.home.emptyTestAnswer");
+    expect(source).toContain("aiServices.home.copy.testFailure");
+    expect(source).toContain("i18n.t('aiServices.home.ui.validAnswer')");
   });
 
   it('prioritizes a deployed website link while keeping API details under advanced settings', () => {
     expect(source).toContain('ChannelCredentialPanel');
-    expect(source).toContain('외부 배포 · 테스트');
-    expect(source).toContain('버튼 하나로 에이전트를 외부 배포하고, 바로 열어 테스트한 뒤 링크를 공유하세요');
-    expect(source).toContain('외부 접속 링크');
-    expect(source).toContain('외부 배포됨 · 자동 생성');
-    expect(source).toContain('링크 복사');
-    expect(source).toContain('공유하기');
+    expect(source).toContain("i18n.t('aiServices.home.ui.externalDeployTest')");
+    expect(source).toContain("aiServices.home.copy.deployTestDescription");
+    expect(source).toContain("aiServices.home.copy.externalLink");
+    expect(source).toContain("aiServices.home.copy.publishedAuto");
+    expect(source).toContain("aiServices.home.ui.copyLink");
+    expect(source).toContain("i18n.t('aiServices.home.ui.share')");
     expect(source).toContain('navigator.share');
     expect(source).toContain('sharePublicLink');
     expect(source).toContain("err.name === 'AbortError'");
-    expect(source).toContain("linkCopied ? '복사됨' : '링크 복사'");
-    expect(source).toContain('aria-label="공유 링크를 클립보드에 복사"');
+    expect(source).toContain("aiServices.home.ui.copyLink");
+    expect(source).toContain("aria-label={i18n.t('aiServices.home.copy.copyShareLink')}");
     expect(source).toContain('grid grid-cols-2 gap-2 sm:flex sm:flex-wrap');
-    expect(source).toContain('에이전트 열기');
+    expect(source).toContain("i18n.t('aiServices.home.ui.openAgent')");
     expect(source).not.toContain('웹사이트 열기');
-    expect(source).toContain('고급 설정 · API/token 보기');
+    expect(source).toContain("i18n.t('aiServices.home.ui.openAdvanced')");
     expect(source).toContain('/credentials/revoke');
     expect(source).toContain('Conversation API URL');
     expect(source).toContain('Message API URL template');
-    expect(source).toContain('Token 복사');
-    expect(source).toContain('API URL 복사');
-    expect(source).toContain('Bearer token · 한 번만 표시');
+    expect(source).toContain("i18n.t('aiServices.home.ui.copyToken')");
+    expect(source).toContain("i18n.t('aiServices.home.ui.copyApi')");
+    expect(source).toContain("aiServices.home.copy.tokenWarning");
   });
 
   it('lets admins manage Channel access mode before exposing details', () => {
-    expect(source).toContain('ACCESS_MODE_LABELS');
-    expect(source).toContain('누가 사용할 수 있나요?');
-    expect(source).toContain('공개 범위');
-    expect(source).toContain('링크 공유 · 링크를 아는 사람만');
-    expect(source).toContain('완전 공개 · 누구나 접속');
-    expect(source).toContain('비밀번호 보호 · 비밀번호를 아는 사람만');
-    expect(source).toContain('로그인 필요 · 준비 중');
-    expect(source).toContain('일시 중지 · 아무도 접속 못함');
-    expect(source).toContain('비밀번호 만들기');
+    expect(source).toContain('function accessModeLabel');
+    expect(source).toContain("i18n.t('aiServices.home.ui.whoCanUse')");
+    expect(source).toContain("aiServices.home.ui.accessMethod");
+    expect(source).toContain('function accessModeLabel');
+    expect(source).toContain('aiServices.home.accessMode.${mode}');
+    expect(source).toContain("(['unlisted', 'password', 'disabled', 'login_required', 'public'] as const)");
+    expect(source).toContain("i18n.t('aiServices.home.ui.createPassword')");
     expect(source).toContain('makeSharePassword');
-    expect(source).toContain('저장 후 다시 볼 수 없으니');
-    expect(source).toContain('정보 패널 표시');
-    expect(source).toContain('도구 표시');
-    expect(source).toContain('공개 자료 표시');
-    expect(source).toContain('응답 시간 표시');
+    expect(source).toContain("aiServices.home.copy.passwordGuidance");
+    expect(source).toContain("i18n.t('aiServices.home.ui.showInfoPanel')");
+    expect(source).toContain("i18n.t('aiServices.home.ui.showTools')");
+    expect(source).toContain("i18n.t('aiServices.home.ui.showMaterials')");
+    expect(source).toContain("i18n.t('aiServices.home.ui.showTiming')");
     expect(source).toContain('channelPublicUi');
     expect(store).toContain('AIServiceChannelAccessMode');
     expect(store).toContain('AIServicePublicUiConfig');
@@ -212,48 +216,48 @@ describe('AI Service first-class operations home', () => {
   });
 
   it('supports editing, stopping access, resuming access, and deleting deployed agents from the detail', () => {
-    expect(source).toContain('수정');
-    expect(source).toContain('외부 접근 중지');
-    expect(source).toContain('외부 접근 재개');
-    expect(source).toContain('에이전트 삭제');
-    expect(source).toContain('이름');
-    expect(source).toContain('설명');
+    expect(source).toContain("aiServices.home.ui.edit");
+    expect(source).toContain("i18n.t('aiServices.home.ui.accessStopped')");
+    expect(source).toContain("i18n.t('aiServices.home.ui.resumeAccess')");
+    expect(source).toContain("i18n.t('aiServices.home.ui.deleteAgent')");
+    expect(source).toContain("i18n.t('aiServices.home.ui.name')");
+    expect(source).toContain("i18n.t('aiServices.home.ui.description')");
     expect(source).toContain('saveEdit');
     expect(source).toContain('deleteService');
-    expect(source).toContain("title: '외부 배포 에이전트 삭제'");
+    expect(source).toContain("aiServices.home.ui.deleteAgent");
     expect(source).toContain("danger: true");
-    expect(source).toContain('기존 배포 세션과 대화 기록은 보존됩니다');
+    expect(source).toContain("aiServices.home.copy.managementDescription");
     expect(store).toContain("method: 'PATCH'");
     expect(store).toContain("method: 'DELETE'");
   });
 
   it('covers loading, error and empty states', () => {
-    expect(source).toContain('외부 배포 목록을 불러오는 중');
-    expect(source).toContain('다시 시도');
-    expect(source).toContain('첫 에이전트를 외부 배포해 보세요');
+    expect(source).toContain("aiServices.home.copy.loadingDeployments");
+    expect(source).toContain("i18n.t('aiServices.home.ui.retry')");
+    expect(source).toContain("i18n.t('aiServices.home.copy.emptyFirst')");
   });
 
   it('configures a deployment-pinned customer request CTA without exposing delivery as complete', () => {
     expect(source).toContain('RequestActionDraft');
     expect(source).toContain('requestActionDraft');
     expect(source).toContain('requestActionsSnapshot');
-    expect(source).toContain('고객 요청 버튼');
-    expect(source).toContain('담당 메일');
-    expect(source).toContain('우리 고객사에 요청 보내기');
+    expect(source).toContain("i18n.t('aiServices.home.ui.customerRequestButton')");
+    expect(source).toContain("i18n.t('aiServices.home.ui.recipientEmail')");
+    expect(source).toContain("aiServices.home.requestAction.label");
     expect(source).toContain("destination: { type: 'email', to: draft.recipientEmail.trim() }");
     expect(source).toContain('requestActions: requestActionsSnapshot(requestAction)');
-    expect(source).toContain('수신 주소는 고객 화면에 노출되지 않습니다');
-    expect(source).toContain('발송 완료로 표시되지 않습니다');
+    expect(source).toContain("aiServices.home.ui.requestActionPrivacy");
+    expect(source).toContain("aiServices.home.ui.requestActionPrivacy");
   });
 
   it('prepares immutable Knowledge changes as a new deployment version and preserves rollback', () => {
     expect(source).toContain('DeploymentVersionPanel');
-    expect(source).toContain('새 버전 준비');
-    expect(source).toContain('Knowledge 구성');
-    expect(source).toContain('추가 {added.length}');
-    expect(source).toContain('제외 {removed.length}');
-    expect(source).toContain('만들고 활성화');
-    expect(source).toContain('로 되돌리기');
+    expect(source).toContain("i18n.t('aiServices.home.ui.prepareNewVersion')");
+    expect(source).toContain("aiServices.home.ui.knowledgeConfig");
+    expect(source).toContain("i18n.t('aiServices.home.ui.added')");
+    expect(source).toContain("i18n.t('aiServices.home.ui.removed')");
+    expect(source).toContain("i18n.t('aiServices.home.ui.createActivateVersion'");
+    expect(source).toContain("i18n.t('aiServices.home.ui.rollbackVersion'");
     expect(source).toContain('createDeployment(service.id');
     expect(source).toContain('rollbackDeployment(service.id');
     expect(store).toContain('/deployments`');
@@ -263,19 +267,19 @@ describe('AI Service first-class operations home', () => {
   it('uses a list-to-detail structure for many deployed agents', () => {
     expect(source).toContain('selectedServiceId');
     expect(source).toContain('ServiceListItem');
-    expect(source).toContain('배포된 에이전트');
-    expect(source).toContain('베이스 팀원');
-    expect(source).toContain('현재 배포');
-    expect(source).toContain('고정된 Knowledge');
+    expect(source).toContain("aiServices.home.ui.externalDeployment");
+    expect(source).toContain("i18n.t('aiServices.home.primaryAiTeammate')");
+    expect(source).toContain('service.currentDeployment');
+    expect(source).toContain('deploymentKnowledgeRefs(service)');
     expect(source).toContain('ConversationHistoryPanel');
-    expect(source).toContain('과거 대화');
+    expect(source).toContain("aiServices.home.ui.pastConversations");
     expect(source).toContain('getConversations');
   });
 
   it('uses agent external deployment as the product term instead of website deployment', () => {
-    expect(source).toContain('에이전트 외부 배포');
-    expect(source).toContain('새 외부 배포');
-    expect(source).toContain('외부 배포 이름');
+    expect(source).toContain("aiServices.home.ui.externalDeployment");
+    expect(source).toContain("i18n.t('aiServices.home.ui.newDeployment')");
+    expect(source).toContain("i18n.t('aiServices.home.ui.deploymentName')");
     expect(source).not.toContain('웹사이트 배포');
     expect(source).not.toContain('웹사이트로 배포');
     expect(source).not.toContain('AI 서비스 상태 필터');

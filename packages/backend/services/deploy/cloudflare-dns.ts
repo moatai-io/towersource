@@ -11,7 +11,6 @@
  */
 
 const CF_API = 'https://api.cloudflare.com/client/v4';
-const PARENT_DOMAIN = 'tower.example.com';
 
 // ── Config ──
 
@@ -19,7 +18,19 @@ function getCfConfig() {
   // DNS token = same as API token (Pages + DNS Edit + Zone Read)
   const token = process.env.CLOUDFLARE_DNS_TOKEN || process.env.CLOUDFLARE_API_TOKEN || '';
   const accountId = process.env.CLOUDFLARE_ACCOUNT_ID || '';
-  return { token, accountId };
+  let publicHost = '';
+  try {
+    publicHost = process.env.PUBLIC_URL ? new URL(process.env.PUBLIC_URL).hostname : '';
+  } catch {}
+  const parentDomain = (process.env.CLOUDFLARE_PARENT_DOMAIN || publicHost).trim().replace(/^\.+|\.+$/g, '');
+  if (!parentDomain) {
+    throw new Error('CLOUDFLARE_PARENT_DOMAIN or PUBLIC_URL is required for managed DNS operations');
+  }
+  return { token, accountId, parentDomain };
+}
+
+function getParentDomain(): string {
+  return getCfConfig().parentDomain;
 }
 
 function cfHeaders(): Record<string, string> {
@@ -62,11 +73,11 @@ let _zoneIdCache = '';
 export async function getZoneId(): Promise<string> {
   if (_zoneIdCache) return _zoneIdCache;
 
-  const res = await fetch(`${CF_API}/zones?name=${PARENT_DOMAIN}`, { headers: cfHeaders() });
+  const res = await fetch(`${CF_API}/zones?name=${getParentDomain()}`, { headers: cfHeaders() });
   const data = await res.json() as any;
 
   if (!data.success || !data.result?.length) {
-    throw new Error(`Zone '${PARENT_DOMAIN}' not found. Check CF token has Zone Read permission.`);
+    throw new Error(`Zone '${getParentDomain()}' not found. Check CF token has Zone Read permission.`);
   }
 
   _zoneIdCache = data.result[0].id;
@@ -168,7 +179,7 @@ export async function createWildcardForCustomer(
   }
 
   // Check if wildcard already exists
-  const existing = await listDnsRecords(`*.${customerName}.${PARENT_DOMAIN}`);
+  const existing = await listDnsRecords(`*.${customerName}.${getParentDomain()}`);
   if (existing.length) {
     console.log(`[cf-dns] Wildcard already exists for ${customerName}: ${existing[0].content}`);
     if (existing[0].content !== vmIp) {
@@ -180,7 +191,7 @@ export async function createWildcardForCustomer(
   // Create wildcard A record (not proxied — customer uses own certbot SSL)
   const wildcard = await createDnsRecord({
     type: 'A',
-    name: `*.${customerName}.${PARENT_DOMAIN}`,
+    name: `*.${customerName}.${getParentDomain()}`,
     content: vmIp,
     proxied: false,
     comment: `Wildcard for ${customerName} published sites`,
@@ -193,8 +204,8 @@ export async function createWildcardForCustomer(
  * Check the DNS setup status for a customer.
  */
 export async function getCustomerDnsStatus(customerName: string): Promise<CustomerDnsSetup> {
-  const wildcardName = `*.${customerName}.${PARENT_DOMAIN}`;
-  const baseName = `${customerName}.${PARENT_DOMAIN}`;
+  const wildcardName = `*.${customerName}.${getParentDomain()}`;
+  const baseName = `${customerName}.${getParentDomain()}`;
 
   const [wildcardRecords, baseRecords] = await Promise.all([
     listDnsRecords(wildcardName),
@@ -221,7 +232,7 @@ export async function getCustomerDnsStatus(customerName: string): Promise<Custom
  * Remove all DNS records for a customer (cleanup on deactivation).
  */
 export async function removeCustomerDns(customerName: string): Promise<{ removed: number }> {
-  const wildcardName = `*.${customerName}.${PARENT_DOMAIN}`;
+  const wildcardName = `*.${customerName}.${getParentDomain()}`;
   const records = await listDnsRecords(wildcardName);
 
   for (const r of records) {
@@ -242,7 +253,7 @@ export async function listCustomerWildcards(): Promise<Array<{
   record: DnsRecord;
 }>> {
   const allRecords = await listDnsRecords();
-  const wildcardPattern = new RegExp(`^\\*\\.([a-z0-9-]+)\\.${PARENT_DOMAIN.replace('.', '\\.')}$`);
+  const wildcardPattern = new RegExp(`^\\*\\.([a-z0-9-]+)\\.${getParentDomain().replace('.', '\\.')}$`);
 
   return allRecords
     .filter(r => wildcardPattern.test(r.name))

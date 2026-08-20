@@ -7,17 +7,17 @@ const s = fs.readFileSync(
 );
 describe("simplified file workspace ui", () => {
   it("keeps add, search, and selection compact until requested", () => {
-    expect(s).toContain('aria-label="추가"');
+    expect(s).toContain("aria-label={t('workspace.add')}");
     expect(s).toContain("createMenuOpen");
     expect(s).toContain("searchOpen");
-    expect(s).toContain('aria-label={searchOpen ? "검색 닫기" : "검색"}');
-    expect(s).toContain('aria-label={selectionMode ? "선택 취소" : "선택"}');
+    expect(s).toContain("aria-label={searchOpen ? t('workspace.closeSearch') : t('workspace.search')}");
+    expect(s).toContain("aria-label={selectionMode ? t('workspace.cancelSelection') : t('workspace.select')}");
     expect(s).toContain('className="hidden text-[12px] sm:inline"');
     expect(s).not.toContain("격자");
     expect(s).not.toContain("changeViewMode");
   });
   it("uses a mobile bottom sheet for the add menu", () => {
-    expect(s).toContain('aria-label="추가 메뉴 닫기"');
+    expect(s).toContain("aria-label={t('workspace.closeAddMenu')}");
     expect(s).toContain('bottom-[max(12px,env(safe-area-inset-bottom))]');
   });
   it("creates files and folders inline without prompt", () => {
@@ -25,16 +25,16 @@ describe("simplified file workspace ui", () => {
       "inlineCreate",
       "inlineCreateName",
       "submitCreate",
-      "새 폴더",
-      "새 파일",
-      "만들기",
+      "t('workspace.newFolder')",
+      "t('workspace.newFile')",
+      "t('workspace.create')",
     ])
       expect(s).toContain(token);
     expect(s).not.toContain("window." + "prompt(kind==='file'");
   });
   it("offers row context actions", () => {
     expect(s).toContain("onContextMenu");
-    for (const token of ["펼치기 / 접기", "선택 작업", "경로 복사"])
+    for (const token of ["t('workspace.expandCollapse')", "t('workspace.selectionActions')", "t('workspace.copyPath')"])
       expect(s).toContain(token);
   });
   it("uploads dropped files and folders to current path with feedback", () => {
@@ -43,7 +43,7 @@ describe("simplified file workspace ui", () => {
       "uploadItems",
       "currentPath",
       "dropActive",
-      "현재 폴더에 파일·폴더 놓기",
+      "t('workspace.dropHere')",
     ])
       expect(s).toContain(token);
   });

@@ -78,7 +78,7 @@ export function SidebarSessionsToolbar({
               searchInputRef.current?.focus();
             }}
             className="absolute right-1.5 top-1/2 -translate-y-1/2 text-surface-600 hover:text-gray-300 transition-colors"
-            title={t("clearSearch", { defaultValue: "검색 지우기" })}
+            title={t("clearSearch")}
           >
             <svg
               className="w-3 h-3"
@@ -145,7 +145,7 @@ export function SidebarSessionsToolbar({
                 active={sessionKindFilter === "agents"}
                 onClick={() => setKindFilter("agents")}
               >
-                Agent 대화
+                {t("agentConversations")}
               </FilterMenuItem>
               <FilterMenuItem
                 active={sessionKindFilter === "runs"}
@@ -157,7 +157,7 @@ export function SidebarSessionsToolbar({
                 active={sessionKindFilter === "external"}
                 onClick={() => setKindFilter("external")}
               >
-                외부 배포 (ext)
+                {t("externalDeploymentsWithExtension")}
               </FilterMenuItem>
               <div className="my-1 border-t border-surface-700/70" />
               <FilterMenuItem

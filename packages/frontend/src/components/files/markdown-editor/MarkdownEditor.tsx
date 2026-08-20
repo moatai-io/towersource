@@ -2,6 +2,8 @@
 // Public API: MarkdownEditor.
 
 import React, { useCallback, useMemo, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
+import i18n from '../../../i18n';
 import CodeMirror from '@uiw/react-codemirror';
 import { oneDark } from '@codemirror/theme-one-dark';
 import { markdown } from '@codemirror/lang-markdown';
@@ -226,7 +228,7 @@ function setHeading(view: EditorView, level: number): boolean {
     const match = line.match(/^(#{1,6})\s+(.*)$/);
     if (match?.[1].length === level) return match[2];
     const bare = line.replace(/^#{1,6}\s+/, '');
-    return `${'#'.repeat(level)} ${bare || '제목'}`;
+    return `${'#'.repeat(level)} ${bare || i18n.t('markdownEditor.defaultHeading', { ns: 'files' })}`;
   });
 }
 
@@ -240,6 +242,7 @@ function insertBlock(view: EditorView, text: string): boolean {
 }
 
 export function MarkdownEditor({ value, filePath, onChange, onSave, readOnly = false }: MarkdownEditorProps) {
+  const { t } = useTranslation('files');
   const theme = useSettingsStore((s) => s.theme);
   const viewRef = useRef<EditorView | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -257,13 +260,13 @@ export function MarkdownEditor({ value, filePath, onChange, onSave, readOnly = f
       const insert = `${needsLeadingBreak ? '\n' : ''}${markdownText}\n`;
       view.dispatch({ changes: { from: pos, to: pos, insert }, selection: { anchor: pos + insert.length }, scrollIntoView: true });
       view.focus();
-      toastSuccess(files.length > 1 ? `${files.length}개 파일을 문서에 삽입했습니다.` : '파일을 문서에 삽입했습니다.');
+      toastSuccess(t(files.length > 1 ? 'markdownEditor.filesInserted' : 'markdownEditor.fileInserted', { count: files.length }));
     } catch (err) {
-      toastError(err instanceof Error ? err.message : '파일 삽입에 실패했습니다.');
+      toastError(err instanceof Error ? err.message : t('markdownEditor.fileInsertFailed'));
     } finally {
       uploadingRef.current = false;
     }
-  }, [filePath]);
+  }, [filePath, t]);
 
   const runCommand = useCallback((command: (view: EditorView) => boolean) => {
     const view = viewRef.current;
@@ -322,20 +325,20 @@ export function MarkdownEditor({ value, filePath, onChange, onSave, readOnly = f
   return (
     <div className="flex h-full flex-col bg-surface-950">
       <div className="flex shrink-0 flex-wrap items-center gap-1 border-b border-surface-800 bg-surface-950/95 px-3 py-1.5 text-[12px] text-surface-400">
-        <button className="rounded px-2 py-1 hover:bg-surface-800 hover:text-surface-100" onClick={() => runCommand((v) => setHeading(v, 1))} title="제목 1 토글">H1</button>
-        <button className="rounded px-2 py-1 hover:bg-surface-800 hover:text-surface-100" onClick={() => runCommand((v) => setHeading(v, 2))} title="제목 2 토글">H2</button>
-        <button className="rounded px-2 py-1 hover:bg-surface-800 hover:text-surface-100" onClick={() => runCommand((v) => setHeading(v, 3))} title="제목 3 토글">H3</button>
+        <button className="rounded px-2 py-1 hover:bg-surface-800 hover:text-surface-100" onClick={() => runCommand((v) => setHeading(v, 1))} title={t('markdownEditor.headingToggle', { level: 1 })}>H1</button>
+        <button className="rounded px-2 py-1 hover:bg-surface-800 hover:text-surface-100" onClick={() => runCommand((v) => setHeading(v, 2))} title={t('markdownEditor.headingToggle', { level: 2 })}>H2</button>
+        <button className="rounded px-2 py-1 hover:bg-surface-800 hover:text-surface-100" onClick={() => runCommand((v) => setHeading(v, 3))} title={t('markdownEditor.headingToggle', { level: 3 })}>H3</button>
         <span className="mx-1 h-4 w-px bg-surface-800" />
-        <button className="rounded px-2 py-1 font-bold hover:bg-surface-800 hover:text-surface-100" onClick={() => runCommand((v) => toggleInlineMarker(v, '**', '**', '굵게'))} title="굵게 토글 (Ctrl/Cmd+B)">B</button>
-        <button className="rounded px-2 py-1 italic hover:bg-surface-800 hover:text-surface-100" onClick={() => runCommand((v) => toggleInlineMarker(v, '*', '*', '기울임'))} title="기울임 토글 (Ctrl/Cmd+I)">I</button>
-        <button className="rounded px-2 py-1 hover:bg-surface-800 hover:text-surface-100" onClick={() => runCommand(insertMarkdownLink)} title="링크 삽입/수정/제거 (Ctrl/Cmd+K)">Link</button>
+        <button className="rounded px-2 py-1 font-bold hover:bg-surface-800 hover:text-surface-100" onClick={() => runCommand((v) => toggleInlineMarker(v, '**', '**', t('markdownEditor.boldPlaceholder')))} title={t('markdownEditor.boldToggle')}>B</button>
+        <button className="rounded px-2 py-1 italic hover:bg-surface-800 hover:text-surface-100" onClick={() => runCommand((v) => toggleInlineMarker(v, '*', '*', t('markdownEditor.italicPlaceholder')))} title={t('markdownEditor.italicToggle')}>I</button>
+        <button className="rounded px-2 py-1 hover:bg-surface-800 hover:text-surface-100" onClick={() => runCommand(insertMarkdownLink)} title={t('markdownEditor.linkAction')}>Link</button>
         <span className="mx-1 h-4 w-px bg-surface-800" />
-        <button className="rounded px-2 py-1 hover:bg-surface-800 hover:text-surface-100" onClick={() => runCommand((v) => toggleLinePrefix(v, '- '))} title="리스트 토글">List</button>
-        <button className="rounded px-2 py-1 hover:bg-surface-800 hover:text-surface-100" onClick={() => runCommand(toggleTodo)} title="체크박스 토글">Todo</button>
-        <button className="rounded px-2 py-1 hover:bg-surface-800 hover:text-surface-100" onClick={() => runCommand((v) => toggleLinePrefix(v, '> '))} title="인용 토글">Quote</button>
-        <button className="rounded px-2 py-1 hover:bg-surface-800 hover:text-surface-100" onClick={() => runCommand((v) => insertBlock(v, '```\ncode\n```'))} title="코드블록">Code</button>
+        <button className="rounded px-2 py-1 hover:bg-surface-800 hover:text-surface-100" onClick={() => runCommand((v) => toggleLinePrefix(v, '- '))} title={t('markdownEditor.listToggle')}>List</button>
+        <button className="rounded px-2 py-1 hover:bg-surface-800 hover:text-surface-100" onClick={() => runCommand(toggleTodo)} title={t('markdownEditor.checkboxToggle')}>Todo</button>
+        <button className="rounded px-2 py-1 hover:bg-surface-800 hover:text-surface-100" onClick={() => runCommand((v) => toggleLinePrefix(v, '> '))} title={t('markdownEditor.quoteToggle')}>Quote</button>
+        <button className="rounded px-2 py-1 hover:bg-surface-800 hover:text-surface-100" onClick={() => runCommand((v) => insertBlock(v, '```\ncode\n```'))} title={t('markdownEditor.codeBlock')}>Code</button>
         <span className="mx-1 h-4 w-px bg-surface-800" />
-        <button className="rounded px-2 py-1 hover:bg-surface-800 hover:text-surface-100" onClick={() => fileInputRef.current?.click()} title="이미지/파일 삽입">Attach</button>
+        <button className="rounded px-2 py-1 hover:bg-surface-800 hover:text-surface-100" onClick={() => fileInputRef.current?.click()} title={t('markdownEditor.attach')}>Attach</button>
         <input
           ref={fileInputRef}
           type="file"
@@ -347,7 +350,7 @@ export function MarkdownEditor({ value, filePath, onChange, onSave, readOnly = f
             e.currentTarget.value = '';
           }}
         />
-        <span className="ml-auto hidden text-[11px] text-surface-600 sm:inline">Markdown · Ctrl/Cmd+S 저장 · 이미지 붙여넣기/드롭 가능</span>
+        <span className="ml-auto hidden text-[11px] text-surface-600 sm:inline">{t('markdownEditor.hint')}</span>
       </div>
       <div className="min-h-0 flex-1">
         <CodeMirror

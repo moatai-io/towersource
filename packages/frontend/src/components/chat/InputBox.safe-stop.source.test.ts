@@ -11,8 +11,8 @@ describe('immediate stop UI contract', () => {
     expect(input).toContain("const isSafeStopAvailable = isPiStreamingSession");
     expect(input).toContain('isSafeStopAvailable && onSafeStop');
     expect(input).not.toMatch(/const isPiStreamingSession[^;]*modelUsed/);
-    expect(input).toContain('title="즉시 중단"');
-    expect(input).toContain('aria-label="응답 즉시 중단"');
+    expect(input).toContain("title={t('stopImmediately')}");
+    expect(input).toContain("aria-label={t('stopImmediately')}");
     expect(input).not.toContain('마치는 중…');
     expect(input).not.toContain('지금 하는 작업을 마치고 멈춥니다');
     expect(input).toContain('focus-visible:ring-primary-400');

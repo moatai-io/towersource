@@ -113,7 +113,7 @@ function getMessageText(content: ContentBlock[]): string {
     .join("\n");
 }
 
-function formatMessageTime(ts: number): string {
+function formatMessageTime(ts: number, t: (key: string, options?: Record<string, unknown>) => string): string {
   const d = new Date(ts);
   const now = new Date();
   const isToday = d.toDateString() === now.toDateString();
@@ -121,23 +121,23 @@ function formatMessageTime(ts: number): string {
   yesterday.setDate(yesterday.getDate() - 1);
   const isYesterday = d.toDateString() === yesterday.toDateString();
 
-  const time = d.toLocaleTimeString("ko-KR", {
+  const time = d.toLocaleTimeString(undefined, {
     hour: "2-digit",
     minute: "2-digit",
     hour12: false,
   });
   if (isToday) return time;
-  if (isYesterday) return `어제 ${time}`;
+  if (isYesterday) return t("agentCard.yesterdayAt", { time });
   return `${d.getMonth() + 1}/${d.getDate()} ${time}`;
 }
 
-function formatAgentCreatedAt(ts?: number): string {
+function formatAgentCreatedAt(ts: number | undefined, t: (key: string, options?: Record<string, unknown>) => string): string {
   if (!ts) return "now";
   const age = Date.now() - ts;
   if (age < 60_000) return "now";
   if (age < 60 * 60_000) return `${Math.max(1, Math.floor(age / 60_000))}m ago`;
-  if (age < 24 * 60 * 60_000) return formatMessageTime(ts);
-  return new Date(ts).toLocaleDateString("ko-KR", {
+  if (age < 24 * 60 * 60_000) return formatMessageTime(ts, t);
+  return new Date(ts).toLocaleDateString(undefined, {
     month: "short",
     day: "numeric",
   });
@@ -169,13 +169,14 @@ function openAgentSession(e: React.MouseEvent, sessionId: string) {
 
 function AgentSessionLink({
   sessionId,
-  label = "세션 열기",
+  label,
   title = "Open Agent Session in main tab",
 }: {
   sessionId?: string;
   label?: string;
   title?: string;
 }) {
+  const { t } = useTranslation("chat");
   if (!sessionId) return null;
   const href = `/s/${sessionId}`;
   return (
@@ -188,7 +189,7 @@ function AgentSessionLink({
       <span aria-hidden="true" className="text-surface-600">
         ↗
       </span>
-      <span className="truncate">{label}</span>
+      <span className="truncate">{label || t("agentCard.openSession")}</span>
     </a>
   );
 }
@@ -258,11 +259,11 @@ function AgentStatusMark({
   const { t } = useTranslation("chat");
   if (isRunning) {
     return (
-      <RunIndicator size="sm" label="작업 중" className="text-primary-300" />
+      <RunIndicator size="sm" label={t("agentCard.working")} className="text-primary-300" />
     );
   }
   if (reported) {
-    const label = "답변 완료";
+    const label = t("agentCard.responseComplete");
     return (
       <span
         className="inline-flex h-5 w-5 items-center justify-center text-[17px] font-bold leading-none text-emerald-300/90"
@@ -276,7 +277,7 @@ function AgentStatusMark({
   return (
     <span
       className="h-1.5 w-1.5 rounded-full bg-violet-300/70"
-      aria-label="대화 준비됨"
+      aria-label={t("agentCard.ready")}
     />
   );
 }
@@ -315,6 +316,7 @@ export function AgentOriginBubble({
   message: ChatMessage;
   onFileClick?: (path: string) => void;
 }) {
+  const { t } = useTranslation("chat");
   const metadata = (message.metadata as any) || {};
   const meta =
     metadata.agentWake || metadata.agentSend || metadata.agentReport || {};
@@ -397,7 +399,7 @@ export function AgentOriginBubble({
 
             {message.timestamp && (
               <span className="text-[12px] text-surface-500">
-                {formatMessageTime(message.timestamp)}
+                {formatMessageTime(message.timestamp, t)}
               </span>
             )}
           </div>
@@ -425,7 +427,7 @@ export function AgentOriginBubble({
             aria-expanded={expanded}
             className="mt-1 text-[12px] font-medium text-surface-500 hover:text-surface-300"
           >
-            {expanded ? "답변 접기" : "답변 펼치기"}
+            {expanded ? t("agentCard.collapseResponse") : t("agentCard.expandResponse")}
           </button>
         )}
 
@@ -437,7 +439,7 @@ export function AgentOriginBubble({
             {(detailArtifacts || detailArtifactPaths.length > 0) && (
               <div className="mt-4 border-t border-surface-700/30 pt-3">
                 <div className="text-[12px] font-medium text-surface-500 mb-1">
-                  관련 파일
+                  {t("agentCard.relatedFiles")}
                 </div>
                 {detailArtifacts && (
                   <div className="text-[15px] text-surface-300 leading-relaxed whitespace-pre-wrap">
@@ -458,7 +460,7 @@ export function AgentOriginBubble({
             {readIfNeeded && (
               <div className="mt-3 border-l border-surface-700/40 pl-3">
                 <div className="text-[12px] font-medium text-surface-500 mb-1">
-                  필요할 때 확인
+                  {t("agentCard.readIfNeeded")}
                 </div>
                 <div className="text-[15px] text-surface-300 leading-relaxed whitespace-pre-wrap">
                   {renderAgentText(readIfNeeded, onFileClick)}
@@ -468,7 +470,7 @@ export function AgentOriginBubble({
             {retrievalHint && (
               <div className="mt-3 border-l border-surface-700/40 pl-3">
                 <div className="text-[12px] font-medium text-surface-500 mb-1">
-                  찾는 방법
+                  {t("agentCard.retrievalHint")}
                 </div>
                 <div className="text-[15px] text-surface-300 leading-relaxed whitespace-pre-wrap">
                   {retrievalHint}
@@ -478,7 +480,7 @@ export function AgentOriginBubble({
             {suggestedNext && (
               <div className="mt-4 border-t border-surface-700/30 pt-3">
                 <div className="text-[12px] font-medium text-surface-500 mb-1">
-                  다음으로 할 수 있는 일
+                  {t("agentCard.suggestedNext")}
                 </div>
                 <div className="text-[15px] text-surface-300 leading-relaxed whitespace-pre-wrap">
                   {suggestedNext}
@@ -491,8 +493,8 @@ export function AgentOriginBubble({
                   sessionId={parentSessionId}
                   label={
                     parentSessionName
-                      ? `부모: ${parentSessionName}`
-                      : "부모 세션 열기"
+                      ? t("agentCard.parentNamed", { name: parentSessionName })
+                      : t("agentCard.openParentSession")
                   }
                   title="Open parent session"
                 />
@@ -500,7 +502,7 @@ export function AgentOriginBubble({
               {backingSessionId && (
                 <AgentSessionLink
                   sessionId={backingSessionId}
-                  label="전체 대화 열기"
+                  label={t("agentCard.openFullConversation")}
                   title="Open Agent backing session"
                 />
               )}
@@ -560,18 +562,18 @@ export function AgentCard({
   const status = agentIsRunning
     ? {
         label: t("agentActivity.running"),
-        title: "작업 중",
+        title: t("agentCard.working"),
         border: "border-primary-400/35",
       }
     : hasReported
       ? {
           label: t("agentActivity.done"),
-          title: "답변 완료",
+          title: t("agentCard.responseComplete"),
           border: "border-emerald-400/25",
         }
       : {
           label: t("agentActivity.deployed"),
-          title: "대화 준비됨",
+          title: t("agentCard.ready"),
           border: "border-violet-400/25",
         };
   const runLabel = hasLaunchResult
@@ -582,7 +584,7 @@ export function AgentCard({
   const missionMeta = [
     runLabel,
     t("agentActivity.created", {
-      time: formatAgentCreatedAt(messageTimestamp),
+      time: formatAgentCreatedAt(messageTimestamp, t),
     }),
   ]
     .filter(Boolean)
@@ -635,7 +637,7 @@ export function AgentCard({
               )}
               {promptPreview.length > 180 && (
                 <span className="mt-1 block text-[12px] font-medium text-surface-500 group-hover/agent-card:text-surface-300">
-                  송부 내용 펼치기
+                  {t("agentCard.expandRequest")}
                 </span>
               )}
             </div>
@@ -729,7 +731,7 @@ export function AgentCard({
             <AgentSessionLink sessionId={resultMeta?.backingSessionId} />
           </div>
           <span className="block pl-9 pt-1 text-[12px] font-medium text-surface-500 group-hover/agent-card:text-surface-300">
-            송부 내용 접기
+            {t("agentCard.collapseRequest")}
           </span>
           {toolCount > 0 && agentIsRunning && lastToolName && (
             <div className="flex items-center gap-1.5 pl-9 text-[12px] text-surface-400">

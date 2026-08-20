@@ -1,4 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import i18n from '../../i18n';
 import { useAiPanelStore } from '../../stores/ai-panel-store';
 import { CadGeometryCanvasLayer } from './CadGeometryCanvasLayer';
 
@@ -341,14 +343,18 @@ function mapModelBBoxToPercent(box: CadBBox, model: CadBBox, contentBox?: number
   return { left: nx1 * 100, top: ny1 * 100, width: Math.max(1.5, (nx2 - nx1) * 100), height: Math.max(1.5, (ny2 - ny1) * 100), calibrated: false };
 }
 
+function tr(key: string, options?: Record<string, unknown>): string {
+  return i18n.t(key, { ns: 'files', ...options });
+}
+
 function kindLabel(kind: CadViewCandidate['kind']) {
   switch (kind) {
-    case 'overview': return '전체';
-    case 'title-block': return '타이틀';
-    case 'table': return '표/BOM';
-    case 'detail': return '텍스트/상세';
-    case 'layout': return '레이아웃';
-    default: return '뷰';
+    case 'overview': return tr('cad.kind.overview');
+    case 'title-block': return tr('cad.kind.titleBlock');
+    case 'table': return tr('cad.kind.table');
+    case 'detail': return tr('cad.kind.detail');
+    case 'layout': return tr('cad.kind.layout');
+    default: return tr('cad.kind.view');
   }
 }
 
@@ -359,6 +365,7 @@ function kindLabel(kind: CadViewCandidate['kind']) {
  * when the server has a global QCAD/ODA-style renderer configured.
  */
 export function CadPreview({ filePath }: { filePath: string }) {
+  useTranslation('files');
   const [status, setStatus] = useState<'loading' | 'loaded' | 'error'>('loading');
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
   const [error, setError] = useState<string>('');
@@ -375,7 +382,7 @@ export function CadPreview({ filePath }: { filePath: string }) {
   const [metadataError, setMetadataError] = useState<string>('');
   const [metadataLoading, setMetadataLoading] = useState(false);
   const [selectedCandidate, setSelectedCandidate] = useState<CadViewCandidate | null>(null);
-  const [renderMessage, setRenderMessage] = useState<string>('렌더 준비 중…');
+  const [renderMessage, setRenderMessage] = useState<string>(() => tr('cad.render.preparing'));
   const [renderMode, setRenderMode] = useState<CadRenderMode>('dark');
   const [renderedSize, setRenderedSize] = useState<{ width: number; height: number } | null>(null);
   const [activeRenderBBox, setActiveRenderBBox] = useState<CadBBox | undefined>(undefined);
@@ -396,7 +403,7 @@ export function CadPreview({ filePath }: { filePath: string }) {
   const lastSelectionSignatureRef = useRef<string>('');
 
   const selectedBBox = selectedCandidate?.kind === 'overview' ? undefined : selectedCandidate?.bbox;
-  const selectedTitle = selectedCandidate ? selectedCandidate.label : '전체 보기';
+  const selectedTitle = selectedCandidate ? selectedCandidate.label : tr('cad.fullView');
   const activeModelBBox = activeRenderBBox || selectedBBox || metadata?.overallBBox;
   const qaModelBounds = qaResult?.qa?.bounds?.modelspace;
   const contentMetrics = selectedBBox ? null : (qaResult?.qa?.visual_metrics?.content || qaResult?.qa?.visual_metrics?.full);
@@ -467,20 +474,20 @@ export function CadPreview({ filePath }: { filePath: string }) {
       setRenderedSize(null);
       setActiveRenderBBox(undefined);
       setIsLazyUpgradePending(false);
-      setRenderMessage('도면 구조 분석 중…');
+      setRenderMessage(tr('cad.render.analyzingStructure'));
       return;
     }
 
     let cancelled = false;
     let objectUrl: string | null = null;
-    const activeLabel = selectedBBox ? selectedTitle : '전체 도면';
+    const activeLabel = selectedBBox ? selectedTitle : tr('cad.fullDrawing');
     setStatus('loading');
     setError('');
     setBlobUrl(null);
     setRenderedSize(null);
     setActiveRenderBBox(selectedBBox);
     setIsLazyUpgradePending(false);
-    setRenderMessage(`${activeLabel} 렌더 준비 중…`);
+    setRenderMessage(tr('cad.render.preparingNamed', { name: activeLabel }));
     setZoom(1);
     setPan({ x: 0, y: 0 });
 
@@ -513,7 +520,7 @@ export function CadPreview({ filePath }: { filePath: string }) {
         if (result.status === 'ready') return result.blob;
         attempt += 1;
         const elapsed = Math.round((Date.now() - startedAt) / 1000);
-        setRenderMessage(`${activeLabel} 첫 렌더링 중… ${elapsed}s · 완료되면 캐시되어 다음부터 빨라집니다`);
+        setRenderMessage(tr('cad.render.firstRender', { name: activeLabel, seconds: elapsed }));
         await new Promise((resolve) => setTimeout(resolve, pollMs));
       }
       throw new Error('CAD preview request cancelled');
@@ -529,7 +536,7 @@ export function CadPreview({ filePath }: { filePath: string }) {
         setBlobUrl(objectUrl);
         setRenderedSize(firstSize);
         setStatus('loaded');
-        setRenderMessage(`${activeLabel} 빠른 preview 준비 완료`);
+        setRenderMessage(tr('cad.render.quickReady', { name: activeLabel }));
         return fetchPreviewWhenReady(hiSize.width, hiSize.height, 3000).then((hiBlob) => {
           if (cancelled) return;
           const hiUrl = URL.createObjectURL(hiBlob);
@@ -537,7 +544,7 @@ export function CadPreview({ filePath }: { filePath: string }) {
           objectUrl = hiUrl;
           setBlobUrl(hiUrl);
           setRenderedSize(hiSize);
-          setRenderMessage(`${activeLabel} 상세 preview 준비 완료`);
+          setRenderMessage(tr('cad.render.detailReady', { name: activeLabel }));
         }).catch(() => undefined);
       })
       .catch((err) => {
@@ -774,13 +781,13 @@ export function CadPreview({ filePath }: { filePath: string }) {
       params.set('bbox', bboxToParam(targetBBox));
       const startedAt = Date.now();
       setIsLazyUpgradePending(true);
-      setRenderMessage(`${selectedTitle} 확대 영역 고해상도 준비 중…`);
+      setRenderMessage(tr('cad.render.zoomPreparing', { name: selectedTitle }));
       try {
         while (!cancelled) {
           const res = await fetch(`/api/files/cad-preview?${params.toString()}`, token ? { headers: { Authorization: `Bearer ${token}` } } : undefined);
           if (res.status === 202) {
             const elapsed = Math.round((Date.now() - startedAt) / 1000);
-            setRenderMessage(`${selectedTitle} 확대 영역 고해상도 준비 중… ${elapsed}s`);
+            setRenderMessage(tr('cad.render.zoomPreparingElapsed', { name: selectedTitle, seconds: elapsed }));
             await new Promise((resolve) => setTimeout(resolve, 3000));
             continue;
           }
@@ -795,7 +802,7 @@ export function CadPreview({ filePath }: { filePath: string }) {
           setActiveRenderBBox(targetBBox);
           setZoom(1.25);
           setPan({ x: 0, y: 0 });
-          setRenderMessage(`${selectedTitle} 확대 영역 고해상도 준비 완료`);
+          setRenderMessage(tr('cad.render.zoomReady', { name: selectedTitle }));
           if (previousUrl) URL.revokeObjectURL(previousUrl);
           break;
         }
@@ -954,16 +961,16 @@ export function CadPreview({ filePath }: { filePath: string }) {
             <span>CAD Workbench</span>
             <span className="rounded-full border border-amber-300 bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-700">beta</span>
             <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-700">{selectedTitle}</span>
-            {geometryLayerEnabled && <span className="rounded-full border border-cyan-300 bg-cyan-50 px-2 py-0.5 text-[10px] font-bold text-cyan-700">AI 객체 선택 레이어</span>}
+            {geometryLayerEnabled && <span className="rounded-full border border-cyan-300 bg-cyan-50 px-2 py-0.5 text-[10px] font-bold text-cyan-700">{tr('cad.objectSelectionLayer')}</span>}
           </div>
           <div className="truncate text-xs text-slate-500" title={filePath}>{filePath.split('/').pop() || filePath}</div>
         </div>
         <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
           <div className="flex items-center overflow-hidden rounded-xl border border-slate-300 bg-slate-50 text-xs font-semibold text-slate-700 shadow-sm">
             {([
-              ['preview', '원본 보기'],
-              ['analysis', 'AI 분석'],
-              ['select', '객체 선택 beta'],
+              ['preview', tr('cad.tabs.original')],
+              ['analysis', tr('cad.tabs.analysis')],
+              ['select', tr('cad.tabs.selectBeta')],
             ] as const).map(([mode, label]) => (
               <button
                 key={mode}
@@ -975,9 +982,9 @@ export function CadPreview({ filePath }: { filePath: string }) {
               </button>
             ))}
           </div>
-          <label className={`flex cursor-pointer items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-semibold shadow-sm ${geometryLayerEnabled ? 'border-cyan-300 bg-cyan-50 text-cyan-800' : 'border-slate-300 bg-white text-slate-600'}`} title="도면 위에 클릭 가능한 분석 객체를 겹쳐 표시합니다. 원본 확인은 raster preview를 기준으로 하세요.">
+          <label className={`flex cursor-pointer items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-semibold shadow-sm ${geometryLayerEnabled ? 'border-cyan-300 bg-cyan-50 text-cyan-800' : 'border-slate-300 bg-white text-slate-600'}`} title={tr('cad.analysisLayerTitle')}>
             <input type="checkbox" className="h-3.5 w-3.5" checked={geometryLayerEnabled} onChange={(event) => toggleGeometryLayer(event.target.checked)} disabled={!qaResult?.artifacts?.cadGeometryManifest} />
-            분석 레이어 beta
+            {tr('cad.analysisLayerBeta')}
           </label>
           <div className="flex items-center overflow-hidden rounded-lg border border-slate-300 bg-white text-xs font-semibold text-slate-700 shadow-sm">
             {(['dark', 'light', 'mono'] as CadRenderMode[]).map((mode) => (
@@ -1005,7 +1012,7 @@ export function CadPreview({ filePath }: { filePath: string }) {
             disabled={qaStatus === 'running'}
             className="rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {qaStatus === 'running' ? '도면 context 준비 중…' : '도면 context 준비'}
+            {qaStatus === 'running' ? tr('cad.context.preparing') : tr('cad.context.prepare')}
           </button>
         </div>
       </div>
@@ -1085,7 +1092,7 @@ export function CadPreview({ filePath }: { filePath: string }) {
                         <div className="max-w-[80%] rounded-lg border border-cyan-300/70 bg-slate-950/85 px-3 py-2 text-center text-xs text-cyan-100 shadow-lg">
                           <div className="font-semibold">{evidenceFocus.label || evidenceFocus.text || 'CAD evidence'}</div>
                           <div className="mt-0.5 text-[11px] text-cyan-100/75">
-                            {[evidenceFocus.handle ? `handle ${evidenceFocus.handle}` : null, evidenceFocus.layer ? `layer ${evidenceFocus.layer}` : null, evidenceFocus.insert ? `insert ${evidenceFocus.insert.slice(0, 2).join(', ')}` : null].filter(Boolean).join(' · ') || '도면 근거 위치'}
+                            {[evidenceFocus.handle ? `handle ${evidenceFocus.handle}` : null, evidenceFocus.layer ? `layer ${evidenceFocus.layer}` : null, evidenceFocus.insert ? `insert ${evidenceFocus.insert.slice(0, 2).join(', ')}` : null].filter(Boolean).join(' · ') || tr('cad.evidenceLocation')}
                           </div>
                         </div>
                       </div>
@@ -1096,7 +1103,7 @@ export function CadPreview({ filePath }: { filePath: string }) {
               <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-t border-slate-200 bg-slate-50 px-3 py-2 text-[11px] text-slate-500">
                 <div className="flex min-w-0 items-center gap-2">
                   <span className="rounded-full bg-white px-2 py-0.5 font-semibold text-slate-700 ring-1 ring-slate-200">{zoomLabel}</span>
-                  <span className="truncate">{renderModeLabel} · {activeRenderBBox ? 'zoom-region preview' : selectedBBox ? 'region preview' : 'overview preview'} · {renderedSize ? `${renderedSize.width}×${renderedSize.height}` : 'render 대기'} · 휠 확대/축소 · 드래그 이동 · 더블클릭 reset{isLazyUpgradePending ? ' · 해상도 업그레이드 중' : ''}</span>
+                  <span className="truncate">{tr('cad.viewerStatus', { mode: renderModeLabel, preview: activeRenderBBox ? 'zoom-region preview' : selectedBBox ? 'region preview' : 'overview preview', size: renderedSize ? `${renderedSize.width}×${renderedSize.height}` : tr('cad.render.waiting'), upgrading: isLazyUpgradePending ? tr('cad.render.upgradingSuffix') : '' })}</span>
                 </div>
                 <div className="shrink-0 font-mono tabular-nums text-slate-400">pan {Math.round(pan.x)}, {Math.round(pan.y)}</div>
               </div>
@@ -1108,22 +1115,22 @@ export function CadPreview({ filePath }: { filePath: string }) {
           <div className="space-y-3">
             <section className="rounded-xl border border-slate-700 bg-slate-950/60 p-3">
               <div className="mb-2 flex items-center justify-between gap-2">
-                <div className="font-semibold text-white">도면 구조</div>
-                {metadataLoading && <span className="text-[11px] text-slate-400">분석 중…</span>}
+                <div className="font-semibold text-white">{tr('cad.structure')}</div>
+                {metadataLoading && <span className="text-[11px] text-slate-400">{tr('cad.analyzing')}</span>}
               </div>
               {metadataError ? (
                 <div className="rounded border border-red-800 bg-red-950/50 p-2 text-red-200">{metadataError}</div>
               ) : metadata ? (
                 <div className="grid grid-cols-2 gap-2 text-[11px]">
-                  <div className="rounded bg-slate-900 p-2"><div className="text-slate-400">파일</div><div className="font-semibold text-slate-100">{fileSizeLabel(metadata.fileSize)}</div></div>
+                  <div className="rounded bg-slate-900 p-2"><div className="text-slate-400">{tr('cad.file')}</div><div className="font-semibold text-slate-100">{fileSizeLabel(metadata.fileSize)}</div></div>
                   <div className="rounded bg-slate-900 p-2"><div className="text-slate-400">Entities</div><div className="font-semibold text-slate-100">{formatNumber(Object.values(metadata.entityTypes).reduce((a, b) => a + b, 0))}</div></div>
                   <div className="rounded bg-slate-900 p-2"><div className="text-slate-400">Layouts</div><div className="font-semibold text-slate-100">{nonEmptyLayouts.length} active / {emptyLayouts.length} empty</div></div>
                   <div className="rounded bg-slate-900 p-2"><div className="text-slate-400">BBox</div><div className="font-semibold text-slate-100">{bboxSizeLabel(metadata.overallBBox)}</div></div>
                 </div>
-              ) : <div className="text-slate-400">metadata 대기 중…</div>}
+              ) : <div className="text-slate-400">{tr('cad.metadataWaiting')}</div>}
               {metadata && emptyLayouts.length > 0 && (
                 <div className="mt-2 rounded border border-amber-700/60 bg-amber-950/30 p-2 text-[11px] text-amber-100">
-                  {emptyLayouts.map((layout) => layout.name).join(', ')} layout은 비어 있어 현재 화면은 Model space 전체 보기입니다.
+                  {emptyLayouts.map((layout) => layout.name).join(', ')} {tr('cad.emptyLayouts')}
                 </div>
               )}
               {lastSelectionEvent && (
@@ -1139,7 +1146,7 @@ export function CadPreview({ filePath }: { filePath: string }) {
               {evidenceFocus && (
                 <div className="mt-2 rounded border border-cyan-700/70 bg-cyan-950/40 p-2 text-[11px] text-cyan-100">
                   <div className="flex items-center justify-between gap-2">
-                    <div className="font-semibold">도면 근거 focus</div>
+                    <div className="font-semibold">{tr('cad.evidenceFocus')}</div>
                     <button
                       type="button"
                       onClick={clearEvidenceFocus}
@@ -1167,7 +1174,7 @@ export function CadPreview({ filePath }: { filePath: string }) {
 
             <section className="rounded-xl border border-cyan-700/60 bg-cyan-950/30 p-3">
               <div className="mb-2 flex items-center justify-between gap-2">
-                <div className="font-semibold text-cyan-50">현재 AI CAD context</div>
+                <div className="font-semibold text-cyan-50">{tr('cad.currentContext')}</div>
                 <span className="rounded-full bg-cyan-400/15 px-1.5 py-0.5 text-[10px] font-semibold text-cyan-100">selection</span>
               </div>
               {evidenceFocus || lastSelectionEvent ? (
@@ -1175,30 +1182,30 @@ export function CadPreview({ filePath }: { filePath: string }) {
                   <div className="rounded bg-slate-950/50 p-2">
                     <div className="font-semibold">{evidenceFocus?.label || evidenceFocus?.text || currentSelection?.selection.label || lastSelectionEvent?.label || selectedTitle}</div>
                     <div className="mt-1 text-cyan-100/70">
-                      {[currentSelection?.selection.primitiveId ? `primitive ${currentSelection.selection.primitiveId}` : null, evidenceFocus?.semanticObjectId || currentSelection?.selection.semanticObjectId ? `semantic ${evidenceFocus?.semanticObjectId || currentSelection?.selection.semanticObjectId}` : null, evidenceFocus?.entityId || currentSelection?.selection.entityId ? `entity ${evidenceFocus?.entityId || currentSelection?.selection.entityId}` : null, evidenceFocus?.handle || currentSelection?.selection.handle ? `handle ${evidenceFocus?.handle || currentSelection?.selection.handle}` : null, currentSelection?.selection.layer ? `layer ${currentSelection.selection.layer}` : null, lastSelectionEvent?.lookup ? `lookup ${lastSelectionEvent.lookup}` : null].filter(Boolean).join(' · ') || '현재 보기 후보가 AI context로 전달됩니다.'}
+                      {[currentSelection?.selection.primitiveId ? `primitive ${currentSelection.selection.primitiveId}` : null, evidenceFocus?.semanticObjectId || currentSelection?.selection.semanticObjectId ? `semantic ${evidenceFocus?.semanticObjectId || currentSelection?.selection.semanticObjectId}` : null, evidenceFocus?.entityId || currentSelection?.selection.entityId ? `entity ${evidenceFocus?.entityId || currentSelection?.selection.entityId}` : null, evidenceFocus?.handle || currentSelection?.selection.handle ? `handle ${evidenceFocus?.handle || currentSelection?.selection.handle}` : null, currentSelection?.selection.layer ? `layer ${currentSelection.selection.layer}` : null, lastSelectionEvent?.lookup ? `lookup ${lastSelectionEvent.lookup}` : null].filter(Boolean).join(' · ') || tr('cad.currentViewSent')}
                     </div>
                   </div>
                   <div className="grid grid-cols-1 gap-1.5">
-                    <button type="button" onClick={() => requestAiForCurrentSelection('선택한 CAD 객체/영역을 설명해줘')} className="rounded border border-cyan-600/60 bg-cyan-900/50 px-2 py-1.5 text-left font-semibold text-cyan-50 hover:bg-cyan-800/70">이 부분 설명해줘</button>
-                    <button type="button" onClick={() => requestAiForCurrentSelection('선택한 CAD 객체와 관련된 치수, 주석, 주변 객체를 찾아줘')} className="rounded border border-cyan-600/60 bg-cyan-900/50 px-2 py-1.5 text-left font-semibold text-cyan-50 hover:bg-cyan-800/70">관련 치수/주석 찾기</button>
-                    <button type="button" onClick={() => requestAiForCurrentSelection('선택한 CAD 객체를 검토 이슈 또는 수정 요청 초안으로 정리해줘')} className="rounded border border-cyan-600/60 bg-cyan-900/50 px-2 py-1.5 text-left font-semibold text-cyan-50 hover:bg-cyan-800/70">수정 요청 만들기</button>
+                    <button type="button" onClick={() => requestAiForCurrentSelection('선택한 CAD 객체/영역을 설명해줘')} className="rounded border border-cyan-600/60 bg-cyan-900/50 px-2 py-1.5 text-left font-semibold text-cyan-50 hover:bg-cyan-800/70">{tr('cad.actions.explain')}</button>
+                    <button type="button" onClick={() => requestAiForCurrentSelection('선택한 CAD 객체와 관련된 치수, 주석, 주변 객체를 찾아줘')} className="rounded border border-cyan-600/60 bg-cyan-900/50 px-2 py-1.5 text-left font-semibold text-cyan-50 hover:bg-cyan-800/70">{tr('cad.actions.findRelated')}</button>
+                    <button type="button" onClick={() => requestAiForCurrentSelection('선택한 CAD 객체를 검토 이슈 또는 수정 요청 초안으로 정리해줘')} className="rounded border border-cyan-600/60 bg-cyan-900/50 px-2 py-1.5 text-left font-semibold text-cyan-50 hover:bg-cyan-800/70">{tr('cad.actions.createRequest')}</button>
                   </div>
                 </div>
               ) : (
-                <div className="rounded bg-slate-950/50 p-2 text-[11px] text-cyan-100/75">도면 객체, 후보 영역, AI 근거를 선택하면 여기서 바로 AI에게 질문할 수 있습니다.</div>
+                <div className="rounded bg-slate-950/50 p-2 text-[11px] text-cyan-100/75">{tr('cad.contextHint')}</div>
               )}
             </section>
 
             {(workbenchMode === 'analysis' || workbenchMode === 'select') && qaStatus === 'done' && (
               <section className="rounded-xl border border-slate-700 bg-slate-950/60 p-3">
                 <div className="mb-2 flex items-center justify-between gap-2">
-                  <div className="font-semibold text-white">도면 텍스트 검색</div>
+                  <div className="font-semibold text-white">{tr('cad.textSearch')}</div>
                   <span className="text-[10px] text-slate-500">{formatNumber(textIndex.length)} indexed</span>
                 </div>
                 <input
                   value={textSearch}
                   onChange={(event) => setTextSearch(event.target.value)}
-                  placeholder="문구, 방 이름, 치수 주석 검색"
+                  placeholder={tr('cad.textSearchPlaceholder')}
                   className="w-full rounded-lg border border-slate-700 bg-slate-900 px-2.5 py-2 text-[11px] text-slate-100 outline-none placeholder:text-slate-500 focus:border-cyan-500"
                 />
                 {textSearch.trim() && (
@@ -1210,11 +1217,11 @@ export function CadPreview({ filePath }: { filePath: string }) {
                         onClick={() => focusTextSearchResult(item)}
                         className="w-full rounded border border-slate-700 bg-slate-900 px-2 py-1.5 text-left hover:border-cyan-600 hover:bg-slate-800"
                       >
-                        <div className="truncate font-semibold text-slate-100" title={item.text}>{item.text || '(빈 텍스트)'}</div>
+                        <div className="truncate font-semibold text-slate-100" title={item.text}>{item.text || tr('cad.emptyText')}</div>
                         <div className="mt-0.5 truncate text-[10px] text-slate-500">{[item.layer ? `layer ${item.layer}` : null, item.handle ? `handle ${item.handle}` : null].filter(Boolean).join(' · ')}</div>
                       </button>
                     ))}
-                    {textSearchResults.length === 0 && <div className="rounded bg-slate-900 p-2 text-[11px] text-slate-500">일치하는 도면 텍스트가 없습니다.</div>}
+                    {textSearchResults.length === 0 && <div className="rounded bg-slate-900 p-2 text-[11px] text-slate-500">{tr('cad.noMatchingText')}</div>}
                   </div>
                 )}
               </section>
@@ -1243,27 +1250,27 @@ export function CadPreview({ filePath }: { filePath: string }) {
                     </button>
                   );
                 })}
-                {!metadataLoading && (metadata?.candidates || []).length === 0 && <div className="text-slate-400">후보 영역을 찾지 못했습니다.</div>}
+                {!metadataLoading && (metadata?.candidates || []).length === 0 && <div className="text-slate-400">{tr('cad.noCandidateRegions')}</div>}
               </div>
             </section>}
 
             {(workbenchMode === 'analysis' || workbenchMode === 'select') && cadGeometryManifest?.counts && (
               <section className="rounded-xl border border-slate-700 bg-slate-950/60 p-3">
                 <div className="mb-2 flex items-center justify-between gap-2">
-                  <div className="font-semibold text-white">AI 분석 준비 상태</div>
+                  <div className="font-semibold text-white">{tr('cad.analysisReadiness')}</div>
                   <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${cadGeometryStatus === 'ready' ? 'bg-emerald-500/15 text-emerald-100' : 'bg-slate-800 text-slate-300'}`}>{cadGeometryStatus}</span>
                 </div>
                 <div className="grid grid-cols-3 gap-2 text-[11px]">
-                  <div className="rounded bg-slate-900 p-2"><div className="text-slate-400">텍스트</div><div className="font-semibold text-slate-100">{formatNumber(textIndex.length)}</div></div>
-                  <div className="rounded bg-slate-900 p-2"><div className="text-slate-400">객체 후보</div><div className="font-semibold text-slate-100">{formatNumber(cadModel?.semanticObjects?.length || 0)}</div></div>
-                  <div className="rounded bg-slate-900 p-2"><div className="text-slate-400">클릭 primitive</div><div className="font-semibold text-slate-100">{formatNumber(cadGeometryManifest.counts.primitives || 0)}</div></div>
+                  <div className="rounded bg-slate-900 p-2"><div className="text-slate-400">{tr('cad.text')}</div><div className="font-semibold text-slate-100">{formatNumber(textIndex.length)}</div></div>
+                  <div className="rounded bg-slate-900 p-2"><div className="text-slate-400">{tr('cad.objectCandidates')}</div><div className="font-semibold text-slate-100">{formatNumber(cadModel?.semanticObjects?.length || 0)}</div></div>
+                  <div className="rounded bg-slate-900 p-2"><div className="text-slate-400">{tr('cad.clickablePrimitives')}</div><div className="font-semibold text-slate-100">{formatNumber(cadGeometryManifest.counts.primitives || 0)}</div></div>
                 </div>
                 {Object.keys(semanticKindCounts).length > 0 && (
                   <div className="mt-2 flex flex-wrap gap-1.5">
                     {Object.entries(semanticKindCounts).map(([kind, count]) => <span key={kind} className="rounded-full border border-slate-700 bg-slate-900 px-2 py-0.5 text-[10px] text-slate-300">{kind} {formatNumber(count)}</span>)}
                   </div>
                 )}
-                <div className="mt-2 rounded border border-amber-700/60 bg-amber-950/30 p-2 text-[11px] text-amber-100">분석 레이어는 beta입니다. 원본 확인과 치수 검토는 raster preview를 기준으로 하세요.</div>
+                <div className="mt-2 rounded border border-amber-700/60 bg-amber-950/30 p-2 text-[11px] text-amber-100">{tr('cad.betaWarning')}</div>
               </section>
             )}
 
@@ -1296,7 +1303,7 @@ export function CadPreview({ filePath }: { filePath: string }) {
                     );
                   })}
                 </div>
-                <div className="mt-2 text-[11px] text-slate-500">클릭하면 도면 focus와 AI Panel current CAD selection이 함께 갱신됩니다.</div>
+                <div className="mt-2 text-[11px] text-slate-500">{tr('cad.selectionHint')}</div>
               </section>
             )}
 
@@ -1332,7 +1339,7 @@ export function CadPreview({ filePath }: { filePath: string }) {
           ) : qaResult ? (
             <div className="space-y-3">
               <div className="flex flex-wrap items-center gap-2">
-                <span className="font-semibold text-gray-900">도면 context: {qaResult.status === 'passed' ? '준비 완료' : (qaResult.status || 'done')}</span>
+                <span className="font-semibold text-gray-900">{tr('cad.contextStatus', { status: qaResult.status === 'passed' ? tr('cad.ready') : (qaResult.status || 'done') })}</span>
                 {(qaResult.warnings || []).length > 0 && <span className="rounded-full bg-amber-100 px-2 py-0.5 font-medium text-amber-800">{qaResult.warnings?.length} warning(s)</span>}
               </div>
               {(qaResult.warnings || []).length > 0 && (
@@ -1348,20 +1355,20 @@ export function CadPreview({ filePath }: { filePath: string }) {
                   </div>
                   <div className="space-y-2">
                     <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
-                      <div className="rounded-lg border border-gray-200 bg-white p-2"><div className="text-[10px] text-gray-500">텍스트</div><div className="font-semibold text-gray-900">{formatNumber(textIndex.length)}</div></div>
-                      <div className="rounded-lg border border-gray-200 bg-white p-2"><div className="text-[10px] text-gray-500">블록</div><div className="font-semibold text-gray-900">{formatNumber(blockIndex.length)}</div></div>
-                      <div className="rounded-lg border border-gray-200 bg-white p-2"><div className="text-[10px] text-gray-500">AI 객체</div><div className="font-semibold text-gray-900">{formatNumber(cadModel?.semanticObjects?.length || 0)}</div></div>
-                      <div className="rounded-lg border border-gray-200 bg-white p-2"><div className="text-[10px] text-gray-500">클릭 primitive</div><div className="font-semibold text-gray-900">{formatNumber(cadGeometryManifest?.counts?.primitives || 0)}</div></div>
+                      <div className="rounded-lg border border-gray-200 bg-white p-2"><div className="text-[10px] text-gray-500">{tr('cad.text')}</div><div className="font-semibold text-gray-900">{formatNumber(textIndex.length)}</div></div>
+                      <div className="rounded-lg border border-gray-200 bg-white p-2"><div className="text-[10px] text-gray-500">{tr('cad.blocks')}</div><div className="font-semibold text-gray-900">{formatNumber(blockIndex.length)}</div></div>
+                      <div className="rounded-lg border border-gray-200 bg-white p-2"><div className="text-[10px] text-gray-500">{tr('cad.aiObjects')}</div><div className="font-semibold text-gray-900">{formatNumber(cadModel?.semanticObjects?.length || 0)}</div></div>
+                      <div className="rounded-lg border border-gray-200 bg-white p-2"><div className="text-[10px] text-gray-500">{tr('cad.clickablePrimitives')}</div><div className="font-semibold text-gray-900">{formatNumber(cadGeometryManifest?.counts?.primitives || 0)}</div></div>
                     </div>
                     {cadGeometryStatus !== 'idle' && (
                       <div className="rounded border border-cyan-100 bg-cyan-50 p-2 text-[11px] text-cyan-900">
-                        <div className="font-semibold">분석 레이어 준비: {cadGeometryStatus}{geometryCanvasEnabled ? ' · 화면에 표시 중' : ' · 토글로 켤 수 있음'}</div>
+                        <div className="font-semibold">{tr('cad.layerReadiness', { status: cadGeometryStatus, display: geometryCanvasEnabled ? tr('cad.showingSuffix') : tr('cad.toggleSuffix') })}</div>
                         {cadGeometryManifest?.counts && <div className="mt-1">tiles {formatNumber(cadGeometryManifest.counts.tiles || 0)} · overview {formatNumber(cadGeometryManifest.counts.overviewPrimitives || 0)}</div>}
                         {cadGeometryError && <div className="mt-1 text-red-700">{cadGeometryError}</div>}
                       </div>
                     )}
                     <button type="button" onClick={() => setArtifactDetailsOpen((value) => !value)} className="text-[11px] font-semibold text-gray-600 underline decoration-dotted underline-offset-2 hover:text-gray-900">
-                      {artifactDetailsOpen ? '개발자 산출물 접기' : '개발자 산출물 보기'}
+                      {artifactDetailsOpen ? tr('cad.hideArtifacts') : tr('cad.showArtifacts')}
                     </button>
                     {artifactDetailsOpen && (
                       <div className="space-y-1 break-all rounded border border-gray-200 bg-white p-2 font-mono text-[11px] text-gray-600">
@@ -1383,7 +1390,7 @@ export function CadPreview({ filePath }: { filePath: string }) {
                   </div>
                 </div>
               )}
-              <div className="text-[11px] text-gray-500">원본은 변경하지 않고 project work/cad 폴더에 preview, text/layer index, QA 산출물을 저장합니다. 오른쪽 AI thread가 이 파일들을 근거로 도면 업무를 이어갈 수 있습니다.</div>
+              <div className="text-[11px] text-gray-500">{tr('cad.artifactDescription')}</div>
             </div>
           ) : null}
         </div>

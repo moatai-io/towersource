@@ -64,7 +64,7 @@ describe('session-scoped attachment contract', () => {
     expect(api).toContain('const status = failures.length > 0 ? 207 : 200');
     expect(api).toContain('res.status(status).json({ attachments, failures })');
     expect(input).toContain('uploadFailures.push(...(data.failures || []))');
-    expect(input).toContain("label: '일부 파일 업로드 실패'");
+    expect(input).toContain("label: t('partialUploadFailed')");
   });
 
   it('bounds request disk staging and reports per-file partial success', () => {
@@ -73,7 +73,7 @@ describe('session-scoped attachment contract', () => {
     expect(api).toContain('const failures: Array<{ name: string; error: string }> = []');
     expect(api).toContain('const status = failures.length > 0 ? 207 : 200');
     expect(input).toContain('uploadFailures.push(...(data.failures || []))');
-    expect(input).toContain("label: '일부 파일 업로드 실패'");
+    expect(input).toContain("label: t('partialUploadFailed')");
   });
 
   it('avoids multiplying a large PDF batch through client-side chunking', () => {

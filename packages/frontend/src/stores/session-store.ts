@@ -40,7 +40,7 @@ export type SidebarTab = 'sessions' | 'files' | 'prompts' | 'pins' | 'rooms' | '
  * - `work` is the full Work history surface. It is separate from live
  *   `TodoWrite`/Work Steps and from the AI navigation's `work` scope.
  */
-export type ActiveView = 'chat' | 'aiTeam' | 'workspaceApps' | 'kanban' | 'history' | 'rooms' | 'files' | 'projectFiles' | 'favorites' | 'inbox' | 'work' | 'schedules' | 'automations' | 'aiServices' | 'beta';
+export type ActiveView = 'chat' | 'aiTeam' | 'kanban' | 'history' | 'rooms' | 'files' | 'projectFiles' | 'favorites' | 'inbox' | 'work' | 'schedules' | 'automations' | 'aiServices' | 'beta';
 
 /**
  * A cached "last AI turn text" per session — populated live from WebSocket

@@ -15,7 +15,7 @@ describe('File Exchange UI integration', () => {
   });
 
   it('owns the C option location switch in one feature surface', () => {
-    for (const label of ['내 파일', 'AI 팀원']) expect(surface).toContain(label);
+    for (const key of ['fileExchange.personalHome', 'fileExchange.aiTeammates']) expect(surface).toContain(key);
     expect(surface).not.toContain("['channel','채널']");
     expect(surface).toContain("useState<LocationKind>('personal')");
     expect(materials).toContain('<FileExchangeSurface personalOnly');
@@ -37,17 +37,17 @@ describe('File Exchange UI integration', () => {
 
   it('keeps the personal Viewer actions readable and removes the duplicated inner heading', () => {
     expect(surface).toContain('whitespace-normal break-keep');
-    expect(surface).toContain("aria-label={personalOnly ? '내 파일' : '내 파일과 팀의 저장소'}");
+    expect(surface).toContain("aria-label={personalOnly ? t('fileExchange.personalHome') : t('fileExchange.surfaceLabel')}");
     expect(surface).toContain('{!personalOnly && <div');
     expect(surface).not.toContain("{personalOnly ? 'PERSONAL FILES' : 'FILE EXCHANGE'}");
   });
 
   it('provides one destination picker as the mobile-equivalent transfer action', () => {
-    expect(surface).toContain('어디로 보낼까요?');
-    expect(surface).toContain('대화, AI 팀원 검색');
-    expect(surface).toContain("label: '현재 대화'");
-    expect(surface).toContain("label: '내 자료'");
-    expect(surface).toContain('AI 팀원 작업공간에 사본 저장');
+    expect(surface).toContain("t('fileExchange.destinationTitle')");
+    expect(surface).toContain("t('fileExchange.destinationSearch')");
+    expect(surface).toContain("label: t('fileExchange.currentConversation')");
+    expect(surface).toContain("label: t('fileExchange.myMaterials')");
+    expect(surface).toContain("description: t('fileExchange.teammateWorkspaceHelp')");
     expect(surface).not.toContain('채널 구성원에게 공유');
     expect(surface).not.toContain("scope: 'channel'");
     expect(surface).toContain("onClick={() => void sendSelection(choice)}");
@@ -65,13 +65,13 @@ describe('File Exchange UI integration', () => {
   });
 
   it('offers an actionable receipt for durable destinations', () => {
-    expect(surface).toContain("label: choice.destination.scope === 'project' ? '작업공간 열기'");
+    expect(surface).toContain("label: choice.destination.scope === 'project' ? t('fileExchange.openWorkspace')");
     expect(surface).not.toContain("'채널 열기'");
     expect(surface).toContain('openReceiptResult(choice.destination, lastResult)');
   });
 
   it('does not attach a fixed Korean particle directly to an open filename', () => {
-    expect(surface).toContain('formatNamedItem(item.name)');
+    expect(surface).toContain("t('fileExchange.namedItem', { name: item.name })");
     expect(surface).not.toContain('${item.name}을 전달할까요?');
   });
 });

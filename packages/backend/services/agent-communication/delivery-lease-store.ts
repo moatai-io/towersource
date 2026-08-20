@@ -127,6 +127,27 @@ export async function renewDeliveryClaim(input: {
   return result.changes === 1;
 }
 
+/** Mark the point where the recipient engine has actually entered its turn. */
+export async function markClaimedDeliveryStarted(input: {
+  deliveryId: string;
+  ownerToken: string;
+  ownerBootId: string;
+  mode?: 'steer' | 'queued-after-turn' | 'new-turn' | 'stored' | 'held' | 'refused';
+  recipientRootTurnId?: string;
+}): Promise<boolean> {
+  const result = await execute(
+    `UPDATE agent_message_deliveries
+        SET state = 'started_turn',
+            delivery_mode_used = COALESCE($4, delivery_mode_used),
+            recipient_root_turn_id = COALESCE($5, recipient_root_turn_id),
+            updated_at = NOW()
+      WHERE id = $1 AND owner_token = $2 AND owner_boot_id = $3
+        AND state = 'claimed'`,
+    [input.deliveryId, input.ownerToken, input.ownerBootId, input.mode ?? null, input.recipientRootTurnId ?? null],
+  );
+  return result.changes === 1;
+}
+
 /** Settle or reschedule a claimed delivery; stale owners cannot mutate the row. */
 export async function settleClaimedDelivery(input: {
   deliveryId: string;
@@ -154,7 +175,8 @@ export async function settleClaimedDelivery(input: {
             completed_at = CASE WHEN $4 IN ('completed', 'failed', 'needs_attention')
               THEN NOW() ELSE completed_at END,
             updated_at = NOW()
-      WHERE id = $1 AND owner_token = $2 AND owner_boot_id = $3 AND state = 'claimed'`,
+      WHERE id = $1 AND owner_token = $2 AND owner_boot_id = $3
+        AND state IN ('claimed', 'started_turn', 'processing', 'responded')`,
     [
       input.deliveryId, input.ownerToken, input.ownerBootId, input.state, input.mode ?? null,
       input.recipientRootTurnId ?? null, input.responseMessageId ?? null,

@@ -28,8 +28,9 @@ describe('Pi Harness prompt execution contract', () => {
   it('normalizes retired Runtime Box and project_shell wording only for Project sessions', () => {
     expect(source).toContain('export function normalizeProjectBashPrompt');
     expect(source).toContain('opts.projectId ? normalizeProjectBashPrompt(rawTowerPrompt) : rawTowerPrompt');
-    expect(source).toContain('Use `bash` for Project commands');
-    expect(source).toContain('Do not choose or infer Worker, host, Runtime Box, container, or transport');
+    expect(source).toContain('Use `bash` as the native shell of this Project Workstation');
+    expect(source).toContain('Missing software is not a permanent platform restriction');
+    expect(source).toContain('Do not choose or infer another Worker, Runtime Box, container, or execution plane');
     expect(source).toContain('Never switch to another execution plane automatically');
   });
 

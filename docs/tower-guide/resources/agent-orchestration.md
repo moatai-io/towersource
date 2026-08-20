@@ -66,4 +66,5 @@ This resource is loaded on demand by Pi via `guide_read` when exact Tower subage
 - send 받는 측이 streaming 중이면 거부 — TARGET_STREAMING
 - send_to_session 권한: 자기 user 의 세션 OR admin — SEND_PERMISSION_DENIED
 - 자율 wake chain: 한 부모가 연속 auto-wake 받을 수 있는 cap 10. 초과 시 자동 정지 + 사용자 알림. 사용자가 부모에 메시지 보내면 reset.
+- Persistent worker 통신은 wake/report-and-resume를 정상 경로로 사용한다. inject/none은 일반 worker API에서 선택하지 않으며 legacy low-level spawn 호환 경로에서만 허용된다.
 - wake는 기본 보고 전달 방식이다. 다만 새 spawn/send 도구 호출 자체는 여전히 사용자 명시 요청 또는 스킬 흐름이 있을 때만 한다.
