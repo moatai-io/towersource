@@ -1,10 +1,14 @@
 # Tower
 
-> **Tower is not an agent harness only for developers. It is a Business OS for people who want to run every part of a company with AI.**
+> **The open-source operating system for running a business with AI agents.**
 
-Create agents, give each one independent computing, and deploy them to employees, customers, or external users. Connect research, documents, data, sales, operations, publishing, and automation inside one self-hosted workspace.
+Give every agent a real computer, a persistent workspace, memory, tools, credentials, and clear authority. Put them to work across research, sales, documents, data, operations, publishing, and customer service.
 
-Over the last five months, Tower has been refined through real work with customer teams, one operational detail at a time. We hope it helps every business skip the long process of building an internal agent harness from scratch and begin with an AI operating system of its own.
+Your team uses Tower from the web and mobile. You choose the infrastructure, models, and services behind it.
+
+Tower was shaped through five months of real customer work. The difference between an agent demo and an operating system is thousands of small details. **Tower was built in those details.**
+
+**Skip rebuilding agent infrastructure. Start building the AI-operated company only you can build.**
 
 [![License](https://img.shields.io/badge/license-Apache_2.0-blue.svg)](LICENSE)
 [![Status](https://img.shields.io/badge/status-research_alpha-orange)]()
@@ -20,7 +24,7 @@ Over the last five months, Tower has been refined through real work with custome
 
 ## Build an agent. Give it a computer. Put it to work.
 
-Tower brings four capabilities together:
+An agent becomes useful when the system around it is ready for real work. Tower brings four parts of that system together:
 
 ### Create and deploy AI agents
 
@@ -28,11 +32,11 @@ Define an agent’s role, promise, instructions, tools, authority, and first mis
 
 ### Give every agent independent computing
 
-A real agent needs more than a chat window. Each Tower agent operates from an accountable workspace with its own project files, execution context, memory, tools, credentials, and policy boundaries. It can produce artifacts, run commands, use connected services, and continue work across sessions without mixing one agent’s operating context with another’s.
+Every agent gets a computer, a workspace, a memory, and a job to own. Each Tower agent operates with its own project files, execution context, tools, credentials, and policy boundaries. It can produce artifacts, run commands, use connected services, and continue work across sessions without mixing one agent’s operating context with another’s.
 
 ### Run Tower on your own infrastructure
 
-Install Tower on your computer, workstation, or organization server. Keep project files, execution, credentials, and operating records inside infrastructure you control. Start locally, then move to a dedicated server when the team is ready.
+Your agents. Your infrastructure. Your models. Your operating rules. Install Tower on your computer, workstation, or organization server, and keep project files, execution, credentials, and operating records inside infrastructure you control.
 
 ### Connect the LLMs you choose
 
@@ -272,7 +276,7 @@ Tower began as an attempt to build the most capable agent environment I could us
 
 Starting from the Pi coding agent, I wanted to configure a high-agency harness myself — choosing the models, tools, prompts, skills, and execution patterns instead of being limited to a fixed chat experience or a predefined agent builder. I wanted an environment that could work with real files and code, accept new tools, and keep evolving around the job. That freedom felt essential to getting the best performance from an agent.
 
-But using a powerful harness alone was not enough. **I wanted my teammates to use the same best-in-class harness through the web and mobile, without rebuilding my development environment.** It needed to become a team structure: people working from anywhere, sharing context and operating rules, and assigning work to AI teammates without every person becoming a terminal expert.
+But using a powerful harness alone was not enough. **I wanted my teammates to use the same deeply configurable harness through the web and mobile, without rebuilding my development environment.** It needed to become a team structure: people working from anywhere, sharing context and operating rules, and assigning work to AI teammates without every person becoming a terminal expert.
 
 I also wanted to give every agent more than a chat session. I wanted to give it **an actual independent computer** — its own files and runtime, tools and credentials, memory and authority boundaries — so it could keep running the many automations a business needs across research, documents, code, publishing, monitoring, and recurring operations.
 
@@ -427,31 +431,39 @@ flowchart TB
 
 ## Quick start
 
-> Tower is research-alpha software. Run it in a controlled environment first, review `.env.example`, and do not connect production credentials until you understand the runtime and permission model.
+> Tower is research-alpha software. Start on a fresh Ubuntu 22.04 or 24.04 server and do not connect production credentials until you understand the runtime and permission model.
+
+### Install on an Ubuntu server
+
+Tower's installer configures Node.js, PostgreSQL with the required extensions, the Tower system service, nginx, secure local secrets, and a final readiness check.
 
 ```bash
-git clone https://github.com/moatai-io/towersource.git tower
+git clone https://github.com/moatai-io/towersource.git
 cd tower
-npm install
-cp .env.example .env
-npm run dev
+sudo bash scripts/oss/install.sh --public-url http://YOUR_SERVER_IP
 ```
 
-Default local ports:
+Then open `http://YOUR_SERVER_IP` and create the first administrator account. Connect an AI provider from **Settings → Connections** when you are ready to run model calls.
 
-- Frontend: `http://localhost:32354`
-- Backend: `http://localhost:32355`
-
-Useful commands:
+If a domain already points to the server, install HTTPS in the same command:
 
 ```bash
-npm run typecheck
-npm test
-npm run build
-npm run preflight
+sudo bash scripts/oss/install.sh \
+  --domain tower.example.com \
+  --email admin@example.com
 ```
 
-See [INSTALL.md](INSTALL.md) for full setup notes.
+The domain path configures nginx, obtains a Let's Encrypt certificate, enables renewal, and redirects HTTP to HTTPS.
+
+Verify or troubleshoot at any time:
+
+```bash
+sudo bash /opt/tower/scripts/oss/doctor.sh --url http://YOUR_SERVER_IP
+sudo systemctl status tower
+sudo journalctl -u tower -f
+```
+
+For local development and advanced deployment options, see [INSTALL.md](INSTALL.md).
 
 ---
 
