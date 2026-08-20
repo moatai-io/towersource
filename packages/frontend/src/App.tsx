@@ -1938,7 +1938,7 @@ function App() {
         JSON.stringify(draft, null, 2),
         'agent-draft',
         undefined,
-        mobileHiring ? { split: 'right', name: t('newAiTeammate') } : { name: t('newAiTeammate') },
+        { split: 'right', name: t('newAiTeammate') },
       );
       // The creator is a file-backed workflow. Leave the Team Home workspace so
       // its activeView branch cannot keep rendering over the newly opened draft.

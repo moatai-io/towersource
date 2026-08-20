@@ -28,6 +28,7 @@ describe('OSS first-run inference setup', () => {
     expect(gate).toContain('setOpenFirstTeammateAfterSetup(true)');
     expect(handoffEffectIndex).toBeGreaterThan(listenerIndex);
     expect(app.slice(handoffEffectIndex, handoffEffectIndex + 500)).toContain("new CustomEvent('tower-start-agent-academy')");
+    expect(app).toContain("{ split: 'right', name: t('newAiTeammate') }");
   });
 
   it('does not count a file-only Project as an AI teammate', () => {
