@@ -17,7 +17,7 @@ describe('Admin organization Google Connection UX', () => {
     expect(source).toContain("credential.provider === 'google'");
     expect(source).toContain('connectOrganizationGoogle(credential.id)');
     expect(source).toContain('mode=reauth');
-    expect(source).toContain('조직 계정 재인증');
+    expect(source).toContain("t('credentialConnections.advancedActions.reauth')");
   });
 
   it('does not expose the legacy personal OAuth path in global Admin Connections', () => {
@@ -28,8 +28,8 @@ describe('Admin organization Google Connection UX', () => {
 
   it('reports that Agent grants remain unchanged and refreshes after callback', () => {
     expect(source).toContain("params.get('oauth') !== 'google-organization'");
-    expect(source).toContain('기존 Agent 권한은 유지됩니다.');
+    expect(source).toContain("t('credentialConnections.oauth.organizationGoogleSaved')");
     expect(source).toContain('void fetchAll()');
-    expect(source).toContain('조직 Google Workspace Connection을 저장하지 못했습니다. 다시 시도해 주세요.');
+    expect(source).toContain("t('credentialConnections.oauth.organizationGoogleSaveFailed')");
   });
 });

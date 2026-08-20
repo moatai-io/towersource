@@ -16,10 +16,7 @@ import {
   readDroppedItems,
   type DroppedFile,
 } from "../../utils/folder-drop";
-import {
-  createTowerFileShortLink,
-  fileServeUrl,
-} from "../../utils/file-path-links";
+import { fileServeUrl } from "../../utils/file-path-links";
 import { useConfirm, usePrompt } from "../../hooks/useDialog";
 import { transferFile } from "../../features/file-exchange/fileExchange";
 import { ViewportContextMenu } from "../common/ViewportContextMenu";
@@ -255,6 +252,9 @@ export function FilesWorkspace({
   const [selectionMode, setSelectionMode] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [transferProjectId, setTransferProjectId] = useState("");
+  const [transferDirectory, setTransferDirectory] = useState("");
+  const [transferDirectories, setTransferDirectories] = useState<FileEntry[]>([]);
+  const [transferDirectoriesLoading, setTransferDirectoriesLoading] = useState(false);
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [uploadProgress, setUploadProgress] = useState<UploadProgressSnapshot | null>(null);
   const fileUploadRef = React.useRef<HTMLInputElement>(null);
@@ -735,17 +735,32 @@ export function FilesWorkspace({
       toastError(t('workspace.copyPathsFailed'));
     }
   };
-  const copySelectedLinks = async () => {
+  const loadTransferDirectories = useCallback(async (directory: string) => {
+    if (!directory) return;
+    setTransferDirectoriesLoading(true);
     try {
-      const links = await Promise.all(
-        [...selectedPaths].map(createTowerFileShortLink),
-      );
-      await navigator.clipboard.writeText(links.join("\n"));
-      toastSuccess(t('workspace.linksCopied', { count: links.length }));
-    } catch {
-      toastError(t('workspace.copyLinksFailed'));
-    }
+      const response = await fetch(`/api/files/tree?path=${encodeURIComponent(directory)}`, { headers: authHeaders() });
+      if (!response.ok) throw new Error(t('workspace.destinationLoadFailed'));
+      const data = await response.json();
+      setTransferDirectories((data.entries || []).filter((entry: FileEntry) => entry.isDirectory));
+    } catch (error) {
+      setTransferDirectories([]);
+      toastError(error instanceof Error ? error.message : t('workspace.destinationLoadFailed'));
+    } finally { setTransferDirectoriesLoading(false); }
+  }, [t]);
+  const selectTransferProject = (projectId: string) => {
+    setTransferProjectId(projectId);
+    const directory = sortedProjects.find((project) => project.id === projectId)?.rootPath || "";
+    setTransferDirectory(directory);
+    setTransferDirectories([]);
+    if (directory) void loadTransferDirectories(directory);
   };
+  const navigateTransferDirectory = (directory: string) => {
+    setTransferDirectory(directory);
+    void loadTransferDirectories(directory);
+  };
+  const transferProjectRoot = sortedProjects.find((project) => project.id === transferProjectId)?.rootPath || "";
+  const transferParentDirectory = transferDirectory && transferDirectory !== transferProjectRoot ? transferDirectory.split("/").slice(0, -1).join("/") : "";
   const copySelectedToProject = async () => {
     const target = sortedProjects.find((project) => project.id === transferProjectId);
     if (!target?.rootPath || !selectedPaths.size || !selectedProject?.id) return;
@@ -756,7 +771,7 @@ export function FilesWorkspace({
     if (!selectedFiles.length) return toastError(t('workspace.filesOnlyTransfer'));
     const approved = await confirm({
       title: t('workspace.transferTitle'),
-      message: t('workspace.transferMessage', { count: selectedFiles.length, name: target.agent?.displayName || target.name }),
+      message: t('workspace.transferMessageWithPath', { count: selectedFiles.length, name: target.agent?.displayName || target.name, path: transferDirectory.slice(target.rootPath.length).replace(/^\/+/, "") || t('workspace.workspaceRoot') }),
       confirmLabel: t('workspace.copyAndSend'),
     });
     if (!approved) return;
@@ -767,7 +782,7 @@ export function FilesWorkspace({
         const relativePath = selectedPath.slice(rootPath.length).replace(/^\/+/, "");
         const receipt = await transferFile(
           { scope: "project", projectId: selectedProject.id, relativePath },
-          { scope: "project", projectId: target.id, relativeDirectory: "uploads" },
+          { scope: "project", projectId: target.id, relativeDirectory: transferDirectory.slice(target.rootPath.length).replace(/^\/+/, "") },
           async () => true,
         );
         if (receipt?.status === "completed") copied += 1;
@@ -1342,12 +1357,6 @@ export function FilesWorkspace({
               {t('workspace.copyPath')}
             </button>
             <button
-              onClick={() => void copySelectedLinks()}
-              className="rounded border border-surface-700 px-2 py-1"
-            >
-              {t('workspace.copyInternalLink')}
-            </button>
-            <button
               onClick={() => void deleteSelected()}
               className="rounded border border-red-500/30 px-2 py-1 text-red-500 dark:text-red-300"
             >
@@ -1355,7 +1364,7 @@ export function FilesWorkspace({
             </button>
             <select
               value={transferProjectId}
-              onChange={(event) => setTransferProjectId(event.target.value)}
+              onChange={(event) => selectTransferProject(event.target.value)}
               className="ml-auto rounded border border-surface-700 bg-surface-900 px-2 py-1 text-surface-700 dark:text-surface-300"
             >
               <option value="">{t('workspace.selectAiTeammateToSend')}</option>
@@ -1367,8 +1376,16 @@ export function FilesWorkspace({
                   </option>
                 ))}
             </select>
+            {transferProjectId && (
+              <div className="flex min-w-[240px] max-w-full items-center gap-1 overflow-x-auto rounded border border-surface-700 bg-surface-900 px-1 py-0.5">
+                <button type="button" disabled={!transferParentDirectory} onClick={() => transferParentDirectory && navigateTransferDirectory(transferParentDirectory)} className="min-h-8 shrink-0 rounded px-2 text-surface-500 hover:bg-surface-800 hover:text-surface-200 disabled:opacity-30" aria-label={t('workspace.parentFolder')}>←</button>
+                <button type="button" onClick={() => navigateTransferDirectory(transferProjectRoot)} className="min-h-8 shrink-0 rounded px-2 text-xs font-semibold text-surface-300 hover:bg-surface-800">{t('workspace.workspaceRoot')}</button>
+                {transferDirectoriesLoading ? <span className="px-2 text-xs text-surface-500">{t('workspace.loading')}</span> : transferDirectories.map((directory) => <button key={directory.path} type="button" onClick={() => navigateTransferDirectory(directory.path)} className="min-h-8 shrink-0 rounded px-2 text-xs text-surface-400 hover:bg-surface-800 hover:text-surface-100">📁 {directory.name}</button>)}
+                <span className="ml-auto max-w-[180px] shrink-0 truncate px-2 font-mono text-[10px] text-surface-600" title={transferDirectory}>{transferDirectory.slice(transferProjectRoot.length).replace(/^\/+/, "") || "/"}</span>
+              </div>
+            )}
             <button
-              disabled={!transferProjectId || busyAction === "copy"}
+              disabled={!transferProjectId || !transferDirectory || busyAction === "copy"}
               onClick={() => void copySelectedToProject()}
               className="rounded border border-primary-500/30 px-2 py-1 font-bold text-primary-700 disabled:opacity-40 dark:text-primary-200"
             >

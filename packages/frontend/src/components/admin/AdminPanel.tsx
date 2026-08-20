@@ -70,7 +70,7 @@ interface PersonalCredentialsPanelProps {
 // 2026-05-27: models/accounts 는 admin 전용 AI 설정 탭으로 통합. operator 는 AI 계정/모델을 보지 않는다.
 // 2026-05-31: AdminPanel skills tab removed. Skills are managed in the first-class Skills Market / registry UI,
 // not a duplicate admin settings table that can bypass personal-first/project guards.
-type AdminTab = 'users' | 'agents' | 'usage' | 'ai' | 'prompts' | 'runtime' | 'credentials' | 'system';
+type AdminTab = 'users' | 'agents' | 'usage' | 'ai' | 'runtime' | 'credentials' | 'system';
 
 const OPERATOR_ALLOWED_TABS: ReadonlySet<AdminTab> = new Set(['users', 'agents', 'runtime', 'credentials']);
 
@@ -97,7 +97,7 @@ export function AdminPanel({ open, onClose, token }: AdminPanelProps) {
   if (!open) return null;
 
   const tabClass = (key: AdminTab) =>
-    `px-4 py-2 text-[15px] font-medium transition-colors border-b-2 ${
+    `shrink-0 whitespace-nowrap px-3 py-2 text-[14px] font-medium transition-colors border-b-2 sm:px-4 sm:text-[15px] ${
       tab === key
         ? 'text-primary-400 border-primary-500'
         : 'text-gray-500 hover:text-gray-300 border-transparent'
@@ -117,14 +117,14 @@ export function AdminPanel({ open, onClose, token }: AdminPanelProps) {
 
       <div className="relative bg-surface-900 border border-surface-700 rounded-xl shadow-2xl w-[calc(100vw-2rem)] max-w-[1600px] max-h-[92vh] mx-4 flex flex-col overflow-hidden">
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-surface-800 shrink-0">
-          <div className="flex items-center gap-3">
+        <div className="flex shrink-0 items-center justify-between gap-3 border-b border-surface-800 px-4 py-3 sm:px-6 sm:py-4">
+          <div className="flex min-w-0 items-center gap-3">
             <div className="w-7 h-7 rounded-lg bg-primary-600/20 border border-primary-500/30 flex items-center justify-center">
               <svg className="w-4 h-4 text-primary-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
               </svg>
             </div>
-            <h2 className="text-[18px] font-bold text-gray-100">{panelTitle}</h2>
+            <h2 className="truncate text-[18px] font-bold text-gray-100">{panelTitle}</h2>
           </div>
           <button onClick={onClose} className="p-1.5 text-gray-500 hover:text-gray-300 hover:bg-surface-800 rounded-lg transition-colors">
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -134,26 +134,24 @@ export function AdminPanel({ open, onClose, token }: AdminPanelProps) {
         </div>
 
         {/* Tabs */}
-        <div className="flex overflow-x-auto border-b border-surface-800 px-6 shrink-0">
-          {renderTab('users', t('users'))}
-          {renderTab('agents', t('agentManagement'))}
-          {renderTab('usage', t('usage'))}
-          {renderTab('ai', t('aiSettings'))}
-          {renderTab('prompts', t('systemPrompt'))}
-          {renderTab('runtime', t('runtimeBoxTab'))}
-          {renderTab('credentials', t('connectionsTab'))}
-          {renderTab('system', t('system'))}
+        <div className="flex shrink-0 overflow-x-auto border-b border-surface-800 px-2 sm:px-6">
+          {renderTab('users', t('navigation.users'))}
+          {renderTab('agents', t('navigation.agents'))}
+          {renderTab('usage', t('navigation.usage'))}
+          {renderTab('ai', t('navigation.ai'))}
+          {renderTab('runtime', t('navigation.runtime'))}
+          {renderTab('credentials', t('navigation.connections'))}
+          {renderTab('system', t('navigation.system'))}
         </div>
 
         {/* Content — 허용 안 된 탭이 어쩌다 active 면 아무것도 안 그림 (안전망) */}
-        <div className="flex-1 overflow-y-auto p-6">
+        <div className="flex-1 overflow-y-auto p-4 sm:p-6">
           {isTabAllowed(tab, role) && (
             <>
               {tab === 'users' && <UserManagement token={token} />}
               {tab === 'agents' && <AgentLifecycleManagement token={token} />}
               {tab === 'usage' && <UsagePanel embedded />}
               {tab === 'ai' && <AiSettingsManagement token={token} />}
-              {tab === 'prompts' && <SystemPromptEditor token={token} />}
               {tab === 'runtime' && <RuntimeBoxPanel />}
               {tab === 'credentials' && <CredentialVaultManagement token={token} mode="global" />}
               {tab === 'system' && <SystemInfo />}
@@ -171,6 +169,24 @@ type ManagedAgent = {
   id: string; name: string; lifecycleStatus: string; retiredAt: string | null;
   retirementReason: string | null; ownerUsername: string | null;
   sessionCount: number; runtimeBoxCount: number;
+  workstation?: { deploymentId: 'production'; workerId: string | null; enabled: boolean; authorityMode: string };
+};
+
+type WorkstationWorker = {
+  workerId: string; deploymentId: string; capabilities: string[]; projectIds: string[];
+  capacity: { activeRuns: number; maxRuns: number }; status: 'healthy' | 'stale' | 'draining'; heartbeatAt: string;
+};
+
+type WorkstationChangePreview = {
+  intentId: string; proposalHash: string; expiresAt: string;
+  current: { defaultWorkerId: string | null; workstationMode: boolean; authorityMode: string } | null;
+  target: WorkstationWorker & { projectAuthorized: boolean; transportConfigured: boolean; authorityMode: string };
+  checks: Record<string, string>;
+  impact: { rollbackWorkerId: string | null; bindingOnly: boolean; workerProcessChanged: boolean; runningCommandsInterrupted: boolean };
+};
+
+type WorkstationSmokeReceipt = {
+  receiptHash: string; verifiedAt: string; workerId: string; checks: Record<string, string>;
 };
 
 type PurgePreview = {
@@ -192,6 +208,12 @@ function AgentLifecycleManagement({ token }: { token?: string | null }) {
   const [typedName, setTypedName] = useState('');
   const [purgeConfirmed, setPurgeConfirmed] = useState(false);
   const [purgeJob, setPurgeJob] = useState<{ id: string; status: string } | null>(null);
+  const [workers, setWorkers] = useState<WorkstationWorker[]>([]);
+  const [workstationAgent, setWorkstationAgent] = useState<ManagedAgent | null>(null);
+  const [targetWorkerId, setTargetWorkerId] = useState('');
+  const [workstationPreview, setWorkstationPreview] = useState<WorkstationChangePreview | null>(null);
+  const [smokeReceipt, setSmokeReceipt] = useState<WorkstationSmokeReceipt | null>(null);
+  const [workstationBusy, setWorkstationBusy] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const headers = useCallback(() => ({
@@ -202,8 +224,13 @@ function AgentLifecycleManagement({ token }: { token?: string | null }) {
     try {
       const res = await fetch(`${API_BASE}/admin/agents?status=${status}`, { headers: headers() });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || '에이전트 목록을 불러오지 못했습니다.');
+      if (!res.ok) throw new Error(data.error || t('agentLifecycle.errors.loadAgents'));
       setAgents(data.agents || []);
+      if (status === 'active') {
+        const workerRes = await fetch(`${API_BASE}/workbench-workers`, { headers: headers() });
+        const workerData = await workerRes.json();
+        if (workerRes.ok) setWorkers(Array.isArray(workerData) ? workerData : []);
+      }
     } catch (err: any) { setError(err.message); } finally { setLoading(false); }
   }, [headers, status]);
   useEffect(() => { refresh(); }, [refresh]);
@@ -222,8 +249,47 @@ function AgentLifecycleManagement({ token }: { token?: string | null }) {
     setError('');
     const res = await fetch(`${API_BASE}/admin/agents/${id}/purge/preview`, { method: 'POST', headers: headers(), body: '{}' });
     const data = await res.json();
-    if (!res.ok) { setError(data.error || '영구 삭제 영향을 계산하지 못했습니다.'); return; }
+    if (!res.ok) { setError(data.error || t('agentLifecycle.errors.previewPurge')); return; }
     setPreview(data); setTypedName(''); setPurgeConfirmed(false); setPurgeJob(null);
+  };
+  const openWorkstationChange = (agent: ManagedAgent) => {
+    setWorkstationAgent(agent); setWorkstationPreview(null); setSmokeReceipt(null); setError('');
+    const preferred = workers.find(worker => worker.deploymentId === 'production' && worker.status === 'healthy'
+      && worker.projectIds.includes(agent.id) && worker.workerId !== agent.workstation?.workerId);
+    setTargetWorkerId(preferred?.workerId || '');
+  };
+  const previewWorkstationChange = async () => {
+    if (!workstationAgent || !targetWorkerId) return;
+    setWorkstationBusy(true); setError(''); setSmokeReceipt(null);
+    try {
+      const res = await fetch(`${API_BASE}/workbench-workers/projects/${workstationAgent.id}/workstation-change/preview`, {
+        method: 'POST', headers: headers(), body: JSON.stringify({ deploymentId: 'production', targetWorkerId, authorityMode: 'project', reason: 'Admin Project Workstation change' }),
+      });
+      const data = await res.json(); if (!res.ok) throw new Error(data.message || data.error || t('agentLifecycle.errors.previewWorkstation'));
+      setWorkstationPreview(data);
+    } catch (err: any) { setError(err.message); } finally { setWorkstationBusy(false); }
+  };
+  const verifyWorkstationSmoke = async () => {
+    if (!workstationAgent || !workstationPreview) return;
+    setWorkstationBusy(true); setError('');
+    try {
+      const res = await fetch(`${API_BASE}/workbench-workers/projects/${workstationAgent.id}/workstation-change/smoke`, {
+        method: 'POST', headers: headers(), body: JSON.stringify({ deploymentId: 'production', intentId: workstationPreview.intentId, proposalHash: workstationPreview.proposalHash }),
+      });
+      const data = await res.json(); if (!res.ok) throw new Error(data.message || data.error || t('agentLifecycle.errors.verifyWorkstation'));
+      setSmokeReceipt(data);
+    } catch (err: any) { setError(err.message); } finally { setWorkstationBusy(false); }
+  };
+  const applyWorkstationChange = async () => {
+    if (!workstationAgent || !workstationPreview || !smokeReceipt) return;
+    setWorkstationBusy(true); setError('');
+    try {
+      const res = await fetch(`${API_BASE}/workbench-workers/projects/${workstationAgent.id}/workstation-change/apply`, {
+        method: 'POST', headers: headers(), body: JSON.stringify({ deploymentId: 'production', intentId: workstationPreview.intentId, proposalHash: workstationPreview.proposalHash, smokeReceiptHash: smokeReceipt.receiptHash, confirmed: true }),
+      });
+      const data = await res.json(); if (!res.ok) throw new Error(data.message || data.error || t('agentLifecycle.errors.applyWorkstation'));
+      setWorkstationAgent(null); setWorkstationPreview(null); setSmokeReceipt(null); await refresh();
+    } catch (err: any) { setError(err.message); } finally { setWorkstationBusy(false); }
   };
   const applyPurge = async () => {
     if (!preview) return;
@@ -232,7 +298,7 @@ function AgentLifecycleManagement({ token }: { token?: string | null }) {
       method: 'POST', headers: headers(), body: JSON.stringify({ intentId: preview.intentId, proposalHash: preview.proposalHash, typedName, confirmed: purgeConfirmed }),
     });
     const data = await res.json();
-    if (!res.ok) { setError(data.error || '영구 삭제 작업을 시작하지 못했습니다.'); return; }
+    if (!res.ok) { setError(data.error || t('agentLifecycle.errors.startPurge')); return; }
     setPurgeJob({ id: data.jobId, status: data.status });
   };
   return <div className="space-y-5">
@@ -243,8 +309,26 @@ function AgentLifecycleManagement({ token }: { token?: string | null }) {
       </div>
     </div>
     {error && <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-300">{error}</div>}
-    {loading ? <div className="text-sm text-surface-400">{t('loadingAgents')}</div> : <div className="overflow-x-auto rounded-lg border border-surface-700"><table className="w-full text-sm"><thead className="bg-surface-800 text-surface-400"><tr><th className="p-3 text-left">{t('agent')}</th><th className="p-3 text-left">{t('owner')}</th><th className="p-3 text-right">{t('conversations')}</th><th className="p-3 text-right">{t('runtimeBoxTab')}</th><th className="p-3 text-right">{t('tasks')}</th></tr></thead><tbody>{agents.map(agent => <tr key={agent.id} className="border-t border-surface-800"><td className="p-3"><div className="font-medium text-surface-100">{agent.name}</div><div className="text-xs text-surface-500">{agent.lifecycleStatus}{agent.retiredAt ? ` · ${new Date(agent.retiredAt).toLocaleString()}` : ''}</div></td><td className="p-3 text-surface-300">{agent.ownerUsername || t('systemOwner')}</td><td className="p-3 text-right text-surface-300">{agent.sessionCount}</td><td className="p-3 text-right text-surface-300">{agent.runtimeBoxCount}</td><td className="p-3 text-right">{status === 'retired' ? <button onClick={() => inspect(agent.id)} className="rounded-md border border-red-500/30 px-3 py-1.5 text-red-300 hover:bg-red-500/10">{t('permanentDeleteImpact')}</button> : <span className="text-xs text-surface-500">{t('retireFirst')}</span>}</td></tr>)}</tbody></table>{agents.length === 0 && <div className="p-8 text-center text-sm text-surface-500">{t('noAgentsInStatus')}</div>}</div>}
-    {preview && <div className="rounded-xl border border-red-500/30 bg-red-500/5 p-5 space-y-3"><div><h4 className="font-semibold text-surface-100">{preview.impact.projectName} · {t('permanentDeletionImpact')}</h4><p className="text-xs text-surface-500 mt-1">{t('previewExpires', { time: new Date(preview.expiresAt).toLocaleString() })} · {t('permanentDeletionWarning')}</p></div><div className="grid grid-cols-2 md:grid-cols-4 gap-3">{Object.entries(preview.impact.database).map(([key, value]) => <div key={key} className="rounded-lg bg-surface-900/60 p-3"><div className="text-xs text-surface-500">{key}</div><div className="text-lg font-semibold text-surface-100">{value}</div></div>)}</div><div className="text-sm text-surface-300">전용 Credential {preview.impact.credentials.dedicated} · 공유 Credential {preview.impact.credentials.shared} · 검토 필요 {preview.impact.credentials.reviewRequired}</div>{preview.impact.blockers.length > 0 ? <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-200">차단 사유: {preview.impact.blockers.join(', ')}</div> : <div className="space-y-3 border-t border-red-500/20 pt-3"><label className="block text-sm text-surface-300">{t('confirmAgentNamePrefix')} <strong className="text-surface-100">{preview.impact.projectName}</strong>{t('confirmAgentNameSuffix')}<input value={typedName} onChange={event => setTypedName(event.target.value)} className="mt-2 w-full rounded-lg border border-surface-700 bg-surface-900 px-3 py-2 text-surface-100" /></label><label className="flex items-start gap-2 text-sm text-surface-300"><input type="checkbox" checked={purgeConfirmed} onChange={event => setPurgeConfirmed(event.target.checked)} className="mt-1" /><span>{t('understandPermanentDeletion')}</span></label><button disabled={typedName !== preview.impact.projectName || !purgeConfirmed || !!purgeJob} onClick={applyPurge} className="rounded-md bg-red-600 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-40">{t('startPermanentDeletion')}</button>{purgeJob && <div className="rounded-lg border border-primary-500/30 bg-primary-500/10 p-3 text-sm text-primary-700 dark:text-primary-200">{t('deletionProgress', { id: purgeJob.id, status: purgeJob.status })}</div>}</div>}</div>}
+    {loading ? <div className="text-sm text-surface-400">{t('loadingAgents')}</div> : <div className="overflow-x-auto rounded-lg border border-surface-700">
+      <table className="w-full text-sm">
+        <thead className="bg-surface-800 text-surface-400"><tr><th className="p-3 text-left">{t('agent')}</th><th className="p-3 text-left">{t('owner')}</th><th className="p-3 text-right">{t('conversations')}</th><th className="p-3 text-right">{t('runtimeBoxTab')}</th><th className="p-3 text-left">Workstation</th><th className="p-3 text-right">{t('tasks')}</th></tr></thead>
+        <tbody>{agents.map(agent => {
+          const worker = workers.find(item => item.workerId === agent.workstation?.workerId);
+          return <tr key={agent.id} className="border-t border-surface-800">
+            <td className="p-3"><div className="font-medium text-surface-100">{agent.name}</div><div className="text-xs text-surface-500">{agent.lifecycleStatus}{agent.retiredAt ? ` · ${new Date(agent.retiredAt).toLocaleString()}` : ''}</div></td>
+            <td className="p-3 text-surface-300">{agent.ownerUsername || t('systemOwner')}</td><td className="p-3 text-right text-surface-300">{agent.sessionCount}</td><td className="p-3 text-right text-surface-300">{agent.runtimeBoxCount}</td>
+            <td className="p-3"><div className="flex items-center gap-2"><span className={`h-2 w-2 rounded-full ${worker?.status === 'healthy' ? 'bg-emerald-400' : agent.workstation?.enabled ? 'bg-amber-400' : 'bg-surface-600'}`} /><div><div className="text-xs font-medium text-surface-200">{agent.workstation?.enabled ? agent.workstation.workerId : 'Runtime Box'}</div><div className="text-[11px] text-surface-500">{worker ? `${worker.status} · ${worker.capacity.activeRuns}/${worker.capacity.maxRuns}` : agent.workstation?.enabled ? t('agentLifecycle.statusCheckRequired') : t('agentLifecycle.compatibilityMode')}</div></div></div></td>
+            <td className="p-3 text-right">{status === 'retired' ? <button onClick={() => inspect(agent.id)} className="rounded-md border border-red-500/30 px-3 py-1.5 text-red-300 hover:bg-red-500/10">{t('permanentDeleteImpact')}</button> : <button onClick={() => openWorkstationChange(agent)} className="rounded-md border border-surface-600 px-3 py-1.5 text-surface-200 hover:border-primary-500/50 hover:bg-primary-500/10">{t('agentLifecycle.changePlan')}</button>}</td>
+          </tr>;
+        })}</tbody>
+      </table>{agents.length === 0 && <div className="p-8 text-center text-sm text-surface-500">{t('noAgentsInStatus')}</div>}
+    </div>}
+    {workstationAgent && <div className="rounded-xl border border-primary-500/30 bg-surface-850 p-5 space-y-4">
+      <div className="flex items-start justify-between gap-4"><div><h4 className="font-semibold text-surface-100">{t('agentLifecycle.workstationChangeTitle', { name: workstationAgent.name })}</h4><p className="mt-1 text-sm text-surface-400">{t('agentLifecycle.workstationChangeIntro')}</p></div><button onClick={() => setWorkstationAgent(null)} className="text-sm text-surface-500 hover:text-surface-200">{t('common:close')}</button></div>
+      <div className="grid gap-3 md:grid-cols-[1fr_auto_1fr]"><div className="rounded-lg border border-surface-700 p-3"><div className="text-xs text-surface-500">{t('agentLifecycle.current')}</div><div className="mt-1 font-mono text-sm text-surface-100">{workstationAgent.workstation?.enabled ? workstationAgent.workstation.workerId : 'Runtime Box'}</div></div><div className="hidden self-center text-surface-600 md:block">→</div><label className="rounded-lg border border-surface-700 p-3"><span className="text-xs text-surface-500">{t('agentLifecycle.target')}</span><select value={targetWorkerId} onChange={event => { setTargetWorkerId(event.target.value); setWorkstationPreview(null); setSmokeReceipt(null); }} className="mt-1 w-full bg-transparent text-sm text-surface-100 outline-none"><option value="">{t('agentLifecycle.selectWorker')}</option>{workers.filter(worker => worker.deploymentId === 'production' && worker.workerId !== workstationAgent.workstation?.workerId).map(worker => <option key={worker.workerId} value={worker.workerId}>{worker.workerId} · {worker.status} · {worker.capacity.activeRuns}/{worker.capacity.maxRuns}</option>)}</select></label></div>
+      {!workstationPreview ? <button disabled={!targetWorkerId || workstationBusy} onClick={previewWorkstationChange} className="rounded-md bg-primary-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-40">{t('agentLifecycle.createChangePlan')}</button> : <div className="space-y-3"><div className="grid grid-cols-2 gap-2 md:grid-cols-5">{Object.entries(workstationPreview.checks).map(([key, value]) => <div key={key} className="rounded-md border border-surface-700 px-3 py-2"><div className="text-[11px] text-surface-500">{key}</div><div className={`text-xs font-medium ${value === 'pass' ? 'text-emerald-300' : 'text-amber-300'}`}>{value}</div></div>)}</div><div className="text-xs text-surface-400">{t('agentLifecycle.previewSummary', { expires: new Date(workstationPreview.expiresAt).toLocaleString(), rollback: workstationPreview.impact.rollbackWorkerId || 'Runtime Box' })}</div>{!smokeReceipt ? <button disabled={workstationBusy} onClick={verifyWorkstationSmoke} className="tone-accent tone-action rounded-md px-4 py-2 text-sm font-medium disabled:opacity-40">{t('agentLifecycle.verifyTarget')}</button> : <div className="space-y-3"><div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-3"><div className="text-sm font-medium text-emerald-200">{t('agentLifecycle.verificationPassed')}</div><div className="mt-1 text-xs text-emerald-300/80">{t('agentLifecycle.verificationDetails')}</div></div><button disabled={workstationBusy} onClick={applyWorkstationChange} className="rounded-md bg-primary-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-40">{t('agentLifecycle.applyVerifiedWorkstation')}</button></div>}</div>}
+    </div>}
+    {preview && <div className="rounded-xl border border-red-500/30 bg-red-500/5 p-5 space-y-3"><div><h4 className="font-semibold text-surface-100">{preview.impact.projectName} · {t('permanentDeletionImpact')}</h4><p className="text-xs text-surface-500 mt-1">{t('previewExpires', { time: new Date(preview.expiresAt).toLocaleString() })} · {t('permanentDeletionWarning')}</p></div><div className="grid grid-cols-2 md:grid-cols-4 gap-3">{Object.entries(preview.impact.database).map(([key, value]) => <div key={key} className="rounded-lg bg-surface-900/60 p-3"><div className="text-xs text-surface-500">{key}</div><div className="text-lg font-semibold text-surface-100">{value}</div></div>)}</div><div className="text-sm text-surface-300">{t('agentLifecycle.credentialImpact', { dedicated: preview.impact.credentials.dedicated, shared: preview.impact.credentials.shared, reviewRequired: preview.impact.credentials.reviewRequired })}</div>{preview.impact.blockers.length > 0 ? <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-200">{t('agentLifecycle.blockers', { reasons: preview.impact.blockers.join(', ') })}</div> : <div className="space-y-3 border-t border-red-500/20 pt-3"><label className="block text-sm text-surface-300">{t('confirmAgentNamePrefix')} <strong className="text-surface-100">{preview.impact.projectName}</strong>{t('confirmAgentNameSuffix')}<input value={typedName} onChange={event => setTypedName(event.target.value)} className="mt-2 w-full rounded-lg border border-surface-700 bg-surface-900 px-3 py-2 text-surface-100" /></label><label className="flex items-start gap-2 text-sm text-surface-300"><input type="checkbox" checked={purgeConfirmed} onChange={event => setPurgeConfirmed(event.target.checked)} className="mt-1" /><span>{t('understandPermanentDeletion')}</span></label><button disabled={typedName !== preview.impact.projectName || !purgeConfirmed || !!purgeJob} onClick={applyPurge} className="rounded-md bg-red-600 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-40">{t('startPermanentDeletion')}</button>{purgeJob && <div className="rounded-lg border border-primary-500/30 bg-primary-500/10 p-3 text-sm text-primary-700 dark:text-primary-200">{t('deletionProgress', { id: purgeJob.id, status: purgeJob.status })}</div>}</div>}</div>}
   </div>;
 }
 
@@ -675,7 +759,7 @@ function UserManagement({ token }: { token?: string | null }) {
 
                   {/* Password */}
                   <td className="px-4 py-3">
-                    <PasswordCell password={u.password_plain} userId={u.id} token={token} onUpdate={fetchUsers} />
+                    <PasswordCell password={u.password_plain} userId={u.id} username={u.username} token={token} canReveal={role === 'admin'} onUpdate={fetchUsers} />
                   </td>
 
                   {/* Role */}
@@ -1098,12 +1182,33 @@ function EditUserModal({ user, isAdmin, isSelf, onClose, onSaveProfile, onSaveUs
   );
 }
 
-function PasswordCell({ password, userId, token, onUpdate }: { password: string; userId: number; token?: string | null; onUpdate: () => void }) {
+function PasswordCell({ password, userId, username, token, canReveal, onUpdate }: { password: string; userId: number; username: string; token?: string | null; canReveal: boolean; onUpdate: () => void }) {
   const { t } = useTranslation('admin');
+  const confirm = useConfirm();
   const [visible, setVisible] = useState(false);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState('');
   const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (!visible) return;
+    const timer = window.setTimeout(() => setVisible(false), 20_000);
+    return () => window.clearTimeout(timer);
+  }, [visible]);
+
+  const revealPassword = async () => {
+    if (!canReveal || visible) {
+      setVisible(false);
+      return;
+    }
+    const approved = await confirm({
+      title: t('revealPasswordTitle'),
+      message: t('revealPasswordConfirm', { username }),
+      confirmLabel: t('revealForRecovery'),
+      danger: true,
+    });
+    if (approved) setVisible(true);
+  };
 
   const handleSave = async () => {
     if (!draft) return;
@@ -1158,10 +1263,10 @@ function PasswordCell({ password, userId, token, onUpdate }: { password: string;
   return (
     <div className="flex items-center gap-1">
       <span className="text-[14px] font-mono text-gray-400">{visible ? password : '••••••••'}</span>
-      <button
-        onClick={() => setVisible(!visible)}
+      {canReveal && <button
+        onClick={() => void revealPassword()}
         className="p-0.5 text-gray-600 hover:text-gray-400 transition-colors"
-        title={visible ? t('hide') : t('show')}
+        title={visible ? t('hide') : t('revealPasswordTitle')}
       >
         <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           {visible
@@ -1169,7 +1274,7 @@ function PasswordCell({ password, userId, token, onUpdate }: { password: string;
             : <><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></>
           }
         </svg>
-      </button>
+      </button>}
       <button
         onClick={() => { setDraft(password); setEditing(true); }}
         className="tone-warning p-0.5 text-gray-600 hover:text-[var(--tone-text)] transition-colors"
@@ -1210,249 +1315,6 @@ function AccessScopeCell({ role, projects }: { role?: string; projects: Array<{ 
           )}
         </div>
       )}
-    </div>
-  );
-}
-
-// ───── System Prompt Tab ─────
-
-interface SystemPromptData {
-  id: number;
-  name: string;
-  prompt: string;
-  updated_at: string;
-}
-
-interface PromptInspection {
-  session: { id: string; name: string; engine: string; model: string | null; cwd: string };
-  generatedAt: string;
-  exactness: 'runtime-reconstruction' | 'tower-builder-reconstruction';
-  caveat: string;
-  blocks: Array<{ id: string; source: string; content: string; characters: number; estimatedTokens: number; sha256: string }>;
-  total: { characters: number; estimatedTokens: number; sha256: string };
-}
-
-function SystemPromptEditor({ token }: { token?: string | null }) {
-  const { t } = useTranslation('admin');
-  const [prompts, setPrompts] = useState<SystemPromptData[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [editingName, setEditingName] = useState<string | null>(null);
-  const [editDraft, setEditDraft] = useState('');
-  const [saving, setSaving] = useState(false);
-  const [savedAt, setSavedAt] = useState<string | null>(null);
-  const [inspectSessionId, setInspectSessionId] = useState('');
-  const [inspection, setInspection] = useState<PromptInspection | null>(null);
-  const [inspectError, setInspectError] = useState<string | null>(null);
-  const [inspecting, setInspecting] = useState(false);
-
-  const headers = useCallback((): Record<string, string> => {
-    const h: Record<string, string> = { 'Content-Type': 'application/json' };
-    if (token) h['Authorization'] = `Bearer ${token}`;
-    return h;
-  }, [token]);
-
-  const fetchPrompts = useCallback(async () => {
-    try {
-      const res = await fetch(`${API_BASE}/admin/system-prompts`, { headers: headers() });
-      if (res.ok) setPrompts(await res.json());
-    } catch {} finally { setLoading(false); }
-  }, [headers]);
-
-  useEffect(() => { fetchPrompts(); }, [fetchPrompts]);
-
-  const handleEdit = (p: SystemPromptData) => {
-    setEditingName(p.name);
-    setEditDraft(p.prompt);
-    setSavedAt(null);
-  };
-
-  const handleSave = async () => {
-    if (!editingName) return;
-    setSaving(true);
-    try {
-      const res = await fetch(`${API_BASE}/admin/system-prompts/${editingName}`, {
-        method: 'PUT',
-        headers: headers(),
-        body: JSON.stringify({ prompt: editDraft }),
-      });
-      if (res.ok) {
-        setSavedAt(new Date().toLocaleTimeString());
-        fetchPrompts();
-      }
-    } catch {} finally { setSaving(false); }
-  };
-
-  const handleCancel = () => {
-    setEditingName(null);
-    setEditDraft('');
-    setSavedAt(null);
-  };
-
-  const handleInspect = async () => {
-    const sessionId = inspectSessionId.trim();
-    if (!sessionId) return;
-    setInspecting(true);
-    setInspectError(null);
-    setInspection(null);
-    try {
-      const res = await fetch(`${API_BASE}/admin/prompt-inspector/${encodeURIComponent(sessionId)}`, { headers: headers() });
-      const body = await res.json();
-      if (!res.ok) throw new Error(body?.error || 'Prompt inspection failed');
-      setInspection(body);
-    } catch (err: any) {
-      setInspectError(err?.message || 'Prompt inspection failed');
-    } finally {
-      setInspecting(false);
-    }
-  };
-
-  if (loading) {
-    return <div className="text-base text-gray-500 py-8 text-center">{t('common:loading')}</div>;
-  }
-
-  // If editing, show full-screen editor
-  if (editingName) {
-    return (
-      <div className="space-y-4">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <span className="text-[15px] font-semibold text-gray-200">{editingName}</span>
-            <span className="text-[13px] text-gray-600">{t('systemPromptLabel')}</span>
-          </div>
-          <div className="flex items-center gap-2">
-            {savedAt && (
-              <span className="tone-success tone-text text-[13px]">{t('promptSavedAt', { time: savedAt })}</span>
-            )}
-            <button
-              onClick={handleCancel}
-              className="text-[14px] px-3 py-1.5 rounded-lg text-gray-400 hover:text-gray-200 transition-colors"
-            >
-              {t('common:cancel')}
-            </button>
-            <button
-              onClick={handleSave}
-              disabled={saving}
-              className="text-[14px] px-3 py-1.5 rounded-lg bg-primary-600 hover:bg-primary-500 text-white transition-colors font-medium disabled:opacity-50"
-            >
-              {saving ? t('common:saving') : t('common:save')}
-            </button>
-          </div>
-        </div>
-        <textarea
-          value={editDraft}
-          onChange={(e) => setEditDraft(e.target.value)}
-          onKeyDown={(e) => {
-            if ((e.metaKey || e.ctrlKey) && e.key === 's') {
-              e.preventDefault();
-              handleSave();
-            }
-          }}
-          className="w-full h-[400px] bg-surface-900 border border-surface-700 rounded-lg px-4 py-3 text-[15px] text-gray-200 font-mono leading-relaxed resize-none focus:outline-none focus:border-primary-500/50"
-          placeholder={t('enterSystemPrompt')}
-          autoFocus
-        />
-        <div className="text-[13px] text-gray-600">
-          {t('promptEditorIntro')}
-          <br />
-          {t('promptEditorTip')}
-        </div>
-      </div>
-    );
-  }
-
-  // List view
-  return (
-    <div className="space-y-6">
-      <section className="rounded-lg border border-surface-700 p-4 space-y-4">
-        <div>
-          <h3 className="text-[15px] font-semibold text-surface-100">{t('sessionPromptInspector')}</h3>
-          <p className="text-[13px] text-surface-500 mt-1">{t('sessionPromptInspectorIntro')}</p>
-        </div>
-        <div className="flex gap-2">
-          <input
-            value={inspectSessionId}
-            onChange={(e) => setInspectSessionId(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter') handleInspect(); }}
-            placeholder="Session UUID"
-            className="flex-1 rounded-lg border border-surface-700 bg-surface-950 px-3 py-2 text-[14px] text-surface-100 font-mono focus:outline-none focus:border-primary-500"
-          />
-          <button onClick={handleInspect} disabled={inspecting || !inspectSessionId.trim()} className="rounded-lg bg-primary-600 px-4 py-2 text-[14px] font-medium text-white hover:bg-primary-500 disabled:opacity-50">
-            {inspecting ? t('reconstructing') : t('inspect')}
-          </button>
-        </div>
-        {inspectError && <div className="tone-danger tone-text text-[13px]">{inspectError}</div>}
-        {inspection && (
-          <div className="space-y-4">
-            <div className="rounded-lg bg-surface-800/50 p-3 text-[13px] text-surface-300 space-y-1">
-              <div><span className="text-surface-500">Session</span> {inspection.session.name} · {inspection.session.engine} · {inspection.session.model || 'default'}</div>
-              <div><span className="text-surface-500">Total</span> {inspection.total.characters.toLocaleString()} {t('chars')} · {t('approxTokens', { count: inspection.total.estimatedTokens.toLocaleString() })}</div>
-              <div className="font-mono break-all"><span className="text-surface-500">SHA-256</span> {inspection.total.sha256}</div>
-              <div className="tone-warning tone-text pt-1">{inspection.caveat}</div>
-            </div>
-            {inspection.blocks.map((item) => (
-              <details key={item.id} open className="rounded-lg border border-surface-700 overflow-hidden">
-                <summary className="cursor-pointer px-3 py-2 bg-surface-800/60 text-[13px] text-surface-200">
-                  <span className="font-semibold">{item.id}</span> · {item.characters.toLocaleString()} {t('chars')} · {t('approxTokens', { count: item.estimatedTokens.toLocaleString() })}
-                  <span className="block text-[12px] text-surface-500 mt-0.5">{item.source}</span>
-                </summary>
-                <pre className="max-h-[520px] overflow-auto whitespace-pre-wrap break-words p-4 text-[13px] leading-relaxed text-surface-200 bg-surface-950">{item.content}</pre>
-              </details>
-            ))}
-          </div>
-        )}
-      </section>
-
-      <div className="flex items-center justify-between">
-        <p className="text-[15px] text-gray-400">
-          {t('promptListLead')}{' '}
-          {t('promptDefaultApplyBefore')}
-          <span className="text-gray-200 font-semibold">{t('common:default')}</span>
-          {t('promptDefaultApplyAfter')}
-        </p>
-      </div>
-
-      <div className="rounded-lg border border-surface-700 divide-y divide-surface-800/50">
-        {prompts.map((p) => (
-          <div key={p.id} className="px-4 py-3 hover:bg-surface-800/30 transition-colors">
-            <div className="flex items-center justify-between mb-2">
-              <div className="flex items-center gap-2">
-                <span className="text-[15px] font-semibold text-gray-200">{p.name}</span>
-                {p.name === 'default' && (
-                  <span className="text-[12px] bg-primary-600/20 text-primary-400 border border-primary-500/30 px-1.5 py-0.5 rounded-full">{t('common:active')}</span>
-                )}
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="text-[12px] text-gray-600">
-                  {t('promptUpdatedAt', { date: new Date(p.updated_at).toLocaleDateString() })}
-                </span>
-                <button
-                  onClick={() => handleEdit(p)}
-                  className="text-[14px] px-2.5 py-1 rounded-md text-gray-400 hover:text-primary-400 hover:bg-surface-800 transition-colors"
-                >
-                  {t('common:edit')}
-                </button>
-              </div>
-            </div>
-            <pre className="text-[14px] text-gray-500 font-mono whitespace-pre-wrap line-clamp-3 leading-relaxed">
-              {p.prompt}
-            </pre>
-          </div>
-        ))}
-      </div>
-
-      <div className="p-3 bg-surface-800/30 rounded-lg border border-surface-700/50">
-        <h4 className="text-[13px] font-semibold text-gray-500 uppercase tracking-wider mb-2">{t('common:howItWorks')}</h4>
-        <div className="text-[14px] text-gray-500 space-y-1">
-          <p>{t('promptHowItWorks')}</p>
-          <div className="font-mono text-[13px] bg-surface-900/50 rounded px-3 py-2 text-gray-400 mt-1">
-            [your prompt here]<br/>
-            <br/>
-            User: john (role: member)<br/>
-            System package management requires IT team assistance.<br/>
-            Your workspace is restricted to: ~/workspace
-          </div>
-        </div>
-      </div>
     </div>
   );
 }
@@ -1865,14 +1727,14 @@ export function PersonalCredentialsPanel({ open, onClose, token }: PersonalCrede
     <div data-testid="personal-credentials-panel" className="fixed inset-0 z-[200] flex items-center justify-center">
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
       <div className="relative bg-surface-900 border border-surface-700 rounded-xl shadow-2xl w-full max-w-6xl max-h-[85vh] mx-4 flex flex-col overflow-hidden">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-surface-800 shrink-0">
-          <div className="flex items-center gap-3">
+        <div className="flex shrink-0 items-center justify-between gap-3 border-b border-surface-800 px-4 py-3 sm:px-6 sm:py-4">
+          <div className="flex min-w-0 items-center gap-3">
             <div className="w-7 h-7 rounded-lg bg-primary-600/20 border border-primary-500/30 flex items-center justify-center">
               <svg className="w-4 h-4 text-primary-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
               </svg>
             </div>
-            <h2 className="text-[18px] font-bold text-gray-100">{t('personalCredentials')}</h2>
+            <h2 className="truncate text-[18px] font-bold text-gray-100">{t('personalCredentials')}</h2>
           </div>
           <button onClick={onClose} className="p-1.5 text-gray-500 hover:text-gray-300 hover:bg-surface-800 rounded-lg transition-colors">
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1880,7 +1742,7 @@ export function PersonalCredentialsPanel({ open, onClose, token }: PersonalCrede
             </svg>
           </button>
         </div>
-        <div className="flex-1 overflow-y-auto p-6">
+        <div className="flex-1 overflow-y-auto p-4 sm:p-6">
           <CredentialVaultManagement token={token} mode="personal" />
         </div>
       </div>
@@ -1910,7 +1772,7 @@ function CredentialVaultManagement({ token, mode }: { token?: string | null; mod
   const [saving, setSaving] = useState(false);
   const [statusMessage, setStatusMessage] = useState('');
   const [error, setError] = useState('');
-  const [connectionMode, setConnectionMode] = useState<'none' | 'picker' | 'api_key_simple' | 'api_key' | 'oauth' | 'cloud' | 'ssh' | 'cli'>('none');
+  const [connectionMode, setConnectionMode] = useState<'none' | 'picker' | 'api_key_simple' | 'api_key' | 'oauth' | 'ssh'>('none');
   const [showTargetForm, setShowTargetForm] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [personalSection, setPersonalSection] = useState<'connections' | 'projects'>('connections');
@@ -2063,7 +1925,7 @@ function CredentialVaultManagement({ token, mode }: { token?: string | null; mod
     if (isPersonalCredentialMode) return;
     const params = new URLSearchParams(window.location.search);
     if (params.get('oauth') !== 'google-organization') return;
-    setStatusMessage(params.get('status') === 'success' ? '조직 Google Workspace Connection을 저장했습니다. 기존 Agent 권한은 유지됩니다.' : '조직 Google Workspace Connection을 저장하지 못했습니다. 다시 시도해 주세요.');
+    setStatusMessage(params.get('status') === 'success' ? t('credentialConnections.oauth.organizationGoogleSaved') : t('credentialConnections.oauth.organizationGoogleSaveFailed'));
     params.delete('oauth');
     params.delete('status');
     params.delete('credentialId');
@@ -2071,7 +1933,7 @@ function CredentialVaultManagement({ token, mode }: { token?: string | null; mod
     const query = params.toString();
     window.history.replaceState({}, '', `${window.location.pathname}${query ? `?${query}` : ''}${window.location.hash}`);
     void fetchAll();
-  }, [fetchAll, isPersonalCredentialMode]);
+  }, [fetchAll, isPersonalCredentialMode, t]);
 
   const openAddConnection = () => {
     setConnectionMode(current => current === 'none' ? 'picker' : 'none');
@@ -2088,17 +1950,17 @@ function CredentialVaultManagement({ token, mode }: { token?: string | null; mod
       const query = credentialId ? `?mode=reauth&credentialId=${encodeURIComponent(credentialId)}` : '?mode=create';
       const res = await fetch(`${API_BASE}/auth/google/organization${query}`, { headers: headers() });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok || typeof data.url !== 'string') throw new Error(data.error || '조직 Google 연결을 시작하지 못했습니다.');
+      if (!res.ok || typeof data.url !== 'string') throw new Error(data.error || t('credentialConnections.oauth.organizationGoogleStartFailed'));
       window.location.assign(data.url);
     } catch (err: any) {
-      setError(err.message || '조직 Google 연결을 시작하지 못했습니다.');
+      setError(err.message || t('credentialConnections.oauth.organizationGoogleStartFailed'));
       setSaving(false);
     }
   };
 
   const connectOAuthProvider = async (provider: OAuthProviderConnection) => {
     if (!provider.configured) {
-      setError(`${provider.label} OAuth client가 서버에 설정되지 않았습니다.`);
+      setError(t('credentialConnections.oauth.clientNotConfigured', { provider: provider.label }));
       return;
     }
     setSaving(true);
@@ -2106,19 +1968,19 @@ function CredentialVaultManagement({ token, mode }: { token?: string | null; mod
     try {
       const res = await fetch(provider.authPath, { headers: headers() });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok || !data.url) throw new Error(data.error || 'OAuth 로그인 URL을 만들지 못했습니다.');
+      if (!res.ok || !data.url) throw new Error(data.error || t('credentialConnections.oauth.loginUrlFailed'));
       window.location.href = data.url;
     } catch (err: any) {
-      setError(err.message || 'OAuth 연결을 시작하지 못했습니다.');
+      setError(err.message || t('credentialConnections.oauth.connectionStartFailed'));
       setSaving(false);
     }
   };
 
   const disconnectOAuthProvider = async (provider: OAuthProviderConnection) => {
     const ok = await confirm({
-      title: `${provider.label} 연결 해제`,
-      message: '개인 OAuth 토큰과 Runtime Box용 개인 CLI 설정을 함께 삭제합니다. 계속할까요?',
-      confirmLabel: '연결 해제',
+      title: t('credentialConnections.oauth.disconnectTitle', { provider: provider.label }),
+      message: t('credentialConnections.oauth.disconnectConfirm'),
+      confirmLabel: t('credentialConnections.disconnect'),
       danger: true,
     });
     if (!ok) return;
@@ -2127,11 +1989,11 @@ function CredentialVaultManagement({ token, mode }: { token?: string | null; mod
     try {
       const res = await fetch(`${API_BASE}/auth/oauth/${encodeURIComponent(provider.id)}`, { method: 'DELETE', headers: headers() });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || 'OAuth 연결 해제에 실패했습니다.');
-      setStatusMessage(`${provider.label} 연결을 해제했습니다.`);
+      if (!res.ok) throw new Error(data.error || t('credentialConnections.oauth.disconnectFailed'));
+      setStatusMessage(t('credentialConnections.oauth.disconnected', { provider: provider.label }));
       await fetchAll();
     } catch (err: any) {
-      setError(err.message || 'OAuth 연결 해제에 실패했습니다.');
+      setError(err.message || t('credentialConnections.oauth.disconnectFailed'));
     } finally {
       setSaving(false);
     }
@@ -2148,7 +2010,7 @@ function CredentialVaultManagement({ token, mode }: { token?: string | null; mod
         scope: apiKeyForm.scope || 'workspace',
       };
       if (!normalizedForm.secretValue?.trim()) {
-        throw new Error('API key 값을 입력해야 합니다. 값은 저장 후 다시 표시하지 않습니다.');
+        throw new Error(t('credentialConnections.apiKey.valueRequired'));
       }
       setApiKeyForm(normalizedForm);
       const res = await fetch(`${API_BASE}/credential-vault/${isPersonalCredentialMode ? 'my/credentials/api-key' : 'credentials/api-key'}`, {
@@ -2157,7 +2019,7 @@ function CredentialVaultManagement({ token, mode }: { token?: string | null; mod
         body: JSON.stringify(normalizedForm),
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || 'API key 저장에 실패했습니다.');
+      if (!res.ok) throw new Error(data.error || t('credentialConnections.apiKey.saveFailed'));
       if (apiKeyProjectId) {
         const grantRes = await fetch(`${API_BASE}/credential-vault/${isPersonalCredentialMode ? 'my/projects' : 'projects'}/${encodeURIComponent(apiKeyProjectId)}/policies/${encodeURIComponent(normalizedForm.id)}`, {
           method: 'PUT',
@@ -2165,14 +2027,14 @@ function CredentialVaultManagement({ token, mode }: { token?: string | null; mod
           body: JSON.stringify({ mode: 'allow', targetEnvName: normalizedForm.defaultEnvName }),
         });
         const grantData = await grantRes.json().catch(() => ({}));
-        if (!grantRes.ok) throw new Error(grantData.error || 'API key는 저장됐지만 프로젝트 허용 설정에 실패했습니다.');
+        if (!grantRes.ok) throw new Error(grantData.error || t('credentialConnections.apiKey.projectGrantFailed'));
       }
       setApiKeyForm(f => ({ ...f, secretValue: '' }));
       setConnectionMode('none');
-      setStatusMessage(`Credential 저장 완료: ${data.credential?.display_name || normalizedForm.displayName}.${apiKeyProjectId ? ' 선택한 프로젝트에서도 사용할 수 있습니다.' : ' 프로젝트 연결은 상세 보기에서 나중에 할 수 있습니다.'}`);
+      setStatusMessage(t(apiKeyProjectId ? 'credentialConnections.apiKey.savedWithProject' : 'credentialConnections.apiKey.savedWithoutProject', { name: data.credential?.display_name || normalizedForm.displayName }));
       await fetchAll();
     } catch (err: any) {
-      setError(err.message || 'API key 저장에 실패했습니다.');
+      setError(err.message || t('credentialConnections.apiKey.saveFailed'));
     } finally {
       setSaving(false);
     }
@@ -2702,7 +2564,7 @@ function CredentialVaultManagement({ token, mode }: { token?: string | null; mod
             {isPersonalCredentialMode ? t('credentialConnections.personalPrivacyDescription') : t('credentialConnections.adminPrivacyDescription')}
           </p>
         </div>
-        <div className="flex flex-wrap gap-2 shrink-0">
+        <div className="grid w-full grid-cols-2 gap-2 lg:flex lg:w-auto lg:flex-wrap lg:shrink-0">
           {isPersonalCredentialMode ? (
             <>
               {primaryOAuthProvider && (
@@ -2711,11 +2573,11 @@ function CredentialVaultManagement({ token, mode }: { token?: string | null; mod
                   onClick={() => connectOAuthProvider(primaryOAuthProvider)}
                   aria-disabled={!primaryOAuthProvider.configured}
                   title={!primaryOAuthProvider.configured ? t('credentialConnections.googleOauthSetupRequired') : undefined}
-                  className="px-3 py-2 text-base rounded-lg bg-primary-600 text-white hover:bg-primary-500 transition-colors"
+                  className="min-h-10 rounded-lg bg-primary-600 px-3 py-2 text-[14px] text-white transition-colors hover:bg-primary-500"
                 >
                   {primaryOAuthProvider.configured
-                    ? primaryOAuthProvider.status === 'not_connected' ? t('credentialConnections.accountConnection') : primaryOAuthProvider.status === 'reauth_required' ? t('credentialConnections.reloginRequired') : t('credentialConnections.changeAccount')
-                    : t('credentialConnections.checkSetup')}
+                    ? primaryOAuthProvider.status === 'not_connected' ? t('credentialConnections.actionLabels.connect') : primaryOAuthProvider.status === 'reauth_required' ? t('credentialConnections.actionLabels.reconnect') : t('credentialConnections.actionLabels.change')
+                    : t('credentialConnections.actionLabels.setup')}
                 </button>
               )}
               <button
@@ -2723,18 +2585,18 @@ function CredentialVaultManagement({ token, mode }: { token?: string | null; mod
                   setConnectionMode(current => current === 'api_key_simple' ? 'none' : 'api_key_simple');
                   window.setTimeout(() => addConnectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 0);
                 }}
-                className="px-3 py-2 text-base rounded-lg border border-surface-700 text-gray-200 hover:bg-surface-800 transition-colors"
+                className="min-h-10 rounded-lg border border-surface-700 px-3 py-2 text-[14px] text-gray-200 transition-colors hover:bg-surface-800"
               >
-                {connectionMode === 'api_key_simple' ? t('credentialConnections.close') : `+ ${t('credentialConnections.addConnection')}`}
+                {connectionMode === 'api_key_simple' ? t('credentialConnections.close') : `+ ${t('credentialConnections.actionLabels.add')}`}
               </button>
             </>
           ) : isAdmin && (
-            <button onClick={openAddConnection} className="px-3 py-2 text-base rounded-lg bg-primary-600 text-white hover:bg-primary-500 transition-colors">
-              {connectionMode === 'none' ? `+ ${t('credentialConnections.addConnection')}` : t('credentialConnections.close')}
+            <button onClick={openAddConnection} className="min-h-10 rounded-lg bg-primary-600 px-3 py-2 text-[14px] text-white transition-colors hover:bg-primary-500">
+              {connectionMode === 'none' ? `+ ${t('credentialConnections.actionLabels.add')}` : t('credentialConnections.close')}
             </button>
           )}
-          <button onClick={fetchAll} className="px-3 py-2 text-base rounded-lg border border-surface-700 text-gray-300 hover:text-gray-100 hover:bg-surface-800 transition-colors">
-            {t('credentialConnections.refreshStatus')}
+          <button onClick={fetchAll} className="min-h-10 rounded-lg border border-surface-700 px-3 py-2 text-[14px] text-gray-300 transition-colors hover:bg-surface-800 hover:text-gray-100">
+            {t('credentialConnections.actionLabels.refresh')}
           </button>
         </div>
       </div>
@@ -2793,9 +2655,9 @@ function CredentialVaultManagement({ token, mode }: { token?: string | null; mod
                   </div>
                   {provider.statusReason && provider.status === 'reauth_required' && <div className="mt-1 text-[12px] text-amber-300/80">{t('credentialConnections.tokenRefreshFailed')}</div>}
                 </div>
-                <div className="flex flex-wrap gap-2 shrink-0">
+                <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto sm:flex-wrap sm:shrink-0">
                   <button disabled={saving} aria-disabled={!provider.configured} onClick={() => connectOAuthProvider(provider)} className="px-3 py-2 text-[14px] rounded-md bg-primary-600 text-white hover:bg-primary-500 transition-colors">
-                    {provider.configured ? provider.status === 'not_connected' ? t('credentialConnections.accountConnection') : provider.status === 'reauth_required' ? t('credentialConnections.reloginRequired') : t('credentialConnections.changeAccount') : t('credentialConnections.checkSetup')}
+                    {provider.configured ? provider.status === 'not_connected' ? t('credentialConnections.actionLabels.connect') : provider.status === 'reauth_required' ? t('credentialConnections.actionLabels.reconnect') : t('credentialConnections.actionLabels.change') : t('credentialConnections.actionLabels.setup')}
                   </button>
                   {provider.status !== 'not_connected' && <button disabled={saving} onClick={() => disconnectOAuthProvider(provider)} className="px-3 py-2 text-[14px] rounded-md border border-red-500/30 text-red-300 hover:bg-red-500/10 disabled:opacity-40 transition-colors">{t('credentialConnections.disconnect')}</button>}
                 </div>
@@ -2813,8 +2675,8 @@ function CredentialVaultManagement({ token, mode }: { token?: string | null; mod
               <p className="text-[14px] text-gray-500 mt-1 max-w-3xl">{t('credentialConnections.askAiDescription')}</p>
             </div>
             <div className="flex flex-wrap gap-2">
-              <button onClick={() => copyText(aiCredentialPrompt)} className="px-3 py-1.5 text-[14px] rounded-md border border-primary-500/40 text-primary-300 hover:bg-primary-500/10 transition-colors">{t('credentialConnections.copyDiagnosticPrompt')}</button>
-              <button onClick={() => copyText(diagnosticCopyText)} className="px-3 py-1.5 text-[14px] rounded-md border border-surface-700 text-gray-300 hover:bg-surface-800 transition-colors">{t('credentialConnections.copyScreenStatus')}</button>
+              <button onClick={() => copyText(aiCredentialPrompt)} title={t('credentialConnections.copyDiagnosticPrompt')} className="min-h-10 flex-1 rounded-md border border-primary-500/40 px-3 py-1.5 text-[14px] text-primary-300 transition-colors hover:bg-primary-500/10 sm:flex-none">{t('credentialConnections.actionLabels.copyPrompt')}</button>
+              <button onClick={() => copyText(diagnosticCopyText)} title={t('credentialConnections.copyScreenStatus')} className="min-h-10 flex-1 rounded-md border border-surface-700 px-3 py-1.5 text-[14px] text-gray-300 transition-colors hover:bg-surface-800 sm:flex-none">{t('credentialConnections.actionLabels.copyStatus')}</button>
             </div>
           </div>
           <pre className="whitespace-pre-wrap rounded-lg border border-surface-800 bg-surface-950/70 p-3 text-[14px] text-gray-300">{aiCredentialPrompt}</pre>
@@ -2971,9 +2833,9 @@ function CredentialVaultManagement({ token, mode }: { token?: string | null; mod
 
             <nav aria-label={t('credentialConnections.managementTab')} className="flex overflow-x-auto border-b border-surface-800 px-2 md:px-3">
               {([
-                ['management', t('credentialConnections.managementTab')],
-                ['agents', t('credentialConnections.agentsTab')],
-                ['advanced', t('credentialConnections.advancedTab')],
+                ['management', t('credentialConnections.detailTabs.management')],
+                ['agents', t('credentialConnections.detailTabs.agents')],
+                ['advanced', t('credentialConnections.detailTabs.advanced')],
               ] as const).map(([tab, label]) => (
                 <button
                   key={tab}
@@ -3006,31 +2868,31 @@ function CredentialVaultManagement({ token, mode }: { token?: string | null; mod
 
               {connectionDetailTab === 'advanced' && (
                 <div className="space-y-4">
-                  <div><h5 className="text-base font-semibold text-surface-100">{t('credentialConnections.advancedCredentialManagement')}</h5><p className="mt-1 text-[14px] text-surface-400">원문·구조·기술 이름처럼 일반 연결 관리에는 필요하지 않은 운영자 기능입니다.</p></div>
+                  <div><h5 className="text-base font-semibold text-surface-100">{t('credentialConnections.advancedCredentialManagement')}</h5><p className="mt-1 text-[14px] text-surface-400">{t('credentialConnections.advancedDescription')}</p></div>
                   <div className="divide-y divide-surface-800 border-y border-surface-800">
                     {selectedConnection.credentials.map(credential => (
                       <div key={credential.id} className="py-4">
-                        <div className="flex items-start justify-between gap-3"><div className="text-[14px] font-medium text-surface-200">{credential.displayName}</div><span className={`tone-pill px-2 py-0.5 text-[12px] ${credential.enabled ? 'tone-success' : 'tone-muted'}`}>{credential.enabled ? '저장됨' : '사용 중지'}</span></div>
-                        <div className="mt-3 flex flex-wrap gap-2">
-                          {credential.allowedActions?.reveal !== false && <button type="button" disabled={credentialSecureBusy} onClick={() => void revealCredential(credential.id, credential.displayName)} className="min-h-10 rounded-md border border-surface-700 px-3 text-[13px] text-surface-200 hover:bg-surface-800 disabled:cursor-not-allowed disabled:text-surface-600">원문 보기</button>}
-                          {credential.allowedActions?.replacementAction === 'rotate' && <button type="button" onClick={() => { setCredentialRotateTarget({ credentialId: credential.id, displayName: credential.displayName }); setCredentialRotateCandidate(''); }} className="min-h-10 rounded-md border border-surface-700 px-3 text-[13px] text-surface-200 hover:bg-surface-800">수정하기</button>}
-                          {credential.allowedActions?.replacementAction === 'reauth' && credential.provider === 'google' && <button type="button" disabled={saving} onClick={() => void connectOrganizationGoogle(credential.id)} className="tone-accent tone-action min-h-10 rounded-md px-3 text-[13px] font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400 disabled:bg-surface-800 disabled:text-surface-500">조직 계정 재인증</button>}
-                          <button type="button" disabled={credentialSecureBusy} onClick={() => inspectCredential(credential.id)} className="min-h-10 rounded-md border border-surface-700 px-3 text-[13px] text-surface-200 hover:bg-surface-800 disabled:cursor-not-allowed disabled:text-surface-600">구조 보기</button>
+                        <div className="flex items-start justify-between gap-3"><div className="min-w-0 truncate text-[14px] font-medium text-surface-200">{credential.displayName}</div><span className={`tone-pill shrink-0 px-2 py-0.5 text-[12px] ${credential.enabled ? 'tone-success' : 'tone-muted'}`}>{credential.enabled ? t('credentialConnections.advancedMessages.stored') : t('credentialConnections.advancedMessages.disabled')}</span></div>
+                        <div className="mt-3 grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
+                          {credential.allowedActions?.reveal !== false && <button type="button" disabled={credentialSecureBusy} onClick={() => void revealCredential(credential.id, credential.displayName)} className="min-h-10 rounded-md border border-surface-700 px-3 text-[13px] text-surface-200 hover:bg-surface-800 disabled:cursor-not-allowed disabled:text-surface-600">{t('credentialConnections.advancedActions.reveal')}</button>}
+                          {credential.allowedActions?.replacementAction === 'rotate' && <button type="button" onClick={() => { setCredentialRotateTarget({ credentialId: credential.id, displayName: credential.displayName }); setCredentialRotateCandidate(''); }} className="min-h-10 rounded-md border border-surface-700 px-3 text-[13px] text-surface-200 hover:bg-surface-800">{t('credentialConnections.advancedActions.edit')}</button>}
+                          {credential.allowedActions?.replacementAction === 'reauth' && credential.provider === 'google' && <button type="button" disabled={saving} onClick={() => void connectOrganizationGoogle(credential.id)} className="tone-accent tone-action min-h-10 rounded-md px-3 text-[13px] font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400 disabled:bg-surface-800 disabled:text-surface-500">{t('credentialConnections.advancedActions.reauth')}</button>}
+                          <button type="button" disabled={credentialSecureBusy} onClick={() => inspectCredential(credential.id)} className="min-h-10 rounded-md border border-surface-700 px-3 text-[13px] text-surface-200 hover:bg-surface-800 disabled:cursor-not-allowed disabled:text-surface-600">{t('credentialConnections.advancedActions.inspect')}</button>
                         </div>
-                        {credentialRevealTarget?.credentialId === credential.id && credentialRevealValue !== null && <div className="mt-3 rounded-md border border-surface-700 bg-surface-950 p-3"><div className="flex items-center justify-between gap-3"><span className="text-[12px] font-medium text-surface-400">원문 · 30초 후 자동 마스킹</span><button type="button" onClick={() => { setCredentialRevealValue(null); setCredentialRevealTarget(null); }} className="text-[13px] text-primary-300 hover:text-primary-200">지금 가리기</button></div><div className="mt-2 break-all font-mono text-[13px] text-surface-100">{credentialRevealValue}</div></div>}
-                        {credential.allowedActions?.reason === 'oauth_token' && <p className="mt-2 text-[13px] text-surface-400">OAuth token은 원문을 표시하지 않습니다. 문제가 있으면 다시 연결하세요.</p>}
-                        {credential.allowedActions?.reason === 'ssh_private_key' && <p className="mt-2 text-[13px] text-surface-400">SSH private key는 원문을 표시하지 않습니다. 확인이 필요하면 수정 흐름을 사용하세요.</p>}
-                        {credential.allowedActions?.reason === 'structured_credential' && <p className="mt-2 text-[13px] text-surface-400">구조화 Credential은 민감 필드를 제외한 구조만 검사할 수 있습니다.</p>}
-                        {credentialInspectResults[credential.id] && <div className="mt-3 rounded-md bg-surface-900 p-3 text-[13px] text-surface-300">형식 {credentialInspectResults[credential.id].format} · {credentialInspectResults[credential.id].valid ? '유효' : '확인 필요'} · 길이 {credentialInspectResults[credential.id].lengthBucket} · 공백 {credentialInspectResults[credential.id].whitespace}</div>}
-                        <details className="mt-2 text-[13px] text-surface-400"><summary className="cursor-pointer">기술 이름 보기</summary><div className="mt-2 break-all font-mono text-surface-300">{credential.id} · {credential.envName}</div></details>
+                        {credentialRevealTarget?.credentialId === credential.id && credentialRevealValue !== null && <div className="mt-3 rounded-md border border-surface-700 bg-surface-950 p-3"><div className="flex flex-wrap items-center justify-between gap-2"><span className="text-[12px] font-medium text-surface-400">{t('credentialConnections.advancedMessages.revealExpiry')}</span><button type="button" onClick={() => { setCredentialRevealValue(null); setCredentialRevealTarget(null); }} className="shrink-0 text-[13px] text-primary-300 hover:text-primary-200">{t('credentialConnections.advancedActions.maskNow')}</button></div><div className="mt-2 break-all font-mono text-[13px] text-surface-100">{credentialRevealValue}</div></div>}
+                        {credential.allowedActions?.reason === 'oauth_token' && <p className="mt-2 text-[13px] text-surface-400">{t('credentialConnections.advancedMessages.oauthHidden')}</p>}
+                        {credential.allowedActions?.reason === 'ssh_private_key' && <p className="mt-2 text-[13px] text-surface-400">{t('credentialConnections.advancedMessages.sshHidden')}</p>}
+                        {credential.allowedActions?.reason === 'structured_credential' && <p className="mt-2 text-[13px] text-surface-400">{t('credentialConnections.advancedMessages.structuredHidden')}</p>}
+                        {credentialInspectResults[credential.id] && <div className="mt-3 rounded-md bg-surface-900 p-3 text-[13px] text-surface-300">{t('credentialConnections.advancedMessages.format')} {credentialInspectResults[credential.id].format} · {credentialInspectResults[credential.id].valid ? t('credentialConnections.advancedMessages.valid') : t('credentialConnections.advancedMessages.reviewNeeded')} · {t('credentialConnections.advancedMessages.length')} {credentialInspectResults[credential.id].lengthBucket} · {t('credentialConnections.advancedMessages.whitespace')} {credentialInspectResults[credential.id].whitespace}</div>}
+                        <details className="mt-2 text-[13px] text-surface-400"><summary className="cursor-pointer">{t('credentialConnections.advancedActions.technicalNames')}</summary><div className="mt-2 break-all font-mono text-surface-300">{credential.id} · {credential.envName}</div></details>
                       </div>
                     ))}
                   </div>
                   {credentialRotateTarget && (
-                    <section className="rounded-lg border border-surface-700 bg-surface-900 p-4" aria-label="Credential 교체">
-                      <div className="flex items-start justify-between gap-3"><div><h6 className="text-[14px] font-semibold text-surface-100">{credentialRotateTarget.displayName} 교체</h6><p className="mt-1 text-[13px] text-surface-400">기존 Credential ID와 프로젝트 연결을 유지하고 저장값만 교체합니다.</p></div><button type="button" onClick={() => { setCredentialRotateTarget(null); setCredentialRotateCandidate(''); }} className="text-[13px] text-surface-400 hover:text-surface-200">{t('common:cancel')}</button></div>
-                      <input type="password" autoComplete="off" value={credentialRotateCandidate} onChange={event => setCredentialRotateCandidate(event.target.value)} placeholder={'새 Credential 값'} className="mt-3 min-h-11 w-full rounded-md border border-surface-700 bg-surface-950 px-3 text-[14px] text-surface-100 outline-none focus:border-primary-400" />
-                      <button type="button" disabled={credentialSecureBusy || !credentialRotateCandidate} onClick={rotateCredential} className="mt-3 min-h-10 rounded-md bg-primary-600 px-4 text-[14px] font-medium text-white hover:bg-primary-500 disabled:cursor-not-allowed disabled:opacity-50">{credentialSecureBusy ? '확인 중…' : '영향 확인 후 교체'}</button>
+                    <section className="rounded-lg border border-surface-700 bg-surface-900 p-4" aria-label={t('credentialConnections.advancedMessages.replaceDialog')}>
+                      <div className="flex items-start justify-between gap-3"><div className="min-w-0"><h6 className="truncate text-[14px] font-semibold text-surface-100">{t('credentialConnections.advancedMessages.replaceTitle', { name: credentialRotateTarget.displayName })}</h6><p className="mt-1 text-[13px] text-surface-400">{t('credentialConnections.advancedMessages.replaceDescription')}</p></div><button type="button" onClick={() => { setCredentialRotateTarget(null); setCredentialRotateCandidate(''); }} className="shrink-0 text-[13px] text-surface-400 hover:text-surface-200">{t('common:cancel')}</button></div>
+                      <input type="password" autoComplete="off" value={credentialRotateCandidate} onChange={event => setCredentialRotateCandidate(event.target.value)} placeholder={t('credentialConnections.advancedMessages.newValue')} className="mt-3 min-h-11 w-full rounded-md border border-surface-700 bg-surface-950 px-3 text-[14px] text-surface-100 outline-none focus:border-primary-400" />
+                      <button type="button" disabled={credentialSecureBusy || !credentialRotateCandidate} onClick={rotateCredential} className="mt-3 min-h-10 w-full rounded-md bg-primary-600 px-4 text-[14px] font-medium text-white hover:bg-primary-500 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto">{credentialSecureBusy ? t('credentialConnections.advancedMessages.checking') : t('credentialConnections.advancedActions.reviewAndReplace')}</button>
                     </section>
                   )}
                 </div>
@@ -3154,10 +3016,10 @@ function CredentialVaultManagement({ token, mode }: { token?: string | null; mod
             className="flex min-h-10 w-full items-center justify-between gap-3 text-left"
           >
             <span>
-              <span className="block text-[14px] font-medium text-surface-300">고급 Credential 관리</span>
-              <span className="mt-1 block text-[13px] text-surface-500">env·파일 주입·외부 동기화처럼 운영자에게만 필요한 기술 설정입니다.</span>
+              <span className="block text-[14px] font-medium text-surface-300">{t('credentialConnections.advancedManagement')}</span>
+              <span className="mt-1 block text-[13px] text-surface-500">{t('credentialConnections.advancedManagementDescription')}</span>
             </span>
-            <span className="text-[13px] text-surface-500">{showAdvanced ? '접기' : '열기'}</span>
+            <span className="text-[13px] text-surface-500">{showAdvanced ? t('credentialConnections.collapse') : t('credentialConnections.expand')}</span>
           </button>
         </section>
       )}
@@ -3209,8 +3071,8 @@ function CredentialVaultManagement({ token, mode }: { token?: string | null; mod
         <section ref={addConnectionRef} className="rounded-xl border border-primary-500/30 bg-primary-500/5 p-4 space-y-4 scroll-mt-6">
           <div className="flex items-start justify-between gap-3">
             <div>
-              <h4 className="text-base font-semibold text-gray-100">외부 연결 추가</h4>
-              <p className="text-[14px] text-gray-500 mt-1">API key를 직접 저장하거나 OAuth 계정에 로그인해 연결할 수 있습니다.</p>
+              <h4 className="text-base font-semibold text-gray-100">{t('credentialConnections.addExternalConnection')}</h4>
+              <p className="text-[14px] text-gray-500 mt-1">{t('credentialConnections.addExternalConnectionDescription')}</p>
             </div>
             <button onClick={() => setConnectionMode('none')} className="text-gray-500 hover:text-gray-300">{t('credentialConnections.close')}</button>
           </div>
@@ -3223,8 +3085,6 @@ function CredentialVaultManagement({ token, mode }: { token?: string | null; mod
                 { mode: 'ssh', title: 'SSH private key', desc: '빠른 진입: SSH 접속 키를 Runtime Box 임시 파일로 제공', badge: '통합됨' },
                 ...(!isPersonalCredentialMode ? [
                   { mode: 'oauth', title: 'OAuth 계정', desc: 'Google Workspace처럼 로그인해서 권한을 허용하고 필요할 때 재연결', badge: oauthProviders.some(provider => provider.configured) ? '사용 가능' : '설정 필요' },
-                  { mode: 'cloud', title: 'Cloud 계정', desc: 'Azure tenant/client secret 또는 배포용 service principal', badge: '준비 중' },
-                  { mode: 'cli', title: 'CLI profile', desc: 'gh, az, gws 같은 CLI 설정을 임시 프로필로 materialize', badge: '준비 중' },
                 ] : []),
               ].map(item => (
                 <button key={item.mode} onClick={() => setConnectionMode(item.mode as any)} className="text-left rounded-xl border border-surface-700 bg-surface-950/60 p-4 hover:border-primary-500/50 hover:bg-surface-900 transition-colors">
@@ -3252,20 +3112,12 @@ function CredentialVaultManagement({ token, mode }: { token?: string | null; mod
             </div>
           )}
 
-          {connectionMode !== 'picker' && connectionMode !== 'api_key_simple' && connectionMode !== 'api_key' && connectionMode !== 'ssh' && connectionMode !== 'oauth' && (
-            <div className="rounded-lg border border-surface-700 bg-surface-950/50 p-4">
-              <button onClick={() => setConnectionMode('picker')} className="text-[14px] text-gray-500 hover:text-gray-300 mb-3">← 연결 방식 다시 선택</button>
-              <h5 className="text-base font-semibold text-gray-200">{connectionMode === 'cloud' ? 'Cloud 계정 연결' : 'CLI profile 연결'}</h5>
-              <p className="text-[14px] text-gray-500 mt-2">이 타입은 아직 저장 동작 전 단계입니다.</p>
-            </div>
-          )}
-
           {connectionMode === 'api_key_simple' && (
             <div className="rounded-lg border border-surface-700 bg-surface-950/50 p-4 space-y-4">
-              <button onClick={() => setConnectionMode('picker')} className="text-[14px] text-gray-500 hover:text-gray-300">← 다른 연결 방식 선택</button>
+              <button onClick={() => setConnectionMode('picker')} className="text-[14px] text-gray-500 hover:text-gray-300">{t('credentialConnections.apiKey.chooseAnotherMethod')}</button>
               <div>
-                <h4 className="text-lg font-semibold text-gray-100">{isPersonalCredentialMode ? '내 개인 API key 추가' : 'API key 추가'}</h4>
-                <p className="text-[14px] text-gray-500 mt-1">{isPersonalCredentialMode ? '내 개인 금고에 저장합니다. 다른 사용자는 값에 접근할 수 없고, 선택한 프로젝트에서 내 실행에만 주입됩니다.' : '외부 서비스에서 발급받은 키를 Tower Vault에 저장합니다. 값은 저장 후 다시 표시하지 않고, 프로젝트 실행 환경에는 “실행 이름”으로만 주입됩니다.'}</p>
+                <h4 className="text-lg font-semibold text-gray-100">{isPersonalCredentialMode ? t('credentialConnections.apiKey.addPersonalTitle') : t('credentialConnections.apiKey.addTitle')}</h4>
+                <p className="text-[14px] text-gray-500 mt-1">{isPersonalCredentialMode ? t('credentialConnections.apiKey.personalDescription') : t('credentialConnections.apiKey.adminDescription')}</p>
               </div>
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
                 {Object.entries(API_KEY_PROVIDER_PRESETS).map(([provider, preset]) => (
@@ -3282,34 +3134,34 @@ function CredentialVaultManagement({ token, mode }: { token?: string | null; mod
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 <label>
-                  <span className={labelClass}>서비스 이름</span>
-                  <input className={inputClass} value={apiKeyForm.provider} onChange={e => setApiKeyForm(f => apiKeyFormFromServiceName(e.target.value, f.secretValue))} placeholder="예: notion" />
-                  <span className="mt-1 block text-[12px] text-gray-600">서비스 이름만 넣으면 나머지 이름은 자동으로 만듭니다.</span>
+                  <span className={labelClass}>{t('credentialConnections.apiKey.serviceName')}</span>
+                  <input className={inputClass} value={apiKeyForm.provider} onChange={e => setApiKeyForm(f => apiKeyFormFromServiceName(e.target.value, f.secretValue))} placeholder={t('credentialConnections.apiKey.serviceNamePlaceholder')} />
+                  <span className="mt-1 block text-[12px] text-gray-600">{t('credentialConnections.apiKey.serviceNameHint')}</span>
                 </label>
                 <label>
-                  <span className={labelClass}>바로 사용할 프로젝트</span>
+                  <span className={labelClass}>{t('credentialConnections.apiKey.project')}</span>
                   <select className={inputClass} value={apiKeyProjectId} onChange={e => setApiKeyProjectId(e.target.value)}>
-                    <option value="">저장만 하기</option>
+                    <option value="">{t('credentialConnections.apiKey.saveOnly')}</option>
                     {projects.map(project => <option key={project.id} value={project.id}>{project.name}</option>)}
                   </select>
                 </label>
                 <label className="md:col-span-2">
-                  <span className={labelClass}>API key 값</span>
-                  <input type="password" className={`${inputClass} font-mono`} autoComplete="new-password" data-1p-ignore value={apiKeyForm.secretValue} onChange={e => setApiKeyForm(f => ({ ...f, secretValue: e.target.value }))} placeholder="여기에 발급받은 API key를 붙여넣으세요. 저장 후 다시 표시되지 않습니다." />
+                  <span className={labelClass}>{t('credentialConnections.apiKey.value')}</span>
+                  <input type="password" className={`${inputClass} font-mono`} autoComplete="new-password" data-1p-ignore value={apiKeyForm.secretValue} onChange={e => setApiKeyForm(f => ({ ...f, secretValue: e.target.value }))} placeholder={t('credentialConnections.apiKey.valuePlaceholder')} />
                 </label>
               </div>
               <details className="rounded-lg border border-surface-800 bg-surface-950/40 p-3 text-[12px] text-gray-500">
-                <summary className="cursor-pointer text-gray-400">고급 이름 확인</summary>
+                <summary className="cursor-pointer text-gray-400">{t('credentialConnections.apiKey.advancedNames')}</summary>
                 <div className="mt-2 grid grid-cols-1 md:grid-cols-3 gap-2">
-                  <div>화면 이름 <span className="font-mono text-gray-300">{apiKeyForm.displayName}</span></div>
-                  <div>실행 이름 <span className="font-mono text-gray-300">{apiKeyForm.defaultEnvName}</span></div>
-                  <div>내부 ID <span className="font-mono text-gray-300">{apiKeyForm.id}</span></div>
+                  <div>{t('credentialConnections.apiKey.displayName')} <span className="font-mono text-gray-300">{apiKeyForm.displayName}</span></div>
+                  <div>{t('credentialConnections.apiKey.runtimeName')} <span className="font-mono text-gray-300">{apiKeyForm.defaultEnvName}</span></div>
+                  <div>{t('credentialConnections.apiKey.internalId')} <span className="font-mono text-gray-300">{apiKeyForm.id}</span></div>
                 </div>
               </details>
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 rounded-lg border border-surface-800 bg-surface-950/60 p-3">
-                <div className="text-[14px] text-gray-500">저장하면 <span className="font-mono text-gray-300">{apiKeyForm.defaultEnvName || '-'}</span> 이름으로 Runtime Box에 연결할 수 있습니다.{isPersonalCredentialMode ? ' 개인 금고 값은 다른 사용자에게 보이지 않습니다.' : ''}</div>
+                <div className="text-[14px] text-gray-500">{t('credentialConnections.apiKey.runtimeHint', { envName: apiKeyForm.defaultEnvName || '-' })}{isPersonalCredentialMode ? ` ${t('credentialConnections.apiKey.personalPrivacyHint')}` : ''}</div>
                 <button disabled={saving || !apiKeyForm.provider.trim() || !apiKeyForm.secretValue?.trim()} onClick={saveApiKey} className="px-4 py-2 rounded-md bg-primary-600 text-white text-base disabled:opacity-40 disabled:cursor-not-allowed hover:bg-primary-500 transition-colors">
-                  {saving ? '저장 중…' : '저장'}
+                  {saving ? t('credentialConnections.saving') : t('common:save')}
                 </button>
               </div>
             </div>
@@ -3471,6 +3323,8 @@ function CredentialVaultManagement({ token, mode }: { token?: string | null; mod
 
 function SystemInfo() {
   const { t } = useTranslation('admin');
+  const [defaultResponseLanguage, setDefaultResponseLanguage] = useState<'en' | 'ko'>('ko');
+  const [languageSaving, setLanguageSaving] = useState(false);
   const serverConfig = useSettingsStore((s) => s.serverConfig);
   const updateAvailable = useSettingsStore((s) => s.updateAvailable);
   const latestBuildId = useSettingsStore((s) => s.latestBuildId);
@@ -3485,6 +3339,34 @@ function SystemInfo() {
   }, []);
 
   useEffect(() => { refresh(); }, [refresh]);
+  useEffect(() => {
+    fetch(`${API_BASE}/admin/language-settings`)
+      .then(response => response.ok ? response.json() : null)
+      .then(data => {
+        if (data?.defaultResponseLanguage === 'en' || data?.defaultResponseLanguage === 'ko') {
+          setDefaultResponseLanguage(data.defaultResponseLanguage);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  const saveDefaultResponseLanguage = async (language: 'en' | 'ko') => {
+    setDefaultResponseLanguage(language);
+    setLanguageSaving(true);
+    try {
+      const response = await fetch(`${API_BASE}/admin/language-settings`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ defaultResponseLanguage: language }),
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setDefaultResponseLanguage(data.defaultResponseLanguage);
+      }
+    } finally {
+      setLanguageSaving(false);
+    }
+  };
 
   const defaults = serverConfig?.defaults || {};
   const publicUrl = serverConfig?.publicUrl || apiHealth?.publicUrl || window.location.origin;
@@ -3561,6 +3443,22 @@ function SystemInfo() {
         <HealthCard label={t('updateStatus')} ok={!updateAvailable} detail={updateAvailable ? t('updateAvailableDetail', { buildId: latestBuildId || '-' }) : t('upToDate')} />
       </div>
 
+      <div className="rounded-lg border border-surface-700 bg-surface-900/40 p-4 space-y-3">
+        <div>
+          <h3 className="text-[14px] font-semibold text-gray-300">{i18n.language === 'ko' ? '기본 AI 응답 언어' : 'Default AI response language'}</h3>
+          <p className="mt-1 text-[13px] text-gray-500">{i18n.language === 'ko' ? '개인 설정이 없는 사용자의 기본값입니다. 개인 설정과 현재 요청이 우선합니다.' : 'Used when a user has no personal preference. Personal settings and explicit requests take precedence.'}</p>
+        </div>
+        <select
+          value={defaultResponseLanguage}
+          disabled={languageSaving}
+          onChange={event => saveDefaultResponseLanguage(event.target.value as 'en' | 'ko')}
+          className="w-full max-w-xs rounded-lg border border-surface-700 bg-surface-900 px-3 py-2 text-sm text-surface-200"
+        >
+          <option value="en">English</option>
+          <option value="ko">한국어</option>
+        </select>
+      </div>
+
       <div className="rounded-lg border border-surface-700 divide-y divide-surface-800/50">
         {configRows.map((row) => <InfoRow key={row.label} label={row.label} value={row.value} mono={row.mono} />)}
       </div>
@@ -3576,19 +3474,6 @@ function SystemInfo() {
 }
 
 // ───── AI Settings Management ─────
-
-function AiUsageManagement({ token }: { token?: string | null }) {
-  const { t } = useTranslation('admin');
-  return (
-    <div className="space-y-5">
-      <div>
-        <h3 className="text-[15px] font-semibold text-gray-300 uppercase tracking-wider">{t('usage')}</h3>
-        <p className="text-[13px] text-gray-600 mt-1">{t('usageDescription')}</p>
-      </div>
-      <AiTokenUsageDashboard token={token} />
-    </div>
-  );
-}
 
 interface AiComposerAdminSettings {
   enabled: boolean;
@@ -4011,7 +3896,7 @@ function ModelManagement({ token }: { token?: string | null }) {
 
       {/* AI Router models */}
       <div>
-        <div className="flex items-center justify-between mb-2">
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
           <h3 className="text-[15px] font-semibold text-gray-300 uppercase tracking-wider">{t('piOpenRouter')}</h3>
           <button
             onClick={() => setAddingPi(!addingPi)}
@@ -4023,7 +3908,7 @@ function ModelManagement({ token }: { token?: string | null }) {
 
         {addingPi && (
           <div className="bg-surface-800/50 rounded-lg border border-surface-700 p-4 mb-3 space-y-3">
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <input
                 placeholder={t('modelIdPlaceholder')}
                 value={newPi.modelId}
@@ -4037,7 +3922,7 @@ function ModelManagement({ token }: { token?: string | null }) {
                 className="bg-surface-700 border border-surface-600 rounded px-3 py-1.5 text-[15px] text-gray-200 placeholder:text-gray-600"
               />
             </div>
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
               <input
                 placeholder={t('provider')}
                 value={newPi.provider}
@@ -4128,220 +4013,6 @@ function InfoRow({ label, value, mono }: { label: string; value: string; mono?: 
   );
 }
 
-// ───── AI Token Usage Dashboard ─────
-
-interface AiTokenBudgetSnapshot {
-  customer: string;
-  ok: boolean;
-  models?: string[];
-  maxBudget?: number | null;
-  budgetDuration?: string | null;
-  spend?: number | null;
-  remaining?: number | null;
-  usedPct?: number | null;
-  metadata?: Record<string, unknown> | null;
-  updatedAt: string;
-  error?: string;
-}
-
-interface AiTokenUsageDay {
-  date: string;
-  inputTokens: number;
-  outputTokens: number;
-  cacheReadTokens: number;
-  cacheCreationTokens: number;
-  totalTokens: number;
-  costUsd: number;
-  turns: number;
-}
-
-interface AiTokenUsageSummary {
-  days: number;
-  daily: AiTokenUsageDay[];
-  totals: Omit<AiTokenUsageDay, 'date'>;
-}
-
-function formatBudgetMoney(value: number | null | undefined): string {
-  if (typeof value !== 'number' || Number.isNaN(value)) return '-';
-  return `$${value.toLocaleString(undefined, { maximumFractionDigits: value >= 100 ? 0 : 2 })}`;
-}
-
-function formatTokenCount(value: number | null | undefined): string {
-  if (typeof value !== 'number' || Number.isNaN(value)) return '-';
-  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
-  if (value >= 1_000) return `${(value / 1_000).toFixed(1)}K`;
-  return value.toLocaleString();
-}
-
-function UsageMetricCard({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-lg border border-surface-700 bg-surface-800/50 px-4 py-3">
-      <div className="text-[12px] text-gray-600 uppercase tracking-wider">{label}</div>
-      <div className="mt-1 text-[20px] font-semibold text-gray-100 tabular-nums">{value}</div>
-    </div>
-  );
-}
-
-function TinyTokenUsageChart({ data }: { data: AiTokenUsageDay[] }) {
-  const { t } = useTranslation('admin');
-  const width = 720;
-  const height = 180;
-  const padX = 28;
-  const padY = 18;
-  const max = Math.max(1, ...data.map(d => d.totalTokens));
-  const points = data.map((d, i) => {
-    const x = padX + (data.length <= 1 ? 0 : (i / (data.length - 1)) * (width - padX * 2));
-    const y = height - padY - (d.totalTokens / max) * (height - padY * 2);
-    return { x, y, d };
-  });
-  const path = points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(' ');
-  const area = `${path} L ${width - padX} ${height - padY} L ${padX} ${height - padY} Z`;
-
-  return (
-    <div className="rounded-lg border border-surface-700 bg-surface-900/60 p-3">
-      <div className="flex items-center justify-between mb-2">
-        <div className="text-[14px] font-medium text-gray-300">{t('recentTokenUsage', { days: data.length })}</div>
-        <div className="text-[12px] text-gray-600">{t('inputOutputBasis')}</div>
-      </div>
-      <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-[180px] overflow-visible">
-        <line x1={padX} y1={height - padY} x2={width - padX} y2={height - padY} stroke="currentColor" className="text-surface-700" strokeWidth="1" />
-        <path d={area} fill="currentColor" className="text-primary-500/10" />
-        <path d={path} fill="none" stroke="currentColor" className="text-primary-400" strokeWidth="2.5" />
-        {points.map((p, i) => (
-          <g key={p.d.date}>
-            {(i === 0 || i === points.length - 1 || p.d.totalTokens === max) && (
-              <>
-                <circle cx={p.x} cy={p.y} r="3" fill="currentColor" className="text-primary-300" />
-                <text x={p.x} y={Math.max(12, p.y - 8)} textAnchor="middle" className="fill-gray-500 text-[12px]">
-                  {formatTokenCount(p.d.totalTokens)}
-                </text>
-              </>
-            )}
-          </g>
-        ))}
-      </svg>
-    </div>
-  );
-}
-
-function AiTokenUsageDashboard({ token }: { token?: string | null }) {
-  const { t } = useTranslation('admin');
-  const [rows, setRows] = useState<AiTokenBudgetSnapshot[]>([]);
-  const [usage, setUsage] = useState<AiTokenUsageSummary | null>(null);
-  const [capturedAt, setCapturedAt] = useState<string>('');
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
-
-  const headers = useCallback(() => ({
-    'Content-Type': 'application/json',
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
-  }), [token]);
-
-  const fetchBudgets = useCallback(async () => {
-    setLoading(true);
-    setError('');
-    try {
-      const res = await fetch(`${API_BASE}/admin/ai-token-budgets`, { headers: headers() });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || t('budgetLookupFailed'));
-      setRows(Array.isArray(data.rows) ? data.rows : []);
-      setUsage(data.usage || null);
-      setCapturedAt(data.capturedAt || '');
-    } catch (err: any) {
-      setError(err?.message || t('budgetLookupFailed'));
-      setRows([]);
-      setUsage(null);
-    } finally {
-      setLoading(false);
-    }
-  }, [headers, t]);
-
-  useEffect(() => { fetchBudgets(); }, [fetchBudgets]);
-
-  if (loading) return <div className="text-gray-500 text-base py-6 text-center">Loading AI usage…</div>;
-
-  const budget = rows[0];
-  const totals = usage?.totals;
-  const budgetPct = budget && typeof budget.usedPct === 'number' && Number.isFinite(budget.usedPct)
-    ? Math.max(0, Math.min(100, budget.usedPct))
-    : null;
-  const remaining = budget?.maxBudget == null ? null : budget?.remaining;
-  const budgetStatusColor = !budget?.ok ? 'tone-danger tone-bg' : budgetPct == null ? 'bg-gray-500' : budgetPct >= 90 ? 'tone-danger tone-bg' : budgetPct >= 70 ? 'tone-warning tone-bg' : 'tone-success tone-bg';
-  const budgetPolicy = budget?.metadata?.['budget_policy'];
-  const budgetPolicyText = typeof budgetPolicy === 'string' || typeof budgetPolicy === 'number' || typeof budgetPolicy === 'boolean'
-    ? String(budgetPolicy)
-    : '';
-
-  return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between text-[14px] text-gray-500">
-        <div>{t('currentVm')} · {capturedAt ? t('capturedAt', { time: new Date(capturedAt).toLocaleString() }) : t('aiUsage')}</div>
-        <button
-          onClick={fetchBudgets}
-          className="px-2.5 py-1 text-[13px] text-gray-400 hover:text-gray-200 bg-surface-900 border border-surface-700 rounded-md"
-        >{t('refresh')}</button>
-      </div>
-
-      {error && <div className="tone-card tone-warning px-4 py-3 text-[14px] rounded-lg">{error}</div>}
-
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-        <UsageMetricCard label={t('inputTokens')} value={formatTokenCount(totals?.inputTokens)} />
-        <UsageMetricCard label={t('outputTokens')} value={formatTokenCount(totals?.outputTokens)} />
-        <UsageMetricCard label={t('cacheRead')} value={formatTokenCount(totals?.cacheReadTokens)} />
-        <UsageMetricCard label={t('estimatedCost')} value={formatBudgetMoney(totals?.costUsd)} />
-      </div>
-
-      {usage?.daily && usage.daily.length > 0 && <TinyTokenUsageChart data={usage.daily} />}
-
-      <div className="bg-surface-800/50 rounded-lg border border-surface-700 overflow-hidden">
-        <div className="px-4 py-3 border-b border-surface-700/60">
-          <div className="text-[14px] font-medium text-gray-300">AI Token Budget</div>
-          <div className="text-[12px] text-gray-600">{t('budgetRemaining')}</div>
-        </div>
-        {!budget ? (
-          <div className="px-4 py-8 text-center text-[15px] text-gray-500">{t('noTokenBudget')}</div>
-        ) : (
-          <div className="px-4 py-3">
-            <div className="flex items-center gap-3">
-              <span className={`w-2 h-2 rounded-full ${budgetStatusColor}`} />
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
-                  <span className="text-[15px] text-gray-200 font-medium">{budget.customer}</span>
-                  {budgetPolicyText && (
-                    <span className="text-[12px] px-1.5 py-0.5 rounded bg-primary-500/10 text-primary-300 border border-primary-500/20">
-                      {budgetPolicyText}
-                    </span>
-                  )}
-                </div>
-                <div className="text-[12px] text-gray-600 font-mono truncate">
-                  {(budget.models || []).join(', ') || t('modelsUnknown')} · {t('updatedAt', { time: new Date(budget.updatedAt).toLocaleString() })}
-                </div>
-              </div>
-              {budget.ok ? (
-                <div className="text-right shrink-0">
-                  <div className="text-[15px] text-gray-200 font-medium">
-                    {formatBudgetMoney(budget.spend)} / {formatBudgetMoney(budget.maxBudget)}
-                  </div>
-                  <div className="text-[13px] text-gray-500">
-                    {t('remainingAmount', { amount: formatBudgetMoney(remaining) })} · {budget.budgetDuration || t('noDuration')}
-                  </div>
-                </div>
-              ) : (
-                <div className="text-[14px] text-red-300 max-w-[300px] truncate" title={budget.error}>{budget.error || 'error'}</div>
-              )}
-            </div>
-            {budget.ok && budgetPct != null && (
-              <div className="mt-2 h-1.5 rounded-full bg-surface-900 overflow-hidden">
-                <div className={`h-full ${budgetStatusColor}`} style={{ width: `${budgetPct}%` }} />
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
 // ───── Legacy fallback accounts tab ─────
 
 interface ClaudeAccount {
@@ -4360,34 +4031,11 @@ interface ProjectSummary {
   claude_account_id: string | null;
 }
 
-interface CodexAuthStatus {
-  configured: boolean;
-  provider: string;
-  type?: string;
-  agentDir?: string;
-  authPath?: string;
-  accountId?: string | null;
-  email?: string | null;
-  planType?: string | null;
-  expiresAt?: string | null;
-  expired?: boolean | null;
-  latestUsage?: {
-    ts?: string;
-    rateLimits?: {
-      plan_type?: string | null;
-      primary?: { used_percent?: number; window_minutes?: number; resets_at?: number } | null;
-      secondary?: { used_percent?: number; window_minutes?: number; resets_at?: number } | null;
-    };
-    usage?: any;
-  } | null;
-}
-
 function ClaudeAccountManagement({ token }: { token?: string | null }) {
   const { t } = useTranslation('admin');
   const confirm = useConfirm();
   const [accounts, setAccounts] = useState<ClaudeAccount[]>([]);
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
-  const [codexAuth, setCodexAuth] = useState<CodexAuthStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [newAccount, setNewAccount] = useState({ id: '', label: '', configDir: '', tier: 'max' as string, isDefault: false });
@@ -4401,14 +4049,12 @@ function ClaudeAccountManagement({ token }: { token?: string | null }) {
 
   const fetchData = useCallback(async () => {
     try {
-      const [accRes, projRes, codexRes] = await Promise.all([
+      const [accRes, projRes] = await Promise.all([
         fetch(`${API_BASE}/admin/claude-accounts`, { headers: headers() }),
         fetch(`${API_BASE}/projects`, { headers: headers() }),
-        fetch(`${API_BASE}/admin/openai-codex-auth/status`, { headers: headers() }),
       ]);
       if (accRes.ok) setAccounts(await accRes.json());
       if (projRes.ok) setProjects(await projRes.json());
-      if (codexRes.ok) setCodexAuth(await codexRes.json());
     } catch {} finally { setLoading(false); }
   }, [headers]);
 
@@ -4473,66 +4119,10 @@ function ClaudeAccountManagement({ token }: { token?: string | null }) {
 
   return (
     <div className="space-y-5">
-      {/* ── ChatGPT Codex Account Section ── */}
-      <div>
-        <div className="flex items-center justify-between mb-3">
-          <div>
-            <h3 className="text-[15px] font-medium text-gray-300">ChatGPT Codex 계정</h3>
-            <p className="text-[13px] text-gray-600 mt-0.5">Direct GPT / Codex-LB 경로가 사용하는 ChatGPT/Codex OAuth 상태입니다. 기본 사용자 경로는 AI Router(Smartest/Mini)입니다.</p>
-          </div>
-          <button
-            onClick={fetchData}
-            className="px-2.5 py-1 text-[13px] text-gray-400 hover:text-gray-200 bg-surface-800 border border-surface-700 rounded-md"
-          >새로고침</button>
-        </div>
-        <div className="bg-surface-800 border border-surface-700 rounded-lg p-4 space-y-2">
-          <div className="flex items-center gap-2">
-            <span className={`w-2 h-2 rounded-full ${codexAuth?.configured && !codexAuth?.expired ? 'tone-success tone-bg' : 'tone-warning tone-bg'}`} />
-            <span className="text-[15px] text-gray-200 font-medium">
-              {codexAuth?.configured ? 'openai-codex 로그인됨' : 'openai-codex 로그인 필요'}
-            </span>
-            {codexAuth?.planType && (
-              <span className={`tone-pill text-[12px] font-semibold px-1.5 py-0.5 rounded ${codexAuth.planType === 'free' ? 'tone-warning' : 'tone-success'}`}>
-                {codexAuth.planType.toUpperCase()}
-              </span>
-            )}
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-1 text-[13px] text-gray-500">
-            <div>email: <span className="text-gray-300">{codexAuth?.email || '-'}</span></div>
-            <div>expires: <span className="text-gray-300">{codexAuth?.expiresAt || '-'}</span></div>
-            <div className="md:col-span-2">auth path: <code className="text-gray-400">{codexAuth?.authPath || '~/.pi/agent/auth.json'}</code></div>
-          </div>
-          {codexAuth?.latestUsage?.rateLimits && (
-            <div className="mt-2 grid grid-cols-1 md:grid-cols-3 gap-2 text-[13px]">
-              <div className="rounded-md bg-surface-900 border border-surface-700 px-3 py-2">
-                <div className="text-gray-600">5-hour</div>
-                <div className="text-gray-200 font-medium">{codexAuth.latestUsage.rateLimits.primary?.used_percent ?? 0}% used</div>
-              </div>
-              <div className="rounded-md bg-surface-900 border border-surface-700 px-3 py-2">
-                <div className="text-gray-600">weekly</div>
-                <div className="text-gray-200 font-medium">{codexAuth.latestUsage.rateLimits.secondary?.used_percent ?? 0}% used</div>
-              </div>
-              <div className="rounded-md bg-surface-900 border border-surface-700 px-3 py-2">
-                <div className="text-gray-600">last snapshot</div>
-                <div className="text-gray-200 font-medium truncate">{codexAuth.latestUsage.ts || '-'}</div>
-              </div>
-            </div>
-          )}
-          {codexAuth?.planType === 'free' && (
-            <div className="tone-card tone-warning text-[13px] rounded-md px-3 py-2">
-              현재 OAuth claim은 free입니다. Pro 계정으로 다시 로그인해야 Codex Pro 경로가 정상화됩니다.
-            </div>
-          )}
-          <div className="text-[13px] text-gray-600">
-            로그인/재로그인: <code className="text-gray-400">cd ~/.pi/agent && node ~/tower/packages/backend/node_modules/@earendil-works/pi-ai/dist/cli.js login openai-codex</code>
-          </div>
-        </div>
-      </div>
-
       {/* ── Legacy fallback accounts section ── */}
       <div>
-        <div className="flex items-center justify-between mb-3">
-          <div className="text-[15px] text-gray-400">
+        <div className="mb-3 flex flex-col items-stretch gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="min-w-0 text-[15px] text-gray-400">
             {t('accountsRegistered', { count: accounts.length })}
             {defaultAccount && (
               <span className="ml-2 text-primary-400/70">{t('defaultAccount', { label: defaultAccount.label })}</span>
@@ -4540,7 +4130,7 @@ function ClaudeAccountManagement({ token }: { token?: string | null }) {
           </div>
           <button
             onClick={() => setShowForm(!showForm)}
-            className="px-3 py-1.5 text-[14px] font-medium bg-primary-600 hover:bg-primary-500 text-white rounded-lg transition-colors"
+            className="min-h-10 rounded-lg bg-primary-600 px-3 text-[14px] font-medium text-white transition-colors hover:bg-primary-500 sm:shrink-0"
           >
             {showForm ? t('common:cancel') : t('addAccount')}
           </button>
@@ -4550,7 +4140,7 @@ function ClaudeAccountManagement({ token }: { token?: string | null }) {
         {showForm && (
           <div className="bg-surface-800 border border-surface-700 rounded-lg p-4 mb-3 space-y-3">
             {error && <div className="text-red-400 text-[14px]">{error}</div>}
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div>
                 <label className="text-[13px] text-gray-500 block mb-1">{t('idSlug')}</label>
                 <input

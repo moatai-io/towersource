@@ -23,22 +23,33 @@
 
 ---
 
-## Quick Start (3 commands)
+## Quick Start — Ubuntu Server
+
+For a fresh Ubuntu 22.04 or 24.04 server, use the OSS installer. It provisions Node.js 22, PostgreSQL 18 with `uuid-ossp`/`pg_trgm`/`vector`, secure local secrets, a systemd service, nginx, and a final doctor check.
 
 ```bash
 git clone https://github.com/moatai-io/towersource.git tower
 cd tower
-bash setup.sh
+sudo bash scripts/oss/install.sh --public-url http://YOUR_SERVER_IP
 ```
 
-The setup wizard handles everything: dependencies, environment, workspace, skills, and memory hooks.
+Open `http://YOUR_SERVER_IP` and create the first administrator account. Configure model access later from **Settings → Connections**.
 
-Then start:
+For automatic nginx + Let's Encrypt HTTPS, point a domain at the server first:
 
 ```bash
-npm run dev
-# → Open http://localhost:32354
+sudo bash scripts/oss/install.sh \
+  --domain tower.example.com \
+  --email admin@example.com
 ```
+
+Run the readiness check again at any time:
+
+```bash
+sudo bash /opt/tower/scripts/oss/doctor.sh --url http://YOUR_SERVER_IP
+```
+
+> `setup.sh` and `npm run dev` are retained for development/workstation setup. They are not the canonical single-server production install path.
 
 ---
 

@@ -9,10 +9,7 @@ import type { TaskMeta } from '../../stores/kanban-store';
 // The Pi engine now fronts Tower's AI Router models (Smartest/Smart via LiteLLM),
 // while still retaining full-VM debug paths for direct providers.
 // See: workspace/decisions/2026-05-17-pi-claude-parity-roadmap.md (W2)
-const ENGINE_OPTIONS = [
-  { id: 'claude', name: 'Claude (Max 구독)' },
-  { id: 'pi',     name: 'AI Router' },
-];
+const ENGINE_OPTION_IDS = ['claude', 'pi'] as const;
 
 const WORKFLOW_OPTIONS = [
   { id: 'auto', name: 'Auto', desc: 'Agent decides' },
@@ -24,10 +21,7 @@ const WORKFLOW_OPTIONS = [
 
 // New tasks report through Notification Hub. Legacy channel/kakao/all/default
 // policies remain readable for old rows but are normalized when edited.
-const REPORT_POLICY_OPTIONS = [
-  { id: 'silent', name: '🔕 조용히' },
-  { id: 'notification', name: '🔔 알림으로 보고' },
-];
+const REPORT_POLICY_OPTION_IDS = ['silent', 'notification'] as const;
 
 interface NewTaskModalProps {
   onClose: () => void;
@@ -111,6 +105,8 @@ function Dropdown({
 
 export function NewTaskModal({ onClose, onCreated, editTask, projectId, filterProjectId }: NewTaskModalProps) {
   const { t } = useTranslation('kanban');
+  const engineOptions = ENGINE_OPTION_IDS.map((id) => ({ id, name: id === 'claude' ? t('engineClaudeMax') : 'AI Router' }));
+  const reportPolicyOptions = REPORT_POLICY_OPTION_IDS.map((id) => ({ id, name: t(`reportPolicy.options.${id}`) }));
   const sessions = useSessionStore((s) => s.sessions);
   const activeSessionId = useSessionStore((s) => s.activeSessionId);
   const activeSession = sessions.find((s) => s.id === activeSessionId);
@@ -422,7 +418,7 @@ export function NewTaskModal({ onClose, onCreated, editTask, projectId, filterPr
                   // versa). User can change it back in the model dropdown.
                   setModel(defaultModelByEngine[next] || '');
                 }}
-                options={ENGINE_OPTIONS}
+                options={engineOptions}
               />
             </div>
             <div className="flex-1">
@@ -446,15 +442,15 @@ export function NewTaskModal({ onClose, onCreated, editTask, projectId, filterPr
 
           {/* Report policy — how completion gets reported. */}
           <div>
-            <label htmlFor="task-report-policy" className="text-sm text-gray-400 mb-1 block">리포팅</label>
+            <label htmlFor="task-report-policy" className="text-sm text-gray-400 mb-1 block">{t('reportPolicy.label')}</label>
             <Dropdown
               value={reportPolicy}
               onChange={setReportPolicy}
-              options={REPORT_POLICY_OPTIONS}
+              options={reportPolicyOptions}
             />
             <p className="text-[13px] text-gray-500 mt-1">
-              {reportPolicy === 'silent' && '완료되면 태스크 보드에만 표시됩니다.'}
-              {reportPolicy === 'notification' && '완료 또는 실패 결과를 알림 센터에 남깁니다.'}
+              {reportPolicy === 'silent' && t('reportPolicy.silentHint')}
+              {reportPolicy === 'notification' && t('reportPolicy.notificationHint')}
             </p>
           </div>
         </div>

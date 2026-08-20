@@ -14,8 +14,8 @@ describe('Agent-only Google Connection UX', () => {
 
   it('starts Google OAuth from the target Agent Connection panel', () => {
     expect(connections).toContain('/api/auth/google/agent?projectId=');
-    expect(connections).toContain('이 Agent의 Google 계정');
-    expect(connections).toContain('Google 계정 연결 또는 재인증');
+    expect(connections).toContain("t('agentGoogle.title')");
+    expect(connections).toContain("t('agentGoogle.connectOrReauthorize')");
     expect(connections).toContain("params.get('oauth') !== 'google-agent'");
     expect(connections).toContain("params.get('projectId') !== projectId");
     expect(connections).toContain("tower-agent-credentials-changed");

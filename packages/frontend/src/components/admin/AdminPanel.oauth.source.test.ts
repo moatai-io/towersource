@@ -5,11 +5,11 @@ const source = readFileSync(new URL('./AdminPanel.tsx', import.meta.url), 'utf8'
 
 describe('Personal Credential OAuth UI', () => {
   it('puts the primary Google action in the personal credential header', () => {
-    expect(source).toContain("primaryOAuthProvider.status === 'not_connected' ? t('credentialConnections.accountConnection')");
-    expect(source).toContain("t('credentialConnections.checkSetup')");
+    expect(source).toContain("primaryOAuthProvider.status === 'not_connected' ? t('credentialConnections.actionLabels.connect')");
+    expect(source).toContain("t('credentialConnections.actionLabels.setup')");
     expect(source).toContain("aria-disabled={!primaryOAuthProvider.configured}");
-    expect(source).toContain("primaryOAuthProvider.status === 'reauth_required' ? t('credentialConnections.reloginRequired')");
-    expect(source).toContain("`+ ${t('credentialConnections.addConnection')}`");
+    expect(source).toContain("primaryOAuthProvider.status === 'reauth_required' ? t('credentialConnections.actionLabels.reconnect')");
+    expect(source).toContain("t('credentialConnections.actionLabels.change')");
     expect(source).toContain('connectOAuthProvider(primaryOAuthProvider)');
   });
 
@@ -19,8 +19,8 @@ describe('Personal Credential OAuth UI', () => {
     expect(source).not.toContain('내 Google Workspace 연결');
     expect(source).toContain("provider.status === 'connected' ? t('credentialConnections.connected')");
     expect(source).toContain("provider.status === 'reauth_required' ? t('credentialConnections.reloginRequired')");
-    expect(source).toContain("provider.status === 'not_connected' ? t('credentialConnections.accountConnection')");
-    expect(source).toContain("t('credentialConnections.checkSetup')");
+    expect(source).toContain("provider.status === 'not_connected' ? t('credentialConnections.actionLabels.connect')");
+    expect(source).toContain("t('credentialConnections.actionLabels.setup')");
     expect(source).toContain("provider.configured ? provider.status === 'not_connected'");
   });
 

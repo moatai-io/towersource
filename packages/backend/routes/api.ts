@@ -38,7 +38,7 @@ import {
   requestSignup,
   updateSignupInviteCode,
 } from '../services/auth/signup-invites.js';
-import { getAiComposerSettings, getSignupApprovalMode, setAiComposerSettings, setSignupApprovalMode } from '../services/settings/app-settings.js';
+import { getAiComposerSettings, getDefaultResponseLanguage, getSignupApprovalMode, setAiComposerSettings, setDefaultResponseLanguage, setSignupApprovalMode } from '../services/settings/app-settings.js';
 import {
   createSession, getSession, updateSession, deleteSession,
   getArchivedSessions, restoreSession, permanentlyDeleteSession,
@@ -2678,74 +2678,6 @@ import {
 } from '../services/auth/credential-store.js';
 import { readCredentialHealth } from '../services/auth/credential-health.js';
 
-function decodeJwtPayload(token: string): any | null {
-  try {
-    const part = token.split('.')[1];
-    if (!part) return null;
-    const padded = part.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - part.length % 4) % 4);
-    return JSON.parse(Buffer.from(padded, 'base64').toString('utf8'));
-  } catch {
-    return null;
-  }
-}
-
-function getLatestCodexUsageSnapshot() {
-  try {
-    const file = path.join(config.workspaceRoot, '.audit', 'codex-usage.jsonl');
-    if (!fs.existsSync(file)) return null;
-    const lines = fs.readFileSync(file, 'utf8').trim().split('\n').filter(Boolean);
-    for (let i = lines.length - 1; i >= 0; i--) {
-      try {
-        const snapshot = JSON.parse(lines[i]);
-        if (snapshot?.rateLimits) return snapshot;
-      } catch {}
-    }
-    return null;
-  } catch {
-    return null;
-  }
-}
-
-function getCodexAuthStatus() {
-  const agentDir = process.env.PI_CODING_AGENT_DIR || path.join(os.homedir(), '.pi', 'agent');
-  const authPath = path.join(agentDir, 'auth.json');
-  const exists = fs.existsSync(authPath);
-  const latestUsage = getLatestCodexUsageSnapshot();
-  if (!exists) {
-    return { configured: false, agentDir, authPath, provider: 'openai-codex', latestUsage };
-  }
-  const raw = JSON.parse(fs.readFileSync(authPath, 'utf8'));
-  const creds = raw?.['openai-codex'];
-  if (!creds) {
-    return { configured: false, agentDir, authPath, provider: 'openai-codex', latestUsage };
-  }
-  const payload = typeof creds.access === 'string' ? decodeJwtPayload(creds.access) : null;
-  const authClaim = payload?.['https://api.openai.com/auth'] || {};
-  const profile = payload?.['https://api.openai.com/profile'] || {};
-  const expiresAt = typeof creds.expires === 'number' ? new Date(creds.expires).toISOString() : null;
-  return {
-    configured: true,
-    provider: 'openai-codex',
-    type: creds.type || 'oauth',
-    agentDir,
-    authPath,
-    accountId: creds.accountId || authClaim.chatgpt_account_id || null,
-    email: profile.email || null,
-    planType: authClaim.chatgpt_plan_type || null,
-    expiresAt,
-    expired: typeof creds.expires === 'number' ? Date.now() > creds.expires : null,
-    latestUsage,
-  };
-}
-
-router.get('/admin/openai-codex-auth/status', adminMiddleware, (_req, res) => {
-  try {
-    res.json(getCodexAuthStatus());
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
 async function handleAiUsageMetrics(req: any, res: any) {
   try {
     const { listAiTokenBudgetSnapshots } = await import('../services/ai/ai-token-budget.js');
@@ -2963,11 +2895,14 @@ router.get('/me', authMiddleware, async (req, res) => {
 
 router.patch('/me/profile', authMiddleware, async (req, res) => {
   const currentUser = (req as any).user;
-  const { displayName, affiliation } = req.body;
-  if (displayName === undefined && affiliation === undefined) {
+  const { displayName, affiliation, language } = req.body;
+  if (displayName === undefined && affiliation === undefined && language === undefined) {
     return res.status(400).json({ error: 'No fields to update' });
   }
-  await updateUserProfile(currentUser.userId, { displayName, affiliation });
+  if (language !== undefined && language !== null && language !== 'en' && language !== 'ko') {
+    return res.status(400).json({ error: 'language must be en, ko, or null' });
+  }
+  await updateUserProfile(currentUser.userId, { displayName, affiliation, language });
   const profile = await getOwnProfile(currentUser.userId);
   res.json(profile);
 });
@@ -3028,6 +2963,33 @@ router.patch('/admin/signup-settings', adminMiddleware, async (req, res) => {
     const currentUser = (req as any).user;
     const mode = req.body?.approvalMode === 'manual' ? 'manual' : 'auto';
     res.json({ approvalMode: await setSignupApprovalMode(mode, currentUser?.userId ?? null) });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+router.get('/language-settings', authMiddleware, async (req, res) => {
+  const currentUser = (req as any).user;
+  const [profile, defaultResponseLanguage] = await Promise.all([
+    getOwnProfile(currentUser.userId),
+    getDefaultResponseLanguage(),
+  ]);
+  res.setHeader('Cache-Control', 'no-store');
+  res.json({
+    userLanguage: profile?.language ?? null,
+    defaultResponseLanguage,
+    effectiveFallback: defaultResponseLanguage || process.env.WORKSPACE_LANGUAGE || 'ko',
+  });
+});
+
+router.get('/admin/language-settings', adminMiddleware, async (_req, res) => {
+  res.json({ defaultResponseLanguage: await getDefaultResponseLanguage() });
+});
+
+router.patch('/admin/language-settings', adminMiddleware, async (req, res) => {
+  try {
+    const currentUser = (req as any).user;
+    res.json({ defaultResponseLanguage: await setDefaultResponseLanguage(req.body?.defaultResponseLanguage, currentUser?.userId ?? null) });
   } catch (err: any) {
     res.status(400).json({ error: err.message });
   }
@@ -6100,52 +6062,52 @@ interface AgentAcademyDraftTemplate {
 
 const AGENT_ACADEMY_DRAFT_TEMPLATES: AgentAcademyDraftTemplate[] = [
   {
-    id: 'company-profile', face: '📄', name: '회사소개서 성장 Agent', levelTitle: 'Level 0 · Trainee Writer',
+    id: 'company-profile', face: '📄', name: 'Company Materials', levelTitle: 'Starting point',
     role: '회사소개서·제안서·영업 메시지를 계속 개선하고 좋은 문장과 근거를 축적합니다.',
     capabilities: ['자료에서 핵심 메시지와 proof를 뽑습니다.', '고객별 첫 장 메시지와 제안서 목차를 만듭니다.', '좋은 표현을 messaging bank 후보로 정리합니다.'],
     sourceHints: ['회사소개서', '제안서', '브로슈어', 'messaging bank'],
     firstTask: '현재 자료에서 고객에게 가장 먼저 보여줄 메시지 3개를 제안해줘.',
-    promotionGoal: '승인된 메시지 3개를 재사용 가능한 후보로 정리하면 Level 1로 승급',
+    promotionGoal: '검토 가능한 핵심 메시지 초안 만들기',
   },
   {
-    id: 'cs', face: '🎧', name: '고객 문의 성장 Agent', levelTitle: 'Level 0 · Trainee Support',
+    id: 'cs', face: '🎧', name: 'Inquiry Response Prep', levelTitle: 'Starting point',
     role: 'FAQ·정책·상담 사례를 바탕으로 고객 답변 초안과 내부 확인 항목을 분리합니다.',
     capabilities: ['고객 답변 초안을 만듭니다.', '사람 확인이 필요한 항목을 표시합니다.', '반복 문의를 FAQ 개선 후보로 축적합니다.'],
     sourceHints: ['FAQ', '정책 문서', '상담 기록'],
     firstTask: '최근 문의를 유형별로 나누고 답변 초안과 내부 확인 항목을 분리해줘.',
-    promotionGoal: '답변 초안 3건을 내부 검토 가능한 형태로 만들면 Level 1로 승급',
+    promotionGoal: '답변 초안과 내부 확인 항목을 구분하기',
   },
   {
-    id: 'rfp', face: '📑', name: 'RFP/입찰 성장 Agent', levelTitle: 'Level 0 · Trainee Analyst',
+    id: 'rfp', face: '📑', name: 'Document Requirement Review', levelTitle: 'Starting point',
     role: 'RFP/입찰 문서에서 제출 요건, 누락 자료, 제안서 구조, 리스크를 정리합니다.',
     capabilities: ['제출 요건과 마감을 분리합니다.', '누락 자료와 확인 질문을 정리합니다.', '제안서 목차와 리스크 표를 만듭니다.'],
     sourceHints: ['RFP', '입찰 문서', '제출 요건표'],
     firstTask: '이 RFP에서 제출 요건, 누락 자료, 제안서 목차, 주요 리스크를 정리해줘.',
-    promotionGoal: '제출 요건/누락 자료/리스크 표를 1회 완성하면 Level 1로 승급',
+    promotionGoal: '요건·누락 자료·리스크 초안 정리하기',
   },
   {
-    id: 'dev', face: '🧑‍💻', name: '개발 동료 성장 Agent', levelTitle: 'Level 0 · Trainee Builder',
+    id: 'dev', face: '🧑‍💻', name: 'Product & Code Work', levelTitle: 'Starting point',
     role: '제품 코드와 결정 기록을 읽고 작은 UI/기능 실험, 버그 수정, 검증 로그를 연결합니다.',
     capabilities: ['관련 코드와 결정문서를 찾습니다.', '작은 변경안을 제안하고 구현합니다.', 'typecheck/build/test 결과를 남깁니다.'],
     sourceHints: ['코드베이스', 'AGENTS.md', 'decisions'],
     firstTask: '이 제품 실험을 작은 구현 단위로 나누고 첫 변경안을 제안해줘.',
-    promotionGoal: '첫 코드 변경에서 typecheck/build 검증까지 성공하면 Level 1로 승급',
+    promotionGoal: '첫 변경안을 검증 가능한 형태로 완성하기',
   },
   {
-    id: 'ops', face: '🗂️', name: '운영 PM 성장 Agent', levelTitle: 'Level 0 · Trainee Operator',
+    id: 'ops', face: '🗂️', name: 'Progress Coordination', levelTitle: 'Starting point',
     role: '프로젝트 진행상황, 결정, 리스크, 다음 액션을 정리하고 반복 운영 루틴을 개선합니다.',
     capabilities: ['현재 상태와 다음 액션을 정리합니다.', '결정과 단순 메모를 구분합니다.', '반복 업무를 자동화/스킬 후보로 제안합니다.'],
     sourceHints: ['회의록', 'progress', 'decisions', '업무 기록'],
     firstTask: '현재 진행상황, 막힌 점, 다음 3개 액션을 정리해줘.',
-    promotionGoal: '진행상황/막힌 점/다음 액션을 정기 요약하면 Level 1로 승급',
+    promotionGoal: '현재 상태와 다음 액션을 검토 가능한 형태로 정리하기',
   },
   {
-    id: 'custom', face: '✨', name: '직접 키울 Agent', levelTitle: 'Level 0 · Trainee',
+    id: 'custom', face: '✨', name: 'New AI Teammate', levelTitle: 'Starting point',
     role: '사용자가 지정한 반복 업무를 배우고 수행하면서 점점 더 나은 작업 기준을 축적합니다.',
-    capabilities: ['역할을 대화로 구체화합니다.', '첫 업무를 제안합니다.', '반복 절차를 스킬/자동화 후보로 정리합니다.'],
+    capabilities: ['원하는 도움을 작업 범위로 정리합니다.', '첫 업무와 완료 기준을 제안합니다.', '반복 절차를 스킬/자동화 후보로 정리합니다.'],
     sourceHints: ['대화로 먼저 시작'],
-    firstTask: '이 Agent가 맡을 지속 역할과 첫 업무를 함께 정해줘.',
-    promotionGoal: '첫 업무를 성공적으로 마치면 Level 1로 승급',
+    firstTask: '원하는 도움을 작업 범위와 첫 업무로 함께 정리해줘.',
+    promotionGoal: '첫 업무와 완료 기준을 함께 정하기',
   },
 ];
 
@@ -6175,22 +6137,23 @@ router.post('/agents/academy/draft', async (req, res) => {
     const template = pickAgentAcademyDraftTemplate(intent, material);
     const materials = splitMaterialCandidates(material);
     const role = intent.trim()
-      ? `${template.role} 사용자가 설명한 육성 방향: ${intent.trim()}`
+      ? `사용자가 원하는 도움: ${intent.trim()}\n\n시작 예시에서 제안한 작업 범위: ${template.role}`
       : template.role;
     res.json({
       status: 'draft',
       templateId: template.id,
       face: template.face,
       name: template.name,
-      levelTitle: template.levelTitle,
+      // Legacy artifact fields remain for compatibility, but represent a starting point and first success criterion.
+      levelTitle: 'Starting point',
       role,
       capabilities: template.capabilities,
       sourceHints: materials.length ? materials : template.sourceHints,
       firstTask: template.firstTask,
       promotionGoal: template.promotionGoal,
       assumptions: [
-        materials.length ? '자료명/사용자 설명 기반 초안입니다. 실제 파일 내용 분석은 후속 단계입니다.' : '자료가 없어도 대화로 먼저 설정할 수 있습니다.',
-        '이 draft는 확정 전 사용자가 수정할 수 있습니다.',
+        materials.length ? '자료명과 사용자 설명을 바탕으로 만든 작업 범위 초안입니다. 실제 파일 내용 분석은 후속 단계입니다.' : '자료가 없어도 원하는 도움을 설명해 먼저 시작할 수 있습니다.',
+        '선택한 업무 예시는 고정 역할이 아니며, 이 초안은 생성 전에 수정할 수 있습니다.',
       ],
     });
   } catch (err: any) {

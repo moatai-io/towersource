@@ -100,6 +100,11 @@ describe('Sidebar realtime performance source contracts', () => {
     expect(src).toContain('scrollbar-none h-full min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden');
     expect(src).toContain("sidebarTab === 'files' ? '' : 'overflow-y-auto'");
     expect(src).toContain("overflowY: sidebarTab === 'files' ? 'hidden' : undefined");
+    expect(src).toContain('data-sidebar-files-root="true"');
+    expect(src).toContain("className={`h-full min-h-0 overflow-hidden ${isMobile ? 'flex flex-col' : 'grid grid-cols-[176px_minmax(0,1fr)]'}`}");
+    expect(src).toContain('data-sidebar-files-scroll="true"');
+    expect(src).toContain('overflow-x-hidden overflow-y-auto overscroll-contain');
+    expect(src).not.toContain("<div className={`min-h-full ${isMobile ? 'flex flex-col' : 'grid h-full min-h-0 grid-cols-[176px_minmax(0,1fr)] overflow-hidden'}`}>");
     expect(src).not.toContain('latestSessionsCollapsed');
     expect(src).toContain("title={t('aiTeamNavTitle')}");
     expect(src).toContain("agentNavScope === 'work' && !isSearching");
@@ -123,8 +128,9 @@ describe('Sidebar realtime performance source contracts', () => {
     expect(src).toContain('selectedAgentProjectId && filterLabels');
     expect(src).toContain('selectedDeckGroups');
     expect(src).toContain('<LabelGroup');
-    expect(src).toContain("rememberAgentWorkspaceLocation(project.id, 'files')");
-    expect(src).toContain("aria-label={t('openNamedFiles', { name: project.agent?.displayName || project.name })}");
+    const selectedAgentHeader = src.slice(src.indexOf('selectedAgentProjectId && navigationGroupedSessions?.groups[0]'), src.indexOf("key={`${selectedAgentProjectId}:__uncategorized__`}"));
+    expect(selectedAgentHeader).not.toContain("rememberAgentWorkspaceLocation(project.id, 'files')");
+    expect(selectedAgentHeader).not.toContain("aria-label={t('openNamedFiles'" );
     expect(src).not.toContain('showPinControls={false}');
     expect(src).toContain('buildSidebarAgentRailModel({ projects, sessions })');
     const agentRailModel = fs.readFileSync(AGENT_RAIL_MODEL_PATH, 'utf-8');

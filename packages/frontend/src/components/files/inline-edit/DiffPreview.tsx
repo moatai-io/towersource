@@ -51,7 +51,7 @@ function CheckIcon({ className = '' }: { className?: string }) {
 }
 
 export function DiffPreview({ state }: Props) {
-  const { t } = useTranslation('files');
+  const { t, i18n } = useTranslation('files');
   // Cmd/Ctrl + Enter → apply
   useEffect(() => {
     if (state.stage !== 'preview') return;
@@ -72,6 +72,7 @@ export function DiffPreview({ state }: Props) {
   const sizeAfter = state.replacement.length;
   const sizeDelta = sizeAfter - sizeBefore;
   const sizeDeltaLabel = sizeDelta === 0 ? '±0' : sizeDelta > 0 ? `+${sizeDelta}` : `${sizeDelta}`;
+  const language = i18n.resolvedLanguage || i18n.language || 'en';
 
   // Diagnostic hint when the AI returned the selection unchanged. The most
   // common cause we've seen in dogfood is users selecting only the inner
@@ -147,8 +148,8 @@ export function DiffPreview({ state }: Props) {
           <section className="flex flex-col min-h-0">
             <div className="flex items-center gap-2 px-4 py-2 border-b border-surface-700/40">
               <span className="w-1.5 h-1.5 rounded-full bg-gray-500" />
-              <span className="text-[12px] uppercase tracking-[0.12em] text-gray-500 font-medium">Before</span>
-              <span className="text-[12px] text-gray-600 ml-auto">{sizeBefore.toLocaleString()}자</span>
+              <span className="text-[12px] uppercase tracking-[0.12em] text-gray-500 font-medium">{t('inlineEditDiff.before')}</span>
+              <span className="text-[12px] text-gray-600 ml-auto">{t('inlineEditDiff.characterCount', { count: sizeBefore.toLocaleString(language) })}</span>
             </div>
             <pre className="flex-1 overflow-auto px-4 py-3 text-sm text-gray-300/90 whitespace-pre-wrap break-words font-mono leading-relaxed">
               {state.selection.text}
@@ -157,9 +158,9 @@ export function DiffPreview({ state }: Props) {
           <section className="flex flex-col min-h-0 bg-primary-500/[0.03]">
             <div className="flex items-center gap-2 px-4 py-2 border-b border-surface-700/40">
               <span className="w-1.5 h-1.5 rounded-full bg-primary-400 shadow-sm shadow-primary-400/60" />
-              <span className="text-[12px] uppercase tracking-[0.12em] text-primary-300 font-medium">After</span>
+              <span className="text-[12px] uppercase tracking-[0.12em] text-primary-300 font-medium">{t('inlineEditDiff.after')}</span>
               <span className="text-[12px] text-gray-600 ml-auto">
-                {sizeAfter.toLocaleString()}자
+                {t('inlineEditDiff.characterCount', { count: sizeAfter.toLocaleString(language) })}
                 <span className={`ml-1.5 ${sizeDelta > 0 ? 'tone-success tone-text opacity-80' : sizeDelta < 0 ? 'tone-warning tone-text opacity-80' : 'text-gray-600'}`}>
                   {sizeDeltaLabel}
                 </span>

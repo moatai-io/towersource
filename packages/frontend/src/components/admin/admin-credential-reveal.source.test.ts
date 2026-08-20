@@ -6,10 +6,10 @@ const source = fs.readFileSync(path.join(import.meta.dirname, 'AdminPanel.tsx'),
 
 describe('Admin Credential management UX', () => {
   it('puts reveal, edit, and structure actions together for each Credential', () => {
-    expect(source).toContain('Credential 관리');
-    expect(source).toContain('원문 보기');
-    expect(source).toContain('수정하기');
-    expect(source).toContain('구조 보기');
+    expect(source).toContain("t('credentialConnections.advancedCredentialManagement')");
+    expect(source).toContain("t('credentialConnections.advancedActions.reveal')");
+    expect(source).toContain("t('credentialConnections.advancedActions.edit')");
+    expect(source).toContain("t('credentialConnections.advancedActions.inspect')");
     expect(source).toContain("purpose: 'admin_session_reveal'");
   });
 
@@ -21,8 +21,8 @@ describe('Admin Credential management UX', () => {
   });
 
   it('keeps temporary inline masking controls', () => {
-    expect(source).toContain('원문 · 30초 후 자동 마스킹');
-    expect(source).toContain('지금 가리기');
+    expect(source).toContain("t('credentialConnections.advancedMessages.revealExpiry')");
+    expect(source).toContain("t('credentialConnections.advancedActions.maskNow')");
     expect(source).toContain('credentialRevealTarget?.credentialId === credential.id');
   });
 });

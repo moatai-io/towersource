@@ -727,7 +727,8 @@
     "keys": "키: {{keys}}",
     "newValue": "새 Credential 값",
     "replace": "새 값으로 교체",
-    "cancel": "취소"
+    "cancel": "취소",
+    "chatInjectionNotice": "Credential 주입은 이 에이전트와의 대화에서 요청하셔도 됩니다. 비밀값을 채팅에 붙여넣지 마세요. 에이전트가 Tower의 안전 입력창을 안내합니다."
   },
   "teammateCountCompact": "{{count}}명",
   "externalDeployment": "외부 배포",
@@ -973,5 +974,63 @@
     "date": "날짜",
     "removeLabel": "{{title}} 즐겨찾기 해제",
     "remove": "즐겨찾기 해제"
+  },
+  "agentGoogle": {
+    "connected": "이 Agent의 Google 계정을 연결했습니다.",
+    "connectFailed": "Google 계정을 연결하지 못했습니다. 다시 시도해 주세요.",
+    "startFailed": "Google 연결을 시작하지 못했습니다.",
+    "title": "이 Agent의 Google 계정",
+    "description": "Gmail·Calendar·Drive를 이 Agent 전용 Credential로 연결하거나 재인증합니다.",
+    "dedicated": "Agent 전용",
+    "redirecting": "Google로 이동하는 중…",
+    "connectOrReauthorize": "Google 계정 연결 또는 재인증"
+  },
+  "connectionRequiredFields": "필수 필드 {{connected}}/{{total}}",
+  "whatsNew": {
+    "title": "새 기능 (What's New)",
+    "empty": "아직 게시된 업데이트가 없습니다.",
+    "newBadge": "새 항목"
+  },
+  "urlPreviewErrors": {
+    "required": "URL을 입력하세요.",
+    "protocol": "http:// 또는 https://로 시작하는 URL을 입력하세요.",
+    "unsafe": "이 URL은 미리보기에서 열 수 없습니다."
+  },
+  "engineSwitchFailed": "엔진 전환에 실패했습니다.",
+  "reference": {
+    "workspace": "작업 공간: {{name}}",
+    "file": "파일: {{title}}",
+    "session": "세션: {{title}}",
+    "fileCopied": "파일 참조가 복사되었습니다",
+    "sessionCopied": "세션 참조가 복사되었습니다",
+    "copyFailed": "복사할 수 없습니다"
+  },
+  "aiTeamQuickPanel": {
+    "ariaLabel": "AI 팀 빠른 찾기",
+    "eyebrow": "AI 빠른 접근",
+    "close": "닫기",
+    "searchPlaceholder": "팀원·업무·대화 검색",
+    "searchResults": "검색 결과",
+    "teammate": "AI 팀원",
+    "conversation": "대화",
+    "noResults": "검색 결과가 없습니다.",
+    "continueWorking": "이어서 하기",
+    "recentConversations": "최근 대화",
+    "recentTeammates": "최근 사용한 AI 팀원",
+    "newTeammate": "새 AI 팀원 만들기",
+    "manageAll": "전체 AI 팀 관리",
+    "time": {
+      "justNow": "방금 전",
+      "hoursAgo": "{{count}}시간 전",
+      "hoursAgo_other": "{{count}}시간 전",
+      "daysAgo": "{{count}}일 전",
+      "daysAgo_other": "{{count}}일 전"
+    }
+  },
+  "mcpConnections": {
+    "title": "MCP 연결",
+    "description": "이 에이전트가 사용할 MCP 서버와 도구 연결을 여기에서 관리할 수 있게 됩니다.",
+    "comingSoon": "준비 중",
+    "scopeHint": "에이전트별 서버 선택, 권한 범위, Credential 연결 상태를 함께 보여줄 예정입니다."
   }
 }

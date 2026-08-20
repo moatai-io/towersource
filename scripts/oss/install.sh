@@ -2,8 +2,8 @@
 set -Eeuo pipefail
 
 # Tower OSS single-host installer for Ubuntu 22.04/24.04.
-# Installs Node.js, PostgreSQL + extensions, nginx, Tower systemd service,
-# and optionally Let's Encrypt when --domain is provided.
+# Installs the web application, PostgreSQL, nginx, reproducible Nix compute
+# closure, and a local Project Worker. Let's Encrypt remains optional.
 
 APP_DIR="${TOWER_APP_DIR:-/opt/tower}"
 DATA_DIR="${TOWER_DATA_DIR:-/var/lib/tower}"
@@ -12,7 +12,6 @@ PUBLIC_URL=""
 DOMAIN=""
 CERTBOT_EMAIL=""
 SOURCE_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
-PROFILE="minimal"
 SKIP_SOURCE_COPY=false
 
 usage() {
@@ -29,9 +28,11 @@ Options:
   --source-dir <path>    Tower source checkout (default: current repository)
   --app-dir <path>       Installed application path (default: /opt/tower)
   --data-dir <path>      Persistent data/workspace path (default: /var/lib/tower)
-  --profile <name>       minimal or recommended (default: minimal)
   --skip-source-copy     Use source directory in place instead of copying to /opt
   -h, --help             Show help
+
+Tower installs one complete configuration. Partial/minimal install profiles are
+not supported because every Project requires the local Worker compute plane.
 
 Examples:
   sudo bash scripts/oss/install.sh --public-url http://203.0.113.10
@@ -51,7 +52,7 @@ while [[ $# -gt 0 ]]; do
     --source-dir) SOURCE_DIR="$(cd "$2" && pwd)"; shift 2 ;;
     --app-dir) APP_DIR="$2"; shift 2 ;;
     --data-dir) DATA_DIR="$2"; shift 2 ;;
-    --profile) PROFILE="$2"; shift 2 ;;
+    --profile) fail "--profile was removed; Tower now installs the complete recommended configuration by default" ;;
     --skip-source-copy) SKIP_SOURCE_COPY=true; shift ;;
     -h|--help) usage; exit 0 ;;
     *) fail "Unknown option: $1" ;;
@@ -60,7 +61,7 @@ done
 
 [[ $EUID -eq 0 ]] || fail "Run with sudo: sudo bash scripts/oss/install.sh ..."
 [[ -f "$SOURCE_DIR/package.json" ]] || fail "Tower source not found at $SOURCE_DIR"
-[[ "$PROFILE" == "minimal" || "$PROFILE" == "recommended" ]] || fail "--profile must be minimal or recommended"
+[[ -f "$SOURCE_DIR/flake.nix" && -f "$SOURCE_DIR/flake.lock" ]] || fail "Tower Nix closure definition is missing"
 
 if [[ -n "$DOMAIN" ]]; then
   [[ "$DOMAIN" =~ ^[A-Za-z0-9.-]+$ ]] || fail "Invalid domain: $DOMAIN"
@@ -78,7 +79,7 @@ case "${VERSION_ID:-}" in 22.04|24.04) ;; *) fail "Ubuntu 22.04 or 24.04 require
 export DEBIAN_FRONTEND=noninteractive
 log "Installing base packages"
 apt-get update -qq
-apt-get install -y -qq curl ca-certificates gnupg lsb-release git build-essential nginx python3 openssl rsync
+apt-get install -y -qq curl ca-certificates gnupg lsb-release git build-essential nginx python3 openssl rsync xz-utils sudo
 
 if ! command -v node >/dev/null || ! node -e 'process.exit(Number(process.versions.node.split(".")[0]) >= 22 ? 0 : 1)' >/dev/null 2>&1; then
   log "Installing Node.js 22"
@@ -86,6 +87,22 @@ if ! command -v node >/dev/null || ! node -e 'process.exit(Number(process.versio
   apt-get install -y -qq nodejs
 fi
 ok "Node.js $(node -v)"
+
+if [[ -e /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh ]]; then
+  # shellcheck disable=SC1091
+  . /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh
+fi
+if ! command -v nix >/dev/null 2>&1 && [[ ! -x /nix/var/nix/profiles/default/bin/nix ]]; then
+  log "Installing Nix package manager"
+  curl -fsSL https://nixos.org/nix/install | sh -s -- --daemon --yes
+  # shellcheck disable=SC1091
+  . /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh
+fi
+if ! command -v nix >/dev/null 2>&1 && [[ -x /nix/var/nix/profiles/default/bin/nix ]]; then
+  export PATH="/nix/var/nix/profiles/default/bin:$PATH"
+fi
+command -v nix >/dev/null 2>&1 || fail "Nix installation did not expose the nix command"
+ok "Nix $(nix --version)"
 
 log "Installing PostgreSQL 18 and pgvector"
 install -d /usr/share/postgresql-common/pgdg
@@ -153,10 +170,35 @@ if [[ -d "$APP_DIR/packages/backend/node_modules" ]]; then
   ln -sfn "$APP_DIR/packages/backend/node_modules" "$APP_DIR/dist/backend/packages/backend/node_modules"
 fi
 
-install -d -m 755 "$DATA_DIR/workspace" "$DATA_DIR/app-data"
+install -d -m 755 "$DATA_DIR/workspace" "$DATA_DIR/app-data" "$DATA_DIR/nix"
 if [[ -d templates/workspace ]]; then
   cp -rn templates/workspace/. "$DATA_DIR/workspace/" || true
 fi
+
+# Seed only the explicitly allowlisted public managed skills before General is created.
+TEAMSKILLS_ROOT="$DATA_DIR/workspace/projects/teamskills"
+install -d -m 755 "$TEAMSKILLS_ROOT/skills"
+DEFAULT_SKILLS=(
+  agents-md cta design-explore design-md frontend-design goal html-slide ideate
+  md-docx-publisher mermaid-pdf plan-refine pdf2pptx pptx-review pptx-template
+  search session-rename skill-architect soul svg task-schedule tower-intro
+  web-capture wiki-compile
+)
+find "$TEAMSKILLS_ROOT/skills" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
+for skill in "${DEFAULT_SKILLS[@]}"; do
+  [[ -f "skills/managed/$skill/SKILL.md" ]] || fail "Default managed skill missing: $skill"
+  rsync -a "skills/managed/$skill/" "$TEAMSKILLS_ROOT/skills/$skill/"
+done
+node - "$TEAMSKILLS_ROOT/skillset.json" "${DEFAULT_SKILLS[@]}" <<'NODE'
+const fs = require('node:fs');
+const defaultSkills = process.argv.slice(3);
+fs.writeFileSync(process.argv[2], `${JSON.stringify({ version: 1, description: 'Tower OSS default managed skills', defaultSkills }, null, 2)}\n`);
+NODE
+
+log "Building reproducible Nix application and compute closure"
+CLOSURE_LINK="$DATA_DIR/nix/tower-app"
+nix --extra-experimental-features 'nix-command flakes' build "path:$APP_DIR#towerApp" --out-link "$CLOSURE_LINK"
+"$CLOSURE_LINK/bin/runtime-compute-doctor"
 
 ENV_FILE="$DATA_DIR/tower.env"
 JWT_SECRET=$(openssl rand -hex 32)
@@ -182,6 +224,8 @@ PI_ENABLED=true
 DEFAULT_ENGINE=pi
 CLAUDE_ENABLED=false
 TOWER_AGENT_FIRST_ENABLED=true
+RUNTIME_BOX_MATERIALIZE_SKILLS=true
+TOWER_PRIMARY_WORKER_ID=tower-oss-local-01
 WORKSPACE_LANGUAGE=en
 EOF
 chmod 600 "$ENV_FILE"
@@ -208,8 +252,41 @@ LimitNOFILE=65536
 [Install]
 WantedBy=multi-user.target
 EOF
+if ! getent group tower-worker >/dev/null; then groupadd --system tower-worker; fi
+if ! getent passwd tower-worker >/dev/null; then
+  useradd --system --gid tower-worker --home-dir "$DATA_DIR/worker-home" --create-home --shell /usr/sbin/nologin tower-worker
+fi
+chmod +x "$APP_DIR/scripts/oss/bootstrap-local-worker.sh"
+cat > /etc/systemd/system/tower-oss-worker-bootstrap.service <<EOF
+[Unit]
+Description=Complete Tower OSS local Worker bootstrap
+After=tower.service postgresql.service network-online.target
+Requires=tower.service postgresql.service
+
+[Service]
+Type=oneshot
+Environment=TOWER_APP_DIR=$APP_DIR
+Environment=TOWER_DATA_DIR=$DATA_DIR
+Environment=TOWER_NIX_CLOSURE_LINK=$CLOSURE_LINK
+Environment=TOWER_LOCAL_WORKER_CONTROL_PLANE_URL=http://127.0.0.1:$PORT
+ExecStart=$APP_DIR/scripts/oss/bootstrap-local-worker.sh
+EOF
+cat > /etc/systemd/system/tower-oss-worker-bootstrap.timer <<'EOF'
+[Unit]
+Description=Retry Tower OSS local Worker bootstrap until first admin exists
+
+[Timer]
+OnBootSec=10s
+OnUnitActiveSec=15s
+AccuracySec=2s
+Persistent=true
+Unit=tower-oss-worker-bootstrap.service
+
+[Install]
+WantedBy=timers.target
+EOF
 systemctl daemon-reload
-systemctl enable --now tower
+systemctl enable --now tower tower-oss-worker-bootstrap.timer
 
 log "Configuring nginx"
 NGINX_NAME=tower
@@ -251,24 +328,20 @@ if [[ -n "$DOMAIN" ]]; then
   systemctl enable --now certbot.timer >/dev/null 2>&1 || true
 fi
 
-if [[ "$PROFILE" == "recommended" ]]; then
-  log "Installing recommended document tools"
-  apt-get install -y -qq poppler-utils ffmpeg imagemagick fonts-noto-cjk fonts-noto-color-emoji
-fi
-
 log "Running Tower doctor"
-bash "$APP_DIR/scripts/oss/doctor.sh" --app-dir "$APP_DIR" --data-dir "$DATA_DIR" --url "$PUBLIC_URL"
+TOWER_NIX_CLOSURE_LINK="$CLOSURE_LINK" bash "$APP_DIR/scripts/oss/doctor.sh" --app-dir "$APP_DIR" --data-dir "$DATA_DIR" --url "$PUBLIC_URL"
 
 cat <<EOF
 
 Tower is ready.
 
 Open: $PUBLIC_URL
-Next: create the first administrator account in your browser.
-AI models: open Settings > Connections and connect OpenRouter or an OpenAI-compatible provider.
+Next: create the first administrator account. Tower will activate the local Worker and continue to AI provider setup.
 
 Useful commands:
   sudo systemctl status tower
+  sudo systemctl status tower-oss-worker-bootstrap.timer
   sudo journalctl -u tower -f
+  sudo journalctl -u tower-oss-worker-bootstrap.service -f
   sudo bash $APP_DIR/scripts/oss/doctor.sh --url $PUBLIC_URL
 EOF

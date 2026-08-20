@@ -23,6 +23,11 @@ export function SettingsPanel() {
   const handleLanguageChange = (lang: LangId) => {
     setLanguage(lang);
     i18n.changeLanguage(lang);
+    fetch('/api/me/profile', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ language: lang }),
+    }).catch(() => {});
   };
 
   if (!isOpen) return null;

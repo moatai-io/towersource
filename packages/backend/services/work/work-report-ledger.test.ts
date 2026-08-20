@@ -16,22 +16,38 @@ vi.mock('./work-ledger.js', () => ({
 import { indexWorkReportMessage, indexWorkReportMessageUpdate, parseWorkReportBlock } from './work-report-ledger.js';
 
 describe('parseWorkReportBlock', () => {
-  it('extracts the final 업무보고 block fields and artifacts', () => {
+  it('extracts the standard Work Summary fields and artifacts in any conversation language', () => {
     const report = parseWorkReportBlock([{ type: 'text', text: `완료했습니다.
 
-업무보고:
-- 결론: TodoWrite는 live progress로 낮추고 업무보고를 최근 업무 원천으로 삼았습니다.
-- 산출물: \`~/workspace/decisions/2026-08-04-recent-work-from-work-report.md\`, packages/backend/services/work/work-report-ledger.ts
-- 다음: parser를 WorkLedger 후보 추출 경로에 연결합니다.
+Work Summary:
+- Outcome: TodoWrite는 live progress로 낮추고 Work Summary를 최근 업무 원천으로 삼았습니다.
+- Artifacts: \`~/workspace/decisions/2026-08-04-recent-work-from-work-report.md\`, packages/backend/services/work/work-report-ledger.ts
+- Next: parser를 WorkLedger 후보 추출 경로에 연결합니다.
 
 다른 문장` }]);
 
     expect(report).toMatchObject({
-      conclusion: 'TodoWrite는 live progress로 낮추고 업무보고를 최근 업무 원천으로 삼았습니다.',
+      conclusion: 'TodoWrite는 live progress로 낮추고 Work Summary를 최근 업무 원천으로 삼았습니다.',
       next: 'parser를 WorkLedger 후보 추출 경로에 연결합니다.',
     });
     expect(report?.artifacts).toContain('~/workspace/decisions/2026-08-04-recent-work-from-work-report.md');
     expect(report?.artifacts).toContain('packages/backend/services/work/work-report-ledger.ts');
+  });
+
+  it('keeps legacy 업무보고 blocks readable', () => {
+    expect(parseWorkReportBlock(`업무보고:\n- 결론: 기존 기록 호환\n- 산출물: packages/backend/legacy.ts\n- 다음: 새 형식으로 전환`)).toMatchObject({
+      conclusion: '기존 기록 호환',
+      artifacts: ['packages/backend/legacy.ts'],
+      next: '새 형식으로 전환',
+    });
+  });
+
+  it('accepts English field aliases case-insensitively', () => {
+    expect(parseWorkReportBlock(`## work summary\n- RESULT: Indexed successfully.\n- FILES: packages/backend/index.ts\n- NEXT STEPS: Verify UI projection.`)).toMatchObject({
+      conclusion: 'Indexed successfully.',
+      artifacts: ['packages/backend/index.ts'],
+      next: 'Verify UI projection.',
+    });
   });
 
   it('ignores ordinary assistant text without the label', () => {
@@ -46,17 +62,17 @@ describe('indexWorkReportMessage', () => {
     upsertWorkLedgerRecordMock.mockResolvedValue({ id: 'wl-1' });
   });
 
-  it('writes a compact manual WorkLedger row for an assistant 업무보고', async () => {
+  it('writes a compact manual WorkLedger row for an assistant Work Summary', async () => {
     queryOneMock.mockResolvedValueOnce({ project_id: 'p1', user_id: 7, session_name: 'Recent work session' });
 
     const indexed = await indexWorkReportMessage({
       sessionId: 's1',
       messageId: 'a1',
       role: 'assistant',
-      content: [{ type: 'text', text: `업무보고:
-- 결론: 최근 업무를 업무보고 라벨로 색인합니다.
-- 산출물: \`~/workspace/projects/tower/work/report.md\`
-- 다음: UI projection을 조정합니다.` }],
+      content: [{ type: 'text', text: `Work Summary:
+- Outcome: 최근 업무를 Work Summary 라벨로 색인합니다.
+- Artifacts: \`~/workspace/projects/tower/work/report.md\`
+- Next: UI projection을 조정합니다.` }],
     });
 
     expect(indexed).toBe(true);
@@ -68,19 +84,19 @@ describe('indexWorkReportMessage', () => {
       sourceType: 'manual',
       sourceId: 'work-report:a1',
       status: 'completed',
-      outcome: '최근 업무를 업무보고 라벨로 색인합니다.',
+      outcome: '최근 업무를 Work Summary 라벨로 색인합니다.',
       artifacts: ['~/workspace/projects/tower/work/report.md'],
       backlog: [{ type: 'task', title: 'UI projection을 조정합니다.' }],
     }));
     expect(upsertWorkLedgerRecordMock.mock.calls[0][0].sourceRefs).toMatchObject({
       kind: 'work_report',
       assistantMessageId: 'a1',
-      parserVersion: 1,
+      parserVersion: 2,
     });
   });
 
   it('does not index non-assistant messages', async () => {
-    const indexed = await indexWorkReportMessage({ sessionId: 's1', messageId: 'u1', role: 'user', content: '업무보고:\n- 결론: no' });
+    const indexed = await indexWorkReportMessage({ sessionId: 's1', messageId: 'u1', role: 'user', content: 'Work Summary:\n- Outcome: no' });
     expect(indexed).toBe(false);
     expect(queryOneMock).not.toHaveBeenCalled();
     expect(upsertWorkLedgerRecordMock).not.toHaveBeenCalled();
@@ -89,8 +105,8 @@ describe('indexWorkReportMessage', () => {
   it('indexes streamed assistant updates by looking up message context', async () => {
     queryOneMock.mockResolvedValueOnce({ session_id: 's1', role: 'assistant', project_id: 'p1', user_id: 7, session_name: 'Session' });
 
-    const indexed = await indexWorkReportMessageUpdate('a2', [{ type: 'text', text: `업무보고:
-- 결론: streaming update indexed.` }]);
+    const indexed = await indexWorkReportMessageUpdate('a2', [{ type: 'text', text: `Work Summary:
+- Outcome: streaming update indexed.` }]);
 
     expect(indexed).toBe(true);
     expect(upsertWorkLedgerRecordMock).toHaveBeenCalledWith(expect.objectContaining({

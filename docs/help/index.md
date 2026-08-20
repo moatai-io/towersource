@@ -1,28 +1,33 @@
 ---
-title: "Tower 도움말"
+title: "Tower Help"
 icon: "📖"
 order: 0
 ---
 
-# Tower 도움말
+# Tower Help
 
-Tower에 오신 것을 환영합니다. 이 문서에서는 Tower의 주요 기능과 사용법을 안내합니다.
+Tower is a self-hosted workspace where teams can work with AI teammates across conversations, files, tools, credentials, automations, and published outputs.
 
----
+The current help sets are maintained by language:
 
-## 목차
+- [한국어 도움말](./ko/index.md)
+- [English help](./en/index.md)
 
-| 순서 | 문서 | 설명 |
-|------|------|------|
-| 1 | [시작하기](./01-getting-started.md) | Tower 소개, 화면 구성, 첫 대화 시작 |
-| 2 | [Sessions — AI 대화](./02-sessions.md) | Claude AI와의 1:1 대화 기능 |
-| 3 | [Channels — 팀 채널](./03-channels.md) | 팀원들과 함께하는 실시간 채널 |
-| 4 | [Files — 파일 관리](./04-files.md) | File Tree, 편집기, 공유 기능 |
-| 5 | [Tasks — 칸반 보드](./05-tasks.md) | Kanban 보드로 AI 태스크 관리 |
-| 6 | [Visual Blocks — 시각화](./06-visual-blocks.md) | AI 응답의 자동 시각화 블록 |
-| 7 | [Settings — 설정](./07-settings.md) | 테마, 모델, Admin 설정 |
-| 8 | [단축키 & 꿀팁](./08-shortcuts.md) | 키보드 단축키와 생산성 팁 |
+## Current product model
 
----
+1. Choose a **Project** or Primary AI teammate workspace.
+2. Continue work in a **Session**.
+3. Keep durable outputs in Project files.
+4. Use **My Work** to review ongoing work, approvals, and execution history.
+5. Use **Automations** for recurring or scheduled AI work.
+6. Use Skills and Connections when a task needs specialized instructions or an external service.
 
-궁금한 주제를 선택해서 시작하세요. 각 문서는 독립적으로 읽을 수 있습니다.
+## Documentation status
+
+Some topic files originated in earlier Tower releases. A page marked **Historical UI guide** describes a retired or substantially changed surface and should not be treated as the current product contract.
+
+For installation and system architecture, use the maintained public documents:
+
+- [Installation Guide](../../INSTALL.md)
+- [Architecture](../tower-guide/architecture.md)
+- [Skills](../tower-guide/skills.md)

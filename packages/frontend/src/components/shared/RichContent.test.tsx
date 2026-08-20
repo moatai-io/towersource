@@ -1,8 +1,12 @@
 // @vitest-environment jsdom
-import { describe, expect, it, vi } from 'vitest';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import { RichContent } from './RichContent';
+import '../../i18n';
+import i18n from '../../i18n';
+
+beforeAll(async () => { await i18n.changeLanguage('en'); });
 
 describe('RichContent file path links', () => {
   it('opens a portable workspace HTML path wrapped in inline code', () => {
@@ -11,7 +15,7 @@ describe('RichContent file path links', () => {
 
     render(<RichContent text={`결과: \`${path}\``} onFileClick={onFileClick} />);
 
-    const link = screen.getByRole('button', { name: `파일 열기: ${path}` });
+    const link = screen.getByRole('button', { name: `Open file: ${path}` });
     expect(link).toHaveTextContent(path);
     fireEvent.click(link);
     expect(onFileClick).toHaveBeenCalledWith(path);
@@ -28,11 +32,11 @@ describe('RichContent file path links', () => {
 
     fireEvent.contextMenu(screen.getByText(path));
 
-    expect(screen.getByRole('menuitem', { name: '새 탭에서 열기' })).toBeInTheDocument();
-    expect(screen.getByRole('menuitem', { name: '다운로드' })).toBeInTheDocument();
-    expect(screen.getByRole('menuitem', { name: '내 파일에 저장' })).toBeInTheDocument();
-    expect(screen.getByRole('menuitem', { name: '위치 경로 복사' })).toBeInTheDocument();
-    expect(screen.getByRole('menuitem', { name: '파일 위치 보기' })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'Open in new tab' })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'Download' })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'Save to My Files' })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'Copy file path' })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'Show file location' })).toBeInTheDocument();
   });
 });
 

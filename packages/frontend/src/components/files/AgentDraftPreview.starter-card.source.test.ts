@@ -53,7 +53,7 @@ describe("AI employee bootstrap card", () => {
   it("opens the minimal creator directly without starting a helper conversation", () => {
     expect(app).toContain("draft.sourceProjectId = sourceProject?.id");
     expect(app).toContain(
-      "mobileHiring ? { split: 'right', name: t('newAiTeammate') } : { name: t('newAiTeammate') }",
+      "{ split: 'right', name: t('newAiTeammate') }",
     );
     expect(app).not.toContain("AI talent team seed project is unavailable");
     expect(app).not.toContain("createSessionInDb('AI 인재팀과 새 직원 찾기'");

@@ -543,5 +543,53 @@
     "openFullConversation": "Open full conversation",
     "expandRequest": "Expand request",
     "collapseRequest": "Collapse request"
+  },
+  "confirmProceed": "Yes, proceed",
+  "confirmStop": "No, stop",
+  "unanswered": "[Unanswered]",
+  "expandQuestion": "Expand question",
+  "questionNeedsAnswer": "A question needs your response",
+  "reopenQuestionHint": "Reopen the question to review it",
+  "reopenQuestion": "Reopen",
+  "minimizeQuestion": "Minimize question",
+  "minimizeQuestionHint": "Minimize the question and view the conversation",
+  "inputResize": {
+    "manualHint": "Drag to resize · Double-click to return to automatic sizing",
+    "hint": "Drag to resize",
+    "label": "Resize message input"
+  },
+  "skillInvocation": {
+    "applied": "{{name}} was applied to this turn",
+    "naturalSelection": "Automatically selected from an explicit natural-language signal."
+  },
+  "branch": {
+    "openPoint": "Open the branch point in {{name}}",
+    "openOriginal": "Open the original conversation",
+    "startedFromSession": "Started from an earlier message in {{name}}",
+    "startedFromOriginal": "Started from an earlier message in the original conversation",
+    "openOriginalLocation": "Open original location"
+  },
+  "jumpToLatest": "Jump to latest message",
+  "loadingOlderMessages": "Loading older messages…",
+  "scrollForOlderMessages": "↑ Scroll up to load earlier messages",
+  "autoResume": {
+    "title": "This conversation resumed automatically after the backend restarted.",
+    "label": "Resumed after server restart"
+  },
+  "stoppedTurn": {
+    "title": "Work stopped.",
+    "forcedHint": "Review any in-progress steps if needed.",
+    "savedHint": "Results up to this point have been saved."
+  },
+  "runtime": {
+    "steeringCanceled": "Steering message canceled.",
+    "alreadyFinished": "This work has already finished.",
+    "stopRejected": "This work cannot be stopped.",
+    "compactComplete": "✂️ Long conversation summarized. Continuing here.",
+    "compactFailed": "Automatic conversation cleanup failed. Send again in this session to retry.",
+    "questionTimedOut": "The response window expired, so the AI will ask again in chat.",
+    "open": "Open",
+    "steeringRestoredAfterFailure": "Could not deliver the additional instruction, so it was restored to the input.",
+    "websocketNotReady": "The connection is not ready, so the message was not sent. Try again shortly."
   }
 }

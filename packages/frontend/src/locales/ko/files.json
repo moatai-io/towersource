@@ -373,7 +373,8 @@
     "save": "저장",
     "instructionsTitle": "프로젝트 지침",
     "instructionsLoading": "프로젝트 지침을 불러오는 중…",
-    "noInstructions": "이 프로젝트에는 아직 AGENTS.md 지침 파일이 없습니다."
+    "noInstructions": "이 프로젝트에는 아직 AGENTS.md 지침 파일이 없습니다.",
+    "connections": "연결"
   },
   "workspace": {
     "noProjectFiles": "열 수 있는 프로젝트 파일이 없습니다",
@@ -505,7 +506,10 @@
     "selectionActions": "선택 작업",
     "currentPath": "현재 경로",
     "close": "닫기",
-    "noExpiry": "기한 없음"
+    "noExpiry": "기한 없음",
+    "destinationLoadFailed": "대상 폴더를 불러오지 못했습니다.",
+    "transferMessageWithPath": "{{count}}개 파일의 독립된 사본을 {{name}} 작업공간의 {{path}}에 저장할까요?",
+    "workspaceRoot": "작업공간 루트"
   },
   "agentHome": {
     "level": {
@@ -723,5 +727,73 @@
     "hideArtifacts": "개발자 산출물 접기",
     "showArtifacts": "개발자 산출물 보기",
     "artifactDescription": "원본은 변경하지 않고 project work/cad 폴더에 preview, text/layer index, QA 산출물을 저장합니다. 오른쪽 AI thread가 이 파일들을 근거로 도면 업무를 이어갈 수 있습니다."
+  },
+  "selection": {
+    "copied": "{{count}}개 항목 복사됨 — 대상 폴더에서 붙여넣기 하세요",
+    "deleteOne": "“{{name}}”을 삭제하시겠습니까?",
+    "deleteMany": "{{count}}개 항목을 삭제하시겠습니까?",
+    "deleteTitle": "삭제",
+    "deleted": "{{count}}개 삭제됨",
+    "deleteFailed": "{{count}}개 삭제 실패",
+    "moved": "{{count}}개 파일 이동 완료",
+    "moveFailed": "{{count}}개 파일 이동 실패"
+  },
+  "shortLink": {
+    "invalid": "잘못된 파일 링크입니다.",
+    "openFailed": "파일 링크를 열 수 없습니다.",
+    "missingPath": "파일 경로가 없습니다.",
+    "opening": "파일 링크를 여는 중…"
+  },
+  "pins": {
+    "empty": "아직 즐겨찾기가 없습니다",
+    "emptyHint": "파일이나 폴더를 즐겨찾기에 추가해보세요",
+    "expand": "즐겨찾기 펼치기",
+    "collapse": "즐겨찾기 접기",
+    "title": "즐겨찾기",
+    "remove": "즐겨찾기 해제"
+  },
+  "richContent": {
+    "pathCopied": "위치 경로를 복사했습니다",
+    "pathCopyFailed": "경로 복사에 실패했습니다",
+    "readFailed": "파일을 읽지 못했습니다",
+    "savePersonalFailed": "내 파일에 저장하지 못했습니다",
+    "savedPersonal": "내 파일에 저장했습니다",
+    "pathMenu": "파일 경로 메뉴",
+    "openNewTab": "새 탭에서 열기",
+    "download": "다운로드",
+    "savePersonal": "내 파일에 저장",
+    "copyPath": "위치 경로 복사",
+    "revealFile": "파일 위치 보기",
+    "openFile": "파일 열기: {{path}}",
+    "copyFailedFallback": "복사 실패 — 직접 드래그해서 복사해주세요"
+  },
+  "tree": {
+    "pasted": "{{count}}개 항목 붙여넣기 완료",
+    "pasteFailed": "{{count}}개 항목 붙여넣기 실패",
+    "deleted": "{{count}}개 삭제됨",
+    "deletedOne": "{{name}} 삭제됨",
+    "deleteFailed": "{{count}}개 삭제 실패"
+  },
+  "notesView": {
+    "searchPlaceholder": "문서 파일명이나 폴더 검색",
+    "clear": "지우기",
+    "loading": "불러오는 중…",
+    "empty": "문서 파일이 없습니다",
+    "loadFailed": "문서 색인을 불러오지 못했습니다."
+  },
+  "inlineEditErrors": {
+    "selectionNotFound": "선택한 텍스트를 원본에서 찾지 못했어요. 여러 단락에 걸친 선택이거나, 마크다운 부호 / HTML 엔티티가 섞인 영역은 아직 지원하지 않아요. 한 단락 안에서 다시 선택해 주세요.",
+    "selectionAmbiguous": "선택한 텍스트가 파일 안에 여러 번 나와요. 좀 더 큰 범위를 선택해 주세요.",
+    "editFailed": "AI 편집에 실패했어요.",
+    "undoFailed": "되돌리기에 실패했어요.",
+    "saveFailed": "저장에 실패했어요."
+  },
+  "inlineEditDiff": {
+    "before": "변경 전",
+    "after": "변경 후",
+    "characterCount": "{{count}}자"
+  },
+  "inlineEditOutline": {
+    "selection": "선택"
   }
 }

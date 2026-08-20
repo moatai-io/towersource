@@ -148,5 +148,21 @@
       "특정 주제에 대해 이 채널에서 오간 내용을 찾아줘",
       "이 논의를 바탕으로 다음 액션 플랜을 만들어줘"
     ]
+  },
+  "retiredChannel": {
+    "eyebrow": "보존된 링크",
+    "title": "내부 채널 기능이 종료되었습니다",
+    "description": "기존 채널 기록은 삭제하지 않고 보존하고 있습니다. 새 실행 결과와 중요한 안내는 알림 센터에서 확인하고, 상세 작업 기록은 Work와 실행 세션에서 확인해 주세요.",
+    "openWork": "Work 열기",
+    "openAiTeam": "AI 팀으로 이동"
+  },
+  "thread": {
+    "noConversationYet": "아직 대화 없음",
+    "cadWorkbenchPrefix": "CAD Workbench: ",
+    "automationPrefix": "Automation: ",
+    "currentFilePrefix": "현재 파일: ",
+    "currentCadSelection": "현재 CAD 선택",
+    "selectionArea": "선택 영역",
+    "answerQuestionPlaceholder": "질문에 답변을 입력하세요…"
   }
 }

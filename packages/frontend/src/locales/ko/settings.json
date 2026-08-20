@@ -51,5 +51,17 @@
   "browserNotificationsDisabled": "브라우저 알림을 껐습니다",
   "browserNotificationSettingsFailed": "브라우저 알림 설정에 실패했습니다",
   "testNotificationSent": "테스트 알림 전송: {{count}}개",
-  "testNotificationFailed": "테스트 알림 전송 실패"
+  "testNotificationFailed": "테스트 알림 전송 실패",
+  "oauthConnections": {
+    "title": "연결",
+    "connect": "연결",
+    "connecting": "연결 중…",
+    "disconnect": "연결 해제",
+    "disconnectTitle": "계정 연결 해제",
+    "disconnectMessage": "이 계정의 연결을 해제하시겠습니까?",
+    "skillReadiness": "스킬 준비 상태",
+    "readyCount": "({{ready}}/{{total}} 준비됨)",
+    "noCredentialSkills": "현재 추가 연결이 필요한 스킬이 없습니다.",
+    "missingConnections": "{{connections}} 연결 필요"
+  }
 }

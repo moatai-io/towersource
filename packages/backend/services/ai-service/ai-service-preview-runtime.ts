@@ -16,6 +16,10 @@ import { recordPassedRuntimeEvaluation } from './activation-gate.js';
 import { buildServiceAgentRuntimePrompt, serviceIdentityFromExperience } from './service-identity.js';
 import { buildServiceKnowledgePrompt } from './source-snapshot.js';
 import { AIServiceKnowledgeCitationError, parseKnowledgeReadEvidence, validateKnowledgeAnswerCitations, type KnowledgeReadEvidence } from './knowledge-citation-validation.js';
+import { config } from '../../config.js';
+import { ensureRunning, getOrCreateBox } from '../runtime-box/runtime-box-manager.js';
+import { isProjectExcluded } from '../runtime-box/policy.js';
+import { createBackendAIServiceAgentRuntimeProvider } from './ai-service-agent-runtime-provider.js';
 
 interface PreviewDeploymentRow {
   service_id: string;
@@ -27,6 +31,29 @@ interface PreviewDeploymentRow {
   policy_snapshot: unknown;
   experience_snapshot: unknown;
   snapshot_hash: string;
+}
+
+interface AIServiceRuntimeBoundary {
+  readinessBoundary: 'project-runtime-box';
+  agentExecutionBoundary: 'backend-process';
+  agentRuntimeProvider: 'backend-engine';
+  runtimeBoxId: number;
+  projectId: string;
+}
+
+async function requireChannelRuntimeBox(input: {
+  runtimeMode: 'preview' | 'channel';
+  projectId: string;
+  projectName: string;
+  ownerUserId: number;
+}): Promise<AIServiceRuntimeBoundary | null> {
+  if (input.runtimeMode !== 'channel') return null;
+  if (!config.runtimeBox.enabled) throw new Error('AI Service Channel requires Runtime Box, but Runtime Box is disabled');
+  if (isProjectExcluded(input.projectId, input.projectName)) throw new Error('AI Service Channel Project is excluded from Runtime Box');
+  const box = await getOrCreateBox(input.projectId, input.ownerUserId);
+  const running = await ensureRunning(Number(box.id), input.ownerUserId);
+  if (running.status !== 'running') throw new Error(`AI Service Channel Runtime Box is not running (status=${running.status})`);
+  return { readinessBoundary: 'project-runtime-box', agentExecutionBoundary: 'backend-process', agentRuntimeProvider: 'backend-engine', runtimeBoxId: Number(running.id), projectId: input.projectId };
 }
 
 interface HarnessBindingSnapshot {
@@ -55,6 +82,7 @@ export interface AIServicePreviewResult {
     toolCount: number;
     tools: Array<{ name: string; input?: Record<string, unknown> }>;
     deploymentSnapshotHash: string;
+    runtimeBoundary: AIServiceRuntimeBoundary | null;
     knowledgeCitationValidation?: {
       readCount: number;
       verifiedCount: number;
@@ -210,7 +238,14 @@ export async function runAIServicePreview(input: {
     model: binding.model || harness.defaultModel,
     harness,
   });
+  const runtimeBoundary = await requireChannelRuntimeBox({
+    runtimeMode: input.runtimeMode || 'preview',
+    projectId: deployment.owner_project_id,
+    projectName: deployment.service_name,
+    ownerUserId: deployment.owner_user_id,
+  });
   const engine = await getEngine(harness.engine);
+  const agentRuntimeProvider = createBackendAIServiceAgentRuntimeProvider();
   const abortRuntime = () => engine.abort(sessionId);
   if (input.signal?.aborted) abortRuntime();
   else input.signal?.addEventListener('abort', abortRuntime, { once: true });
@@ -280,7 +315,7 @@ export async function runAIServicePreview(input: {
   const runtimeLabel = input.runtimeMode === 'channel' ? 'AI Service Channel' : 'AI Service Preview';
   const systemBoundary = `You are running inside an isolated ${runtimeLabel}. Answer the user's request directly. Use only the tools exposed by the pinned Harness. You have no filesystem, Project instructions, memory, credentials, MCP, publishing, scheduling, or orchestration capability. For material claims based on the web, name the source URLs you actually fetched and state uncertainty.${knowledge.prompt ? `\n\n${knowledge.prompt}\n\nFor precise Knowledge answers, use knowledge_search and then knowledge_read. Cite the returned path and line range. These tools can inspect only this immutable Deployment snapshot.` : ''}`;
   try {
-    for await (const message of engine.run(sessionId, `${systemBoundary}\n\nUser request:\n${input.prompt}`, {
+    for await (const message of agentRuntimeProvider.run({ engine, sessionId, prompt: `${systemBoundary}\n\nUser request:\n${input.prompt}`, opts: {
       cwd,
       model: binding.model || harness.defaultModel || undefined,
       userId: input.userId,
@@ -295,7 +330,7 @@ export async function runAIServicePreview(input: {
       serviceIdentityPrompt: buildServiceAgentRuntimePrompt(serviceIdentity),
       serviceKnowledgeSnapshot: knowledge.citations.length > 0 ? mergedKnowledgeSnapshot : undefined,
       rootTurnId,
-    }, callbacks)) {
+    }, callbacks })) {
       if (message.type === 'assistant') {
         const blocks = (message.content || []) as TowerContentBlock[];
         const nextText = blocks.filter((block): block is TowerContentBlock & { type: 'text' } => block.type === 'text').map((block) => block.text || '').join('') || text;
@@ -366,6 +401,7 @@ export async function runAIServicePreview(input: {
     toolCount: fingerprint.toolCount,
     tools: tools.map(({ id: _id, ...tool }) => tool),
     deploymentSnapshotHash: deployment.snapshot_hash,
+    runtimeBoundary,
     ...(knowledge.citations.length > 0 ? { knowledgeCitationValidation: {
       readCount: knowledgeReadEvidence.length,
       verifiedCount: citationValidation.verified.length,

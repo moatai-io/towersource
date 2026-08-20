@@ -5,7 +5,7 @@ export type InferenceProviderReadiness = {
   defaultModel: string;
   readyProviders: string[];
   configuredProviders: string[];
-  reason: 'ready' | 'no_provider' | 'default_unavailable';
+  reason: 'ready' | 'no_provider' | 'default_unavailable' | 'provider_auth_failed';
   nextAction: string;
 };
 

@@ -727,7 +727,8 @@
     "keys": "Keys: {{keys}}",
     "newValue": "New Credential value",
     "replace": "Replace with new value",
-    "cancel": "Cancel"
+    "cancel": "Cancel",
+    "chatInjectionNotice": "You can also request credential injection in a conversation with this Agent. Do not paste secret values into chat; the Agent will guide you to Tower’s secure input."
   },
   "teammateCountCompact": "{{count}} teammates",
   "externalDeployment": "External deployment",
@@ -973,5 +974,63 @@
     "date": "Date",
     "removeLabel": "Remove {{title}} from Favorites",
     "remove": "Remove from Favorites"
+  },
+  "agentGoogle": {
+    "connected": "Connected this Agent’s Google account.",
+    "connectFailed": "Could not connect the Google account. Try again.",
+    "startFailed": "Could not start Google authorization.",
+    "title": "Google account for this Agent",
+    "description": "Connect or reauthorize Gmail, Calendar, and Drive with credentials dedicated to this Agent.",
+    "dedicated": "Agent-only",
+    "redirecting": "Opening Google…",
+    "connectOrReauthorize": "Connect or reauthorize Google"
+  },
+  "connectionRequiredFields": "Required fields {{connected}}/{{total}}",
+  "whatsNew": {
+    "title": "What's new",
+    "empty": "No updates have been published yet.",
+    "newBadge": "New"
+  },
+  "urlPreviewErrors": {
+    "required": "Enter a URL.",
+    "protocol": "Enter a URL that starts with http:// or https://.",
+    "unsafe": "This URL cannot be opened in the preview."
+  },
+  "engineSwitchFailed": "Could not switch conversation engines.",
+  "reference": {
+    "workspace": "Workspace: {{name}}",
+    "file": "File: {{title}}",
+    "session": "Conversation: {{title}}",
+    "fileCopied": "File reference copied.",
+    "sessionCopied": "Conversation reference copied.",
+    "copyFailed": "Could not copy the reference."
+  },
+  "aiTeamQuickPanel": {
+    "ariaLabel": "Quick AI team finder",
+    "eyebrow": "AI Quick Access",
+    "close": "Close",
+    "searchPlaceholder": "Search teammates, work, or conversations",
+    "searchResults": "Search results",
+    "teammate": "AI teammate",
+    "conversation": "Conversation",
+    "noResults": "No results found.",
+    "continueWorking": "Continue working",
+    "recentConversations": "Recent conversations",
+    "recentTeammates": "Recently used AI teammates",
+    "newTeammate": "Create AI teammate",
+    "manageAll": "Manage all AI teammates",
+    "time": {
+      "justNow": "Just now",
+      "hoursAgo": "{{count}} hour ago",
+      "hoursAgo_other": "{{count}} hours ago",
+      "daysAgo": "{{count}} day ago",
+      "daysAgo_other": "{{count}} days ago"
+    }
+  },
+  "mcpConnections": {
+    "title": "MCP connections",
+    "description": "Manage the MCP servers and tool connections available to this Agent here.",
+    "comingSoon": "Coming soon",
+    "scopeHint": "This will show per-Agent server selection, permission scope, and Credential connection status."
   }
 }

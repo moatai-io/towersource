@@ -35,7 +35,7 @@ describe("embedded file workspace parity", () => {
       "t('workspace.copyAndSend')",
       "transferFile",
       '{ scope: "project", projectId: selectedProject.id, relativePath }',
-      '{ scope: "project", projectId: target.id, relativeDirectory: "uploads" }',
+      'projectId: target.id, relativeDirectory: transferDirectory.slice(target.rootPath.length)'
     ])
       expect(s).toContain(t);
     expect(s).not.toContain("symlink");

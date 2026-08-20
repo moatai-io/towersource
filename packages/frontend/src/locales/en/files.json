@@ -373,7 +373,8 @@
     "save": "Save",
     "instructionsTitle": "Project instructions",
     "instructionsLoading": "Loading project instructions…",
-    "noInstructions": "This project does not have an AGENTS.md instruction file yet."
+    "noInstructions": "This project does not have an AGENTS.md instruction file yet.",
+    "connections": "Connections"
   },
   "workspace": {
     "noProjectFiles": "No project files are available",
@@ -505,7 +506,10 @@
     "selectionActions": "Selection actions",
     "currentPath": "Current path",
     "close": "Close",
-    "noExpiry": "No expiry"
+    "noExpiry": "No expiry",
+    "destinationLoadFailed": "Could not load the destination folder.",
+    "transferMessageWithPath": "Save independent copies of {{count}} files in {{name}} workspace at {{path}}?",
+    "workspaceRoot": "Workspace root"
   },
   "agentHome": {
     "level": {
@@ -531,10 +535,10 @@
     "aiTeammate": "AI teammate",
     "joinedTeam": "Joined team {{date}}",
     "startedCollaboration": "Started working with me {{date}}",
-    "assignWork": "Assign new work",
-    "settings": "Teammate settings",
-    "externalDeployComingSoon": "External deployment is coming soon",
-    "externalDeploy": "External deployment",
+    "assignWork": "Assign work",
+    "settings": "Settings",
+    "externalDeployComingSoon": "Deployment coming soon",
+    "externalDeploy": "Deploy",
     "currentLevel": "Current level",
     "next": "Next",
     "myWork": "Work explored with me",
@@ -723,5 +727,73 @@
     "hideArtifacts": "Hide developer artifacts",
     "showArtifacts": "Show developer artifacts",
     "artifactDescription": "The original is unchanged. Preview, text/layer indexes, and QA artifacts are saved under project work/cad so the AI thread can continue drawing work using this evidence."
+  },
+  "selection": {
+    "copied": "Copied {{count}} items. Paste them in the destination folder.",
+    "deleteOne": "Delete “{{name}}”?",
+    "deleteMany": "Delete {{count}} items?",
+    "deleteTitle": "Delete items",
+    "deleted": "Deleted {{count}} items.",
+    "deleteFailed": "Could not delete {{count}} items.",
+    "moved": "Moved {{count}} files.",
+    "moveFailed": "Could not move {{count}} files."
+  },
+  "shortLink": {
+    "invalid": "This file link is invalid.",
+    "openFailed": "Could not open the file link.",
+    "missingPath": "The file path is missing.",
+    "opening": "Opening file link…"
+  },
+  "pins": {
+    "empty": "No favorites yet",
+    "emptyHint": "Add a file or folder to your favorites.",
+    "expand": "Expand favorites",
+    "collapse": "Collapse favorites",
+    "title": "Favorites",
+    "remove": "Remove from favorites"
+  },
+  "richContent": {
+    "pathCopied": "File path copied.",
+    "pathCopyFailed": "Could not copy the file path.",
+    "readFailed": "Could not read the file.",
+    "savePersonalFailed": "Could not save the file to My Files.",
+    "savedPersonal": "Saved to My Files.",
+    "pathMenu": "File actions",
+    "openNewTab": "Open in new tab",
+    "download": "Download",
+    "savePersonal": "Save to My Files",
+    "copyPath": "Copy file path",
+    "revealFile": "Show file location",
+    "openFile": "Open file: {{path}}",
+    "copyFailedFallback": "Could not copy. Select and copy the text manually."
+  },
+  "tree": {
+    "pasted": "Pasted {{count}} items.",
+    "pasteFailed": "Could not paste {{count}} items.",
+    "deleted": "Deleted {{count}} items.",
+    "deletedOne": "Deleted {{name}}.",
+    "deleteFailed": "Could not delete {{count}} items."
+  },
+  "notesView": {
+    "searchPlaceholder": "Search document filenames or folders",
+    "clear": "Clear",
+    "loading": "Loading…",
+    "empty": "No document files",
+    "loadFailed": "Could not load the document index."
+  },
+  "inlineEditErrors": {
+    "selectionNotFound": "Could not find the selected text in the source. Selections spanning multiple paragraphs or containing Markdown markers or HTML entities are not supported yet. Select again within a single paragraph.",
+    "selectionAmbiguous": "The selected text appears more than once in the file. Select a larger area.",
+    "editFailed": "AI editing failed.",
+    "undoFailed": "Could not undo the edit.",
+    "saveFailed": "Could not save the edit."
+  },
+  "inlineEditDiff": {
+    "before": "Before",
+    "after": "After",
+    "characterCount": "{{count}} characters"
+  },
+  "inlineEditOutline": {
+    "selection": "Selection"
   }
 }

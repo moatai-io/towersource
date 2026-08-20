@@ -126,26 +126,26 @@ function ThreadList({ onSelectThread, onNewThread, onNewProjectThread, onDeleteT
             <p className="text-[14px] text-gray-600">{t('noThreadsYet')}</p>
           </div>
         ) : (
-          threads.map((t) => {
-            const isChannelAi = t.label === 'channel_ai';
-            const isAgent = t.label === 'agent';
-            const isProjectThread = t.aiPanelScope === 'project' || t.label === 'project_ai';
-            const isSessionThread = t.aiPanelScope === 'session' || (!!t.parentSessionId && !isAgent);
-            const isOwnProjectThread = isProjectThread && t.label === 'ai_thread';
-            const isSharedInPanel = isChannelAi || (isProjectThread && t.visibility === 'project');
+          threads.map((thread) => {
+            const isChannelAi = thread.label === 'channel_ai';
+            const isAgent = thread.label === 'agent';
+            const isProjectThread = thread.aiPanelScope === 'project' || thread.label === 'project_ai';
+            const isSessionThread = thread.aiPanelScope === 'session' || (!!thread.parentSessionId && !isAgent);
+            const isOwnProjectThread = isProjectThread && thread.label === 'ai_thread';
+            const isSharedInPanel = isChannelAi || (isProjectThread && thread.visibility === 'project');
             const accessBadge = isSharedInPanel ? 'shared' : isOwnProjectThread ? 'mine' : 'local';
             return (
               <div
-                key={t.id}
+                key={thread.id}
                 className={`group border-b border-surface-800/50 transition-colors ${
-                  activeThreadId === t.id
+                  activeThreadId === thread.id
                     ? 'bg-surface-700/60 text-gray-200'
                     : 'text-gray-400 hover:bg-surface-800/60 hover:text-gray-300'
                 }`}
               >
                 <div className="flex items-stretch">
                   <button
-                    onClick={() => { setConfirmDeleteId(null); onSelectThread(t.id); }}
+                    onClick={() => { setConfirmDeleteId(null); onSelectThread(thread.id); }}
                     className="min-w-0 flex-1 px-3 py-2.5 text-left"
                   >
                     <div className="flex items-center justify-between gap-2">
@@ -173,28 +173,28 @@ function ThreadList({ onSelectThread, onNewThread, onNewProjectThread, onDeleteT
                             session
                           </span>
                         )}
-                        {t.name}
+                        {thread.name}
                       </span>
-                      <span className="text-[12px] text-gray-600 shrink-0">{formatRelativeTime(t.updatedAt)}</span>
+                      <span className="text-[12px] text-gray-600 shrink-0">{formatRelativeTime(thread.updatedAt)}</span>
                     </div>
                     <div className="text-[12px] text-gray-600 mt-0.5">
                       {[
-                        t.turnCount ? `${t.turnCount} turns` : null,
-                        t.engine && t.engine !== 'claude' ? t.engine : null,
+                        thread.turnCount ? `${thread.turnCount} turns` : null,
+                        thread.engine && thread.engine !== 'claude' ? thread.engine : null,
                         isSharedInPanel ? 'shared with project' : isOwnProjectThread ? 'my project thread' : 'only visible here',
                         isProjectThread ? 'project thread' : null,
                         isAgent ? 'subagent' : null,
-                      ].filter(Boolean).join(' · ') || '아직 대화 없음'}
+                      ].filter(Boolean).join(' · ') || t('thread.noConversationYet')}
                     </div>
                   </button>
                   <div className="flex items-center pr-2">
-                    {confirmDeleteId === t.id ? (
+                    {confirmDeleteId === thread.id ? (
                       <div className="flex items-center gap-1">
                         <button
                           type="button"
-                          onClick={async (e) => { e.stopPropagation(); await onDeleteThread(t.id); setConfirmDeleteId(null); }}
+                          onClick={async (e) => { e.stopPropagation(); await onDeleteThread(thread.id); setConfirmDeleteId(null); }}
                           className="rounded px-1.5 py-1 text-[12px] font-medium text-red-300 hover:bg-red-500/15"
-                          aria-label={`Confirm delete thread ${t.name}`}
+                          aria-label={`Confirm delete thread ${thread.name}`}
                         >
                           Delete
                         </button>
@@ -209,10 +209,10 @@ function ThreadList({ onSelectThread, onNewThread, onNewProjectThread, onDeleteT
                     ) : (
                       <button
                         type="button"
-                        onClick={(e) => { e.stopPropagation(); setConfirmDeleteId(t.id); }}
+                        onClick={(e) => { e.stopPropagation(); setConfirmDeleteId(thread.id); }}
                         className="rounded p-1 text-gray-700 opacity-0 transition-all hover:bg-red-500/10 hover:text-red-300 group-hover:opacity-100 focus:opacity-100"
                         title="Delete thread"
-                        aria-label={`Delete thread ${t.name}`}
+                        aria-label={`Delete thread ${thread.name}`}
                       >
                         <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
                           <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
@@ -563,14 +563,14 @@ function ThreadView({ onBack, onEnsureThread, onFileClick, draft = false }: {
           {fileAnchor && (
             <div className="mt-0.5 flex min-w-0 items-center gap-1 text-[12px] text-primary-300/90" title={fileAnchor.path}>
               <span aria-hidden="true">{isCadFileAnchor ? '📐' : isAutomationAnchor ? '⏰' : '📎'}</span>
-              <span className="truncate">{isCadFileAnchor ? 'CAD Workbench: ' : isAutomationAnchor ? 'Automation: ' : '현재 파일: '}{fileAnchor.title || basename(fileAnchor.path)}</span>
+              <span className="truncate">{isCadFileAnchor ? t('thread.cadWorkbenchPrefix') : isAutomationAnchor ? t('thread.automationPrefix') : t('thread.currentFilePrefix')}{fileAnchor.title || basename(fileAnchor.path)}</span>
               {isCadFileAnchor && <span className="shrink-0 rounded-full border border-amber-400/30 bg-amber-400/10 px-1 py-0.5 text-[10px] font-bold text-amber-200">beta</span>}
             </div>
           )}
           {isCadFileAnchor && currentCadSelection && (
             <div className="mt-1 flex min-w-0 items-center gap-1 text-[11px] text-cyan-200/90" title={cadSelectionMeta(currentCadSelection)}>
-              <span className="shrink-0 rounded-full border border-cyan-400/30 bg-cyan-400/10 px-1.5 py-0.5 font-semibold text-cyan-200">현재 CAD 선택</span>
-              <span className="truncate">{cadSelectionTitle(currentCadSelection) || '선택 영역'}</span>
+              <span className="shrink-0 rounded-full border border-cyan-400/30 bg-cyan-400/10 px-1.5 py-0.5 font-semibold text-cyan-200">{t('thread.currentCadSelection')}</span>
+              <span className="truncate">{cadSelectionTitle(currentCadSelection) || t('thread.selectionArea')}</span>
               {cadSelectionMeta(currentCadSelection) && <span className="truncate text-cyan-200/55">· {cadSelectionMeta(currentCadSelection)}</span>}
             </div>
           )}
@@ -631,7 +631,7 @@ function ThreadView({ onBack, onEnsureThread, onFileClick, draft = false }: {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder={pendingQuestion ? '질문에 답변을 입력하세요…' : t('askAi')}
+            placeholder={pendingQuestion ? t('thread.answerQuestionPlaceholder') : t('askAi')}
             rows={1}
             className="flex-1 px-2.5 py-1.5 bg-surface-800 border border-surface-700 rounded-lg text-[14px] text-gray-200 placeholder:text-gray-600 focus:outline-none focus:border-primary-500/50 transition-colors resize-none"
             style={{ minHeight: '32px', maxHeight: '80px' }}

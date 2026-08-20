@@ -51,5 +51,17 @@
   "browserNotificationsDisabled": "Browser notifications disabled",
   "browserNotificationSettingsFailed": "Could not update browser notification settings.",
   "testNotificationSent": "Test notification sent: {{count}}",
-  "testNotificationFailed": "Could not send test notification."
+  "testNotificationFailed": "Could not send test notification.",
+  "oauthConnections": {
+    "title": "Connections",
+    "connect": "Connect",
+    "connecting": "Connecting…",
+    "disconnect": "Disconnect",
+    "disconnectTitle": "Disconnect account",
+    "disconnectMessage": "Disconnect this account?",
+    "skillReadiness": "Skill readiness",
+    "readyCount": "({{ready}}/{{total}} ready)",
+    "noCredentialSkills": "No skills currently require additional connections.",
+    "missingConnections": "Connect {{connections}}"
+  }
 }

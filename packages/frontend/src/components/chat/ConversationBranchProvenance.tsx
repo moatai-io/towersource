@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import type { SessionMeta } from '@tower/shared';
 
 type BranchSource = { sessionId: string; sessionKey: string; sessionName: string; messageShortId?: string | null; hash?: string };
@@ -8,6 +9,7 @@ function headers(): Record<string, string> {
 }
 
 export function ConversationBranchProvenance({ session }: { session: SessionMeta }) {
+  const { t } = useTranslation('chat');
   const [source, setSource] = useState<BranchSource | null>(null);
 
   useEffect(() => {
@@ -28,9 +30,9 @@ export function ConversationBranchProvenance({ session }: { session: SessionMeta
         detail: { sessionId: sourceSessionId, sessionKey: source?.sessionKey, hash: source?.hash },
       }))}
       className="tone-muted tone-card min-h-10 max-w-full rounded-full px-3 text-[13px] text-surface-400 hover:text-surface-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500"
-      title={source?.sessionName ? `${source.sessionName}의 분기 지점 열기` : '원본 대화 열기'}
+      title={source?.sessionName ? t('branch.openPoint', { name: source.sessionName }) : t('branch.openOriginal')}
     >
-      <span className="block truncate">{source?.sessionName ? `${source.sessionName}의 과거 메시지에서 시작됨` : '원본 대화의 과거 메시지에서 시작됨'} · 원본 위치 열기</span>
+      <span className="block truncate">{source?.sessionName ? t('branch.startedFromSession', { name: source.sessionName }) : t('branch.startedFromOriginal')} · {t('branch.openOriginalLocation')}</span>
     </button>
   </div>;
 }

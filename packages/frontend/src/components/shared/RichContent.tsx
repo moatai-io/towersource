@@ -1,6 +1,7 @@
 import React, { useMemo, Suspense } from 'react';
 import { createPortal } from 'react-dom';
 import ReactMarkdown from 'react-markdown';
+import i18n from '../../i18n';
 import { toastSuccess, toastError } from '../../utils/toast';
 import remarkMath from 'remark-math';
 import rehypeHighlight from 'rehype-highlight';
@@ -109,9 +110,9 @@ async function copyFilePath(filePath: string) {
   const normalizedPath = filePath.trim();
   try {
     await navigator.clipboard.writeText(normalizedPath);
-    toastSuccess('위치 경로를 복사했습니다');
+    toastSuccess(i18n.t('files:richContent.pathCopied'));
   } catch {
-    toastError('경로 복사에 실패했습니다');
+    toastError(i18n.t('files:richContent.pathCopyFailed'));
   }
 }
 
@@ -130,7 +131,7 @@ function downloadTowerFile(filePath: string) {
 async function saveTowerFileToPersonal(filePath: string) {
   try {
     const source = await fetch(fileServeUrl(filePath));
-    if (!source.ok) throw new Error('파일을 읽지 못했습니다');
+    if (!source.ok) throw new Error(i18n.t('files:richContent.readFailed'));
     const blob = await source.blob();
     const fileName = filePath.split('/').pop() || 'saved-file';
     const form = new FormData();
@@ -141,11 +142,11 @@ async function saveTowerFileToPersonal(filePath: string) {
     const saved = await fetch('/api/personal-space/files/upload', { method: 'POST', headers, body: form });
     if (!saved.ok) {
       const body = await saved.json().catch(() => ({}));
-      throw new Error(body.error || '내 파일에 저장하지 못했습니다');
+      throw new Error(body.error || i18n.t('files:richContent.savePersonalFailed'));
     }
-    toastSuccess('내 파일에 저장했습니다');
+    toastSuccess(i18n.t('files:richContent.savedPersonal'));
   } catch (error) {
-    toastError(error instanceof Error ? error.message : '내 파일에 저장하지 못했습니다');
+    toastError(error instanceof Error ? error.message : i18n.t('files:richContent.savePersonalFailed'));
   }
 }
 
@@ -180,7 +181,7 @@ function FilePathContextTarget({ filePath, children }: { filePath: string; child
       {menu && typeof document !== 'undefined' && createPortal(
         <div
           role="menu"
-          aria-label="파일 경로 메뉴"
+          aria-label={i18n.t('files:richContent.pathMenu')}
           className="fixed z-[100] min-w-44 overflow-hidden rounded-lg border border-surface-700 bg-surface-900 p-1 text-[13px] text-gray-200 shadow-2xl"
           style={{ left: Math.max(8, Math.min(menu.x, window.innerWidth - 196)), top: Math.max(8, Math.min(menu.y, window.innerHeight - 260)) }}
           onClick={(event) => event.stopPropagation()}
@@ -194,7 +195,7 @@ function FilePathContextTarget({ filePath, children }: { filePath: string; child
               setMenu(null);
             }}
           >
-            새 탭에서 열기
+            {i18n.t('files:richContent.openNewTab')}
           </button>
           <button
             type="button"
@@ -205,7 +206,7 @@ function FilePathContextTarget({ filePath, children }: { filePath: string; child
               setMenu(null);
             }}
           >
-            다운로드
+            {i18n.t('files:richContent.download')}
           </button>
           <button
             type="button"
@@ -216,7 +217,7 @@ function FilePathContextTarget({ filePath, children }: { filePath: string; child
               setMenu(null);
             }}
           >
-            내 파일에 저장
+            {i18n.t('files:richContent.savePersonal')}
           </button>
           <button
             type="button"
@@ -227,7 +228,7 @@ function FilePathContextTarget({ filePath, children }: { filePath: string; child
               setMenu(null);
             }}
           >
-            위치 경로 복사
+            {i18n.t('files:richContent.copyPath')}
           </button>
           <button
             type="button"
@@ -238,7 +239,7 @@ function FilePathContextTarget({ filePath, children }: { filePath: string; child
               setMenu(null);
             }}
           >
-            파일 위치 보기
+            {i18n.t('files:richContent.revealFile')}
           </button>
         </div>,
         document.body,
@@ -333,7 +334,7 @@ function buildMdComponents({ onFileClick }: MdComponentsOptions = {}) {
                 onFileClick(text);
               }}
               title={`Open ${text}`}
-              aria-label={`파일 열기: ${text}`}
+              aria-label={i18n.t('files:richContent.openFile', { path: text })}
             >
               <code className="hover:text-primary-400 transition-colors">{children}</code>
             </button>
@@ -510,7 +511,7 @@ function CopyBtn({ text, className = '' }: { text: string; className?: string })
           setCopied(true);
           setTimeout(() => setCopied(false), 1500);
         } else {
-          toastError('복사 실패 — 직접 드래그해서 복사해주세요');
+          toastError(i18n.t('files:richContent.copyFailedFallback'));
         }
       }}
       className={`p-1.5 rounded-md bg-surface-800/80 border border-surface-700/50 text-gray-400 hover:text-gray-200 hover:bg-surface-700/80 transition-all ${className}`}

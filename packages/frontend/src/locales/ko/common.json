@@ -337,11 +337,6 @@
         "clearSelection": "선택 비우기",
         "noSelectedMaterials": "아직 선택한 자료가 없습니다.",
         "advancedPath": "고급 · 경로 직접 입력",
-        "capabilities": "가능한 일",
-        "permissionPreview": "권한 설계 미리보기",
-        "available": "사용 가능",
-        "connectionPreparing": "연결 준비 중",
-        "approvalNeeded": "확인이 필요한 일",
         "whoCanUse": "누가 사용할 수 있나요?",
         "peopleWithLink": "링크를 아는 사람",
         "peopleWithPassword": "비밀번호를 아는 사람",
@@ -405,20 +400,6 @@
         "visitorDailyLimit": "방문자별 하루 한도",
         "totalTokenLimit": "전체 토큰 한도",
         "usageAvailableAfterDeploy": "에이전트를 외부 배포하면 사용량을 확인할 수 있습니다.",
-        "capabilityKnowledgeTitle": "자료를 찾아 답변",
-        "capabilityKnowledgeDetail": "선택한 문헌 안에서 근거를 찾고 인용합니다.",
-        "capabilityDataTitle": "업무 데이터 조회",
-        "capabilityDataDetail": "연결한 DB·API에서 허용된 데이터만 읽습니다.",
-        "capabilityProposeTitle": "실행안 제안",
-        "capabilityProposeDetail": "변경 내용을 작성하지만 실제 실행하지 않습니다.",
-        "capabilityExecuteTitle": "실제 업무 실행",
-        "capabilityExecuteDetail": "승인 정책 안에서 외부 시스템을 변경합니다.",
-        "approvalEveryTitle": "매번 승인",
-        "approvalEveryDetail": "실행 전 담당자가 확인",
-        "approvalPolicyTitle": "정책 안에서 자동",
-        "approvalPolicyDetail": "금액·대상 등 조건 필요",
-        "approvalDisabledTitle": "실행 허용 안 함",
-        "approvalDisabledDetail": "답변·조회·제안까지만",
         "deploymentSummary": "외부 배포 승인 요약",
         "deploymentFinalReview": "배포 전 최종 확인",
         "noMaterialsConnected": "연결 자료 없음",
@@ -476,7 +457,6 @@
         "websiteCheckHttpError": "웹사이트 확인 HTTP {{status}}",
         "sharingSettingsHttpError": "공유 설정 HTTP {{status}}",
         "deploymentStepsLabel": "에이전트 외부 배포 단계",
-        "externalApiBetaLabel": "외부 AI API 연동 베타",
         "registryRelease": "Registry 발행본"
       },
       "copy": {
@@ -514,13 +494,8 @@
         "createDescription": "AI 팀원 하나를 고르고, 외부 공개 범위만 정하세요. 배포 준비와 접속 링크 생성은 Tower가 자동으로 처리합니다.",
         "smartDescription": "Tower가 작업에 맞는 모델을 자동 선택합니다.",
         "harnessModelDescription": "선택한 Harness에 고정된 기본 모델을 사용합니다.",
-        "externalApi": "외부 AI API 연결",
-        "externalApiDescription": "OpenAI, Anthropic 등 별도 API를 이 배포에 연결하는 기능을 준비 중입니다.",
-        "externalApiPreparing": "외부 AI API 설정 · 준비 중",
         "materialsDescription": "선택한 자료의 현재 내용을 배포본에 고정합니다. 원본 파일이 바뀌어도 새로 배포하기 전에는 외부 응답이 달라지지 않습니다.",
         "materialsSafety": "Tower가 Project 경계·symlink·파일 형식·크기를 서버에서 다시 검사한 뒤 내용을 고정합니다. 비워두면 자료 없이 배포됩니다.",
-        "capabilitiesDescription": "기술 도구 대신 외부 사용자가 체감할 업무 수준으로 고릅니다.",
-        "approvalDescription": "실제 실행 권한을 연결할 때 적용할 기본 승인 방식을 미리 정합니다.",
         "linkDefaultDescription": "가장 간단한 기본 설정입니다.",
         "passwordDescription": "공유 전에 한 번 더 보호합니다.",
         "openAfterDeploy": "외부 배포가 끝나면 이 화면에서 바로 웹사이트를 열어 대화해 볼 수 있습니다."
@@ -635,7 +610,9 @@
       "openTodos": "열린 Todo",
       "noOpenTodos": "열린 Todo가 없습니다.",
       "completedSample": "완료 샘플",
-      "noCompletedSample": "완료 샘플이 없습니다."
+      "noCompletedSample": "완료 샘플이 없습니다.",
+      "workList": "실제 업무",
+      "workListDescription": "Workstream별 현재 단계와 완료 현황을 최근 업데이트 순으로 보여줍니다."
     }
   },
   "publish": {
@@ -1247,12 +1224,12 @@
       "selectWorkspace": "AI 직원을 둘 작업방을 선택하세요.",
       "create": "Agent 생성에 실패했습니다."
     },
-    "title": "AI와 함께 키울 직원을 정해보세요.",
-    "description": "설정 폼을 채우는 대신, 만들고 싶은 역할을 말하거나 자료 이름을 알려주세요. Agent Academy가 오른쪽 AI 직원 초안을 제안합니다.",
-    "introBefore": "어떤 AI 직원을 키울지 같이 정해볼게요. 단발 업무보다 ",
-    "ongoingRole": "계속 맡길 역할",
-    "introAfter": "로 생각하면 좋아요. 예: 고객 문의에 계속 답해주는 에이전트, 회사소개서를 계속 개선하는 에이전트.",
-    "rolePrompt": "만들고 싶은 역할을 말해주세요",
+    "title": "AI teammate에게 어떤 도움을 받고 싶은지 말해주세요.",
+    "description": "직접 설명하는 것이 기본입니다. 아래 예시는 고정된 직무나 정체성이 아니라 초안을 시작하기 위한 선택 사항입니다.",
+    "introBefore": "도움받고 싶은 일을 자유롭게 설명해 주세요. 특정 업무, 반복 흐름, 개선하고 싶은 결과 모두 괜찮습니다. ",
+    "ongoingRole": "설명은 계속 수정할 수 있고",
+    "introAfter": ", 예시를 골라도 시작 초안을 준비하는 데만 사용합니다.",
+    "rolePrompt": "이 AI teammate와 어떤 일을 시작하고 싶나요?",
     "mode": {
       "chatTitle": "AI와 함께 설정",
       "uploadTitle": "자료를 보고 제안",
@@ -1264,7 +1241,7 @@
     "materialQuestion": "줄 문서가 있나요?",
     "materialHint": "지금은 파일명 기반, 다음 단계에서 실제 업로드 연결",
     "materialPlaceholder": "예: 회사소개서.pdf\n고객 FAQ.md\n입찰요건.xlsx",
-    "quickRoles": "빠른 역할 후보",
+    "quickRoles": "업무 예시",
     "drafting": "Academy가 초안 작성 중…",
     "suggestDraft": "초안 제안받기",
     "openViewer": "Side Viewer에서 보기",
@@ -1276,12 +1253,16 @@
     "sourceScope": "참고 자료 범위",
     "chooseFace": "얼굴 선택",
     "capabilities": "할 수 있는 일",
-    "nextPromotion": "다음 승급 조건",
+    "nextPromotion": "첫 성공 기준",
     "firstTask": "첫 업무",
-    "preparing": "육성 준비 중…",
-    "start": "이 AI 직원으로 시작",
+    "preparing": "준비 중…",
+    "start": "이 AI teammate 만들기",
     "startChat": "바로 채팅에서 첫 업무 시작",
-    "openManagement": "관리 화면에서 보기"
+    "openManagement": "관리 화면에서 보기",
+    "workExamples": "선택 가능한 업무 예시",
+    "workExamplesHint": "설명이 막힐 때만 골라보세요. 생성 전 모든 내용을 다시 고칠 수 있습니다.",
+    "workScope": "제안된 작업 범위",
+    "firstSuccess": "첫 성공 기준"
   },
   "personalUsage": {
     "error": {
@@ -1328,5 +1309,19 @@
     "completed": "완료됨 {{count}}개",
     "created": "등록 {{date}}",
     "completedAt": "완료 {{date}}"
+  },
+  "updateBanner": {
+    "deferred": "현재 턴이 끝나면 최신 버전으로 자동 전환합니다.",
+    "busy": "새 버전이 준비되었습니다. 현재 작업이 끝난 뒤 새로고침하면 최신 상태로 전환됩니다.",
+    "ready": "새 버전이 준비되었습니다. 지금 새로고침해 최신 상태로 전환할 수 있습니다.",
+    "updateAfterTurn": "턴 끝나면 업데이트",
+    "cancelDeferred": "예약 취소",
+    "reload": "새로고침"
+  },
+  "running": "실행 중",
+  "getStarted": "시작하기",
+  "uploadProgress": {
+    "label": "파일 업로드 {{percent}}%",
+    "saving": "저장 중…"
   }
 }

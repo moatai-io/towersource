@@ -15,7 +15,7 @@ describe('mobile My Work layout', () => {
 
   it('collapses desktop-only explanation and stats on mobile', () => {
     expect(source).toContain('hidden max-w-3xl');
-    expect(source).toContain('hidden grid-cols-2 gap-1.5 md:grid');
+    expect(source).toContain('grid gap-3 md:grid-cols-2');
     expect(source).toContain('md:shrink-0');
   });
 });

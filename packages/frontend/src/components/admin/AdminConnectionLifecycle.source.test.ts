@@ -27,7 +27,7 @@ describe('Admin Connection lifecycle UX', () => {
   it('moves raw reveal and structure inspection into the advanced tab', () => {
     const advanced = source.slice(source.indexOf("connectionDetailTab === 'advanced'"), source.indexOf("connectionDetailTab === 'agents'"));
     expect(advanced).toContain("t('credentialConnections.advancedCredentialManagement')");
-    expect(advanced).toContain('원문 보기');
-    expect(advanced).toContain('구조 보기');
+    expect(advanced).toContain("t('credentialConnections.advancedActions.reveal')");
+    expect(advanced).toContain("t('credentialConnections.advancedActions.inspect')");
   });
 });

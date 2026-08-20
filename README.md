@@ -438,7 +438,7 @@ flowchart TB
 Tower's installer configures Node.js, PostgreSQL with the required extensions, the Tower system service, nginx, secure local secrets, and a final readiness check.
 
 ```bash
-git clone https://github.com/moatai-io/towersource.git
+git clone https://github.com/moatai-io/towersource.git tower
 cd tower
 sudo bash scripts/oss/install.sh --public-url http://YOUR_SERVER_IP
 ```

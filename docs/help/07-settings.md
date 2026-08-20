@@ -123,9 +123,9 @@ Admin 계정은 시스템 관리 기능에 접근할 수 있습니다. Header의
 - Session/AI Reply/AI Task 별 기본 모델 지정
 - 모델별 사용 제한 설정
 
-### System Prompt 관리
+### AI 운영 정책
 
-시스템 전체에 적용되는 System Prompt를 설정합니다. 모든 AI 대화에 공통으로 적용되는 지침을 지정할 수 있습니다.
+현재 Admin Panel은 시스템 프롬프트 원문을 직접 편집하는 화면을 제공하지 않습니다. 공통 AI 동작은 제품의 시스템 정책, 조직 설정, 프로젝트의 `AGENTS.md`, 역할·도구 정책으로 나누어 관리합니다.
 
 ### Skills 관리
 

@@ -165,7 +165,7 @@ export interface IframeSelectionMessage {
  * Build the inject script as a serialized string. Self-contained (no closures
  * over outer scope) so it survives the Blob → iframe boundary.
  */
-function buildInjectScript(): string {
+function buildInjectScript(selectionLabel: string): string {
   // Note: this code runs INSIDE the iframe, so `window.parent` is the Tower
   // React app. Keep it tiny and dependency-free.
   return `
@@ -553,7 +553,7 @@ function buildInjectScript(): string {
     label.setAttribute(OUTLINE_ATTR, 'label');
     label.className = 'tower-inline-edit-outline-label';
     label.dataset.scope = kind === 'parent' ? 'parent' : 'selection';
-    label.textContent = labelText || (kind === 'parent' ? 'parent' : '선택');
+    label.textContent = labelText || (kind === 'parent' ? 'parent' : ${JSON.stringify(selectionLabel)});
     label.addEventListener('click', function (e) {
       e.preventDefault();
       e.stopPropagation();
@@ -601,7 +601,7 @@ function buildInjectScript(): string {
       try { existing[i].parentNode && existing[i].parentNode.removeChild(existing[i]); } catch (_) {}
     }
 
-    var selDiv = buildOutlineDiv('selection', selectionRect, '선택');
+    var selDiv = buildOutlineDiv('selection', selectionRect, ${JSON.stringify(selectionLabel)});
     document.body.appendChild(selDiv);
     outlineState.selectionEl = selDiv;
     outlineState.selectionRect = selectionRect;
@@ -763,9 +763,9 @@ function buildInjectScript(): string {
  * `data-tower-inline-edit-injector` attribute so we can find and strip it
  * on the way out.
  */
-export function wrapHtmlWithInjector(html: string): string {
+export function wrapHtmlWithInjector(html: string, selectionLabel = 'Selection'): string {
   const cleaned = stripOutlineNodes(stripInjectorScripts(html));
-  const scriptTag = `<script ${INJECTOR_MARKER_ATTR}>${buildInjectScript()}</script>`;
+  const scriptTag = `<script ${INJECTOR_MARKER_ATTR}>${buildInjectScript(selectionLabel)}</script>`;
   // Case-insensitive search for the closing body tag.
   const bodyClose = /<\/body\s*>/i.exec(cleaned);
   if (bodyClose) {

@@ -1,7 +1,7 @@
 /**
- * Language Resolver — 3-layer precedence for AI response language.
+ * Language Resolver — layered precedence for AI response language.
  *
- *   session.language  >  user.language  >  WORKSPACE_LANGUAGE  >  'ko'
+ *   session.language > user.language > organization.language > WORKSPACE_LANGUAGE > 'ko'
  *
  * Deterministic: same input → same output. Do NOT inject timestamps, random
  * values, or any per-request variability here. This function's result is
@@ -22,6 +22,10 @@ export interface LanguageBearingUser {
 }
 
 export interface LanguageBearingSession {
+  language?: string | null;
+}
+
+export interface LanguageBearingOrganization {
   language?: string | null;
 }
 
@@ -49,20 +53,25 @@ const LANGUAGE_LABELS: Record<string, { english: string; native: string }> = {
  * Order of precedence (first defined wins):
  *   1. session.language     — explicit per-session override (Phase 3)
  *   2. user.language        — user profile setting           (Phase 2)
- *   3. WORKSPACE_LANGUAGE   — workspace/VM default            (Phase 1)
- *   4. 'ko'                 — hard fallback
+ *   3. organization.language — Admin Panel workspace default
+ *   4. WORKSPACE_LANGUAGE    — bootstrap/VM fallback
+ *   5. 'ko'                  — hard fallback
  *
  * Returns a lowercase ISO 639-1 code. Never throws.
  */
 export function resolveLanguage(
   user?: LanguageBearingUser | null,
   session?: LanguageBearingSession | null,
+  organization?: LanguageBearingOrganization | null,
 ): string {
   const fromSession = normalize(session?.language);
   if (fromSession) return fromSession;
 
   const fromUser = normalize(user?.language);
   if (fromUser) return fromUser;
+
+  const fromOrganization = normalize(organization?.language);
+  if (fromOrganization) return fromOrganization;
 
   const fromEnv = normalize(process.env.WORKSPACE_LANGUAGE);
   if (fromEnv) return fromEnv;
@@ -92,10 +101,10 @@ export function buildLanguagePolicyBlock(language: string): string {
 
   return [
     '## Language Policy (HIGHEST PRIORITY)',
-    `- This user's primary language is **${nativeName} (${englishName} / ${code})**.`,
-    `- Respond in ${englishName} by default.`,
+    `- The configured response language is **${nativeName} (${englishName} / ${code})**.`,
+    `- Respond in ${englishName} by default, regardless of the language used in conversation history, memory summaries, project files, or prior assistant messages.`,
     nativeInstruction,
-    '- Only switch languages when the user writes in a different language or explicitly requests one.',
+    '- An explicit language request in the current user message takes precedence for that response. Otherwise, do not infer the response language from historical context.',
     '- Code identifiers, file paths, and command snippets stay as-is; translate the prose around them.',
     '- When writing Markdown bold emphasis, never put spaces inside the markers: use `**text**`, not `** text **`. For Korean/CJK, use `**텍스트**`, not `** 텍스트 **`, because some web Markdown renderers expose the raw `**` when inner spaces are present.',
   ].join('\n');

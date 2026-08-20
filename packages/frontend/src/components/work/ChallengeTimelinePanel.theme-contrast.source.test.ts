@@ -13,7 +13,7 @@ describe('AI team activity theme contrast', () => {
   });
 
   it('pairs status and accent text for light and dark themes', () => {
-    expect(source).toContain('text-primary-700 dark:text-primary-300');
+    expect(source).toContain('text-primary-700 dark:text-primary-200');
     expect(source).toContain('text-amber-700 dark:text-amber-300');
     expect(source).toContain('text-emerald-700 dark:text-emerald-300');
     expect(source).toContain('text-red-700 dark:text-red-300');

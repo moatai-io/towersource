@@ -1,7 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
-const source = readFileSync(new URL('./AdminPanel.tsx', import.meta.url), 'utf8');
+const adminSource = readFileSync(new URL('./AdminPanel.tsx', import.meta.url), 'utf8');
+const source = readFileSync(new URL('../usage/UsagePanel.tsx', import.meta.url), 'utf8');
 const en = JSON.parse(readFileSync(new URL('../../locales/en/admin.json', import.meta.url), 'utf8'));
 const ko = JSON.parse(readFileSync(new URL('../../locales/ko/admin.json', import.meta.url), 'utf8'));
 
@@ -13,11 +14,13 @@ const keys = [
 
 describe('Admin AI usage locale contract', () => {
   it('routes the token usage dashboard through the admin locale', () => {
-    expect(source).toContain("function TinyTokenUsageChart({ data }");
-    expect(source).toContain("t('recentTokenUsage', { days: data.length })");
-    expect(source).toContain("t('inputTokens')");
-    expect(source).toContain("t('budgetLookupFailed')");
-    expect(source).toContain("t('remainingAmount', { amount: formatBudgetMoney(remaining) })");
+    expect(adminSource).toContain("import { UsagePanel } from '../usage/UsagePanel'");
+    expect(adminSource).toContain("<UsagePanel embedded />");
+    expect(source).toContain("function AiUsageSection({ aiUsage, isDark }");
+    expect(source).toContain("tr('usage.apiInputTokens')");
+    expect(source).toContain("tr('usage.apiOutputTokens')");
+    expect(source).toContain("tr('usage.remainingBudget')");
+    expect(source).toContain("function AiTokenLineChart({ data, isDark }");
   });
 
   it('ships matching English and Korean usage labels', () => {

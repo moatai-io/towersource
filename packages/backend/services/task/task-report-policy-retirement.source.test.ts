@@ -19,8 +19,8 @@ describe('retired task channel report policy', () => {
   });
 
   it('offers Notification Hub rather than internal channels in the task UI', () => {
-    expect(modal).toContain("{ id: 'notification', name: '🔔 알림으로 보고' }");
-    expect(modal).toContain('완료 또는 실패 결과를 알림 센터에 남깁니다.');
+    expect(modal).toContain("t(`reportPolicy.options.${id}`)");
+    expect(modal).toContain("t('reportPolicy.notificationHint')");
     expect(modal).not.toContain('채널에만');
     expect(modal).not.toContain('연결된 채널');
   });

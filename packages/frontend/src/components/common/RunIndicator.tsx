@@ -1,4 +1,5 @@
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 
 export type RunIndicatorSize = 'xs' | 'sm' | 'md';
 
@@ -17,14 +18,16 @@ interface RunIndicatorProps {
  * Uses currentColor so each host surface owns tone/contrast, and only animates
  * transform/opacity so it does not shift layout while a run is active.
  */
-export function RunIndicator({ size = 'sm', label = '실행 중', className = '' }: RunIndicatorProps) {
+export function RunIndicator({ size = 'sm', label, className = '' }: RunIndicatorProps) {
+  const { t } = useTranslation('common');
+  const resolvedLabel = label === undefined ? t('running') : label;
   return (
     <span
       className={`tower-run-indicator tower-run-indicator-${size} ${className}`.trim()}
-      role={label ? 'status' : undefined}
-      aria-label={label || undefined}
-      aria-hidden={label ? undefined : true}
-      title={label || undefined}
+      role={resolvedLabel ? 'status' : undefined}
+      aria-label={resolvedLabel || undefined}
+      aria-hidden={resolvedLabel ? undefined : true}
+      title={resolvedLabel || undefined}
     >
       <span />
       <span />

@@ -231,7 +231,7 @@ function ModelSelectorInline({ onClose }: { onClose: () => void }) {
       applyPickedModel(pendingSwitch.modelId);
       setPendingSwitch(null);
     } else {
-      setSwitchError(result.error?.message ?? '엔진 전환에 실패했습니다.');
+      setSwitchError(result.error?.message ?? t('engineSwitchFailed'));
     }
   };
 
@@ -942,7 +942,7 @@ function HeaderImpl({
   const activeDisplayTitle = activeFileTab?.path
     ? basename(activeFileTab.path)
     : activeSessionName;
-  const activeDisplayKind = activeFileTab?.path ? '파일' : '세션';
+  const activeDisplayKind = activeFileTab?.path ? 'file' : 'session';
   const activeDisplayId = activeFileTab?.path ?? activeSessionId;
   const isMobile = useSessionStore((s) => s.isMobile);
   const identityLines = React.useMemo(
@@ -965,17 +965,17 @@ function HeaderImpl({
   const handleCopyTitle = async () => {
     if (!activeDisplayTitle) return;
     const parts = [
-      activeProjectName ? `작업 공간: ${activeProjectName}` : null,
-      `${activeDisplayKind}: ${activeDisplayTitle}`,
+      activeProjectName ? t('reference.workspace', { name: activeProjectName }) : null,
+      t(`reference.${activeDisplayKind}`, { title: activeDisplayTitle }),
       activeDisplayId ? `id: ${activeDisplayId}` : null,
     ].filter(Boolean);
     try {
       await navigator.clipboard.writeText(parts.join(' / '));
       setTitleCopied(true);
-      toastSuccess(`${activeDisplayKind} 참조가 복사되었습니다`);
+      toastSuccess(t(`reference.${activeDisplayKind}Copied`));
       setTimeout(() => setTitleCopied(false), 1500);
     } catch {
-      toastError('복사할 수 없습니다');
+      toastError(t('reference.copyFailed'));
     }
   };
 

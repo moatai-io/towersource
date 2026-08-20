@@ -37,9 +37,6 @@ import { buildSidebarSessionTimelineModel } from '../../features/navigation-side
 import { SidebarSessionTimeline } from '../../features/navigation-sidebar/sessions/SidebarSessionTimeline';
 import { buildSidebarAgentRailModel } from '../../features/navigation-sidebar/sessions/sidebar-agent-rail-model';
 
-const sidebarProjectSessionsLoaded = new Set<string>();
-const sidebarProjectSessionsLoading = new Set<string>();
-
 const naturalCollator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
 
 type MobileAgentPane = 'root' | 'detail';
@@ -443,7 +440,7 @@ export function Sidebar({
   const agentFirstEnabled = useSettingsStore((s) => s.serverConfig?.agentFirstEnabled === true);
   const capabilityProjectId = useSettingsStore((s) => s.capabilityProjectId);
   const sessions = useSessionStore((s) => s.sessions);
-  const mergeSessions = useSessionStore((s) => s.mergeSessions);
+  const hydrateProjectSessions = useSessionStore((s) => s.hydrateProjectSessions);
   const activeSessionId = useSessionStore((s) => s.activeSessionId);
   const isMobile = useSessionStore((s) => s.isMobile);
   const activeSessionCwd = useSessionStore((s) => {
@@ -1028,26 +1025,9 @@ export function Sidebar({
   }, [projects, selectedAgentProjectId]);
 
   useEffect(() => {
-    const projectId = selectedAgentProjectId;
-    if (!projectId || sidebarProjectSessionsLoaded.has(projectId) || sidebarProjectSessionsLoading.has(projectId)) return;
-    sidebarProjectSessionsLoading.add(projectId);
-    const params = new URLSearchParams({ projectId });
-    const token = localStorage.getItem('token');
-    const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
-    void fetch(`/api/sessions?${params.toString()}`, { headers })
-      .then(async (response) => {
-        if (!response.ok) throw new Error(`project session lazy load failed: ${response.status}`);
-        const data = await response.json().catch(() => []);
-        if (Array.isArray(data)) mergeSessions(data);
-        sidebarProjectSessionsLoaded.add(projectId);
-      })
-      .catch((error) => {
-        console.warn('[sidebar] failed to lazy-load project sessions:', error);
-      })
-      .finally(() => {
-        sidebarProjectSessionsLoading.delete(projectId);
-      });
-  }, [mergeSessions, selectedAgentProjectId]);
+    if (!selectedAgentProjectId) return;
+    void hydrateProjectSessions(selectedAgentProjectId);
+  }, [hydrateProjectSessions, selectedAgentProjectId]);
 
   // Projects sorted for the Files tab. Default = pinned first, then recent activity.
   const fileProjectSortMode = useFileStore((s) => s.projectSortMode);
@@ -1500,27 +1480,6 @@ export function Sidebar({
                   >
                     <svg aria-hidden="true" className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M3.75 10.5 12 3.75l8.25 6.75M5.25 9.75v9a1.5 1.5 0 0 0 1.5 1.5h3.5v-5.5h3.5v5.5h3.5a1.5 1.5 0 0 0 1.5-1.5v-9" /></svg>
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      rememberAgentWorkspaceLocation(project.id, 'files');
-                      useSettingsStore.getState().setCapabilityProjectId(project.id);
-                      if (useSessionStore.getState().isMobile) {
-                        useFileStore.getState().activateChatSlot();
-                        useSessionStore.getState().setMobileTab('files');
-                        useSessionStore.getState().setActiveView('projectFiles');
-                        useSessionStore.getState().setSidebarOpen(false);
-                      } else {
-                        useFileStore.getState().openSystemTab('projectFiles', { refId: project.id, title: t('agentFilesTabTitle', { name: project.agent?.displayName || project.name }), icon: '📁' });
-                        useSessionStore.getState().setActiveView('chat');
-                      }
-                    }}
-                    className="grid h-7 w-7 shrink-0 place-items-center rounded-md text-surface-500 transition-colors hover:bg-surface-800 hover:text-primary-300"
-                    aria-label={t('openNamedFiles', { name: project.agent?.displayName || project.name })}
-                    title={t('namedFiles', { name: project.agent?.displayName || project.name })}
-                  >
-                    <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8} aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75A1.5 1.5 0 0 1 5.25 5.25h4l2 2h7.5a1.5 1.5 0 0 1 1.5 1.5v8.5a1.5 1.5 0 0 1-1.5 1.5H5.25a1.5 1.5 0 0 1-1.5-1.5V6.75Z" /></svg>
-                  </button>
                   <button type="button" onClick={() => onNewSession(project.id)} className="grid h-9 w-9 shrink-0 place-items-center rounded-lg text-surface-500 transition-colors hover:bg-surface-800 hover:text-primary-300 min-[769px]:h-7 min-[769px]:w-7 min-[769px]:rounded-md" aria-label={t('startNewConversationWith', { name: project.agent?.displayName || project.name })} title={t('newSession')}>
                     <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>
                   </button>
@@ -1969,7 +1928,11 @@ export function Sidebar({
           </div>
           </div>
         ) : sidebarTab === 'files' ? (
-          <div className={`min-h-full ${isMobile ? 'flex flex-col' : 'grid h-full min-h-0 grid-cols-[176px_minmax(0,1fr)] overflow-hidden'}`}>
+          // Keep the Files tab height-bound to the sidebar. `min-h-full` lets this
+          // root grow with the file tree and revives the outer sidebar scroll rail.
+          // The project rail hides its scrollbar chrome; the file pane below is the
+          // single visible vertical scroll owner.
+          <div data-sidebar-files-root="true" className={`h-full min-h-0 overflow-hidden ${isMobile ? 'flex flex-col' : 'grid grid-cols-[176px_minmax(0,1fr)]'}`}>
             {!isMobile && (
               <nav className="flex min-h-0 flex-col border-r border-surface-800/80 bg-surface-900/95 px-2 py-2" aria-label={t('selectProjectFolder')}>
                 <div className="relative mb-2 shrink-0">
@@ -1993,7 +1956,7 @@ export function Sidebar({
                 </div>
               </nav>
             )}
-            <div className="flex min-h-0 min-w-0 flex-col overflow-y-auto">
+            <div data-sidebar-files-scroll="true" className="flex min-h-0 min-w-0 flex-col overflow-x-hidden overflow-y-auto overscroll-contain">
             {isMobile && mobileProjectPickerOpen && (
               <section className="min-h-full px-3 py-3">
                 <button type="button" onClick={() => { setMobileProjectPickerOpen(false); setMobileProjectQuery(''); }} className="mb-2 flex min-h-9 items-center gap-1 rounded-lg px-1 text-sm font-semibold text-surface-300 active:bg-surface-800"><span aria-hidden="true">‹</span><span>{t('files')}</span></button>

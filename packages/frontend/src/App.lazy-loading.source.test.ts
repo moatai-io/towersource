@@ -13,10 +13,12 @@ describe('frontend startup session loading boundaries', () => {
     expect(appSource).not.toContain('auth 상태 검증 (401만 로그아웃 — 네트워크 에러는 유지)\n        if (status.authEnabled && token) {\n          try {\n            const r = await fetchWithRestartTolerantAuth(`${API_BASE}/sessions`');
   });
 
-  it('loads only the recent startup session window', () => {
+  it('loads only the recent startup session window without replacing hydrated project lists', () => {
     expect(appSource).toContain('const STARTUP_SESSION_LIST_LIMIT = 200;');
     expect(appSource).toContain('fetchWithRestartTolerantAuth(`${API_BASE}/sessions?limit=${STARTUP_SESSION_LIST_LIMIT}`');
+    expect(appSource).toContain('const setRecentSessions = useSessionStore((s) => s.setRecentSessions);');
     expect(appSource).not.toContain('fetchWithRestartTolerantAuth(`${API_BASE}/sessions`, { headers })');
+    expect(appSource).not.toContain('setSessions(next);');
   });
 
   it('deduplicates startup session list loading for unchanged auth state', () => {

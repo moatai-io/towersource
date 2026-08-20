@@ -34,8 +34,6 @@ describe("file operations", () => {
       "copySelectedPaths",
       'paths.join("\\n")',
       "workspace.pathsCopied",
-      "createTowerFileShortLink",
-      "workspace.copyInternalLink",
     ])
       expect(s).toContain(t);
   });

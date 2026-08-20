@@ -7,8 +7,10 @@ const timeline = fs.readFileSync(path.resolve(import.meta.dirname, './ChallengeT
 const api = fs.readFileSync(path.resolve(import.meta.dirname, '../../../../backend/routes/api.ts'), 'utf8');
 
 describe('personal AI usage summary', () => {
-  it('shows the authenticated user usage and estimated cost in work history', () => {
-    expect(timeline).toContain('<PersonalUsageSummary />');
+  it('keeps usage metrics available without placing them above actual work progress', () => {
+    expect(timeline).not.toContain('<PersonalUsageSummary />');
+    expect(timeline).toContain('<WorkstreamList');
+    expect(timeline).toContain("tr('challenge.timeline.currentProgress')");
     expect(summary).toContain('/api/metrics/my-ai-usage?days=');
     expect(summary).toContain("t('personalUsage.title')");
     expect(summary).toContain("t('personalUsage.estimatedCost')");

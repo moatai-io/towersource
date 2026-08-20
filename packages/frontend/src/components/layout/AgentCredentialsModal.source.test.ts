@@ -7,6 +7,10 @@ const sidebar = fs.readFileSync(path.join(import.meta.dirname, 'Sidebar.tsx'), '
 const connections = fs.readFileSync(path.join(import.meta.dirname, 'AgentConnectionsPanel.tsx'), 'utf8');
 
 describe('Agent Credential independent management surface', () => {
+  it('tells users they can request secure credential injection in Agent chat', () => {
+    expect(modal).toContain("t('agentCredentials.chatInjectionNotice')");
+  });
+
   it('opens from a dedicated Agent menu item rather than Project settings', () => {
     expect(sidebar).toContain("t('agentCredentials.title')");
     expect(sidebar).toContain('setShowCredentials(true)');

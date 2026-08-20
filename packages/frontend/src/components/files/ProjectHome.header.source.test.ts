@@ -18,11 +18,11 @@ describe("Project Home integrated header", () => {
   it("keeps mobile navigation above content with full-size touch targets", () => {
     expect(source).toContain("pointer-events-auto min-h-11 touch-manipulation");
     expect(source).toContain(
-      "flex-wrap items-center gap-x-3 gap-y-1 sm:flex-nowrap",
+      "flex-wrap items-center gap-x-3 gap-y-1 lg:flex-nowrap",
     );
     expect(source).toContain("relative z-10 order-3 flex w-full");
-    expect(source).toContain("sm:order-none sm:w-auto");
-    expect(source).toContain("hidden max-w-[35%]");
+    expect(source).toContain("overflow-x-auto lg:order-none lg:w-auto");
+    expect(source).toContain("hidden min-w-0 max-w-[260px]");
   });
   it("uses theme-safe inactive tabs and one compact file viewport offset", () => {
     expect(source).toContain(
@@ -31,6 +31,13 @@ describe("Project Home integrated header", () => {
     expect(source).toContain("h-[calc(100vh-58px)]");
     expect(source).not.toContain("h-[calc(100vh-106px)]");
   });
+  it("exposes Connection management from the Agent Home without adding a separate Files shortcut to the team list", () => {
+    expect(source).toContain("import { AgentCredentialsModal } from '../layout/AgentCredentialsModal'");
+    expect(source).toContain("className={homeTabClass(managingConnections)}");
+    expect(source).toContain("{t('projectHome.connections')}");
+    expect(source).toContain('<AgentCredentialsModal project={project}');
+  });
+
   it("honors sidebar Home and Files destinations through shared navigation state", () => {
     expect(source).toContain("getAgentWorkspaceLocation");
     expect(source).toContain("requestedLocation === 'files'");

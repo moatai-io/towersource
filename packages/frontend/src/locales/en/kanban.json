@@ -55,5 +55,15 @@
   "workflowSimpleDesc": "No code",
   "workflowDefaultDesc": "Light code",
   "workflowFeatureDesc": "Worktree",
-  "workflowBigTaskDesc": "Decompose"
+  "workflowBigTaskDesc": "Decompose",
+  "engineClaudeMax": "Claude (Max subscription)",
+  "reportPolicy": {
+    "label": "Reporting",
+    "options": {
+      "silent": "🔕 Board only",
+      "notification": "🔔 Notification center"
+    },
+    "silentHint": "Completion will appear only on the task board.",
+    "notificationHint": "Completion or failure results will be added to the notification center."
+  }
 }

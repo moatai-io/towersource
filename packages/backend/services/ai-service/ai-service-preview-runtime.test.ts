@@ -8,8 +8,13 @@ const engineRun = vi.fn();
 const engineDispose = vi.fn();
 const getEngine = vi.fn(async () => ({ run: engineRun, dispose: engineDispose }));
 const recordPassedRuntimeEvaluation = vi.fn();
+const getOrCreateBox = vi.fn();
+const ensureRunning = vi.fn();
 
 vi.mock('../../db/pg-repo.js', () => ({ queryOne }));
+vi.mock('../../config.js', () => ({ config: { runtimeBox: { enabled: true } } }));
+vi.mock('../runtime-box/runtime-box-manager.js', () => ({ getOrCreateBox, ensureRunning }));
+vi.mock('../runtime-box/policy.js', () => ({ isProjectExcluded: vi.fn(() => false) }));
 const claimEngineSessionId = vi.fn();
 const updateSession = vi.fn();
 const saveMessage = vi.fn();
@@ -47,6 +52,8 @@ describe('AI Service Preview pinned Harness runtime', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     resolvePublishedHarnessReference.mockResolvedValue(harness);
+    getOrCreateBox.mockResolvedValue({ id: 91 });
+    ensureRunning.mockResolvedValue({ id: 91, status: 'running' });
   });
 
   it('runs an existing private runtime Session with no filesystem authority and returns Harness provenance', async () => {
@@ -171,9 +178,22 @@ describe('AI Service Preview pinned Harness runtime', () => {
     const result = await runAIServicePreview({ serviceId: 'svc-1', deploymentId: 'dep-1', conversationId: 'conv-1', prompt: '질문', userId: 7, recordEvaluation: false, runtimeMode: 'channel' });
 
     expect(result.text).toBe('served');
+    expect(result.provenance.runtimeBoundary).toEqual({ readinessBoundary: 'project-runtime-box', agentExecutionBoundary: 'backend-process', agentRuntimeProvider: 'backend-engine', runtimeBoxId: 91, projectId: 'project-1' });
+    expect(getOrCreateBox).toHaveBeenCalledWith('project-1', 7);
+    expect(ensureRunning).toHaveBeenCalledWith(91, 7);
     expect(saveMessage).toHaveBeenCalledWith('runtime-session-1', expect.objectContaining({ role: 'user', username: '외부 사용자' }));
     expect(engineRun).toHaveBeenCalledWith('runtime-session-1', expect.stringContaining('isolated AI Service Channel'), expect.any(Object), expect.any(Object));
     expect(recordPassedRuntimeEvaluation).not.toHaveBeenCalled();
+  });
+
+  it('fails closed before invoking the engine when the required Runtime Box is unavailable', async () => {
+    queryOne.mockResolvedValueOnce(deployment).mockResolvedValueOnce({ runtime_session_id: 'runtime-session-1' });
+    ensureRunning.mockRejectedValueOnce(new Error('Runtime Box capacity unavailable'));
+
+    await expect(runAIServicePreview({ serviceId: 'svc-1', deploymentId: 'dep-1', conversationId: 'conv-1', prompt: '질문', recordEvaluation: false, runtimeMode: 'channel' }))
+      .rejects.toThrow('Runtime Box capacity unavailable');
+    expect(getEngine).not.toHaveBeenCalled();
+    expect(engineRun).not.toHaveBeenCalled();
   });
 
   it('creates serving traffic as a deployment Session in the reserved deck', async () => {

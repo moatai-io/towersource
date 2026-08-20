@@ -19,9 +19,9 @@ describe('Legacy personal hub extraction', () => {
     expect(hub).not.toContain('pendingAssignedCount');
   });
 
-  it('keeps personal materials out of the AI activity briefing', () => {
+  it('keeps personal materials out of the actual Workstream surface', () => {
     expect(timeline).toContain("tr('challenge.timeline.title')");
-    expect(timeline).toContain('<AgentActivityTimeline projects={data.projects} selectedWorkstreamKey={selectedWorkstreamKey}');
+    expect(timeline).toContain('<WorkstreamList projects={data.projects} selectedWorkstreamKey={selectedWorkstreamKey}');
     expect(timeline).toContain('<WorkstreamOverview challenge={selectedChallenge} onBack={returnToActivity} />');
     expect(timeline).not.toContain('<PersonalWorkHub');
     expect(timeline).not.toContain('<ApprovalInbox />');

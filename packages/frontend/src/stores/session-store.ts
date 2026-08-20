@@ -14,6 +14,14 @@ function clampLastTurnPreview(text: string, maxChars = LAST_TURN_PREVIEW_MAX_CHA
   return `${text.slice(0, maxChars).trimEnd()}\n\n…`;
 }
 
+function sortSessionsByActivity(sessions: SessionMeta[]): SessionMeta[] {
+  return dedupeSessionsById(sessions).sort((a, b) => {
+    const at = new Date(a.updatedAt || a.createdAt || 0).getTime();
+    const bt = new Date(b.updatedAt || b.createdAt || 0).getTime();
+    return bt - at;
+  });
+}
+
 export type MobileTab = 'sessions' | 'ai' | 'files' | 'edit' | 'pins' | 'board' | 'schedule' | 'channel' | 'work';
 
 /**
@@ -23,7 +31,8 @@ export type MobileTab = 'sessions' | 'ai' | 'files' | 'edit' | 'pins' | 'board' 
  * - `sessions` is the AI navigation surface: teammate rail, Work/AI Team
  *   first-level scopes, and conversation/session lists. It is not merely a
  *   legacy "sessions tab" in the product sense.
- * - `rooms` is the Channel navigation surface.
+ * - `rooms` is a legacy compatibility identifier for preserved internal-channel
+ *   links. It is not an active navigation surface and renders retirement guidance.
  * - `files`, `prompts`, `pins`, and `history` are non-primary left-panel
  *   utility surfaces retained for focused workflows.
  */
@@ -39,6 +48,8 @@ export type SidebarTab = 'sessions' | 'files' | 'prompts' | 'pins' | 'rooms' | '
  *   Top navigation AI tab and not the AI navigation drawer itself.
  * - `work` is the full Work history surface. It is separate from live
  *   `TodoWrite`/Work Steps and from the AI navigation's `work` scope.
+ * - `rooms` remains only so preserved `/r/` and `/rooms/` links can resolve to
+ *   `RetiredChannelNotice`; new product flows must not navigate to it.
  */
 export type ActiveView = 'chat' | 'aiTeam' | 'kanban' | 'history' | 'rooms' | 'files' | 'projectFiles' | 'favorites' | 'inbox' | 'work' | 'schedules' | 'automations' | 'aiServices' | 'beta';
 
@@ -97,7 +108,12 @@ interface SessionState {
   clearPendingReply: (sessionId: string) => void;
 
   setSessions: (sessions: SessionMeta[]) => void;
+  setRecentSessions: (sessions: SessionMeta[]) => void;
   mergeSessions: (sessions: SessionMeta[]) => void;
+  hydratedProjectSessionIds: Set<string>;
+  projectSessionsLoading: Set<string>;
+  hydrateProjectSessions: (projectId: string, options?: { force?: boolean }) => Promise<void>;
+  resetProjectSessionHydration: () => void;
   hydrateLatestAttentionFromServer: () => Promise<void>;
   setActiveSessionId: (id: string | null) => void;
   setVisibleChatSessionId: (id: string | null) => void;
@@ -163,10 +179,23 @@ export const useSessionStore = create<SessionState>((set) => ({
   mobileTabBeforeContext: 'ai',
   activeView: 'chat',
   pendingReplies: {},
+  hydratedProjectSessionIds: new Set(),
+  projectSessionsLoading: new Set(),
 
   setSessions: (sessions) => {
     set({ sessions: dedupeSessionsById(sessions) });
   },
+  setRecentSessions: (sessions) => set((s) => {
+    const byId = new Map<string, SessionMeta>();
+    for (const session of s.sessions) {
+      const belongsToHydratedProject = !!session.projectId && s.hydratedProjectSessionIds.has(session.projectId);
+      if (belongsToHydratedProject || session.id === s.activeSessionId) {
+        byId.set(session.id, session);
+      }
+    }
+    for (const session of sessions) byId.set(session.id, session);
+    return { sessions: sortSessionsByActivity(Array.from(byId.values())) };
+  }),
   mergeSessions: (sessions) => set((s) => {
     if (!sessions.length) return s;
     const byId = new Map<string, SessionMeta>();
@@ -178,6 +207,48 @@ export const useSessionStore = create<SessionState>((set) => ({
       return bt - at;
     });
     return { sessions: merged };
+  }),
+  hydrateProjectSessions: async (projectId, options) => {
+    const initial = useSessionStore.getState();
+    if (!projectId || initial.projectSessionsLoading.has(projectId)) return;
+    if (!options?.force && initial.hydratedProjectSessionIds.has(projectId)) return;
+
+    set((s) => ({ projectSessionsLoading: new Set(s.projectSessionsLoading).add(projectId) }));
+    try {
+      const token = typeof localStorage !== 'undefined' ? localStorage.getItem('token') : null;
+      const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
+      const params = new URLSearchParams({ projectId });
+      const response = await fetch(`/api/sessions?${params.toString()}`, { headers });
+      if (!response.ok) throw new Error(`project session hydration failed: ${response.status}`);
+      const data = await response.json().catch(() => []);
+      if (!Array.isArray(data)) throw new Error('project session hydration returned a non-array payload');
+
+      set((s) => {
+        const byId = new Map<string, SessionMeta>();
+        for (const session of s.sessions) {
+          if (session.projectId !== projectId) byId.set(session.id, session);
+        }
+        for (const session of data) byId.set(session.id, session);
+        const hydratedProjectSessionIds = new Set(s.hydratedProjectSessionIds);
+        hydratedProjectSessionIds.add(projectId);
+        return {
+          sessions: sortSessionsByActivity(Array.from(byId.values())),
+          hydratedProjectSessionIds,
+        };
+      });
+    } catch (error) {
+      console.warn('[session-store] failed to hydrate project sessions:', error);
+    } finally {
+      set((s) => {
+        const projectSessionsLoading = new Set(s.projectSessionsLoading);
+        projectSessionsLoading.delete(projectId);
+        return { projectSessionsLoading };
+      });
+    }
+  },
+  resetProjectSessionHydration: () => set({
+    hydratedProjectSessionIds: new Set(),
+    projectSessionsLoading: new Set(),
   }),
   hydrateLatestAttentionFromServer: async () => {
     try {

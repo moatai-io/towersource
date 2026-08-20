@@ -8,7 +8,7 @@
  * It can still carry optional `work` metadata for explicit long-running or
  * high-accountability work, but assistants should not add workstream metadata
  * just to manufacture Recent Work records. Durable work memory should come
- * from final `업무보고:` summaries and user-facing artifacts, with TodoWrite
+ * from final `Work Summary:` blocks and user-facing artifacts, with TodoWrite
  * metadata as an exception. When session context and work metadata are present,
  * the tool upserts a Work Ledger record; MessageBubble independently renders
  * the checklist from the persisted tool_use input.
@@ -97,16 +97,16 @@ export function createTodoWriteTool(ctx?: {
   return {
   name: 'TodoWrite',
   label: '진행 단계',
-  description: 'Create and manage the AI run\'s “진행 단계 · Work Steps” for live progress visibility. This is not the user\'s private “내 할 일 · My Todo” checklist. Use it when the user benefits from seeing multi-step execution state during a longer, risky, or externally visible task. Each call sends the full updated list (not a diff). Work metadata is optional and should be reserved for explicit long-lived/high-accountability work; ordinary Recent Work memory should come from final 업무보고 summaries and artifacts. The UI renders this as an interactive checklist with a progress bar.',
+  description: 'Create and manage the AI run\'s “진행 단계 · Work Steps” for live progress visibility. This is not the user\'s private “내 할 일 · My Todo” checklist. Use it when the user benefits from seeing multi-step execution state during a longer, risky, or externally visible task. Each call sends the full updated list (not a diff). Work metadata is optional and should be reserved for explicit long-lived/high-accountability work; ordinary Recent Work memory should come from final Work Summary blocks and artifacts. The UI renders this as an interactive checklist with a progress bar.',
   promptSnippet: 'Track the AI run\'s 진행 단계 (Work Steps) with a visual checklist when live progress visibility is useful. Do not use TodoWrite as the default Recent Work logger, and never use it for the user\'s private 내 할 일 (My Todo).',
   promptGuidelines: [
     'TodoWrite means the AI run\'s “진행 단계 · Work Steps”; “내 할 일 · My Todo” belongs to personal_note_append.',
     'Use TodoWrite only when live progress visibility materially helps the user: longer multi-step execution, risky/operational work, external actions, deployment preparation, or a task where the user may need to interrupt or monitor progress.',
-    'Do NOT use TodoWrite merely because a task has a few internal steps, or just to create a Recent Work record. For ordinary completed work, summarize with an 업무보고: block in the final answer instead.',
+    'Do NOT use TodoWrite merely because a task has a few internal steps, or just to create a Recent Work record. For ordinary completed work, add a Work Summary: block in the final answer instead, regardless of the conversation language.',
     'Do NOT use TodoWrite for greetings, quick factual answers, tiny wording edits, short analysis, simple document edits, or purely informational responses.',
     'Work metadata is optional. Include work metadata only when this run truly needs a durable WorkLedger row during execution, such as a long-running operation, explicit ongoing workstream, protected action, or cross-session handoff.',
     'When work metadata is justified, prefer v3 fields: workstreamKey, workstreamTitle, runTitle, outcome, and note. Existing epic/title/goal are backward-compatible v2 aliases only.',
-    'Do not invent or overfit workstreamKey/workstreamTitle for routine turns. If unsure, omit work metadata and use 업무보고: in the final answer for searchable work memory.',
+    'Do not invent or overfit workstreamKey/workstreamTitle for routine turns. If unsure, omit work metadata and use Work Summary: in the final answer for searchable work memory.',
     'Use work.outcome for the evidence-checkable success criterion. Use work.note for assumptions, boundaries, intended method/tooling, or context. Keep note to 1-2 short sentences and do not include long reasoning traces.',
     'Use top-level backlog for future work candidates discovered during the run. Use top-level questions for unresolved design/product/policy questions. Do not mix backlog/questions into the current todos unless you are executing them now.',
     'If work metadata is justified and the request continues a known prior workstream, set work.mode="continue" and continuationOf to the known id/title/key; otherwise use work.mode="new".',
@@ -114,7 +114,7 @@ export function createTodoWriteTool(ctx?: {
     'Keep exactly ONE task as in_progress at a time.',
     'Mark tasks completed IMMEDIATELY after finishing each one.',
     'If you used TodoWrite during a turn, call TodoWrite one final time BEFORE the final answer with every finished item marked completed so the live progress card closes cleanly.',
-    'Avoid a final todo that only says “report results” when possible; use a completion step that can be marked done before the final answer, such as “Verify and summarize impact”. Put durable memory in the final 업무보고: block, not in artificial checklist items.',
+    'Avoid a final todo that only says “report results” when possible; use a completion step that can be marked done before the final answer, such as “Verify and summarize impact”. Put durable memory in the final Work Summary: block, not in artificial checklist items.',
     'If any item genuinely remains unfinished, leave it pending/in_progress and mention the remaining work in the final answer.',
     'Write todo content, activeForm, and any justified work metadata in the user/session language by default. In Korean sessions, use natural Korean work phrases. Keep code identifiers, file paths, commands, and API names as-is.',
     'Make each todo specific enough to help the user understand current progress: name the target, artifact, decision, or verification when it matters.',

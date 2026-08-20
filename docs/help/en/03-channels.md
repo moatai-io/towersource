@@ -6,6 +6,8 @@ order: 3
 
 # Channels -- Team Chat
 
+> **Historical UI guide:** This page describes the earlier internal Channels UI. Use Sessions, notifications, and My Work for current execution records. Do not treat this page as the current product contract.
+
 > Channels are where your team talks together. Real-time messages, AI assistance, and task execution -- all in one shared space.
 
 ---

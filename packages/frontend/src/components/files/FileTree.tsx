@@ -9,7 +9,6 @@ import { ShareModal } from './ShareModal';
 import { MoveToFolderModal, compactTopLevelPaths } from './SelectionToolbar';
 import { useConfirm } from '../../hooks/useDialog';
 import { buildPdfServeUrl, isPdfPath } from '../../utils/pdf-open';
-import { createTowerFileShortLink } from '../../utils/file-path-links';
 import { ViewportContextMenu } from '../common/ViewportContextMenu';
 
 /** Recursively collect all descendant paths from a FileEntry tree */
@@ -398,7 +397,7 @@ async function uploadFilesToDir(targetDir: string, e: React.DragEvent, onRefresh
 }
 
 // ─── Context Menu ───
-type MenuAction = 'newFile' | 'newFolder' | 'uploadHere' | 'paste' | 'moveSelected' | 'rename' | 'delete' | 'newSession' | 'shareFile' | 'download' | 'downloadZip' | 'copyPath' | 'copyInternalLink' | 'openNewWindow' | 'pin';
+type MenuAction = 'newFile' | 'newFolder' | 'uploadHere' | 'paste' | 'moveSelected' | 'rename' | 'delete' | 'newSession' | 'shareFile' | 'download' | 'downloadZip' | 'copyPath' | 'openNewWindow' | 'pin';
 
 function ContextMenu({ x, y, entry, showNewSession, canPin, canPaste, clipboardCount, selectedCount, isSelectedContext, onAction, onClose, mobile = false }: {
   x: number; y: number; entry: FileEntry;
@@ -507,10 +506,6 @@ function ContextMenu({ x, y, entry, showNewSession, canPin, canPaste, clipboardC
       ),
     },
     {
-      action: 'copyInternalLink', label: isSelectedContext ? `Copy ${selectedCount} internal links` : 'Copy internal link', show: true,
-      icon: <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" /></svg>,
-    },
-    {
       action: 'copyPath', label: isSelectedContext ? `Copy ${selectedCount} paths` : 'Copy path', show: true,
       icon: <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" /></svg>,
     },
@@ -607,6 +602,7 @@ function InlineInput({ defaultValue, placeholder, onSubmit, onCancel }: {
 
 export function FileTree({ entries, onFileClick, onDirectoryClick, onPinFile, onNewSessionInFolder, onRefreshTree, depth = 0, flatPaths: parentFlatPaths }: FileTreeProps) {
   const { t } = useTranslation('layout');
+  const { t: tFiles } = useTranslation('files');
   const confirm = useConfirm();
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; entry: FileEntry; presentation: 'pointer' | 'sheet' } | null>(null);
   const [inlineInput, setInlineInput] = useState<{ type: 'newFile' | 'newFolder' | 'rename'; parentPath?: string; entry?: FileEntry } | null>(null);
@@ -728,8 +724,8 @@ export function FileTree({ entries, onFileClick, onDirectoryClick, onPinFile, on
       if (!entry.isDirectory || !fileClipboard?.paths.length) return;
       try {
         const result = await apiPost('/api/files/copy', { paths: fileClipboard.paths, targetDir: entry.path });
-        if (result.copied > 0) toastQuiet(`${result.copied}개 항목 붙여넣기 완료`);
-        if (result.failed > 0) toastError(`${result.failed}개 항목 붙여넣기 실패`);
+        if (result.copied > 0) toastQuiet(tFiles('tree.pasted', { count: result.copied }));
+        if (result.failed > 0) toastError(tFiles('tree.pasteFailed', { count: result.failed }));
         onRefreshTree?.();
       } catch (err: any) {
         toastError(err.message || 'Paste failed');
@@ -762,17 +758,6 @@ export function FileTree({ entries, onFileClick, onDirectoryClick, onPinFile, on
 
     if (action === 'shareFile') {
       setShareFilePath(entry.path);
-      return;
-    }
-
-    if (action === 'copyInternalLink') {
-      try {
-        const fileUrls = await Promise.all(actionPaths.map((p) => createTowerFileShortLink(p)));
-        await navigator.clipboard.writeText(fileUrls.join('\n'));
-        toastQuiet(isBulkAction ? `${fileUrls.length} short links copied` : 'Short link copied');
-      } catch {
-        toastError('Failed to copy internal link');
-      }
       return;
     }
 
@@ -833,8 +818,8 @@ export function FileTree({ entries, onFileClick, onDirectoryClick, onPinFile, on
             fail++;
           }
         }
-        if (success > 0) toastQuiet(isBulkAction ? `${success}개 삭제됨` : `${displayName} deleted`);
-        if (fail > 0) toastError(`${fail}개 삭제 실패`);
+        if (success > 0) toastQuiet(isBulkAction ? tFiles('tree.deleted', { count: success }) : tFiles('tree.deletedOne', { name: displayName }));
+        if (fail > 0) toastError(tFiles('tree.deleteFailed', { count: fail }));
         useFileStore.getState().clearSelection();
         onRefreshTree?.();
       } catch (err: any) {

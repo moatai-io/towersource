@@ -24,7 +24,7 @@ function hasAnswer(answer: AnswerValue | undefined): boolean {
   return Array.isArray(answer) ? answer.length > 0 : !!answer;
 }
 
-function inferBinaryConfirmationOptions(questionText: string): Array<{ label: string }> {
+function inferBinaryConfirmationOptions(questionText: string, t: (key: string) => string): Array<{ label: string }> {
   const text = questionText.trim();
   if (!text) return [];
   const asksForTypedYesNo = /(네|예|아니오|yes|no)\s*(라고|로)?\s*(답|입력|써|작성)|type\s+(yes|no)|reply\s+(yes|no)/i.test(text);
@@ -32,13 +32,13 @@ function inferBinaryConfirmationOptions(questionText: string): Array<{ label: st
     && /(할까요|하시겠습니까|해도|할지|여부|\?)/.test(text);
 
   return asksForTypedYesNo || asksForGoNoGo
-    ? [{ label: '예, 진행' }, { label: '아니오, 중단' }]
+    ? [{ label: t('confirmProceed') }, { label: t('confirmStop') }]
     : [];
 }
 
-function getQuestionOptions(q: any): Array<{ label: string; description?: string }> {
+function getQuestionOptions(q: any, t: (key: string) => string): Array<{ label: string; description?: string }> {
   const options = Array.isArray(q.options) ? q.options : [];
-  return options.length > 0 ? options : inferBinaryConfirmationOptions(safeStr(q.question || q.prompt || q.title));
+  return options.length > 0 ? options : inferBinaryConfirmationOptions(safeStr(q.question || q.prompt || q.title), t);
 }
 
 export function FloatingQuestionCard({ question, onAnswer, answered, onDismiss, minimized = false, onMinimize, onRestore }: FloatingQuestionCardProps) {
@@ -68,7 +68,7 @@ export function FloatingQuestionCard({ question, onAnswer, answered, onDismiss, 
   const getSubmittableAnswers = (baseAnswers: Record<number, AnswerValue> = answers) => {
     const nextAnswers: Record<number, AnswerValue> = { ...baseAnswers };
     question.questions.forEach((q, qi) => {
-      const options = getQuestionOptions(q);
+      const options = getQuestionOptions(q, t);
       if (options.length === 0) {
         const draftText = (otherText[qi] || '').trim();
         if (draftText) nextAnswers[qi] = draftText;
@@ -96,7 +96,7 @@ export function FloatingQuestionCard({ question, onAnswer, answered, onDismiss, 
   const sendAnswers = (nextAnswers: Record<number, AnswerValue>) => {
     if (isAnswered || !Object.values(nextAnswers).some(hasAnswer)) return;
     const combined = question.questions
-      .map((q, i) => `${q.question}: ${answerToText(nextAnswers[i]) || '[미응답]'}`)
+      .map((q, i) => `${q.question}: ${answerToText(nextAnswers[i]) || t('unanswered')}`)
       .join('\n');
     onAnswer(question.questionId, combined);
   };
@@ -133,7 +133,7 @@ export function FloatingQuestionCard({ question, onAnswer, answered, onDismiss, 
         data-testid="floating-question-minimized"
         onClick={onRestore}
         aria-expanded="false"
-        aria-label="질문 다시 펼치기"
+        aria-label={t('expandQuestion')}
         className="flex min-h-[44px] w-full items-center gap-3 rounded-2xl border px-4 py-2.5 text-left shadow-lg transition hover:bg-black/5 focus-visible:outline-none focus-visible:ring-2 dark:hover:bg-white/5"
         style={{
           background: 'var(--th-bg-primary)',
@@ -150,12 +150,12 @@ export function FloatingQuestionCard({ question, onAnswer, answered, onDismiss, 
           ?
         </span>
         <span className="min-w-0 flex-1">
-          <span className="block text-[13px] font-semibold">답변이 필요한 질문이 있습니다</span>
+          <span className="block text-[13px] font-semibold">{t('questionNeedsAnswer')}</span>
           <span className="block truncate text-[12px]" style={{ color: 'var(--th-text-muted)' }}>
-            {safeStr(question.questions[0]?.question || '질문을 다시 열어 확인하세요')}
+            {safeStr(question.questions[0]?.question || t('reopenQuestionHint'))}
           </span>
         </span>
-        <span className="shrink-0 text-[12px] font-semibold" style={{ color: 'var(--th-text-secondary)' }}>다시 열기</span>
+        <span className="shrink-0 text-[12px] font-semibold" style={{ color: 'var(--th-text-secondary)' }}>{t('reopenQuestion')}</span>
       </button>
     );
   }
@@ -189,7 +189,7 @@ export function FloatingQuestionCard({ question, onAnswer, answered, onDismiss, 
           const answeredText = answeredParts[qi]?.split(': ').slice(1).join(': ') || null;
           const currentText = answerToText(storedAnswer) || answeredText;
           const qDone = !!currentText;
-          const options = getQuestionOptions(q);
+          const options = getQuestionOptions(q, t);
           const optionLabels = new Set(options.map(opt => opt.label));
           const customAnswers = (Array.isArray(storedAnswer) ? storedAnswer : storedAnswer ? [storedAnswer] : [])
             .filter(value => !optionLabels.has(value));
@@ -205,10 +205,10 @@ export function FloatingQuestionCard({ question, onAnswer, answered, onDismiss, 
                     type="button"
                     onClick={onMinimize}
                     aria-expanded="true"
-                    aria-label="질문 최소화"
+                    aria-label={t('minimizeQuestion')}
                     className="-mt-1 flex min-h-[40px] min-w-[40px] shrink-0 items-center justify-center rounded-full transition hover:bg-black/5 focus-visible:outline-none focus-visible:ring-2 dark:hover:bg-white/10"
                     style={{ color: 'var(--th-text-secondary)', ['--tw-ring-color' as any]: 'var(--th-q-pending-border)' }}
-                    title="질문을 최소화하고 대화 내용 보기"
+                    title={t('minimizeQuestionHint')}
                   >
                     <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 12h14" />
@@ -354,7 +354,7 @@ export function FloatingQuestionCard({ question, onAnswer, answered, onDismiss, 
                           handleOtherSubmit(qi, true, e.currentTarget.value);
                         }
                       }}
-                      placeholder={t('typeYourAnswer') || '직접 답장…'}
+                      placeholder={t('typeYourAnswer')}
                       className="block min-h-[128px] w-full min-w-0 flex-1 resize-y rounded-xl border px-4 py-3.5 text-[14px] leading-relaxed outline-none focus:ring-1"
                       style={{
                         background: 'var(--th-bg-secondary)',
@@ -377,7 +377,7 @@ export function FloatingQuestionCard({ question, onAnswer, answered, onDismiss, 
                         }
                         if (e.key === 'Escape') setOtherOpen(prev => ({ ...prev, [qi]: false }));
                       }}
-                      placeholder={t('typeYourAnswer') || '직접 답장…'}
+                      placeholder={t('typeYourAnswer')}
                       className="min-h-[36px] min-w-0 flex-1 rounded-lg border px-2.5 text-[14px] outline-none focus:ring-2"
                       style={{
                         background: 'var(--th-bg-secondary)',

@@ -7,9 +7,12 @@
 import { execute, queryOne } from '../../db/pg-repo.js';
 
 export type SignupApprovalMode = 'auto' | 'manual';
+export type ResponseLanguage = 'en' | 'ko';
 
 export const SIGNUP_APPROVAL_MODES: ReadonlySet<SignupApprovalMode> = new Set(['auto', 'manual']);
+export const RESPONSE_LANGUAGES: ReadonlySet<ResponseLanguage> = new Set(['en', 'ko']);
 const SIGNUP_APPROVAL_MODE_KEY = 'signup.approval_mode';
+const DEFAULT_RESPONSE_LANGUAGE_KEY = 'language.default_response';
 const AI_COMPOSER_SETTINGS_KEY = 'ai.composer_autocomplete';
 
 export interface AiComposerSettings {
@@ -73,6 +76,31 @@ export async function setAiComposerSettings(value: unknown, updatedBy?: number |
     [AI_COMPOSER_SETTINGS_KEY, JSON.stringify(settings), updatedBy ?? null],
   );
   return settings;
+}
+
+function normalizeResponseLanguage(value: unknown): ResponseLanguage | null {
+  return typeof value === 'string' && RESPONSE_LANGUAGES.has(value as ResponseLanguage)
+    ? value as ResponseLanguage
+    : null;
+}
+
+/** Return the Admin Panel response-language default, or null to use the VM bootstrap fallback. */
+export async function getDefaultResponseLanguage(): Promise<ResponseLanguage | null> {
+  const row = await queryOne<{ value: unknown }>('SELECT value FROM app_settings WHERE key = $1', [DEFAULT_RESPONSE_LANGUAGE_KEY]);
+  return normalizeResponseLanguage(row?.value);
+}
+
+/** Validate and persist the Admin Panel response-language default. */
+export async function setDefaultResponseLanguage(language: unknown, updatedBy?: number | null): Promise<ResponseLanguage> {
+  const normalized = normalizeResponseLanguage(language);
+  if (!normalized) throw new Error(`Invalid response language: ${String(language)}`);
+  await execute(
+    `INSERT INTO app_settings (key, value, updated_by, updated_at)
+     VALUES ($1, $2::jsonb, $3, NOW())
+     ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_by = EXCLUDED.updated_by, updated_at = NOW()`,
+    [DEFAULT_RESPONSE_LANGUAGE_KEY, JSON.stringify(normalized), updatedBy ?? null],
+  );
+  return normalized;
 }
 
 function normalizeSignupApprovalMode(value: unknown): SignupApprovalMode {

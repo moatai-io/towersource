@@ -351,11 +351,6 @@
         "clearSelection": "Clear selection",
         "noSelectedMaterials": "No materials selected yet.",
         "advancedPath": "Advanced · Enter paths directly",
-        "capabilities": "Capabilities",
-        "permissionPreview": "Permission design preview",
-        "available": "Available",
-        "connectionPreparing": "Connection coming soon",
-        "approvalNeeded": "Approval required",
         "whoCanUse": "Who can use it?",
         "peopleWithLink": "Anyone with the link",
         "peopleWithPassword": "Anyone with the password",
@@ -419,20 +414,6 @@
         "visitorDailyLimit": "Daily limit per visitor",
         "totalTokenLimit": "Total token limit",
         "usageAvailableAfterDeploy": "Usage becomes available after the agent is deployed externally.",
-        "capabilityKnowledgeTitle": "Answer from materials",
-        "capabilityKnowledgeDetail": "Finds and cites evidence within the selected materials.",
-        "capabilityDataTitle": "Read business data",
-        "capabilityDataDetail": "Reads only permitted data from connected databases and APIs.",
-        "capabilityProposeTitle": "Propose actions",
-        "capabilityProposeDetail": "Drafts changes without executing them.",
-        "capabilityExecuteTitle": "Execute business actions",
-        "capabilityExecuteDetail": "Changes external systems within the approval policy.",
-        "approvalEveryTitle": "Approve every time",
-        "approvalEveryDetail": "A person reviews before execution",
-        "approvalPolicyTitle": "Automatic within policy",
-        "approvalPolicyDetail": "Requires conditions such as amount and target",
-        "approvalDisabledTitle": "Execution disabled",
-        "approvalDisabledDetail": "Answers, reads, and proposals only",
         "deploymentSummary": "External deployment approval summary",
         "deploymentFinalReview": "Final review before deployment",
         "noMaterialsConnected": "No materials connected",
@@ -490,7 +471,6 @@
         "websiteCheckHttpError": "Website check HTTP {{status}}",
         "sharingSettingsHttpError": "Sharing settings HTTP {{status}}",
         "deploymentStepsLabel": "Agent external deployment steps",
-        "externalApiBetaLabel": "External AI API integration beta",
         "registryRelease": "Registry release"
       },
       "copy": {
@@ -528,13 +508,8 @@
         "createDescription": "Choose one AI teammate and the external access scope. Tower handles deployment preparation and link creation automatically.",
         "smartDescription": "Tower automatically selects the right model for the task.",
         "harnessModelDescription": "Uses the default model fixed in the selected Harness.",
-        "externalApi": "Connect an external AI API",
-        "externalApiDescription": "Support for connecting a separate OpenAI, Anthropic, or other API to this deployment is coming soon.",
-        "externalApiPreparing": "External AI API settings · Coming soon",
         "materialsDescription": "Pins the current contents of selected materials to the deployment. Changes to source files do not affect external answers until redeployment.",
         "materialsSafety": "Tower rechecks Project boundaries, symlinks, file types, and size on the server before pinning content. Leave empty to deploy without materials.",
-        "capabilitiesDescription": "Choose work-level capabilities that external users understand instead of technical tools.",
-        "approvalDescription": "Set the default approval method for future execution permissions.",
         "linkDefaultDescription": "The simplest default setting.",
         "passwordDescription": "Adds another layer of protection before sharing.",
         "openAfterDeploy": "After deployment, open the website here and start a conversation immediately."
@@ -635,7 +610,9 @@
       "openTodos": "Open Todos",
       "noOpenTodos": "No open Todos.",
       "completedSample": "Completed sample",
-      "noCompletedSample": "No completed sample."
+      "noCompletedSample": "No completed sample.",
+      "workList": "Actual work",
+      "workListDescription": "Workstreams ordered by latest update, with the current step and completion status."
     }
   },
   "publish": {
@@ -1247,12 +1224,12 @@
       "selectWorkspace": "Select the workspace where this AI teammate will work.",
       "create": "Could not create the Agent."
     },
-    "title": "Choose the AI teammate you want to develop.",
-    "description": "Instead of filling out a configuration form, describe the role you need or name the source materials. Agent Academy will propose an AI teammate draft on the right.",
-    "introBefore": "Let’s define the AI teammate you want to develop. Think in terms of an ",
-    "ongoingRole": "ongoing role",
-    "introAfter": " rather than a one-off task—for example, answering customer questions or continuously improving company materials.",
-    "rolePrompt": "Describe the role you want",
+    "title": "Describe what you want an AI teammate to help with.",
+    "description": "Start in your own words. The examples below are optional starting points, not fixed jobs or identities.",
+    "introBefore": "Begin with the work you want help with. You can describe a specific task, a recurring workflow, or an outcome you want to improve. ",
+    "ongoingRole": "Your description stays editable",
+    "introAfter": ", and any example you choose is only used to prepare a starting draft.",
+    "rolePrompt": "What would you like this AI teammate to help with?",
     "mode": {
       "chatTitle": "Set up with AI",
       "uploadTitle": "Suggest from materials",
@@ -1264,7 +1241,7 @@
     "materialQuestion": "Do you have source documents?",
     "materialHint": "File names only for now; upload support comes next",
     "materialPlaceholder": "Example: company-profile.pdf\ncustomer-faq.md\nrfp-requirements.xlsx",
-    "quickRoles": "Quick role ideas",
+    "quickRoles": "Work examples",
     "drafting": "Academy is drafting…",
     "suggestDraft": "Suggest a draft",
     "openViewer": "Open in Viewer",
@@ -1276,12 +1253,16 @@
     "sourceScope": "Source scope",
     "chooseFace": "Choose a face",
     "capabilities": "Capabilities",
-    "nextPromotion": "Next promotion requirement",
+    "nextPromotion": "First success criterion",
     "firstTask": "First task",
     "preparing": "Preparing…",
-    "start": "Start with this AI teammate",
+    "start": "Create this AI teammate",
     "startChat": "Start the first task in chat",
-    "openManagement": "Open management view"
+    "openManagement": "Open management view",
+    "workExamples": "Optional work examples",
+    "workExamplesHint": "Choose one only if it helps you get started. You can rewrite every part before creating the teammate.",
+    "workScope": "Proposed work scope",
+    "firstSuccess": "First success criterion"
   },
   "personalUsage": {
     "error": {
@@ -1328,5 +1309,19 @@
     "completed": "Completed ({{count}})",
     "created": "Added {{date}}",
     "completedAt": "Completed {{date}}"
+  },
+  "updateBanner": {
+    "deferred": "Tower will switch to the latest version when the current turn finishes.",
+    "busy": "A new version is ready. Refresh after the current work finishes to update safely.",
+    "ready": "A new version is ready. Refresh now to update.",
+    "updateAfterTurn": "Update after this turn",
+    "cancelDeferred": "Cancel scheduled update",
+    "reload": "Refresh"
+  },
+  "running": "Running",
+  "getStarted": "Get started",
+  "uploadProgress": {
+    "label": "File upload {{percent}}%",
+    "saving": "Saving…"
   }
 }

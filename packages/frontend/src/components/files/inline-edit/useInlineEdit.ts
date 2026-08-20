@@ -2,6 +2,7 @@
 // See README.md.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import i18n from '../../../i18n';
 
 export type InlineEditStage =
   | 'idle'
@@ -491,8 +492,8 @@ export function useInlineEdit(args: UseInlineEditArgs): InlineEditState {
       if ('error' in located) {
         setError(
           located.error === 'not_found'
-            ? '선택한 텍스트를 원본에서 찾지 못했어요. 여러 단락에 걸친 선택이거나, 마크다운 부호 / HTML 엔티티가 섞인 영역은 아직 지원하지 않아요. 한 단락 안에서 다시 선택해 주세요.'
-            : '선택한 텍스트가 파일 안에 여러 번 나와요. 좀 더 큰 범위를 선택해 주세요.',
+            ? i18n.t('files:inlineEditErrors.selectionNotFound')
+            : i18n.t('files:inlineEditErrors.selectionAmbiguous'),
         );
         setStage('error');
         return;
@@ -702,7 +703,7 @@ export function useInlineEdit(args: UseInlineEditArgs): InlineEditState {
       // Aborts are intentional; don't surface them as errors.
       if (err?.name === 'AbortError' || controller.signal.aborted) return;
       if (!mountedRef.current || requestFilePathRef.current !== filePath) return;
-      setError(err?.message || 'AI 편집에 실패했어요.');
+      setError(err?.message || i18n.t('files:inlineEditErrors.editFailed'));
       setStage('error');
     }
   }, [selection, instruction, content, filePath, sessionId, editMode]);
@@ -759,7 +760,7 @@ export function useInlineEdit(args: UseInlineEditArgs): InlineEditState {
     } catch (err: any) {
       if (err?.name === 'AbortError' || controller.signal.aborted) return false;
       if (!mountedRef.current || requestFilePathRef.current !== filePath) return false;
-      setError(err?.message || '되돌리기에 실패했어요.');
+      setError(err?.message || i18n.t('files:inlineEditErrors.undoFailed'));
       setStage('error');
       return false;
     }
@@ -856,7 +857,7 @@ export function useInlineEdit(args: UseInlineEditArgs): InlineEditState {
     } catch (err: any) {
       if (err?.name === 'AbortError' || controller.signal.aborted) return;
       if (!mountedRef.current || requestFilePathRef.current !== filePath) return;
-      setError(err?.message || '저장에 실패했어요.');
+      setError(err?.message || i18n.t('files:inlineEditErrors.saveFailed'));
       setStage('error');
     }
   }, [selection, replacement, content, filePath, onContentChange, onSaved, cancel, editMode, undoLast]);

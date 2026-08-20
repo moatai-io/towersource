@@ -1,7 +1,5 @@
 import React from 'react';
 import i18n from '../../i18n';
-import { agentFaceImageUrl, AgentCharacterAvatar, characterFace, distributedKoreanCharacterId } from '../../features/agent-profile/characters';
-import { PersonalUsageSummary } from './PersonalUsageSummary';
 
 interface Segment {
   start: string;
@@ -205,17 +203,10 @@ function activityStatus(session: WorkSession, challenge: ChallengeRow): { label:
   return { label: tr('challenge.timeline.status.needsReview', { ns: 'common' }), tone: 'text-surface-300 bg-surface-800 border-surface-700' };
 }
 
-function AgentFace({ session }: { session: WorkSession }) {
-  const faceImage = agentFaceImageUrl(session.agentFace);
-  const characterId = characterFace(session.agentFace);
-  if (faceImage && !characterId) return <img src={faceImage} alt="" className="h-11 w-11 shrink-0 rounded-xl object-cover" aria-hidden="true" />;
-  return <AgentCharacterAvatar id={characterId || distributedKoreanCharacterId(session.projectId || session.id)} className="h-11 w-11 shrink-0 rounded-xl" variant="list" title={session.agentName} />;
-}
-
 export function ChallengeTimelinePanel() {
   const initialLocation = React.useMemo(() => readWorkstreamLocation(), []);
   const [rangeHours, setRangeHours] = React.useState(48);
-  const [bucketHours, setBucketHours] = React.useState(24);
+  const bucketHours = 24;
   const [projectId, setProjectId] = React.useState(initialLocation.projectId);
   const [data, setData] = React.useState<TimelineResponse | null>(null);
   const [loading, setLoading] = React.useState(false);
@@ -298,7 +289,6 @@ export function ChallengeTimelinePanel() {
       <div className="border-b border-surface-800/80 bg-surface-950/95 px-4 py-3 backdrop-blur-xl md:shrink-0 md:px-5 md:py-4">
         <div className="flex flex-wrap items-start justify-between gap-3 md:gap-4">
           <div>
-            <div className="hidden text-[12px] font-semibold uppercase tracking-[0.18em] text-primary-700/90 dark:text-primary-300/80 md:mb-1 md:block">Activity briefing</div>
             <h1 className="text-[20px] font-semibold tracking-tight text-surface-50 md:text-[24px]">{tr('challenge.timeline.title')}</h1>
             <p className="mt-1 hidden max-w-3xl text-[13px] leading-6 text-surface-500 md:block">
               {tr('challenge.timeline.description')}
@@ -309,10 +299,6 @@ export function ChallengeTimelinePanel() {
               <option value={48}>{tr('challenge.timeline.last2Days')}</option>
               <option value={168}>{tr('challenge.timeline.last7Days')}</option>
               <option value={360}>{tr('challenge.timeline.last15Days')}</option>
-            </select>
-            <select value={bucketHours} onChange={(e) => setBucketHours(Number(e.target.value))} className="h-9 rounded-lg border border-surface-700 bg-surface-900 px-3 text-[13px] text-surface-200 outline-none focus:border-primary-500/70">
-              <option value={6}>{tr('challenge.timeline.every6Hours')}</option>
-              <option value={24}>{tr('challenge.timeline.daily')}</option>
             </select>
             <select value={projectId} onChange={(e) => setProjectId(e.target.value)} className="h-9 min-w-0 flex-1 rounded-lg border border-surface-700 bg-surface-900 px-3 text-[13px] text-surface-200 outline-none focus:border-primary-500/70 md:max-w-[220px] md:flex-none">
               <option value="all">{tr('challenge.timeline.allAssignedWork')}</option>
@@ -325,16 +311,9 @@ export function ChallengeTimelinePanel() {
             </button>
           </div>
         </div>
-
-        <div className="mt-3 hidden grid-cols-2 gap-1.5 md:grid md:grid-cols-3">
-          <Stat label={tr('challenge.timeline.aiTeammates')} value={new Set((data?.projects || []).flatMap((project) => project.challenges.flatMap((challenge) => (challenge.sessions || []).map((session) => session.agentName)))).size} />
-          <Stat label={tr('challenge.timeline.recentActivity')} value={(data?.projects || []).reduce((sum, project) => sum + project.challenges.reduce((inner, challenge) => inner + (challenge.sessions?.length || 0), 0), 0)} tone="primary" />
-          <Stat label={tr('challenge.timeline.stepsToReview')} value={data?.totals.todoLeft ?? 0} tone="amber" />
-        </div>
       </div>
 
       <div className="min-w-0 max-w-full flex-none overflow-x-hidden px-4 py-3 md:min-h-0 md:flex-1 md:overflow-auto md:px-5 md:py-4">
-        <PersonalUsageSummary />
         {error ? (
           <div className="rounded-xl border border-red-400/20 bg-red-500/10 p-4 text-[14px] text-red-700 dark:text-red-200">{error}</div>
         ) : !data || loading ? (
@@ -344,54 +323,47 @@ export function ChallengeTimelinePanel() {
         ) : selectedChallenge ? (
           <WorkstreamOverview challenge={selectedChallenge} onBack={returnToActivity} />
         ) : (
-          <AgentActivityTimeline projects={data.projects} selectedWorkstreamKey={selectedWorkstreamKey} onSelectWorkstream={(key) => selectWorkstream(key, data.projects.flatMap((project) => project.challenges).find((challenge) => workstreamKey(challenge) === key)?.projectId || 'all')} />
+          <WorkstreamList projects={data.projects} selectedWorkstreamKey={selectedWorkstreamKey} onSelectWorkstream={(key) => selectWorkstream(key, data.projects.flatMap((project) => project.challenges).find((challenge) => workstreamKey(challenge) === key)?.projectId || 'all')} />
         )}
       </div>
     </div>
   );
 }
 
-function AgentActivityTimeline({ projects, selectedWorkstreamKey, onSelectWorkstream }: { projects: ProjectGroup[]; selectedWorkstreamKey: string | null; onSelectWorkstream: (key: string) => void }) {
-  const [expandedAgents, setExpandedAgents] = React.useState<Set<string>>(() => new Set());
-  const activities = projects
-    .flatMap((project) => project.challenges.flatMap((challenge) => (challenge.sessions || []).map((session) => ({ session, challenge }))))
-    .sort((a, b) => new Date(b.session.lastAt).getTime() - new Date(a.session.lastAt).getTime());
-  const groups = Array.from(activities.reduce((map, activity) => {
-    const key = `${activity.session.projectId || 'none'}:${activity.session.agentName}`;
-    const current = map.get(key) || { key, session: activity.session, items: [] as typeof activities };
-    current.items.push(activity);
-    map.set(key, current);
-    return map;
-  }, new Map<string, { key: string; session: WorkSession; items: typeof activities }>()).values());
+function WorkstreamList({ projects, selectedWorkstreamKey, onSelectWorkstream }: { projects: ProjectGroup[]; selectedWorkstreamKey: string | null; onSelectWorkstream: (key: string) => void }) {
+  const workstreams = projects
+    .flatMap((project) => project.challenges)
+    .sort((a, b) => new Date(b.lastAt).getTime() - new Date(a.lastAt).getTime());
 
   return (
-    <section aria-labelledby="agent-activity-title" className="overflow-hidden rounded-xl border border-surface-800 bg-surface-900/55">
+    <section aria-labelledby="work-list-title" className="overflow-hidden rounded-xl border border-surface-800 bg-surface-900/55">
       <div className="border-b border-surface-800 bg-surface-950/45 px-4 py-3">
-        <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-primary-700/90 dark:text-primary-300/80">Recent activity</div>
-        <h2 id="agent-activity-title" className="mt-0.5 text-[17px] font-semibold text-surface-100">{tr('challenge.timeline.recentActivity')}</h2>
-        <p className="mt-1 text-[12px] leading-5 text-surface-500">{tr('challenge.timeline.groupDescription')}</p>
+        <h2 id="work-list-title" className="text-[17px] font-semibold text-surface-100">{tr('challenge.timeline.workList')}</h2>
+        <p className="mt-1 text-[12px] leading-5 text-surface-500">{tr('challenge.timeline.workListDescription')}</p>
       </div>
       <div className="divide-y divide-surface-800">
-        {groups.map((group) => {
-          const expanded = expandedAgents.has(group.key);
-          const visibleItems = expanded ? group.items : group.items.slice(0, 3);
-          return <div key={group.key} className="px-4 py-3">
-            <div className="mb-2 flex items-center gap-3">
-              <AgentFace session={group.session} />
-              <div className="min-w-0 flex-1"><div className="text-[13px] font-semibold text-surface-100">{group.session.agentName}</div><div className="text-[11px] text-surface-600">{tr('challenge.timeline.recentWorkCount', { project: group.session.projectName, count: group.items.length })}</div></div>
-              {group.items.length > 3 && <button type="button" onClick={() => setExpandedAgents((current) => { const next = new Set(current); expanded ? next.delete(group.key) : next.add(group.key); return next; })} className="rounded-md border border-surface-700 px-2 py-1 text-[11px] text-surface-400 hover:text-surface-100">{expanded ? tr('challenge.timeline.collapse') : tr('challenge.timeline.showMore', { count: group.items.length - 3 })}</button>}
-            </div>
-            <div className="divide-y divide-surface-800/70 border-t border-surface-800/70">
-              {visibleItems.map(({ session, challenge }) => {
-                const status = activityStatus(session, challenge);
-                const title = session.runTitles[session.runTitles.length - 1] || session.name;
-                const summary = session.openTodos?.[0]?.content || session.completedTodos?.[session.completedTodos.length - 1]?.content || challenge.outcomes?.[challenge.outcomes.length - 1];
-                const key = workstreamKey(challenge);
-                const selected = selectedWorkstreamKey === key;
-                return <button key={`${challenge.id}:${session.id}`} type="button" data-workstream-key={key} aria-current={selected ? 'true' : undefined} onClick={() => onSelectWorkstream(key)} className={`grid w-full grid-cols-[minmax(0,1fr)_auto] gap-x-3 rounded-md px-1 py-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary-500/60 ${selected ? 'bg-primary-500/10 ring-1 ring-inset ring-primary-500/35' : 'hover:bg-surface-800/25'}`}><div className="min-w-0"><div className="flex items-center gap-2"><span className={`rounded-full border px-1.5 py-0.5 text-[9px] font-semibold ${status.tone}`}>{status.label}</span><span className="truncate text-[12px] font-medium text-surface-200">{title}</span></div>{summary && <div className="mt-0.5 truncate pl-[3.9rem] text-[11px] text-surface-500">{summary}</div>}</div><time className="pt-0.5 text-[10px] text-surface-600">{formatDateTime(session.lastAt)}</time></button>;
-              })}
-            </div>
-          </div>;
+        {workstreams.map((challenge) => {
+          const sessions = [...(challenge.sessions || [])].sort((a, b) => new Date(b.lastAt).getTime() - new Date(a.lastAt).getTime());
+          const primarySession = sessions[0];
+          const currentStep = sessions.flatMap((session) => session.openTodos || [])[0]?.content
+            || challenge.outcomes?.[challenge.outcomes.length - 1]
+            || challenge.runTitles?.[challenge.runTitles.length - 1]
+            || tr('challenge.timeline.noCurrentSummary');
+          const key = workstreamKey(challenge);
+          const selected = selectedWorkstreamKey === key;
+          const status = primarySession ? activityStatus(primarySession, challenge) : { label: workstreamStatusLabel(challenge), tone: 'border-surface-700 bg-surface-850 text-surface-400' };
+          const agentNames = Array.from(new Set(sessions.map((session) => session.agentName))).join(', ');
+          return <button key={key} type="button" data-workstream-key={key} aria-current={selected ? 'true' : undefined} onClick={() => onSelectWorkstream(key)} className={`grid min-h-20 w-full grid-cols-[minmax(0,1fr)_auto] gap-3 px-4 py-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary-500/60 ${selected ? 'bg-primary-500/10' : 'hover:bg-surface-800/30'}`}>
+            <span className="min-w-0">
+              <span className="flex min-w-0 flex-wrap items-center gap-2"><span className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${status.tone}`}>{status.label}</span><span className="min-w-0 flex-1 truncate text-[14px] font-semibold text-surface-100">{challenge.title}</span></span>
+              <span className="mt-1 block truncate text-[12px] text-surface-400">{currentStep}</span>
+              <span className="mt-1 block truncate text-[11px] text-surface-600">{challenge.projectName}{agentNames ? ` · ${agentNames}` : ''}</span>
+            </span>
+            <span className="flex shrink-0 flex-col items-end justify-between gap-2">
+              <time className="text-[10px] text-surface-600">{formatDateTime(challenge.lastAt)}</time>
+              <span className="text-[11px] font-semibold tabular-nums text-surface-400">{challenge.todoTotal > 0 ? `${challenge.todoDone}/${challenge.todoTotal}` : tr('challenge.timeline.stepCountMissing')}</span>
+            </span>
+          </button>;
         })}
       </div>
     </section>
@@ -493,16 +465,6 @@ function TodoOverview({ title, todos, empty, completed = false }: { title: strin
 
 function SimpleOverviewList({ title, items, empty }: { title?: string; items: string[]; empty: string }) {
   return <div>{title && <div className="mb-2 text-[11px] font-bold text-surface-400">{title}</div>}{items.length === 0 ? <p className="text-[11px] text-surface-600">{empty}</p> : <ul className="space-y-2 text-[12px] leading-5 text-surface-300">{items.map((item) => <li key={item}>• {item}</li>)}</ul>}</div>;
-}
-
-function Stat({ label, value, tone = 'gray' }: { label: string; value: number; tone?: 'gray' | 'primary' | 'amber' }) {
-  const toneClass = tone === 'primary' ? 'text-primary-700 dark:text-primary-300' : tone === 'amber' ? 'text-amber-700 dark:text-amber-300' : 'text-surface-100';
-  return (
-    <div className="rounded-lg border border-surface-800 bg-surface-900/45 px-2.5 py-1.5">
-      <div className="text-[10px] uppercase tracking-[0.12em] text-surface-600">{label}</div>
-      <div className={`mt-0.5 text-[16px] font-semibold tabular-nums ${toneClass}`}>{value}</div>
-    </div>
-  );
 }
 
 function ProjectTimeline({ project, start, end, expandedIds, onToggle }: { project: ProjectGroup; start: string; end: string; expandedIds: Set<string>; onToggle: (id: string) => void }) {

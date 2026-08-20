@@ -20,6 +20,7 @@ import {
   removeWorkbenchWorkerTransportCredentialBinding,
 } from '../services/runtime-box/workbench-worker-transport-credentials.js';
 import { applyProjectWorkerEmergencyFallback, previewProjectWorkerEmergencyFallback } from '../services/runtime-box/workbench-project-emergency-fallback.js';
+import { applyProjectWorkstationChange, previewProjectWorkstationChange, verifyProjectWorkstationChangeSmoke } from '../services/runtime-box/workbench-project-workstation-change.js';
 import {
   assertWorkbenchWorkerIdentityActive,
   getWorkbenchWorkerIdentity,
@@ -66,6 +67,25 @@ const emergencyFallbackApplySchema = z.object({
   intentId: z.string().uuid(),
   proposalHash: z.string().regex(/^[0-9a-f]{64}$/),
   confirmed: z.literal(true),
+}).strict();
+const workstationChangePreviewSchema = z.object({
+  deploymentId: z.string().regex(/^[a-zA-Z0-9._-]{1,120}$/),
+  targetWorkerId: z.string().min(1).max(120),
+  authorityMode: z.enum(['project','operator-plane']).default('project'),
+  reason: z.string().min(1).max(500),
+  sessionId: z.string().max(200).optional(),
+}).strict();
+const workstationChangeSmokeSchema = z.object({
+  deploymentId: z.string().regex(/^[a-zA-Z0-9._-]{1,120}$/),
+  intentId: z.string().uuid(),
+  proposalHash: z.string().regex(/^[0-9a-f]{64}$/),
+}).strict();
+const workstationChangeApplySchema = z.object({
+  deploymentId: z.string().regex(/^[a-zA-Z0-9._-]{1,120}$/),
+  intentId: z.string().uuid(),
+  proposalHash: z.string().regex(/^[0-9a-f]{64}$/),
+  confirmed: z.literal(true),
+  smokeReceiptHash: z.string().regex(/^[0-9a-f]{64}$/),
 }).strict();
 
 type WorkerRequest = Request & { workbenchWorker?: WorkbenchWorkerIdentity };
@@ -216,6 +236,48 @@ router.post('/projects/:projectId/emergency-fallback/apply', authMiddleware, adm
     const code = (error as any)?.code;
     res.status(['STALE_INTENT','BINDING_STATE_CHANGED','INTENT_EXPIRED_OR_CONSUMED'].includes(code) ? 409 : 403)
       .json({ error: code || 'EMERGENCY_FALLBACK_APPLY_FAILED', message: (error as Error).message });
+  }
+});
+
+router.post('/projects/:projectId/workstation-change/preview', authMiddleware, adminMiddleware, async (req: any, res) => {
+  const parsed = workstationChangePreviewSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: 'Invalid Workstation change preview', issues: parsed.error.issues });
+  try {
+    res.json(await previewProjectWorkstationChange({
+      projectId: String(req.params.projectId), deploymentId: parsed.data.deploymentId,
+      targetWorkerId: parsed.data.targetWorkerId, authorityMode: parsed.data.authorityMode, reason: parsed.data.reason,
+      actor: { userId: req.user.userId, role: req.user.role, sessionId: parsed.data.sessionId ?? null },
+    }));
+  } catch (error) {
+    res.status(409).json({ error: (error as any)?.code || 'WORKSTATION_CHANGE_PREVIEW_FAILED', message: (error as Error).message });
+  }
+});
+
+router.post('/projects/:projectId/workstation-change/smoke', authMiddleware, adminMiddleware, async (req: any, res) => {
+  const parsed = workstationChangeSmokeSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: 'Invalid Workstation change smoke request', issues: parsed.error.issues });
+  try {
+    res.json(await verifyProjectWorkstationChangeSmoke({
+      projectId: String(req.params.projectId), deploymentId: parsed.data.deploymentId,
+      intentId: parsed.data.intentId, proposalHash: parsed.data.proposalHash,
+      actor: { userId: req.user.userId, role: req.user.role },
+    }));
+  } catch (error) {
+    res.status(409).json({ error: (error as any)?.code || 'WORKSTATION_CHANGE_SMOKE_FAILED', message: (error as Error).message });
+  }
+});
+
+router.post('/projects/:projectId/workstation-change/apply', authMiddleware, adminMiddleware, async (req: any, res) => {
+  const parsed = workstationChangeApplySchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: 'Invalid Workstation change apply', issues: parsed.error.issues });
+  try {
+    res.json(await applyProjectWorkstationChange({
+      projectId: String(req.params.projectId), deploymentId: parsed.data.deploymentId,
+      intentId: parsed.data.intentId, proposalHash: parsed.data.proposalHash,
+      confirmed: true, smokeReceiptHash: parsed.data.smokeReceiptHash, actor: { userId: req.user.userId, role: req.user.role },
+    }));
+  } catch (error) {
+    res.status(409).json({ error: (error as any)?.code || 'WORKSTATION_CHANGE_APPLY_FAILED', message: (error as Error).message });
   }
 });
 

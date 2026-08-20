@@ -70,11 +70,11 @@ export function AgentConnectionsPanel({ projectId, spacious = false }: { project
     const params = new URLSearchParams(window.location.search);
     if (params.get('oauth') !== 'google-agent' || params.get('projectId') !== projectId) return;
     if (params.get('status') === 'success') {
-      toastSuccess('이 Agent의 Google 계정을 연결했습니다.');
+      toastSuccess(t('agentGoogle.connected'));
       window.dispatchEvent(new CustomEvent('tower-agent-credentials-changed', { detail: { projectId } }));
       void load();
     } else {
-      toastError('Google 계정을 연결하지 못했습니다. 다시 시도해 주세요.');
+      toastError(t('agentGoogle.connectFailed'));
     }
     params.delete('oauth');
     params.delete('status');
@@ -83,7 +83,7 @@ export function AgentConnectionsPanel({ projectId, spacious = false }: { project
     params.delete('message');
     const query = params.toString();
     window.history.replaceState({}, '', `${window.location.pathname}${query ? `?${query}` : ''}${window.location.hash}`);
-  }, [load, projectId]);
+  }, [load, projectId, t]);
   useEffect(() => {
     const refresh = (event: Event) => {
       const detail = (event as CustomEvent<{ projectId?: string }>).detail;
@@ -91,17 +91,17 @@ export function AgentConnectionsPanel({ projectId, spacious = false }: { project
     };
     window.addEventListener('tower-agent-credentials-changed', refresh);
     return () => window.removeEventListener('tower-agent-credentials-changed', refresh);
-  }, [load, projectId]);
+  }, [load, projectId, t]);
 
   const connectAgentGoogle = async () => {
     setConnectingGoogle(true);
     try {
       const response = await fetch(`/api/auth/google/agent?projectId=${encodeURIComponent(projectId)}`, { headers: authHeaders() });
       const result = await response.json().catch(() => ({}));
-      if (!response.ok || typeof result.url !== 'string') throw new Error(result.error || 'Google 연결을 시작하지 못했습니다.');
+      if (!response.ok || typeof result.url !== 'string') throw new Error(result.error || t('agentGoogle.startFailed'));
       window.location.assign(result.url);
     } catch (reason) {
-      const message = reason instanceof Error ? reason.message : 'Google 연결을 시작하지 못했습니다.';
+      const message = reason instanceof Error ? reason.message : t('agentGoogle.startFailed');
       setError(message);
       toastError(message);
       setConnectingGoogle(false);
@@ -153,10 +153,10 @@ export function AgentConnectionsPanel({ projectId, spacious = false }: { project
       <div className={`rounded-lg border border-primary-500/35 bg-surface-850/70 ${spacious ? 'flex min-h-44 flex-col p-4' : 'p-2.5'}`}>
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0">
-            <div className="text-[14px] font-semibold text-surface-100">이 Agent의 Google 계정</div>
-            <div className="mt-0.5 text-[12px] leading-5 text-surface-400">Gmail·Calendar·Drive를 이 Agent 전용 Credential로 연결하거나 재인증합니다.</div>
+            <div className="text-[14px] font-semibold text-surface-100">{t('agentGoogle.title')}</div>
+            <div className="mt-0.5 text-[12px] leading-5 text-surface-400">{t('agentGoogle.description')}</div>
           </div>
-          <span className="tone-pill tone-accent shrink-0 px-2 py-0.5 text-[11px]">Agent 전용</span>
+          <span className="tone-pill tone-accent shrink-0 px-2 py-0.5 text-[11px]">{t('agentGoogle.dedicated')}</span>
         </div>
         <button
           type="button"
@@ -164,7 +164,7 @@ export function AgentConnectionsPanel({ projectId, spacious = false }: { project
           disabled={connectingGoogle}
           className="tone-action tone-accent mt-auto min-h-10 w-full rounded-lg px-3 py-2 text-[12px] font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400 disabled:cursor-not-allowed disabled:bg-surface-800 disabled:text-surface-500"
         >
-          {connectingGoogle ? 'Google로 이동하는 중…' : 'Google 계정 연결 또는 재인증'}
+          {connectingGoogle ? t('agentGoogle.redirecting') : t('agentGoogle.connectOrReauthorize')}
         </button>
       </div>
       {error && <div className="tone-card tone-warning rounded-md p-2 text-[12px] sm:col-span-2">{error}</div>}
@@ -178,7 +178,7 @@ export function AgentConnectionsPanel({ projectId, spacious = false }: { project
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0">
                 <div className="truncate text-[14px] font-semibold text-surface-200">{connection.displayName}</div>
-                <div className="mt-0.5 truncate text-[12px] text-surface-500">{connection.provider}{connection.fieldCount ? ` · 필수 필드 ${connection.connectedFieldCount ?? 0}/${connection.fieldCount}` : ''}</div>
+                <div className="mt-0.5 truncate text-[12px] text-surface-500">{connection.provider}{connection.fieldCount ? ` · ${t('connectionRequiredFields', { connected: connection.connectedFieldCount ?? 0, total: connection.fieldCount })}` : ''}</div>
               </div>
               <span className={`tone-pill shrink-0 px-2 py-0.5 text-[11px] ${statusTone}`}>
                 {connected ? t('connected') : blocked ? t('blocked') : t('available')}
@@ -200,7 +200,17 @@ export function AgentConnectionsPanel({ projectId, spacious = false }: { project
           </div>
         );
       })}
-      <p className="text-[11px] leading-4 text-surface-500">{t('connectionSecretSafetyNotice')}</p>
+      <div className={`rounded-lg border border-dashed border-surface-700 bg-surface-850/40 ${spacious ? 'flex min-h-44 flex-col p-4' : 'p-2.5'}`}>
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0">
+            <div className="text-[14px] font-semibold text-surface-200">{t('mcpConnections.title')}</div>
+            <div className="mt-1 text-[12px] leading-5 text-surface-500">{t('mcpConnections.description')}</div>
+          </div>
+          <span className="tone-pill tone-muted shrink-0 px-2 py-0.5 text-[11px]">{t('mcpConnections.comingSoon')}</span>
+        </div>
+        <div className="mt-auto pt-3 text-[11px] leading-4 text-surface-600">{t('mcpConnections.scopeHint')}</div>
+      </div>
+      <p className="text-[11px] leading-4 text-surface-500 sm:col-span-2">{t('connectionSecretSafetyNotice')}</p>
     </div>
   );
 }

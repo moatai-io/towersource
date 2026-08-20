@@ -203,6 +203,7 @@ export function AgentCredentialsModal({ project, onClose }: Props) {
             <div className="text-[12px] font-semibold text-primary-300">{project.agent?.displayName || project.name}</div>
             <h2 id="agent-credentials-title" className="mt-1 text-xl font-bold text-surface-100 sm:text-2xl">{t('agentCredentials.title')}</h2>
             <p className="mt-1 text-[14px] leading-6 text-surface-400">{t('agentCredentials.description')}</p>
+            <p className="mt-2 max-w-3xl text-[12px] leading-5 text-surface-500">{t('agentCredentials.chatInjectionNotice')}</p>
           </div>
           <button ref={closeRef} type="button" onClick={onClose} className="min-h-10 shrink-0 rounded-lg border border-surface-700 px-3 text-[14px] font-semibold text-surface-300 hover:bg-surface-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400">{t('agentCredentials.close')}</button>
         </header>

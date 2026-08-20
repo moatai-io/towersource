@@ -34,7 +34,13 @@ const sidebar = fs.readFileSync(path.join(__dirname, 'Sidebar.tsx'), 'utf8');
     expect(source).toContain("source: 'profile' | 'credential' | 'group'");
     expect(source).toContain('fieldCount?: number');
     expect(source).toContain('connectedFieldCount?: number');
-    expect(source).toContain('필수 필드 ${connection.connectedFieldCount ?? 0}/${connection.fieldCount}');
+    expect(source).toContain("t('connectionRequiredFields', { connected: connection.connectedFieldCount ?? 0, total: connection.fieldCount })");
+  });
+
+  it('shows MCP connections as a distinct coming-soon capability', () => {
+    expect(source).toContain("t('mcpConnections.title')");
+    expect(source).toContain("t('mcpConnections.comingSoon')");
+    expect(source).toContain("t('mcpConnections.scopeHint')");
   });
 
   it('moves Connection management out of compact Agent settings into the dedicated Credential surface', () => {

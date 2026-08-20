@@ -55,7 +55,7 @@ export async function probeInferenceProvider(input: {
   if (!modelId) throw new Error('Model ID is required');
   const startedAt = Date.now();
   const response = input.provider === 'openrouter'
-    ? await fetch(`${baseUrl}/models`, { headers: { Authorization: `Bearer ${apiKey}` }, signal: AbortSignal.timeout(15_000) })
+    ? await fetch(`${baseUrl}/key`, { headers: { Authorization: `Bearer ${apiKey}` }, signal: AbortSignal.timeout(15_000) })
     : await fetch(`${baseUrl}/responses`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },

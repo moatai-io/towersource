@@ -12,6 +12,7 @@
  * See: workspace/decisions/2026-05-05-no-native-dialogs.md
  */
 import { useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 
 export type ConfirmVariant = 'default' | 'danger';
 
@@ -39,14 +40,17 @@ export interface ConfirmDialogProps {
 export function ConfirmDialog({
   title,
   message,
-  confirmLabel = '확인',
-  cancelLabel = '취소',
+  confirmLabel,
+  cancelLabel,
   variant = 'default',
   promptPlaceholder = null,
   promptInitialValue = '',
   onResolve,
   onPromptResolve,
 }: ConfirmDialogProps) {
+  const { t } = useTranslation('common');
+  const resolvedConfirmLabel = confirmLabel ?? t('confirm');
+  const resolvedCancelLabel = cancelLabel ?? t('cancel');
   const isPrompt = promptPlaceholder !== null;
   const [value, setValue] = useState(promptInitialValue);
   const overlayRef = useRef<HTMLDivElement>(null);
@@ -131,7 +135,7 @@ export function ConfirmDialog({
             onClick={cancel}
             className="px-3 py-1.5 rounded-lg border border-surface-600 hover:border-surface-500 text-gray-300 text-[14px] font-medium transition-colors"
           >
-            {cancelLabel}
+            {resolvedCancelLabel}
           </button>
           <button
             ref={confirmButtonRef}
@@ -140,7 +144,7 @@ export function ConfirmDialog({
             onClick={confirm}
             className={`px-3 py-1.5 rounded-lg text-[14px] font-medium transition-colors ${confirmButtonClasses}`}
           >
-            {confirmLabel}
+            {resolvedConfirmLabel}
           </button>
         </div>
       </div>

@@ -992,7 +992,7 @@ describe('Pi stream watchdog — source contracts', () => {
     expect(src).toMatch(/emitRecoveryCompactFailedIfNeeded\('oversized-preflight-recovery-error'\)/);
     expect(src).not.toMatch(/emitRecoveryCompactDoneIfNeeded\('oversized-preflight-recovery-error'\)/);
     expect(frontendSrc).toMatch(/towerMsg\.phase === 'failed'/);
-    expect(frontendSrc).toMatch(/컨텍스트 자동 정리에 실패했습니다/);
+    expect(frontendSrc).toContain("i18n.t('chat:runtime.compactFailed')");
   });
 
   it('treats Nothing to compact as a non-fatal skip and avoids unsafe direct continuation', () => {

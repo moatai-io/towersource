@@ -288,7 +288,7 @@ describe('frontend copy i18n contract', () => {
     for (const key of [
       'openAiTeamHomeWithCount', 'teamWorkspace', 'rolesToolsPermissionsTogether',
       'buildTeam', 'renameAi', 'aiTeamUsageSummary', 'openNamedHome', 'namedHome',
-      'openNamedFiles', 'namedFiles', 'startNewConversationWith', 'openMyTodoInViewer',
+      'startNewConversationWith', 'openMyTodoInViewer',
       'myTodo', 'viewer', 'viewMyFiles', 'loadingMyFiles', 'retry',
       'noPersonalFilesHint', 'namedFileActions', 'fileActions', 'workspaceFiles',
       'renamePersonalFile', 'open', 'rename', 'copyPath', 'moveToArchive',

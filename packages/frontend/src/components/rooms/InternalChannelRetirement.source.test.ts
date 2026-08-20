@@ -13,7 +13,12 @@ const chatRuntime = fs.readFileSync(path.resolve(src, 'hooks/useChatRuntime.ts')
 const reconnectSync = fs.readFileSync(path.resolve(src, 'utils/reconnect-sync.ts'), 'utf8');
 const aiPanel = fs.readFileSync(path.resolve(src, 'components/rooms/AiPanel.tsx'), 'utf8');
 const aiPanelStore = fs.readFileSync(path.resolve(src, 'stores/ai-panel-store.ts'), 'utf8');
+const sessionStore = fs.readFileSync(path.resolve(src, 'stores/session-store.ts'), 'utf8');
+const urlSync = fs.readFileSync(path.resolve(src, 'hooks/useUrlSync.ts'), 'utf8');
 const notice = fs.readFileSync(path.resolve(import.meta.dirname, 'RetiredChannelNotice.tsx'), 'utf8');
+const roomsLocale = (language: 'en' | 'ko') => JSON.parse(
+  fs.readFileSync(path.resolve(src, `locales/${language}/rooms.json`), 'utf8'),
+);
 const fileExchange = fs.readFileSync(path.resolve(src, 'features/file-exchange/FileExchangeSurface.tsx'), 'utf8');
 const publicAi = fs.readFileSync(path.resolve(src, 'features/ai-services/PublicAIServiceChat.tsx'), 'utf8');
 
@@ -29,9 +34,19 @@ describe('internal Channel P3 retirement surface', () => {
     expect(app).toContain('<RetiredChannelNotice />');
     expect(app).not.toContain('<RoomPanel />');
     expect(app).not.toContain('findRoomByKey');
-    expect(notice).toContain('내부 채널 기능이 종료되었습니다');
-    expect(notice).toContain('기존 채널 기록은 삭제하지 않고 보존');
+    expect(notice).toContain("t('retiredChannel.title')");
+    expect(notice).toContain("t('retiredChannel.description')");
     expect(notice).toContain("setActiveView('work')");
+    expect(roomsLocale('en').retiredChannel.title).toBe('Internal channels have been retired');
+    expect(roomsLocale('ko').retiredChannel.title).toBe('내부 채널 기능이 종료되었습니다');
+  });
+
+  it('marks remaining rooms identifiers and URLs as legacy compatibility only', () => {
+    expect(sessionStore).toContain('legacy compatibility identifier');
+    expect(sessionStore).toContain('new product flows must not navigate to it');
+    expect(urlSync).toContain('retired internal-channel link compatibility only');
+    expect(urlSync).toContain('Resolves only to retirement guidance');
+    expect(urlSync).toContain('Both forms resolve to `rooms` solely to render RetiredChannelNotice');
   });
 
   it('removes room tabs from persistence and the app shell', () => {
@@ -52,7 +67,6 @@ describe('internal Channel P3 retirement surface', () => {
     expect(reconnectSync).not.toContain("type: 'room_join'");
     expect(reconnectSync).not.toContain("type: 'room_read'");
     expect(reconnectSync).not.toContain('refetchActiveRoom');
-    const urlSync = fs.readFileSync(path.resolve(src, 'hooks/useUrlSync.ts'), 'utf8');
     expect(urlSync).not.toContain('useRoomStore');
     expect(urlSync).not.toContain('findRoomByKey');
     expect(urlSync).toContain('if (cur.roomKey) return');

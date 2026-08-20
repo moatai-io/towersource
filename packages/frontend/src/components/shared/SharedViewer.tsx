@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import ReactMarkdown from 'react-markdown';
 import rehypeHighlight from 'rehype-highlight';
 import { MarkdownPreviewSurface } from '../files/MarkdownPreviewSurface';
@@ -84,6 +85,7 @@ function MarkdownPreview({ content, token, fileName }: { content: string; token:
 }
 
 function CodePreview({ content, ext, encoding }: { content: string; ext: string; encoding?: string }) {
+  const { t } = useTranslation('share');
   const language = LANGUAGE_BY_EXT[ext] || ext || 'plaintext';
   const pretty = useMemo(() => prettyContent(content, ext), [content, ext]);
   const markdown = useMemo(() => fencedCode(pretty, language), [pretty, language]);
@@ -95,7 +97,7 @@ function CodePreview({ content, ext, encoding }: { content: string; ext: string;
           <span className="h-2.5 w-2.5 rounded-full bg-red-400/80" />
           <span className="h-2.5 w-2.5 rounded-full tone-warning tone-bg opacity-80" />
           <span className="h-2.5 w-2.5 rounded-full tone-success tone-bg opacity-80" />
-          <span className="ml-2 truncate text-sm text-gray-400">코드 미리보기</span>
+          <span className="ml-2 truncate text-sm text-gray-400">{t('codePreview')}</span>
         </div>
         <div className="flex items-center gap-2 text-[13px] text-gray-500">
           <span className="rounded-md border border-gray-700 bg-gray-900 px-2 py-0.5 uppercase tracking-wide text-gray-400">{language}</span>
@@ -112,6 +114,7 @@ function CodePreview({ content, ext, encoding }: { content: string; ext: string;
 }
 
 export function SharedViewer() {
+  const { t } = useTranslation('share');
   const token = window.location.pathname.split('/shared/')[1];
   const [data, setData] = useState<FileData | null>(null);
   const [error, setError] = useState('');
@@ -119,13 +122,13 @@ export function SharedViewer() {
   const [viewMode, setViewMode] = useState<'preview' | 'raw'>('preview');
 
   useEffect(() => {
-    if (!token) { setError('잘못된 링크입니다.'); setLoading(false); return; }
+    if (!token) { setError(t('invalidLink')); setLoading(false); return; }
     fetch(`/api/shared/${token}`)
       .then(r => { if (!r.ok) throw new Error(); return r.json(); })
       .then(setData)
-      .catch(() => setError('이 링크는 만료되었거나 취소되었습니다.'))
+      .catch(() => setError(t('expiredOrRevoked')))
       .finally(() => setLoading(false));
-  }, [token]);
+  }, [t, token]);
 
   const handleDownload = () => {
     window.location.href = `/api/shared/${token}?download=1`;
@@ -134,7 +137,7 @@ export function SharedViewer() {
   if (loading) {
     return (
       <div className="bg-gray-950 flex items-center justify-center" style={{ height: '100dvh' }}>
-        <div className="text-gray-400 text-base">불러오는 중...</div>
+        <div className="text-gray-400 text-base">{t('loading')}</div>
       </div>
     );
   }
@@ -144,7 +147,7 @@ export function SharedViewer() {
       <div className="bg-gray-950 flex items-center justify-center" style={{ height: '100dvh' }}>
         <div className="text-center space-y-3">
           <div className="text-6xl">🔗</div>
-          <p className="text-gray-300 text-base">{error || '파일을 불러올 수 없습니다.'}</p>
+          <p className="text-gray-300 text-base">{error || t('loadFailed')}</p>
         </div>
       </div>
     );
@@ -182,7 +185,7 @@ export function SharedViewer() {
                     : 'text-gray-500 hover:text-gray-300'
                 }`}
               >
-                미리보기
+                {t('preview')}
               </button>
               {rawAvailable && (
                 <button
@@ -193,7 +196,7 @@ export function SharedViewer() {
                       : 'text-gray-500 hover:text-gray-300'
                   }`}
                 >
-                  원본
+                  {t('raw')}
                 </button>
               )}
             </div>
@@ -206,7 +209,7 @@ export function SharedViewer() {
           <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
           </svg>
-          다운로드
+          {t('download')}
         </button>
       </div>
 
@@ -222,14 +225,14 @@ export function SharedViewer() {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
             </svg>
             <p className="max-w-md break-words text-base text-gray-300">{data.fileName}</p>
-            <p className="max-w-md text-sm leading-6 text-gray-500">PDF는 이 페이지 안 iframe으로 렌더링하지 않고 브라우저의 PDF viewer에서 엽니다.</p>
+            <p className="max-w-md text-sm leading-6 text-gray-500">{t('pdfViewerHint')}</p>
             <a
               href={renderUrl}
               target="_blank"
               rel="noopener noreferrer"
               className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-base rounded-lg transition-colors"
             >
-              새 탭에서 열기
+              {t('openInNewTab')}
             </a>
           </div>
         ) : useIframe ? (

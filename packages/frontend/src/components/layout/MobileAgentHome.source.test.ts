@@ -45,7 +45,7 @@ describe('mobile teammate workspace', () => {
   });
 
   it('uses compact mobile-first spacing and safe-area room', () => {
-    expect(home).toContain('grid w-full grid-cols-3');
+    expect(home).toContain('agent-home-profile-actions grid w-full grid-cols-1');
     expect(home).toContain('h-16 w-16');
     expect(project).toContain('safe-area-inset-bottom');
   });

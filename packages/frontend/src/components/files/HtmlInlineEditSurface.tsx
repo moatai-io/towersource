@@ -17,6 +17,7 @@
 // Decision: workspace/decisions/2026-05-05-preview-inline-edit.md (Phase 1.5b)
 
 import { useEffect, useMemo, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useInlineEdit } from './inline-edit/useInlineEdit';
 import { SelectionBar } from './inline-edit/SelectionBar';
 import { DiffPreview } from './inline-edit/DiffPreview';
@@ -51,6 +52,7 @@ export function HtmlInlineEditSurface({
   sessionId,
   className,
 }: Props) {
+  const { t, i18n } = useTranslation('files');
   const iframeRef = useRef<HTMLIFrameElement>(null);
 
   // Build a Blob URL with the inject script wired in. We rebuild on every
@@ -58,10 +60,10 @@ export function HtmlInlineEditSurface({
   // Trade-off: the iframe reloads (scroll position resets). For Phase 1.5b
   // this is acceptable; a smoother in-place update is Phase 2 material.
   const blobUrl = useMemo(() => {
-    const wrapped = wrapHtmlWithInjector(content);
+    const wrapped = wrapHtmlWithInjector(content, t('inlineEditOutline.selection'));
     const blob = new Blob([wrapped], { type: 'text/html' });
     return URL.createObjectURL(blob);
-  }, [content]);
+  }, [content, i18n.resolvedLanguage, t]);
 
   // Revoke the blob URL when content changes or component unmounts.
   useEffect(() => {

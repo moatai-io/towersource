@@ -1,9 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import i18n from '../../i18n';
 import { isSafePreviewUrl, normalizePreviewUrl } from './url-preview';
 
 describe('URL preview validation', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.stubGlobal('window', { location: { origin: 'https://tower.example.com' } });
+    await i18n.changeLanguage('en');
   });
 
   it('accepts HTTP and HTTPS URLs', () => {
@@ -23,7 +25,13 @@ describe('URL preview validation', () => {
     expect(isSafePreviewUrl('file:///etc/passwd')).toBe(false);
   });
 
-  it('requires explicit protocols for non-localhost domains', () => {
-    expect(() => normalizePreviewUrl('example.com')).toThrow();
+  it('uses the active locale for validation errors', async () => {
+    expect(() => normalizePreviewUrl('')).toThrow('Enter a URL.');
+    expect(() => normalizePreviewUrl('example.com')).toThrow('Enter a URL that starts with http:// or https://.');
+    expect(() => normalizePreviewUrl('https://user:secret@example.com')).toThrow('This URL cannot be opened in the preview.');
+
+    await i18n.changeLanguage('ko');
+    expect(() => normalizePreviewUrl('')).toThrow('URL을 입력하세요.');
+    expect(() => normalizePreviewUrl('example.com')).toThrow('http:// 또는 https://로 시작하는 URL을 입력하세요.');
   });
 });

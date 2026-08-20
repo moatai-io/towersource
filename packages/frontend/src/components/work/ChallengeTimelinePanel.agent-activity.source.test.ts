@@ -4,23 +4,21 @@ import { describe, expect, it } from 'vitest';
 
 const source = fs.readFileSync(path.resolve(import.meta.dirname, './ChallengeTimelinePanel.tsx'), 'utf8');
 
-describe('My Work agent activity projection', () => {
-  it('presents delegated runs as a user-centric chronological activity briefing', () => {
+describe('My Work progress projection', () => {
+  it('presents one canonical row per Workstream with current progress first', () => {
     expect(source).toContain("tr('challenge.timeline.title')");
-    expect(source).toContain("tr('challenge.timeline.recentActivity')");
-    expect(source).toContain("tr('challenge.timeline.groupDescription')");
-    expect(source).toContain('expandedAgents');
-    expect(source).toContain('group.items.slice(0, 3)');
-    expect(source).toContain(".sort((a, b) => new Date(b.session.lastAt).getTime() - new Date(a.session.lastAt).getTime())");
+    expect(source).toContain("tr('challenge.timeline.workList')");
+    expect(source).toContain("tr('challenge.timeline.currentProgress')");
+    expect(source).toContain("tr('challenge.timeline.resultsAndDecisions')");
+    expect(source).toContain(".sort((a, b) => new Date(b.lastAt).getTime() - new Date(a.lastAt).getTime())");
     expect(source).toContain('session.agentName');
-    expect(source).toContain('<AgentFace session={group.session} />');
     expect(source).toContain('onClick={() => onSelectWorkstream(key)}');
     expect(source).toContain('<WorkstreamOverview challenge={selectedChallenge}');
   });
 
-  it('uses the agent face snapshot with a stable project-based fallback', () => {
-    expect(source).toContain('agentFaceImageUrl(session.agentFace)');
-    expect(source).toContain('characterFace(session.agentFace)');
-    expect(source).toContain('distributedKoreanCharacterId(session.projectId || session.id)');
+  it('keeps assigned AI identity visible in list and overview summaries', () => {
+    expect(source).toContain('const agentNames = Array.from(new Set(sessions.map((session) => session.agentName))).join');
+    expect(source).toContain("tr('challenge.timeline.assignedAi'");
+    expect(source).toContain("tr('challenge.timeline.relatedConversations')");
   });
 });

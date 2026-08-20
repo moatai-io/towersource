@@ -148,5 +148,21 @@
       "Find what people discussed in this channel about a specific topic.",
       "Create the next action plan from this discussion."
     ]
+  },
+  "retiredChannel": {
+    "eyebrow": "Preserved link",
+    "title": "Internal channels have been retired",
+    "description": "Existing channel records remain preserved. Check the notification center for new run results and important updates, and use Work or run sessions for detailed activity.",
+    "openWork": "Open Work",
+    "openAiTeam": "Go to AI team"
+  },
+  "thread": {
+    "noConversationYet": "No conversation yet",
+    "cadWorkbenchPrefix": "CAD Workbench: ",
+    "automationPrefix": "Automation: ",
+    "currentFilePrefix": "Current file: ",
+    "currentCadSelection": "Current CAD selection",
+    "selectionArea": "Selected area",
+    "answerQuestionPlaceholder": "Type your answer…"
   }
 }

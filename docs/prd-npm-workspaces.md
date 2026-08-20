@@ -1,8 +1,10 @@
 # PRD: Tower npm Workspaces 전환
 
-> ⚠️ **HISTORICAL — 2026-03-11 모노레포 전환 기획서.**
-> 전환은 완료되었고(3/16 monorepo 커밋), 현재 구조는 `packages/backend`·`packages/frontend`·`packages/shared`입니다.
-> 이 문서의 `better-sqlite3` 관련 의존성 언급은 SQLite 시점 기준이며, 이후 3/2026에 PostgreSQL로 전면 이관되어 `better-sqlite3`는 제거되었습니다.
+> **상태: 완료된 마이그레이션의 역사 기록**
+>
+> 이 문서는 현재 설치 또는 아키텍처 가이드가 아닙니다. 당시의 전환 계획과 위험 분석을 보존하기 위해 남겨두었습니다. 현재 구조는 루트 `package.json`과 `packages/backend`, `packages/frontend`, `packages/shared`를 기준으로 확인하세요. 제품 구조는 [`docs/tower-guide/architecture.md`](./tower-guide/architecture.md), 설치 방법은 [`INSTALL.md`](../INSTALL.md)를 사용하십시오.
+>
+> 이 문서의 `better-sqlite3`와 SQLite 관련 내용은 전환 당시의 기록입니다. Tower의 현재 서버 데이터베이스 계약은 PostgreSQL입니다.
 
 **작성일**: 2026-03-11
 **상태**: Draft → Reviewed → 구현 완료 (historical)

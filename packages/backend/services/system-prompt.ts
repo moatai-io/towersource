@@ -23,6 +23,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { SYSTEM_PROMPT_DYNAMIC_BOUNDARY } from '@anthropic-ai/claude-agent-sdk';
 import { query, queryOne, execute } from '../db/pg-repo.js';
 import { resolveLanguage, buildLanguagePolicyBlock } from './language-resolver.js';
+import { getDefaultResponseLanguage } from './settings/app-settings.js';
 import { config } from '../config.js';
 import { buildSystemPromptMetrics, formatSystemPromptMetrics, hasSystemPromptFragment, type SystemPromptFragmentKey } from './system-prompt-fragments.js';
 import { buildProjectAgentRuntimePrompt, getProjectAgentRuntimeProfile, getSessionProjectAgentRuntimeProfile } from './pm/project-agent-profile.js';
@@ -458,12 +459,18 @@ async function buildRuntimeContextPrompt(user: {
   language?: string | null;
   sessionLanguage?: string | null;
 }): Promise<string> {
-  // Language policy — resolved per request via 3-layer precedence
-  // (session > user > WORKSPACE_LANGUAGE env > 'ko'). Keep this dynamic, but
-  // avoid injecting volatile user/session/path inventory into the prompt body.
+  // Language policy is resolved per request. Explicit inputs remain useful for
+  // tests/service callers; normal user sessions hydrate the preference from DB.
+  const [storedUser, organizationLanguage] = await Promise.all([
+    user.language !== undefined || !user.userId
+      ? Promise.resolve(null)
+      : queryOne<{ language: string | null }>('SELECT language FROM users WHERE id = $1', [user.userId]),
+    getDefaultResponseLanguage(),
+  ]);
   const effectiveLanguage = resolveLanguage(
-    { language: user.language },
+    { language: user.language !== undefined ? user.language : storedUser?.language },
     { language: user.sessionLanguage },
+    { language: organizationLanguage },
   );
   const languagePolicy = buildLanguagePolicyBlock(effectiveLanguage);
 
@@ -525,8 +532,8 @@ export interface BuildSystemPromptUser {
   includeSessionIdentity?: boolean;
   /**
    * User-level language preference (Phase 2 — Users.language column).
-   * Optional: when absent, resolution falls through to sessionLanguage,
-   * WORKSPACE_LANGUAGE env, and finally 'ko'.
+   * Optional: when absent, buildSystemPrompt loads users.language by userId,
+   * then falls through to the Admin default, WORKSPACE_LANGUAGE, and 'ko'.
    */
   language?: string | null;
   /**

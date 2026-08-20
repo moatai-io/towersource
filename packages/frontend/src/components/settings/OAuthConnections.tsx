@@ -7,6 +7,7 @@
  * 2. Skill Readiness — 내가 쓸 수 있는/없는 스킬 현황 (credential 기반)
  */
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import type { ConnectionStatus, SkillReadiness } from '@tower/shared';
 import { emitProductNotice } from '../../utils/product-notice';
 import { useConfirm } from '../../hooks/useDialog';
@@ -45,6 +46,7 @@ function getAuthHeaders(): Record<string, string> {
 }
 
 export function OAuthConnections() {
+  const { t } = useTranslation('settings');
   const confirm = useConfirm();
   const [status, setStatus] = useState<Record<string, ProviderStatus>>({});
   const [connections, setConnections] = useState<ConnectionStatus[]>([]);
@@ -127,9 +129,9 @@ export function OAuthConnections() {
 
   const disconnect = async (provider: string) => {
     const ok = await confirm({
-      title: '연결 해제',
-      message: '연결을 해제하시겠습니까?',
-      confirmLabel: '해제',
+      title: t('oauthConnections.disconnectTitle'),
+      message: t('oauthConnections.disconnectMessage'),
+      confirmLabel: t('oauthConnections.disconnect'),
       danger: true,
     });
     if (!ok) return;
@@ -164,7 +166,7 @@ export function OAuthConnections() {
       {/* ── Connections ── */}
       <section>
         <h3 className="text-[14px] font-semibold text-surface-500 uppercase tracking-wider mb-3">
-          Connections
+          {t('oauthConnections.title')}
         </h3>
         <div className="space-y-2">
           {PROVIDERS.map((p) => {
@@ -194,7 +196,7 @@ export function OAuthConnections() {
                         disabled={isLoading}
                         className="px-2 py-1 text-[12px] font-medium text-red-400 hover:text-red-300 transition-colors disabled:opacity-50"
                       >
-                        해제
+                        {t('oauthConnections.disconnect')}
                       </button>
                     ) : (
                       <button
@@ -202,7 +204,7 @@ export function OAuthConnections() {
                         disabled={isLoading}
                         className={`px-3 py-1 text-[12px] font-semibold rounded-md border transition-all disabled:opacity-50 ${p.color}`}
                       >
-                        {isLoading ? '...' : '연결'}
+                        {isLoading ? t('oauthConnections.connecting') : t('oauthConnections.connect')}
                       </button>
                     )}
                   </div>
@@ -222,10 +224,10 @@ export function OAuthConnections() {
           className="flex items-center gap-1.5 text-[14px] font-semibold text-surface-500 uppercase tracking-wider mb-3 hover:text-surface-400 transition-colors"
         >
           <span className="text-[12px]">{showReadiness ? '▼' : '▶'}</span>
-          Skill Readiness
+          {t('oauthConnections.skillReadiness')}
           {skillReadiness.length > 0 && (
             <span className="ml-1 text-[12px] font-normal normal-case">
-              ({skillReadiness.filter(s => s.ready).length}/{skillReadiness.length} ready)
+              {t('oauthConnections.readyCount', { ready: skillReadiness.filter(s => s.ready).length, total: skillReadiness.length })}
             </span>
           )}
         </button>
@@ -234,7 +236,7 @@ export function OAuthConnections() {
           <div className="space-y-1.5">
             {skillReadiness.length === 0 ? (
               <p className="text-[13px] text-surface-600 px-2">
-                credential이 필요한 스킬이 없습니다.
+                {t('oauthConnections.noCredentialSkills')}
               </p>
             ) : (
               skillReadiness.map((skill) => (
@@ -252,7 +254,7 @@ export function OAuthConnections() {
                   </div>
                   {!skill.ready && (
                     <span className="tone-warning tone-text text-[12px]">
-                      {skill.missing.join(', ')} 연동 필요
+                      {t('oauthConnections.missingConnections', { connections: skill.missing.join(', ') })}
                     </span>
                   )}
                 </div>

@@ -1,4 +1,5 @@
 import React, { useCallback, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 
 /*
  * Owns: 입력창 textarea 의 사용자 드래그 리사이즈 핸들.
@@ -35,6 +36,7 @@ export function InputResizeHandle({
   onReset,
   isManual,
 }: InputResizeHandleProps) {
+  const { t } = useTranslation('chat');
   const dragging = useRef(false);
 
   const handlePointerDown = useCallback((e: React.PointerEvent) => {
@@ -72,8 +74,8 @@ export function InputResizeHandle({
       className="group relative h-2 -mb-1 cursor-row-resize touch-none select-none"
       onPointerDown={handlePointerDown}
       onDoubleClick={onReset}
-      title={isManual ? '드래그로 조절 · 더블클릭으로 자동 모드 복귀' : '드래그로 조절'}
-      aria-label="입력창 높이 조절"
+      title={isManual ? t('inputResize.manualHint') : t('inputResize.hint')}
+      aria-label={t('inputResize.label')}
     >
       {/* Hairline — 평소엔 거의 안 보이고, 호버 / 사용자 manual 상태에서 강조 */}
       <div

@@ -13,5 +13,15 @@
   "shareComplete": "Share complete",
   "shareCancelled": "Share cancelled",
   "externalLinkWarning": "External links contain a snapshot of the conversation at the time of sharing. Future messages will not be included.",
-  "internalShareDescription": "Sharing internally lets the user see this session in their session list."
+  "internalShareDescription": "Sharing internally lets the user see this session in their session list.",
+  "codePreview": "Code preview",
+  "invalidLink": "This link is invalid.",
+  "expiredOrRevoked": "This link has expired or was revoked.",
+  "loading": "Loading…",
+  "loadFailed": "Could not load the file.",
+  "preview": "Preview",
+  "raw": "Raw",
+  "download": "Download",
+  "pdfViewerHint": "PDF files open in the browser’s PDF viewer instead of being embedded on this page.",
+  "openInNewTab": "Open in new tab"
 }

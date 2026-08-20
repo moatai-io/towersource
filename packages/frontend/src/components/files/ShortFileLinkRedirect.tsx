@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useParams } from 'react-router-dom';
 
 function getAuthHeaders(): Record<string, string> {
@@ -10,12 +11,13 @@ function getAuthHeaders(): Record<string, string> {
 
 /** Resolve `/f/:shortId` into the existing authenticated file viewer route. */
 export function ShortFileLinkRedirect() {
+  const { t } = useTranslation('files');
   const { shortId } = useParams();
   const [error, setError] = useState('');
 
   useEffect(() => {
     if (!shortId) {
-      setError('잘못된 파일 링크입니다.');
+      setError(t('shortLink.invalid'));
       return;
     }
 
@@ -23,17 +25,17 @@ export function ShortFileLinkRedirect() {
       .then(async (res) => {
         if (!res.ok) {
           const body = await res.json().catch(() => ({}));
-          throw new Error(body.error || '파일 링크를 열 수 없습니다.');
+          throw new Error(body.error || t('shortLink.openFailed'));
         }
         return res.json();
       })
       .then((data) => {
         const filePath = data.filePath || data.path;
-        if (!filePath) throw new Error('파일 경로가 없습니다.');
+        if (!filePath) throw new Error(t('shortLink.missingPath'));
         window.location.replace(`/file-viewer?path=${encodeURIComponent(filePath)}`);
       })
-      .catch((err: any) => setError(err.message || '파일 링크를 열 수 없습니다.'));
-  }, [shortId]);
+      .catch((err: any) => setError(err.message || t('shortLink.openFailed')));
+  }, [shortId, t]);
 
   return (
     <div className="flex items-center justify-center bg-surface-950 text-surface-100" style={{ height: '100dvh' }}>
@@ -44,7 +46,7 @@ export function ShortFileLinkRedirect() {
             <div className="text-sm text-surface-300">{error}</div>
           </>
         ) : (
-          <div className="text-sm text-surface-300">파일 링크를 여는 중...</div>
+          <div className="text-sm text-surface-300">{t('shortLink.opening')}</div>
         )}
       </div>
     </div>

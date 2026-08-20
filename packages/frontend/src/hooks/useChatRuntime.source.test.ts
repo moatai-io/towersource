@@ -94,7 +94,7 @@ describe('useChatRuntime source contracts', () => {
   it('restores failed Pi steering text to the composer instead of dropping it', () => {
     const src = fs.readFileSync(HOOK_PATH, 'utf-8');
     expect(src).toMatch(/if \(isPiSteering\) \{[\s\S]*removePendingInjection\(activeSid, messageId\)[\s\S]*source: 'steer-cancel'/);
-    expect(src).toContain('추가 지시를 전달하지 못해 입력창으로 복원했습니다.');
+    expect(src).toContain("i18n.t('chat:runtime.steeringRestoredAfterFailure')");
   });
 
   it('tombstones cancelled steers so delayed delivery cannot resurrect them', () => {

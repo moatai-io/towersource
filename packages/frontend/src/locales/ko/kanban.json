@@ -55,5 +55,15 @@
   "workflowSimpleDesc": "코드 없음",
   "workflowDefaultDesc": "가벼운 코딩",
   "workflowFeatureDesc": "워크트리",
-  "workflowBigTaskDesc": "분해"
+  "workflowBigTaskDesc": "분해",
+  "engineClaudeMax": "Claude (Max 구독)",
+  "reportPolicy": {
+    "label": "리포팅",
+    "options": {
+      "silent": "🔕 조용히",
+      "notification": "🔔 알림으로 보고"
+    },
+    "silentHint": "완료되면 태스크 보드에만 표시됩니다.",
+    "notificationHint": "완료 또는 실패 결과를 알림 센터에 남깁니다."
+  }
 }

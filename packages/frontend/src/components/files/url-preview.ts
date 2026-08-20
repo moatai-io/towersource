@@ -1,4 +1,5 @@
 // Owns: URL preview input normalization and validation. Public API: normalizePreviewUrl, isSafePreviewUrl.
+import i18n from '../../i18n';
 
 /** Return whether a Viewer URL is a browser-loadable HTTP(S) or same-origin path without embedded credentials. */
 export function isSafePreviewUrl(value: string): boolean {
@@ -17,17 +18,17 @@ export function isSafePreviewUrl(value: string): boolean {
 /** Normalize user input for a URL preview, adding HTTP only for localhost-style development addresses. */
 export function normalizePreviewUrl(input: string): string {
   const value = input.trim();
-  if (!value) throw new Error('URL을 입력하세요.');
+  if (!value) throw new Error(i18n.t('layout:urlPreviewErrors.required'));
 
   const candidate = /^(localhost|127\.0\.0\.1|\[::1\])(?::\d+)?(?:\/|$)/i.test(value)
     ? `http://${value}`
     : value;
 
   if (!/^https?:\/\//i.test(candidate)) {
-    throw new Error('http:// 또는 https://로 시작하는 URL을 입력하세요.');
+    throw new Error(i18n.t('layout:urlPreviewErrors.protocol'));
   }
   if (!isSafePreviewUrl(candidate)) {
-    throw new Error('이 URL은 미리보기에서 열 수 없습니다.');
+    throw new Error(i18n.t('layout:urlPreviewErrors.unsafe'));
   }
   return new URL(candidate).toString();
 }

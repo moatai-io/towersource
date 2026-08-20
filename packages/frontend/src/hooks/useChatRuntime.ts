@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { useWebSocket } from './useWebSocket';
+import i18n from '../i18n';
 import { useChatStore, type ChatMessage, type SlashCommandInfo, type TurnMetrics } from '../stores/chat-store';
 import { useFileStore } from '../stores/file-store';
 import { useSessionStore } from '../stores/session-store';
@@ -1223,7 +1224,7 @@ export function useChatRuntime(wsEnabled = true) {
             new CustomEvent('restore-input-text', { detail: { text: data.text, source: 'steer-cancel' } }),
           );
         } else {
-          toastInfo('steering 메시지를 취소했습니다');
+          toastInfo(i18n.t('chat:runtime.steeringCanceled'));
         }
         break;
       }
@@ -1366,7 +1367,7 @@ export function useChatRuntime(wsEnabled = true) {
             stopRequested: false,
             stopWaitingFor: undefined,
           });
-          toastWarning(data.reason === 'not_running' ? '이미 작업이 끝났습니다.' : '이 작업을 멈출 수 없습니다.');
+          toastWarning(data.reason === 'not_running' ? i18n.t('chat:runtime.alreadyFinished') : i18n.t('chat:runtime.stopRejected'));
         }
         break;
       }
@@ -1667,7 +1668,7 @@ export function useChatRuntime(wsEnabled = true) {
               useChatStore.getState().addMessage({
                 id: towerMsg.markerId || `compact-${data.sessionId}-${Date.now()}`,
                 role: 'system',
-                content: [{ type: 'text', text: '✂️ 긴 대화를 정리했습니다. 이어서 진행합니다.' }],
+                content: [{ type: 'text', text: i18n.t('chat:runtime.compactComplete') }],
                 timestamp: Date.now(),
               });
             }
@@ -1681,7 +1682,7 @@ export function useChatRuntime(wsEnabled = true) {
             useChatStore.getState().setCompacting(null);
             if (sid) {
               markSessionRunFinished(sid, 'error', {
-                errorMessage: '컨텍스트 자동 정리에 실패했습니다. 같은 세션에서 다시 보내면 재시도합니다.',
+                errorMessage: i18n.t('chat:runtime.compactFailed'),
                 pendingMessageCount: 0,
               });
             }
@@ -1778,7 +1779,7 @@ export function useChatRuntime(wsEnabled = true) {
               useChatStore.getState().addMessage({
                 id: markerId,
                 role: 'system',
-                content: [{ type: 'text', text: '✂️ 긴 대화를 정리했습니다. 이어서 진행합니다.' }],
+                content: [{ type: 'text', text: i18n.t('chat:runtime.compactComplete') }],
                 timestamp: Date.now(),
               });
             }
@@ -1812,7 +1813,7 @@ export function useChatRuntime(wsEnabled = true) {
             useChatStore.getState().addMessage({
               id: `compact-${data.sessionId}-${Date.now()}`,
               role: 'system',
-              content: [{ type: 'text', text: '✂️ 긴 대화를 정리했습니다. 이어서 진행합니다.' }],
+              content: [{ type: 'text', text: i18n.t('chat:runtime.compactComplete') }],
               timestamp: Date.now(),
             });
           }
@@ -2141,7 +2142,7 @@ export function useChatRuntime(wsEnabled = true) {
         }
         if (pq && pq.questionId === data.questionId) {
           useChatStore.getState().setPendingQuestion(null);
-          toastWarning('응답 대기 시간이 초과되어 AI가 채팅으로 다시 질문합니다.');
+          toastWarning(i18n.t('chat:runtime.questionTimedOut'));
         }
         break;
       }
@@ -2507,7 +2508,7 @@ export function useChatRuntime(wsEnabled = true) {
               duration: 12_000,
               ...(actionUrl ? {
                 action: {
-                  label: '열기',
+                  label: i18n.t('chat:runtime.open'),
                   onClick: () => {
                     window.history.pushState({}, '', actionUrl);
                     window.dispatchEvent(new PopStateEvent('popstate'));
@@ -2802,13 +2803,13 @@ export function useChatRuntime(wsEnabled = true) {
             window.dispatchEvent(new CustomEvent('restore-input-text', {
               detail: { text: message, source: 'steer-cancel' },
             }));
-            toastError('추가 지시를 전달하지 못해 입력창으로 복원했습니다.');
+            toastError(i18n.t('chat:runtime.steeringRestoredAfterFailure'));
           } else {
             useChatStore.getState().markPendingFailed();
             addMessage({
               id: generateUUID(),
               role: 'assistant',
-              content: [{ type: 'text', text: 'WebSocket 연결이 아직 준비되지 않아 메시지를 보내지 못했습니다. 잠시 후 다시 시도해 주세요.' }],
+              content: [{ type: 'text', text: i18n.t('chat:runtime.websocketNotReady') }],
               timestamp: Date.now(),
               metadata: { kind: 'client_send_failed', severity: 'warning' },
             });

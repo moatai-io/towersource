@@ -1,4 +1,5 @@
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 import { usePinStore, type Pin } from '../../stores/pin-store';
 
 interface PinListProps {
@@ -31,6 +32,7 @@ const fileTypeBadge: Record<string, string> = {
 };
 
 export function PinList({ onPinClick, onUnpin, embedded = false, hideEmpty = false }: PinListProps) {
+  const { t } = useTranslation('files');
   const pins = usePinStore((s) => s.pins);
   const [embeddedCollapsed, setEmbeddedCollapsed] = React.useState(() => {
     if (!embedded || typeof window === 'undefined') return false;
@@ -48,10 +50,10 @@ export function PinList({ onPinClick, onUnpin, embedded = false, hideEmpty = fal
       <div className="px-4 py-8 text-center">
         <div className="text-surface-700 text-3xl mb-2">&#128204;</div>
         <p className="text-[15px] text-surface-700">
-          아직 즐겨찾기가 없습니다
+          {t('pins.empty')}
         </p>
         <p className="text-[13px] text-surface-800 mt-1">
-          파일이나 폴더를 즐겨찾기에 추가해보세요
+          {t('pins.emptyHint')}
         </p>
       </div>
     );
@@ -64,12 +66,12 @@ export function PinList({ onPinClick, onUnpin, embedded = false, hideEmpty = fal
           type="button"
           onClick={() => setEmbeddedCollapsed((v) => !v)}
           className="w-full px-1 py-0.5 flex items-center gap-1.5 text-[12px] text-gray-600 uppercase tracking-wide font-medium hover:text-gray-400 transition-colors"
-          title={embeddedCollapsed ? '즐겨찾기 펼치기' : '즐겨찾기 접기'}
+          title={embeddedCollapsed ? t('pins.expand') : t('pins.collapse')}
         >
           <svg className={`w-3 h-3 transition-transform ${embeddedCollapsed ? '' : 'rotate-90'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
           </svg>
-          <span className="flex-1 text-left">즐겨찾기</span>
+          <span className="flex-1 text-left">{t('pins.title')}</span>
           <span className="text-[11px] text-surface-700">{pins.length}</span>
         </button>
       )}
@@ -101,7 +103,7 @@ export function PinList({ onPinClick, onUnpin, embedded = false, hideEmpty = fal
               onUnpin(pin.id);
             }}
             className="opacity-0 group-hover:opacity-100 p-0.5 text-surface-600 hover:text-red-400 transition-all"
-            title="즐겨찾기 해제"
+            title={t('pins.remove')}
           >
             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />

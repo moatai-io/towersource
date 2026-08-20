@@ -443,7 +443,7 @@ export async function listUsers() {
 /** 본인 프로필 조회 — UserMenu / GET /api/me 가 사용. */
 export async function getOwnProfile(userId: number) {
   const row = await queryOne<any>(
-    'SELECT id, username, role, display_name, affiliation FROM users WHERE id = $1 AND disabled = 0',
+    'SELECT id, username, role, display_name, affiliation, language FROM users WHERE id = $1 AND disabled = 0',
     [userId],
   );
   if (!row) return null;
@@ -453,6 +453,7 @@ export async function getOwnProfile(userId: number) {
     role: row.role,
     display_name: row.display_name,
     affiliation: row.affiliation,
+    language: row.language,
   };
 }
 
@@ -478,7 +479,7 @@ export async function updateUserPath(_userId: number, _allowedPath: string) {
  */
 export async function updateUserProfile(
   userId: number,
-  fields: { displayName?: string | null; affiliation?: string | null },
+  fields: { displayName?: string | null; affiliation?: string | null; language?: 'en' | 'ko' | null },
 ) {
   const sets: string[] = [];
   const vals: any[] = [];
@@ -490,6 +491,13 @@ export async function updateUserProfile(
   if (fields.affiliation !== undefined) {
     sets.push(`affiliation = $${i++}`);
     vals.push(fields.affiliation === '' ? null : fields.affiliation);
+  }
+  if (fields.language !== undefined) {
+    if (fields.language !== null && fields.language !== 'en' && fields.language !== 'ko') {
+      throw new Error(`Invalid response language: ${String(fields.language)}`);
+    }
+    sets.push(`language = $${i++}`);
+    vals.push(fields.language);
   }
   if (sets.length === 0) return;
   vals.push(userId);

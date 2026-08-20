@@ -1,153 +1,203 @@
-# 스킬 시스템
+# Skills in Tower
 
-Tower 스킬 시스템은 이제 “중앙 레지스트리 하나가 스킬 본문과 런타임을 모두 통제”하는 구조가 아니다.
+Skills are reusable operating instructions that help an AI teammate perform a specific kind of work consistently. A skill can define when it should be used, required tools or credentials, an execution workflow, validation steps, and expected artifacts.
 
-한 줄로 정리하면:
+A skill is not a hidden prompt shortcut. It is a versioned work instruction that can be inspected, reviewed, and made available to selected Projects.
 
-> **스킬 본문은 Tower product repo가 아니라 별도 스킬 소스가 정본이다.** 이 VM에서는 `teamskills/skills`가 운영 정본이고, 프로젝트는 generated `.tower/skills` 복사본을 읽는다.
-
-## 1. 핵심 그림
+## How skills fit into Tower
 
 ```mermaid
 flowchart LR
-  PA["Project skills<br/>projects/<project>/skills"] --> R["Runtime resolver"]
-  EXT["External skill repo<br/>separate versioned source"] --> TS["Organization source<br/>projects/teamskills/skills"]
-  TS --> SK["Org skillset<br/>projects/teamskills/skillset.json"]
-  LEGACY["Legacy managed source<br/>tower/skills/managed"] -.->|"migration only"| TS
-  SK --> M["Project .tower/skills<br/>generated runtime copy"]
-  M --> R
-  CV["Credential Vault"] --> R
-  PREF["User prefs"] --> R
-  LEG["Legacy DB / .claude"] -.->|"explicit migration only"| PA
+    PS["Project-authored skills"] --> CAT["Project skill catalog"]
+    OS["Organization skill source"] --> MAT["Managed materialization"]
+    MAT --> CAT
+    CAT --> RES["Session skill resolver"]
+    PREF["User preferences"] --> RES
+    CONN["Approved Connections"] --> RUN["Eligible execution"]
+    RES --> RUN
 ```
 
-## 2. SSOT — 무엇이 어디의 정본인가
+Tower separates four concerns:
 
-| 영역 | 정본 | 설명 |
-|---|---|---|
-| 프로젝트 스킬 | `workspace/projects/<project>/skills/<skill>/SKILL.md` | 프로젝트 팀이 직접 만든 스킬 본문. Skill Browser 생성/복사의 기본 목적지. |
-| Operator workbench 스킬 | `workspace/projects/project-2/skills/<skill>/SKILL.md` | `skill-registry`, `fleet`, `runtime-box-credentials` 같은 Tower 운영 스킬의 작성 정본. `tower/skills/<skill>`은 당분간 mirror/bootstrap 경로. |
-| 조직 공용 스킬 본문 | `workspace/projects/teamskills/skills/<skill>/SKILL.md` | 해당 VM/조직의 여러 프로젝트에 materialize되는 스킬 원본. |
-| 조직 기본 스킬셋 | `workspace/projects/teamskills/skillset.json` | 기본 materialize 목록. |
-| External skill repo | 별도 skill repository → `teamskills` | 장기 정본. 별도 repo에서 version/review 후 VM에 sync한다. |
-| Legacy managed source | `tower/skills/managed/<skill>/SKILL.md` | 과거 migration artifact. 정상 source/seed/fallback이 아니다. |
-| Legacy managed catalog | `tower/config/skills/managed-skills.yaml` + migration 중 code config | 과거 metadata. 정상 편집 대상이 아니다. |
-| 프로젝트 managed runtime copy | `workspace/projects/<project>/.tower/skills/manifest.json` + `.tower/skills/<skill>/` | materializer가 만든 generated output. Runtime Box와 Pi project session이 읽는 managed copy. |
-| Credential binding | Credential Vault + provider/required-secret metadata | secret 값은 여기서 오며, 스킬 파일이나 `.env`가 아니다. |
-| 사용자별 활성화 | `user_skill_prefs` | 있는 스킬을 켜고 끄는 preference. 스킬 존재 여부를 정의하지 않는다. |
-| Legacy DB-backed skill | `skill_registry(scope='personal'|'project')`, `.tower-db-managed` | migration/audit 대상. 정상 user-facing runtime source가 아니다. |
-| Legacy global | `~/.claude/skills/<skill>/` | compatibility/import 후보. project manifest가 있으면 정상 런타임 source가 아니다. |
+1. **Source** — where the reviewed skill body is authored.
+2. **Availability** — which skills are present for a Project.
+3. **Preference** — whether a user has enabled or disabled an available skill.
+4. **Credentials** — which approved external accounts an eligible execution may use.
 
-## 3. 역할별 진입점
+Changing one concern does not silently change the others.
 
-| 질문 / 작업 | 진입점 | 설명 |
-|---|---|---|
-| 새 스킬 body를 만들거나 고친다 | `/skill-architect` | JTBD, scaffold, validation, audit, refine. 기본 산출은 project skill. |
-| 현재 프로젝트에 스킬을 만든다/복사한다 | Skill Browser / `/api/skills` | active project의 `skills/<skill>/SKILL.md`에 저장. API 이름은 compatibility로 유지 가능. |
-| 스킬을 조직 공용으로 공유한다 | `/share-skill` | locate → compare → diff-first approve → copy/update `teamskills`. |
-| 자체 호스팅 서버에 teamskills bundle을 반영한다 | `/managed-skill-rollout` | source transport → project materialize → slash-command/Credential Vault verify. |
-| teamskills bundle을 project `.tower/skills`에 적용한다 | `/materialize-managed-skills` | 좁은 helper. governance/rollout skill이 아니다. |
-| Runtime Box credential 주입을 본다 | `/runtime-box-credentials` | Credential Vault grant/injection 진단. |
-| Tower 코드/서버/PM2/Runtime Box image를 운영한다 | `/fleet` | 서버 운영. 스킬 본문 정본은 별도 repo/teamskills다. |
-| legacy catalog를 저수준 편집한다 | `/library` | compatibility/legacy only. 일반 lifecycle 진입점 아님. |
-| 스킬 출처/노출 legacy 진단 | `/skill-registry` | deprecated diagnostic shim. 일반 공유/승격에는 쓰지 않는다. |
+## Skill sources
 
-## 4. Project session discovery
+### Project-authored skills
 
-정상 Pi project session은 다음을 우선한다.
+A Project can own skills under its workspace:
 
 ```text
-projects/<project>/.tower/skills/<name>/SKILL.md    # managed runtime copy, manifest-listed only
-projects/<project>/skills/<name>/SKILL.md           # project-authored source
-projects/<project>/.pi/skills/<name>/SKILL.md       # compatibility import
-projects/<project>/.agents/skills/<name>/SKILL.md   # compatibility import
-projects/<project>/.claude/skills/<name>/SKILL.md   # legacy project-local fallback/import only
+<project>/skills/<skill-name>/SKILL.md
 ```
 
-제외되는 것:
+Use this for instructions that belong to one team, client, workflow, or AI teammate. These files are normal Project assets and should be reviewed like other operational documentation.
 
-- global `~/.claude/skills`
-- DB-backed personal/project skill rows
-- `.tower-db-managed` generated folders unless explicitly migrated
-- `.tower/skills` 폴더는 있지만 manifest에 없는 stale managed copy
+### Organization-managed skills
 
-## 5. Teamskills bundle rollout
+A self-hosted organization can maintain a reviewed set of shared skills outside individual Projects. Tower materializes the selected set into each Project's managed runtime layer.
 
-자체 호스팅 서버에 조직 스킬 기본셋을 반영할 때는 `/managed-skill-rollout`이 owner다. 이름은 historical이지만, source는 `teamskills`다.
+The Project-visible managed state is described by:
 
 ```text
-external skill repo / source review
-→ source sync into teamskills
-→ self-hosted server teamskills transport
-→ project .tower/skills materialization
-→ slash-command/runtime verification
-→ Credential Vault readiness
+<project>/.tower/skills/manifest.json
+<project>/.tower/skills/<skill-name>/
 ```
 
-Materialization 검증은 direct script가 기준이다.
+The `.tower/skills` tree is generated runtime state, not the normal authoring location. Do not hand-edit generated managed copies and expect those edits to become the organization source.
+
+### Compatibility imports
+
+Tower may recognize legacy project-local skill folders during migration. Compatibility paths are import or fallback mechanisms, not recommended long-term sources for new skills.
+
+## Skill structure
+
+Every skill has a `SKILL.md` file. A well-formed skill normally explains:
+
+- the job it performs;
+- clear **Use when** triggers;
+- clear **Not for** boundaries;
+- required tools, data sources, and Connections;
+- the execution sequence;
+- approval points for protected actions;
+- validation and artifact requirements.
+
+A skill directory may also contain templates, scripts, examples, schemas, or reference material. If those assets materially affect the result, the AI should inspect them before claiming to have followed the skill.
+
+Example:
+
+```text
+skills/
+└── meeting-prep/
+    ├── SKILL.md
+    ├── templates/
+    │   └── agenda.md
+    └── references/
+        └── checklist.md
+```
+
+## Discovery and activation
+
+Tower does not need to inject the full body of every skill into every Session.
+
+1. The Session receives the list of skills available to the current Project and user.
+2. Skill names and descriptions are used only for routing.
+3. When a skill matches the request, Tower reads the complete `SKILL.md`.
+4. The AI follows the required workflow and relevant bundled assets.
+5. If a required skill or credential is unavailable, the AI reports the concrete boundary instead of pretending the skill was used.
+
+A slash command such as `/meeting-prep` can explicitly select a skill. Natural-language requests can also activate an available skill when the request clearly matches its documented triggers.
+
+## Project availability and user preferences
+
+A skill must be present in the Project's effective catalog before a user preference can enable it.
+
+- The managed manifest defines organization-provided skills available in that Project runtime.
+- Project-authored skills are discovered from the Project source folder.
+- User preferences can enable or disable available skills for that user.
+- A preference record does not install a missing skill.
+- A stale directory that is not part of the effective manifest must not be treated as an active managed skill.
+
+This distinction prevents old or partially copied skills from appearing as valid runtime capabilities.
+
+## Credentials and Connections
+
+Skills never own secret values.
+
+A skill may declare that it needs a provider or environment variable name, but the actual credential is stored and authorized through Tower Connections and Credential Vault.
+
+The execution path distinguishes three stages:
+
+1. **Configured** — an allowed Connection exists for the current principal or Project.
+2. **Materialized** — the eligible runtime command received the required secret without exposing its value.
+3. **Accepted** — the external provider accepted the authentication.
+
+A provider `401` or “not authenticated” response does not, by itself, prove that the Credential was deleted or never configured.
+
+Never put API keys, passwords, OAuth tokens, private keys, or credential JSON in:
+
+- `SKILL.md`;
+- Project source files;
+- `.env.example` values;
+- examples or fixtures;
+- chat messages or generated documentation.
+
+## Permissions and approvals
+
+A skill does not expand authority.
+
+- Project and filesystem access still follow the current user and Project boundary.
+- A Helper Agent does not inherit broader access merely because another agent delegated work to it.
+- External writes, destructive actions, deployment, purchases, and other protected operations can require explicit approval.
+- Tool availability and credential grants are evaluated separately from the skill body.
+
+Skills should document approval points, but enforcement belongs to Tower's runtime and backend authorization layers.
+
+## Managing skills in the UI
+
+The Skills catalog shows the effective skills visible to the current user and Project. Depending on role and deployment policy, users can:
+
+- inspect available skills;
+- review descriptions and required Connections;
+- enable or disable an available skill;
+- open or create a Project-authored skill;
+- identify whether a skill is Project-owned or organization-managed.
+
+Organization-managed source changes should go through the organization's review and rollout process rather than editing a generated Project copy.
+
+## Materialization for self-hosted installations
+
+Tower includes a materialization command for applying the configured organization skill set to registered Projects:
 
 ```bash
-ssh <target> 'cd ~/tower && npm run skills:materialize -- --all-projects'
-ssh <target> 'cd ~/tower && npx tsx packages/backend/scripts/materialize-managed-skills.ts --all-projects --json'
+npm run skills:materialize -- --all-projects
 ```
 
-`skill-registry`와 `skill-registry-orchestration`은 새 작업의 진입점이 아니다. 공유는 `/share-skill`, 자체 호스팅 서버 반영은 `/managed-skill-rollout` 또는 `/fleet skills`로 간다.
+Useful narrower forms include:
 
-## 6. Credential Vault
+```bash
+npm run skills:materialize -- --project <project-id-or-name>
+npm run skills:materialize -- --project-root /path/to/project
+```
 
-스킬 실행에 필요한 비밀값은 `.env`가 아니라 Credential Vault에서 온다. 스킬 문서와 런타임 진단은 값이 아니라 이름만 다룬다.
+Materialization should be treated as a controlled synchronization step:
 
-예:
+- validate the selected skill names and source;
+- write an explicit manifest;
+- avoid exposing host-global skill folders as a shortcut;
+- refuse unsafe or incomplete managed state;
+- verify the Project-visible manifest and skill files after the run.
 
-- `APIFY_TOKEN`
-- `FIRECRAWL_API_KEY`
-- `NAVER_CLIENT_ID`
-- `NAVER_CLIENT_SECRET`
-- `OPENAI_API_KEY`
+Run `npm run skills:materialize -- --help` for the options supported by the installed version.
 
-## 7. Metadata axes
+## Runtime guides are different
 
-| Axis | 답하는 질문 |
-|---|---|
-| `teamskills/skillset.json` | 기본 teamskills bundle에 무엇을 넣나 |
-| `DEFAULT_RUNTIME_BOX_MATERIALIZED_SKILLS` | teamskills skillset이 없을 때의 임시 compiled name-list fallback |
-| `skill.yaml` / skill metadata | 어떤 스킬이고, 누구에게 안전하며, 어떤 secret이 필요한가 |
-| `customer_safe` / operator-only | self-hosted server 기본 배포에 안전한가 |
-| required secret/provider metadata | 어떤 Credential Vault 이름이 필요한가 |
-| visibility/access | 설치된 뒤 UI/search/prompt 후보로 누가 보나 |
-| `.tower/skills/manifest.json` | 이 프로젝트 런타임에 실제 materialize 되었나 |
-| `user_skill_prefs` | 사용자가 해당 스킬을 켰나/껐나 |
+Runtime guides under `docs/tower-guide/resources/` are packaged tool-contract resources used by Tower itself. They cover shared behavior such as PDF analysis, PDF export, publishing, visualization, Git, spreadsheets, CAD, and agent orchestration.
 
-`tags`는 검색/분류용이지 배포 정책의 정본이 아니다.
+They are not user-installed skills and do not appear in the Skills catalog. Their paths and names are application contracts because backend code resolves and packages them. Move or rename them only with the corresponding code and tests.
 
-## 8. Update map
+## Authoring guidance
 
-| 바꾸려는 것 | 봐야 할 곳 |
-|---|---|
-| Project skill body | `workspace/projects/<project>/skills/<skill>/SKILL.md` |
-| Operator skill body | `workspace/projects/project-2/skills/<skill>/SKILL.md` |
-| Operator skill mirror/bootstrap | `tower/skills/<skill>/SKILL.md` |
-| Organization skill body | `workspace/projects/teamskills/skills/<skill>/SKILL.md` |
-| Organization default set | `workspace/projects/teamskills/skillset.json` |
-| External skill repo | 별도 skill repository |
-| Legacy managed source | `tower/skills/managed/<skill>/SKILL.md` |
-| Legacy metadata/name-list fallback | `tower/config/skills/managed-skills.yaml`, `packages/backend/config.ts` |
-| Project runtime materializer | `packages/backend/scripts/materialize-managed-skills.ts`, `packages/backend/services/skill/project-skill-materializer.ts` |
-| Runtime resolver / project skill paths | `packages/backend/services/skill/skill-registry.ts`, `packages/backend/engines/pi/session-resources.ts` |
-| Credential Vault binding | `packages/backend/services/credential-vault/`, `packages/backend/services/skill/skill-credential.ts` |
-| Self-hosted server teamskills rollout | `skills/managed-skill-rollout/SKILL.md`, `scripts/skills/deploy-managed-skills.sh` |
-| Deploy/runtime health | `skills/fleet/SKILL.md`, `scripts/fleet/*` |
+When writing a new skill:
 
-## 9. Related decisions
+1. Start with one concrete job to be done.
+2. Define positive triggers and explicit exclusions.
+3. Name required data sources, tools, and Connections without embedding secrets.
+4. Separate inspection and recommendation from mutation.
+5. Require approval immediately before protected actions.
+6. Define evidence-based validation.
+7. Keep generated runtime copies out of the authoring workflow.
+8. Test the skill in a Project with only the permissions it actually needs.
 
-| 날짜 | 결정 | 요약 |
-|---|---|---|
-| 2026-06-09 | `project-scoped-managed-skill-materialization` | managed skills를 프로젝트 `.tower/skills`에 materialize |
-| 2026-06-09 | `skill-location-paths-are-diagnostic-only` | prompt `<location>`은 진단 메타데이터, 읽기 지시 아님 |
-| 2026-06-10 | `customer-default-managed-skills` | customer 기본 managed skill set |
-| 2026-06-10 | `project-sessions-stop-injecting-global-claude-skills` | project manifest가 있으면 global `.claude` 주입 중단 |
-| 2026-06-10 | `project-scoped-skills-as-user-facing-ssot` | user-facing skills는 project-scoped |
-| 2026-06-10 | `tower-dev-local-ops-skills-ssot` | Superseded: 과거에는 Tower 개발 ops 스킬을 `~/tower/skills` 로컬 정본으로 둠 |
-| 2026-06-19 | `skill-registry-is-promotion-workflow` | Superseded in practice: ordinary promotion moved to `share-skill`; registry name remains backend/legacy only |
-| 2026-06-20 | `skill-management-project-ops-skills-ssot` | 운영 스킬 작성 정본은 `스킬 관리 프로젝트/skills`, `~/tower/skills`는 mirror/bootstrap |
-| 2026-06-26 | `skills-external-repo-and-no-managed-seed` | 스킬은 별도 repo/teamskills가 정본, `tower/skills/managed` fallback 제거 |
+A good skill makes expert work more repeatable without hiding authority, data, or failure conditions.
+
+## Related documentation
+
+- [Tower architecture](./architecture.md)
+- [Runtime visualization formats](./visual-formats.md)
+- [Installation Guide](../../INSTALL.md)

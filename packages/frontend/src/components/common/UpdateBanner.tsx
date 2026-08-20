@@ -1,4 +1,5 @@
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 import { useSettingsStore } from '../../stores/settings-store';
 
 interface UpdateBannerProps {
@@ -9,6 +10,7 @@ interface UpdateBannerProps {
 }
 
 export function UpdateBanner({ onReload, onDeferReload, onCancelDeferred, busy = false }: UpdateBannerProps) {
+  const { t } = useTranslation('common');
   const updateAvailable = useSettingsStore((s) => s.updateAvailable);
   const deferredUpdateRequested = useSettingsStore((s) => s.deferredUpdateRequested);
   if (!updateAvailable) return null;
@@ -20,10 +22,10 @@ export function UpdateBanner({ onReload, onDeferReload, onCancelDeferred, busy =
           <span className="w-2 h-2 rounded-full bg-primary-300 shrink-0" />
           <span className="truncate">
             {deferredUpdateRequested
-              ? '현재 턴이 끝나면 최신 버전으로 자동 전환합니다.'
+              ? t('updateBanner.deferred')
               : busy
-                ? '새 버전이 준비되었습니다. 현재 작업이 끝난 뒤 새로고침하면 최신 상태로 전환됩니다.'
-                : '새 버전이 준비되었습니다. 지금 새로고침해 최신 상태로 전환할 수 있습니다.'}
+                ? t('updateBanner.busy')
+                : t('updateBanner.ready')}
           </span>
         </div>
         <div className="flex items-center gap-2 shrink-0">
@@ -32,7 +34,7 @@ export function UpdateBanner({ onReload, onDeferReload, onCancelDeferred, busy =
               onClick={onDeferReload}
               className="px-2.5 py-1 rounded-md bg-white/10 hover:bg-white/15 border border-white/15 text-[13px] font-semibold transition-colors"
             >
-              턴 끝나면 업데이트
+              {t('updateBanner.updateAfterTurn')}
             </button>
           )}
           {deferredUpdateRequested && onCancelDeferred && (
@@ -40,14 +42,14 @@ export function UpdateBanner({ onReload, onDeferReload, onCancelDeferred, busy =
               onClick={onCancelDeferred}
               className="px-2.5 py-1 rounded-md bg-white/10 hover:bg-white/15 border border-white/15 text-[13px] font-semibold transition-colors"
             >
-              예약 취소
+              {t('updateBanner.cancelDeferred')}
             </button>
           )}
           <button
             onClick={onReload}
             className="px-2.5 py-1 rounded-md bg-primary-500/20 hover:bg-primary-500/30 border border-primary-400/30 text-[13px] font-semibold transition-colors shrink-0"
           >
-            새로고침
+            {t('updateBanner.reload')}
           </button>
         </div>
       </div>

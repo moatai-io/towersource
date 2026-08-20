@@ -17,6 +17,7 @@ export interface AdminAgentListItem {
   ownerUsername: string | null;
   sessionCount: number;
   runtimeBoxCount: number;
+  workstation: { deploymentId: 'production'; workerId: string | null; enabled: boolean; authorityMode: string };
 }
 
 export interface AgentPurgeImpact {
@@ -76,8 +77,12 @@ export async function listAdminAgents(status: AdminAgentLifecycleFilter): Promis
     SELECT p.id, p.name, p.root_path, COALESCE(p.lifecycle_status, 'active') AS lifecycle_status,
            p.retired_at, p.retirement_reason, u.username AS owner_username,
            (SELECT COUNT(*)::int FROM sessions s WHERE s.project_id = p.id) AS session_count,
-           (SELECT COUNT(*)::int FROM project_runtime_boxes rb WHERE rb.project_id = p.id) AS runtime_box_count
+           (SELECT COUNT(*)::int FROM project_runtime_boxes rb WHERE rb.project_id = p.id) AS runtime_box_count,
+           pcb.default_worker_id AS workstation_worker_id,
+           COALESCE(pcb.workstation_mode,FALSE) AS workstation_mode,
+           COALESCE(pcb.authority_mode,'project') AS workstation_authority_mode
       FROM projects p
+      LEFT JOIN project_compute_deployment_bindings pcb ON pcb.project_id=p.id AND pcb.deployment_id='production'
       LEFT JOIN users u ON u.id = p.user_id
      WHERE COALESCE(p.lifecycle_status, 'active') = $1
      ORDER BY CASE WHEN $1 = 'retired' THEN p.retired_at ELSE p.created_at END DESC NULLS LAST
@@ -87,6 +92,10 @@ export async function listAdminAgents(status: AdminAgentLifecycleFilter): Promis
     lifecycleStatus: row.lifecycle_status, retiredAt: row.retired_at ?? null,
     retirementReason: row.retirement_reason ?? null, ownerUsername: row.owner_username ?? null,
     sessionCount: Number(row.session_count ?? 0), runtimeBoxCount: Number(row.runtime_box_count ?? 0),
+    workstation: {
+      deploymentId: 'production', workerId: row.workstation_worker_id ?? null,
+      enabled: Boolean(row.workstation_mode), authorityMode: row.workstation_authority_mode ?? 'project',
+    },
   }));
 }
 

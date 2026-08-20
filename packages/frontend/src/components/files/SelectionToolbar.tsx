@@ -51,19 +51,19 @@ export function SelectionToolbar({ onRefresh }: { onRefresh: () => void }) {
     setFileClipboard(paths);
     clearSelection();
     toggleSelectMode();
-    toastQuiet(`${paths.length}개 항목 복사됨 — 대상 폴더에서 붙여넣기 하세요`);
+    toastQuiet(t('selection.copied', { count: paths.length }));
   };
 
   const handleDelete = async () => {
     if (count === 0) return;
     const paths = compactTopLevelPaths([...selectedPaths]);
     const msg = count === 1
-      ? `"${paths[0].split('/').pop()}" 을 삭제하시겠습니까?`
-      : `${count}개 항목을 삭제하시겠습니까?`;
+      ? t('selection.deleteOne', { name: paths[0].split('/').pop() })
+      : t('selection.deleteMany', { count });
     const ok = await confirm({
-      title: '삭제',
+      title: t('selection.deleteTitle'),
       message: msg,
-      confirmLabel: '삭제',
+      confirmLabel: t('delete'),
       danger: true,
     });
     if (!ok) return;
@@ -78,8 +78,8 @@ export function SelectionToolbar({ onRefresh }: { onRefresh: () => void }) {
         fail++;
       }
     }
-    if (success > 0) toastQuiet(`${success}개 삭제됨`);
-    if (fail > 0) toastError(`${fail}개 삭제 실패`);
+    if (success > 0) toastQuiet(t('selection.deleted', { count: success }));
+    if (fail > 0) toastError(t('selection.deleteFailed', { count: fail }));
     clearSelection();
     onRefresh();
   };
@@ -288,8 +288,8 @@ export function MoveToFolderModal({ selectedPaths, onClose, onComplete }: {
     }
 
     setMoving(false);
-    if (success > 0) toastQuiet(`${success}개 파일 이동 완료`);
-    if (fail > 0) toastError(`${fail}개 파일 이동 실패`);
+    if (success > 0) toastQuiet(t('selection.moved', { count: success }));
+    if (fail > 0) toastError(t('selection.moveFailed', { count: fail }));
     onComplete();
   };
 

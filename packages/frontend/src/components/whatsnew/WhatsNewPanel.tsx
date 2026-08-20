@@ -12,6 +12,7 @@
 
 import React from 'react';
 import ReactMarkdown from 'react-markdown';
+import { useTranslation } from 'react-i18next';
 import rehypeRaw from 'rehype-raw';
 import { remarkGfmPlugin } from '../../utils/markdown-plugins';
 
@@ -69,6 +70,7 @@ interface WhatsNewPanelProps {
 }
 
 export function WhatsNewPanel({ onClose, onBack }: WhatsNewPanelProps) {
+  const { t } = useTranslation('layout');
   const entries = React.useMemo(() => parseEntries(), []);
   const lastSeenAtMount = React.useRef(getLastSeen());
   // Default: 가장 최신 entry 펼쳐서 보여주기.
@@ -86,7 +88,7 @@ export function WhatsNewPanel({ onClose, onBack }: WhatsNewPanelProps) {
         <button
           onClick={onBack}
           className="p-1.5 hover:bg-surface-800 rounded-lg transition-colors text-gray-400 hover:text-gray-200 active:scale-95"
-          aria-label="Back"
+          aria-label={t('common:back')}
         >
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
@@ -95,12 +97,11 @@ export function WhatsNewPanel({ onClose, onBack }: WhatsNewPanelProps) {
         <svg className="w-3.5 h-3.5 text-primary-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
         </svg>
-        {/* TODO i18n — 결정문대로 minimum viable 은 한국어 hard-code, 후속에 layout.json 키 추가 */}
-        <span className="text-[14px] font-semibold text-gray-300 flex-1">새 기능 (What's New)</span>
+        <span className="text-[14px] font-semibold text-gray-300 flex-1">{t('whatsNew.title')}</span>
         <button
           onClick={onClose}
           className="p-1.5 hover:bg-surface-800 rounded-lg transition-colors text-gray-500 hover:text-gray-300 active:scale-95"
-          aria-label="Close"
+          aria-label={t('common:close')}
         >
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -112,7 +113,7 @@ export function WhatsNewPanel({ onClose, onBack }: WhatsNewPanelProps) {
       <div className="flex-1 overflow-y-auto">
         {entries.length === 0 ? (
           <div className="p-6 text-center text-[14px] text-surface-500">
-            아직 게시된 업데이트가 없습니다.
+            {t('whatsNew.empty')}
           </div>
         ) : (
           <div className="divide-y divide-surface-800">
@@ -130,7 +131,7 @@ export function WhatsNewPanel({ onClose, onBack }: WhatsNewPanelProps) {
                         <span className="text-[12px] text-surface-500 font-mono">{entry.date}</span>
                         {isNew && (
                           <span className="tone-pill tone-success text-[10px] font-bold rounded px-1 py-px uppercase tracking-wide leading-none">
-                            New
+                            {t('whatsNew.newBadge')}
                           </span>
                         )}
                       </div>

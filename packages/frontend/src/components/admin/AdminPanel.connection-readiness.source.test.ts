@@ -13,14 +13,14 @@ describe('Connection-centered management UI contract', () => {
   });
 
   it('uses a service Connection as the primary user-facing surface', () => {
-    expect(source).toContain("renderTab('credentials', t('connectionsTab'))");
+    expect(source).toContain("renderTab('credentials', t('navigation.connections'))");
     expect(source).toContain("adminText('credentialConnections.readiness.connectedUnverified')");
     expect(source).toContain('connectionPrimaryAction');
     expect(source).toContain('connectionPrimaryAction');
   });
 
   it('keeps one primary management action and hides low-level credential operations by default', () => {
-    expect(source).toContain('고급 Credential 관리');
+    expect(source).toContain("t('credentialConnections.advancedCredentialManagement')");
     expect(source).toContain('showAdvanced && !isPersonalCredentialMode');
     expect(source).toContain('handleConnectionPrimaryAction');
     expect(source).toContain("return { label: adminText('credentialConnections.primaryAction'), kind: 'detail' as const }");
@@ -50,8 +50,8 @@ describe('Connection-centered management UI contract', () => {
     expect(source).toContain('aria-modal="true"');
     expect(source).toContain('md:max-w-[560px]');
     expect(source).toContain("'management' | 'agents'");
-    expect(source).toContain("['management', t('credentialConnections.managementTab')]");
-    expect(source).toContain("['agents', t('credentialConnections.agentsTab')]");
+    expect(source).toContain("['management', t('credentialConnections.detailTabs.management')]");
+    expect(source).toContain("['agents', t('credentialConnections.detailTabs.agents')]");
     expect(source).not.toContain("['summary', '요약']");
     expect(source).not.toContain("['diagnostics', '진단']");
     expect(source).toContain("if (event.key === 'Escape') closeConnectionDetail()");
@@ -60,15 +60,15 @@ describe('Connection-centered management UI contract', () => {
   });
 
   it('keeps Credential values hidden while exposing only safe structure and identifiers', () => {
-    expect(source).toContain('Credential 관리');
-    expect(source).toContain('구조화 Credential은 민감 필드를 제외한 구조만 검사할 수 있습니다.');
-    expect(source).toContain('기술 이름 보기');
+    expect(source).toContain("t('credentialConnections.advancedCredentialManagement')");
+    expect(source).toContain("t('credentialConnections.advancedMessages.structuredHidden')");
+    expect(source).toContain("t('credentialConnections.advancedActions.technicalNames')");
     expect(source).not.toContain('credential.secretValue');
   });
 
   it('adds ephemeral reveal and structure inspection without persistent storage', () => {
-    expect(source).toContain('원문 보기');
-    expect(source).toContain('구조 보기');
+    expect(source).toContain("t('credentialConnections.advancedActions.reveal')");
+    expect(source).toContain("t('credentialConnections.advancedActions.inspect')");
     expect(source).toContain("cache: 'no-store'");
     expect(source).toContain("document.addEventListener('visibilitychange', handleVisibility)");
     expect(source).toContain('setCredentialRevealValue(null)');
@@ -79,17 +79,17 @@ describe('Connection-centered management UI contract', () => {
   it('exposes the safe actions allowed by the backend reveal policy', () => {
     expect(source).toContain('credential.allowedActions?.reveal !== false');
     expect(source).toContain("credential.allowedActions?.replacementAction === 'rotate'");
-    expect(source).toContain('OAuth token은 원문을 표시하지 않습니다.');
-    expect(source).toContain('SSH private key는 원문을 표시하지 않습니다.');
-    expect(source).toContain('구조화 Credential은 민감 필드를 제외한 구조만 검사할 수 있습니다.');
-    expect(source).toContain('구조 보기');
+    expect(source).toContain("t('credentialConnections.advancedMessages.oauthHidden')");
+    expect(source).toContain("t('credentialConnections.advancedMessages.sshHidden')");
+    expect(source).toContain("t('credentialConnections.advancedMessages.structuredHidden')");
+    expect(source).toContain("t('credentialConnections.advancedActions.inspect')");
   });
 
   it('rotates through no-store preview and exact confirmed apply while preserving project grants', () => {
     expect(source).toContain('/rotate/preview`');
     expect(source).toContain('/rotate/apply`');
-    expect(source).toContain('기존 Credential ID와 프로젝트 연결을 유지');
-    expect(source).toContain('영향 확인 후 교체');
+    expect(source).toContain("t('credentialConnections.advancedMessages.replaceDescription')");
+    expect(source).toContain("t('credentialConnections.advancedActions.reviewAndReplace')");
     expect(source).toContain('confirmed: true');
   });
 

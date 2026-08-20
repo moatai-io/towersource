@@ -13,6 +13,12 @@ describe('Agent Home narrow pane responsiveness', () => {
     expect(home).toContain('agent-home-profile-name');
   });
 
+  it('keeps the three profile actions in one compact vertical stack', () => {
+    expect(home).toContain('grid w-full grid-cols-1 gap-2');
+    expect(styles).toContain('width: 9rem');
+    expect(styles).toContain('.agent-home-profile-actions > * { width: 100%; }');
+  });
+
   it('moves actions below the identity before the name becomes a narrow column', () => {
     expect(styles).toContain('.agent-home-profile-card { container-type: inline-size; }');
     expect(styles).toContain('@container (max-width: 720px)');
@@ -21,7 +27,7 @@ describe('Agent Home narrow pane responsiveness', () => {
 
   it('stacks actions and preserves readable name wrapping in very narrow panes', () => {
     expect(styles).toContain('@container (max-width: 430px)');
-    expect(styles).toContain('.agent-home-profile-actions { grid-template-columns: minmax(0, 1fr); }');
+    expect(styles).toContain('grid-template-columns: minmax(0, 1fr)');
     expect(styles).toContain('overflow-wrap: anywhere');
     expect(styles).toContain('word-break: normal');
   });

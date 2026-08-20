@@ -1,44 +1,62 @@
 ---
-title: "Tower Help"
+title: "Tower at a glance"
 icon: "📖"
 order: 0
 ---
 
-# Tower Help
+# Tower at a glance
 
-Welcome to Tower -- your team's AI command center. Tower brings AI conversations, team collaboration, file management, and task automation into a single workspace.
+Tower is a self-hosted workspace where teams work with AI teammates across conversations, files, tools, credentials, automations, and published outputs.
 
-Whether you are a first-time user or looking for a specific feature, this guide has you covered.
+Remember this basic flow:
 
----
+> **Choose an AI teammate or Project → delegate work in a Session → review files and progress → share only the result you need.**
 
-## What is Tower?
+## Core concepts
 
-Tower is a web platform that gives your entire team access to AI. Instead of each person using a separate chatbot, Tower provides:
+| Concept | Meaning |
+|---|---|
+| **AI teammate** | A Primary Agent with a visible role and accountable workspace |
+| **Project** | The technical boundary for files, Sessions, members, permissions, and Credentials |
+| **Session** | A durable conversation and execution history inside a Project |
+| **Files** | Reusable source material and generated artifacts |
+| **My Work** | Ongoing work, approvals, and execution history |
+| **Automations** | Scheduled or recurring AI work |
+| **Skills** | Specialized, reusable operating instructions |
+| **Connection** | An approved external account that an AI teammate may use within policy |
 
-- **Sessions** -- private 1-on-1 AI conversations
-- **Channels** -- team chat rooms with built-in AI
-- **Files** -- a shared file tree with code editor, previews, and sharing
-- **Tasks** -- a Kanban board where AI executes work autonomously
-- **Visual Blocks** -- charts, diagrams, maps, and more rendered directly in chat
+## Common workflow
 
-Everything is organized by **Projects**, so related conversations, files, and tasks stay together.
+1. Open the relevant AI teammate or Project.
+2. Start a Session or continue an existing one.
+3. State the audience, output format, and important constraints.
+4. Review generated files in the Viewer Pane or Files surface.
+5. Continue revisions in the same Session.
+6. Use an Automation when the work should run on a schedule.
 
----
+## Permissions and credentials
 
-## Table of Contents
+Project membership and roles govern access to Project Sessions and files. Personal files and notes use a separate user boundary. Credential values do not belong in chat, source files, skills, or reusable documents; Tower supplies approved credentials only to eligible executions.
 
-| # | Topic | Description |
-|---|-------|-------------|
-| 1 | [Getting Started](./01-getting-started.md) | Introduction, screen layout, first session |
-| 2 | [Sessions -- AI Chat](./02-sessions.md) | Private AI conversations |
-| 3 | [Channels -- Team Chat](./03-channels.md) | Team chat rooms with @ai and @task |
-| 4 | [Files](./04-files.md) | File tree, editor, sharing |
-| 5 | [Tasks -- Kanban Board](./05-tasks.md) | AI task automation with drag-and-drop |
-| 6 | [Visual Blocks](./06-visual-blocks.md) | Charts, diagrams, tables, and more |
-| 7 | [Settings](./07-settings.md) | Themes, models, admin features |
-| 8 | [Shortcuts & Tips](./08-shortcuts.md) | Keyboard shortcuts and productivity tips |
+## Help topics
 
----
+1. [Getting Started](./01-getting-started.md)
+2. [Sessions](./02-sessions.md)
+3. [Channels — historical UI guide](./03-channels.md)
+4. [Files](./04-files.md)
+5. [Work and Automations](./05-work-and-automations.md)
+6. [Visual Outputs and Artifacts](./06-visual-outputs.md)
+7. [Settings, Permissions, and Connections](./07-settings-permissions-connections.md)
+8. [Shortcuts and Effective Requests](./08-shortcuts-effective-requests.md)
 
-Pick any topic to get started. Each guide is self-contained -- you can read them in any order.
+## Documentation status
+
+English is the default source language for new OSS documentation. Pages marked **Historical UI guide** describe an earlier or retired surface and are not the current product contract.
+
+The Channel guide is retained for historical reference. Current execution history and ongoing work belong in Sessions, Work, notifications, and Automations.
+
+## Maintained references
+
+- [Installation Guide](../../../INSTALL.md)
+- [Architecture](../../tower-guide/architecture.md)
+- [Skills](../../tower-guide/skills.md)

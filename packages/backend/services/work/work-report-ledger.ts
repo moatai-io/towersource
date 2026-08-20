@@ -1,10 +1,11 @@
 /**
- * Owns: extraction of final-answer `업무보고:` blocks into WorkLedger records.
+ * Owns: extraction of final-answer `Work Summary:` blocks into WorkLedger records.
  * Public API: parseWorkReportBlock(), indexWorkReportMessage().
  *
  * Recent Work should not depend on assistants inventing TodoWrite workstream
- * metadata. This module treats a short visible `업무보고:` block as the durable
- * work-memory signal and stores only a compact WorkLedger index row.
+ * metadata. This module treats a short visible `Work Summary:` block as the
+ * durable work-memory signal and stores only a compact WorkLedger index row.
+ * Legacy `업무보고:` blocks remain readable for backward compatibility.
  */
 
 import { createHash } from 'crypto';
@@ -78,13 +79,19 @@ function extractArtifacts(value: string): string[] {
   return Array.from(artifacts);
 }
 
-/** Parse the final visible `업무보고:` block from assistant text. */
+const REPORT_LABEL_PATTERN = /^\s*(?:#{1,6}\s*)?(?:Work Summary|업무보고)\s*[:：]?\s*$/i;
+
+function normalizeFieldLabel(label: string | null): string {
+  return (label || '').replace(/\s+/g, '').toLocaleLowerCase('en-US');
+}
+
+/** Parse the final visible `Work Summary:` block (or legacy `업무보고:` block). */
 export function parseWorkReportBlock(content: unknown): ParsedWorkReport | null {
   const text = asTextContent(content);
-  if (!text.includes('업무보고')) return null;
+  if (!/Work Summary|업무보고/i.test(text)) return null;
 
   const lines = text.replace(/\r\n/g, '\n').split('\n');
-  const labelIndex = lines.findIndex((line) => /^\s*(?:#{1,6}\s*)?업무보고\s*[:：]?\s*$/.test(line));
+  const labelIndex = lines.findIndex((line) => REPORT_LABEL_PATTERN.test(line));
   if (labelIndex < 0) return null;
 
   const bullets: string[] = [];
@@ -117,10 +124,10 @@ export function parseWorkReportBlock(content: unknown): ParsedWorkReport | null 
 
   for (const bullet of compactBullets) {
     const { label, value } = extractField(bullet);
-    const normalized = (label || '').replace(/\s+/g, '');
-    if (!conclusion && (!label || ['결론', '완료', '요약', '결과'].includes(normalized))) conclusion = value || bullet;
-    if (!next && ['다음', '후속', '남은일', 'Next'].includes(normalized)) next = value || null;
-    if (['산출물', '파일', 'Artifacts', '링크'].includes(normalized)) {
+    const normalized = normalizeFieldLabel(label);
+    if (!conclusion && (!label || ['outcome', 'result', 'summary', 'completed', '결론', '완료', '요약', '결과'].includes(normalized))) conclusion = value || bullet;
+    if (!next && ['next', 'nextstep', 'nextsteps', 'followup', '다음', '후속', '남은일'].includes(normalized)) next = value || null;
+    if (['artifacts', 'artifact', 'files', 'file', 'links', 'link', '산출물', '파일', '링크'].includes(normalized)) {
       for (const artifact of extractArtifacts(value)) artifacts.add(artifact);
     }
     for (const artifact of extractArtifacts(bullet)) artifacts.add(artifact);
@@ -187,7 +194,7 @@ async function upsertReport(input: {
     sourceId,
     sourceRefs: {
       kind: 'work_report',
-      parserVersion: 1,
+      parserVersion: 2,
       assistantMessageId: input.messageId,
       sessionName: input.context.session_name || null,
       next: report.next,
@@ -200,7 +207,7 @@ async function upsertReport(input: {
   return true;
 }
 
-/** Index a just-saved assistant message if it contains an `업무보고:` block. */
+/** Index a just-saved assistant message if it contains a Work Summary block. */
 export async function indexWorkReportMessage(input: {
   sessionId: string;
   messageId: string;
@@ -213,7 +220,7 @@ export async function indexWorkReportMessage(input: {
   return await upsertReport({ sessionId: input.sessionId, messageId: input.messageId, content: input.content, context });
 }
 
-/** Index a streamed assistant message update if its final content contains `업무보고:`. */
+/** Index a streamed assistant message update if its final content contains a Work Summary block. */
 export async function indexWorkReportMessageUpdate(messageId: string, content: unknown): Promise<boolean> {
   const context = await messageContext(messageId);
   if (!context || context.role !== 'assistant') return false;

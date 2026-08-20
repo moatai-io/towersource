@@ -1893,7 +1893,9 @@ export async function resolveRuntimeBoxApiKeyEnv(opts: {
       WHERE c.kind = 'api_key'
         AND c.enabled = true
         AND ${allowedProjectCredentialWhere('c', 'p', 'd', 'prj')}
-      ORDER BY CASE p.mode WHEN 'override' THEN 0 WHEN 'allow' THEN 1 WHEN 'inherit' THEN 2 ELSE 3 END, c.id`,
+      ORDER BY CASE p.mode WHEN 'override' THEN 0 WHEN 'allow' THEN 1 WHEN 'inherit' THEN 2 ELSE 3 END,
+               CASE c.scope WHEN 'project' THEN 0 WHEN 'workspace' THEN 1 WHEN 'personal' THEN 2 ELSE 3 END,
+               c.id`,
     [opts.projectId],
   );
 

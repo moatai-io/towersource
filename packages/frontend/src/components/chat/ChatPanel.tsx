@@ -143,6 +143,7 @@ function PlainMessageList({
   restorePlan: SessionViewportRestorePlan;
   onViewportSnapshot?: (snapshot: Omit<ChatViewportSnapshot, 'capturedAt' | 'projectionVersion'>) => void;
 }) {
+  const { t } = useTranslation('chat');
   const scrollRef = useRef<HTMLDivElement>(null);
   const prevLen = useRef(messages.length);
   const plainTouchStartY = useRef(0);
@@ -329,7 +330,7 @@ function PlainMessageList({
             onJumpToLatest();
           }}
           className="absolute bottom-4 right-4 z-20 w-8 h-8 flex items-center justify-center rounded-full bg-primary-600 hover:bg-primary-500 text-white shadow-lg border border-primary-400/40 transition-colors"
-          title="최신 메시지로 이동"
+          title={t('jumpToLatest')}
         >
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 14l-7 7m0 0l-7-7m7 7V3" />
@@ -350,6 +351,7 @@ interface ChatPanelProps {
 }
 
 export function ChatPanel({ onSend, onAbort, onSafeStop, onFileClick, onAnswerQuestion, onLoadMore }: ChatPanelProps) {
+  const { t, i18n } = useTranslation('chat');
   const messages = useChatStore((s) => s.messages);
   const chatSessionId = useChatStore((s) => s.sessionId);
   const sessionLoading = useChatStore((s) => s.sessionLoading);
@@ -1664,10 +1666,10 @@ export function ChatPanel({ onSend, onAbort, onSafeStop, onFileClick, onAnswerQu
               <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
               <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
             </svg>
-            <span>불러오는 중...</span>
+            <span>{t('loadingOlderMessages')}</span>
           </div>
         ) : (
-          <div className="text-[13px] text-gray-600">↑ 스크롤하면 이전 메시지를 불러옵니다</div>
+          <div className="text-[13px] text-gray-600">{t('scrollForOlderMessages')}</div>
         )}
       </div>
     );
@@ -1715,11 +1717,11 @@ export function ChatPanel({ onSend, onAbort, onSafeStop, onFileClick, onAnswerQu
           >
             <div
               className="text-[13px] text-gray-400 bg-surface-800/40 border border-surface-700/40 rounded-full px-3 py-1"
-              title="이 세션은 백엔드 재시작 후 자동으로 재개되었습니다."
+              title={t('autoResume.title')}
             >
               <span className="opacity-70 mr-1">↻</span>
-              서버 재시작 후 자동 재개됨 ·{' '}
-              {new Date(lastAutoResumeAt).toLocaleTimeString('ko-KR', {
+              {t('autoResume.label')} ·{' '}
+              {new Date(lastAutoResumeAt).toLocaleTimeString(i18n.resolvedLanguage || i18n.language, {
                 hour: '2-digit',
                 minute: '2-digit',
               })}
@@ -1866,7 +1868,7 @@ export function ChatPanel({ onSend, onAbort, onSafeStop, onFileClick, onAnswerQu
             <button
               onClick={jumpToLatest}
               className="absolute bottom-4 right-4 z-20 w-8 h-8 flex items-center justify-center rounded-full bg-primary-600 hover:bg-primary-500 text-white shadow-lg border border-primary-400/40 transition-colors"
-              title="최신 메시지로 이동"
+              title={t('jumpToLatest')}
             >
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 14l-7 7m0 0l-7-7m7 7V3" />
@@ -2007,13 +2009,14 @@ function pickActiveTurnStatusLine(lines: string[], seed?: number | null): string
 }
 
 function StoppedTurnStatusBox({ forced }: { forced: boolean }) {
+  const { t } = useTranslation('chat');
   return (
     <div className="shrink-0 px-3 md:px-6 pt-1 pb-1 flex justify-start" data-testid="turn-stopped-status">
       <div className="inline-flex max-w-full items-start gap-2 rounded-xl border border-surface-300 bg-surface-100 px-3 py-2 text-[13px] text-surface-700 shadow-sm dark:border-surface-700 dark:bg-surface-900/80 dark:text-surface-300">
         <span className="mt-0.5 text-[10px] text-surface-500" aria-hidden="true">■</span>
         <span>
-          <strong className="font-semibold text-surface-900 dark:text-surface-100">작업을 멈췄습니다.</strong>
-          <span className="ml-1">{forced ? '진행 중이던 단계는 필요하면 확인해 주세요.' : '지금까지의 결과는 저장되어 있습니다.'}</span>
+          <strong className="font-semibold text-surface-900 dark:text-surface-100">{t('stoppedTurn.title')}</strong>
+          <span className="ml-1">{forced ? t('stoppedTurn.forcedHint') : t('stoppedTurn.savedHint')}</span>
         </span>
       </div>
     </div>

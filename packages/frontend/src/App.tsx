@@ -640,7 +640,8 @@ function App() {
 
   const addSession = useSessionStore((s) => s.addSession);
   const removeSession = useSessionStore((s) => s.removeSession);
-  const setSessions = useSessionStore((s) => s.setSessions);
+  const setRecentSessions = useSessionStore((s) => s.setRecentSessions);
+  const resetProjectSessionHydration = useSessionStore((s) => s.resetProjectSessionHydration);
   const sessionListRefreshRef = useRef({ lastAt: 0, inFlight: false });
   const startupSessionsLoadRef = useRef<{ key: string | null; inFlight: boolean }>({ key: null, inFlight: false });
 
@@ -688,22 +689,16 @@ function App() {
         elapsedMs: Math.round(perfNow() - refreshStartedAt),
       }, { thresholdMs: 800 });
 
-      // WS lifecycle events are best-effort hints. Reconcile with the server list
-      // on reconnect/focus/sidebar entry, but keep the currently viewed session
-      // if a transient list response omits it (e.g. deep-link/share/permission edge).
-      // Decision: workspace/decisions/2026-06-28-session-list-reconciliation.md
-      const activeId = useSessionStore.getState().activeSessionId;
-      const current = useSessionStore.getState().sessions;
-      const active = activeId ? current.find((s) => s.id === activeId) : null;
-      const ids = new Set(data.map((s: SessionMeta) => s.id));
-      const next = active && !ids.has(active.id) ? [active, ...data] : data;
-      setSessions(next);
+      // The response is only the global recent window. Reconcile that window
+      // without deleting complete project lists that were hydrated separately.
+      // Decision: workspace/decisions/2026-08-20-project-session-hydration-reconciliation.md
+      setRecentSessions(data);
     } catch (err) {
       console.warn(`[app] session list reconciliation failed (${reason}):`, err);
     } finally {
       sessionListRefreshRef.current.inFlight = false;
     }
-  }, [authStatus, token, setSessions]);
+  }, [authStatus, token, setRecentSessions]);
 
   // 백그라운드에서 auth 상태 검증 (캐시로 이미 렌더링된 후 조용히 실행)
   useEffect(() => {
@@ -1297,7 +1292,8 @@ function App() {
       })
       .then(async (data) => {
         const setSessionsStartedAt = perfNow();
-        setSessions(data);
+        resetProjectSessionHydration();
+        setRecentSessions(data);
         sessionListRefreshRef.current.lastAt = Date.now();
         setSessionsLoaded(true);
         logClientPerf('startup-sessions-store-set', {
@@ -1419,7 +1415,7 @@ function App() {
       .then((r) => r.ok ? r.json() : [])
       .then((data) => { if (Array.isArray(data)) useSpaceStore.getState().setSpaces(data); })
       .catch(() => {});
-  }, [token, authStatus, sessionsLoaded, setSessions, handleSelectSession, createSessionInDb]);
+  }, [token, authStatus, sessionsLoaded, setRecentSessions, resetProjectSessionHydration, handleSelectSession, createSessionInDb]);
 
   const handleDeleteSession = useCallback(async (id: string) => {
     // Sidebar X now means "hide" (reversible from History), not permanent delete.

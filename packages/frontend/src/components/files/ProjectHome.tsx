@@ -14,15 +14,13 @@ import { WorkspaceKnowledgeGraph } from './WorkspaceKnowledgeGraph';
 import { toastError, toastSuccess } from '../../utils/toast';
 import { AGENT_CHARACTERS, AgentCharacterAvatar, agentFaceImageUrl, characterFace } from '../../features/agent-profile/characters';
 import { AgentIdentityAvatar } from '../../features/agent-profile/AgentIdentityAvatar';
+import { AgentCredentialsModal } from '../layout/AgentCredentialsModal';
 import { getAgentWorkspaceLocation, rememberAgentWorkspaceLocation } from '../../features/agent-workspace/navigation-state';
 
 function authHeaders(): Record<string, string> {
   const token = localStorage.getItem('token');
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
-
-const projectSessionsLoaded = new Set<string>();
-const projectSessionsLoading = new Set<string>();
 
 function compactPath(path?: string | null): string {
   return path ? path.replace(/^\/home\/[^/]+/, '~') : '—';
@@ -308,7 +306,7 @@ export function ProjectHome({ project, onOpenFiles, onOpenFile }: ProjectHomePro
   const openAgentsPanel = useSettingsStore((s) => s.setAgentsPanelOpen);
   const setCapabilityProjectId = useSettingsStore((s) => s.setCapabilityProjectId);
   const sessions = useSessionStore((s) => s.sessions);
-  const mergeSessions = useSessionStore((s) => s.mergeSessions);
+  const hydrateProjectSessions = useSessionStore((s) => s.hydrateProjectSessions);
   const [wikiContent, setWikiContent] = useState('');
   const [wikiLoading, setWikiLoading] = useState(false);
   const [wikiMissing, setWikiMissing] = useState(false);
@@ -324,6 +322,7 @@ export function ProjectHome({ project, onOpenFiles, onOpenFile }: ProjectHomePro
   const [workstreamsLoading, setWorkstreamsLoading] = useState(false);
   const [agentHome, setAgentHome] = useState<any>(null);
   const [editingTeammate, setEditingTeammate] = useState(false);
+  const [managingConnections, setManagingConnections] = useState(false);
   const [teammateDraft, setTeammateDraft] = useState({ displayName: '', role: '', tagline: '', face: '', disabledSkills: [] as string[] });
   const [teammateSaving, setTeammateSaving] = useState(false);
   const [characterPrompt, setCharacterPrompt] = useState('');
@@ -344,24 +343,9 @@ export function ProjectHome({ project, onOpenFiles, onOpenFile }: ProjectHomePro
   }, [homeTab, project?.id]);
 
   useEffect(() => {
-    const projectId = project?.id;
-    if (!projectId || projectSessionsLoaded.has(projectId) || projectSessionsLoading.has(projectId)) return;
-    projectSessionsLoading.add(projectId);
-    const params = new URLSearchParams({ projectId });
-    void fetch(`/api/sessions?${params.toString()}`, { headers: authHeaders() })
-      .then(async (res) => {
-        if (!res.ok) throw new Error(`project session lazy load failed: ${res.status}`);
-        const data = await res.json().catch(() => []);
-        if (Array.isArray(data)) mergeSessions(data);
-        projectSessionsLoaded.add(projectId);
-      })
-      .catch((error) => {
-        console.warn('[project-home] failed to lazy-load project sessions:', error);
-      })
-      .finally(() => {
-        projectSessionsLoading.delete(projectId);
-      });
-  }, [mergeSessions, project?.id]);
+    if (!project?.id) return;
+    void hydrateProjectSessions(project.id);
+  }, [hydrateProjectSessions, project?.id]);
 
   const wikiPath = rootPath ? `${rootPath}/.wiki/index.md` : '';
   const instructionsPath = rootPath ? `${rootPath}/AGENTS.md` : '';
@@ -675,17 +659,18 @@ export function ProjectHome({ project, onOpenFiles, onOpenFile }: ProjectHomePro
   return (
     <div className="relative z-10 h-full overflow-auto bg-surface-950 text-gray-100">
       <header className="pointer-events-auto sticky top-0 z-30 border-b border-surface-800 bg-surface-950 px-3 py-2 shadow-sm sm:px-5 sm:py-2.5 lg:px-8">
-        <div className="flex min-h-9 w-full flex-wrap items-center gap-x-3 gap-y-1 sm:flex-nowrap sm:gap-4">
-          <div className="flex min-w-0 flex-1 items-center gap-2 text-sm font-semibold text-surface-200 sm:flex-initial">
+        <div className="flex min-h-9 w-full flex-wrap items-center gap-x-3 gap-y-1 lg:flex-nowrap lg:gap-4">
+          <div className="flex min-w-0 flex-1 items-center gap-2 text-sm font-semibold text-surface-200 lg:flex-initial">
             <AgentIdentityAvatar project={project} className="h-7 w-7 shrink-0 rounded-lg border border-surface-700/60" />
             <span className="truncate">{project.agent?.displayName || project.name}</span>
           </div>
-          <nav className="relative z-10 order-3 flex w-full shrink-0 items-center gap-1 sm:order-none sm:w-auto" aria-label={t('projectHome.navigationLabel')}>
+          <nav className="relative z-10 order-3 flex w-full shrink-0 items-center gap-1 overflow-x-auto lg:order-none lg:w-auto" aria-label={t('projectHome.navigationLabel')}>
             <button type="button" onClick={() => { setHomeTab('home'); if (project?.id) rememberAgentWorkspaceLocation(project.id, 'home'); }} className={homeTabClass(homeTab === 'home')}>{t('projectHome.homeTab')}</button>
             <button type="button" onClick={() => { setHomeTab('files'); if (project?.id) rememberAgentWorkspaceLocation(project.id, 'files'); }} className={homeTabClass(homeTab === 'files')}>{t('projectHome.allFilesTab')}</button>
             <button type="button" onClick={() => setHomeTab('graph')} className={homeTabClass(homeTab === 'graph')}>{t('projectHome.graphTab')}</button>
+            <button type="button" onClick={() => setManagingConnections(true)} className={homeTabClass(managingConnections)}>{t('projectHome.connections')}</button>
           </nav>
-          <div className="ml-auto hidden max-w-[35%] truncate font-mono text-[11px] text-surface-600 sm:block" title={rootPath}>{compactPath(rootPath)}</div>
+          <div className="ml-auto hidden min-w-0 max-w-[260px] truncate font-mono text-[11px] text-surface-600 xl:block" title={rootPath}>{compactPath(rootPath)}</div>
         </div>
       </header>
       {homeTab === 'files' ? (
@@ -712,6 +697,8 @@ export function ProjectHome({ project, onOpenFiles, onOpenFile }: ProjectHomePro
               onOpenAllWork={() => setHomeTab('work')}
             />
       </div>}
+
+       {managingConnections && <AgentCredentialsModal project={project} onClose={() => setManagingConnections(false)} />}
 
        {editingTeammate && (
         <div className="fixed inset-0 z-[80] grid place-items-center bg-black/55 p-3 sm:p-4" onMouseDown={() => setEditingTeammate(false)}>

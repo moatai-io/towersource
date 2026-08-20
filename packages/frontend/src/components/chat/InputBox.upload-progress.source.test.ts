@@ -10,7 +10,7 @@ describe('InputBox compact upload progress contract', () => {
     expect(source).toContain('Upload progress and attachment chips');
     expect(source).toContain('<UploadProgressChip progress={uploadProgress} />');
     expect(chipSource).toContain('inline-flex h-9 max-w-[220px]');
-    expect(chipSource).toContain("progress.phase === 'processing' ? '저장 중…'");
+    expect(chipSource).toContain("progress.phase === 'processing' ? t('uploadProgress.saving')");
     expect(chipSource).toContain('absolute inset-x-0 bottom-0 h-0.5');
     expect(source).not.toContain('서버에서 파일을 저장하는 중…');
     expect(source).not.toContain('mx-3 mt-2.5 rounded-xl');

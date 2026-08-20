@@ -20,8 +20,8 @@ describe('Chat recovery surface contract', () => {
 
   it('renders user stop as one neutral chat-timeline box without stop toasts', () => {
     expect(chatPanel).toContain('data-testid="turn-stopped-status"');
-    expect(chatPanel).toContain('작업을 멈췄습니다.');
-    expect(chatPanel).toContain('지금까지의 결과는 저장되어 있습니다.');
+    expect(chatPanel).toContain("t('stoppedTurn.title')");
+    expect(chatPanel).toContain("t('stoppedTurn.savedHint')");
     expect(chatPanel).toContain("activeTurnTerminal.reason === 'forced_stop'");
     const stopStateCase = runtime.match(/case 'turn_stop_state':[\s\S]*?\n      case 'session_status_check':/)?.[0] || '';
     expect(stopStateCase).not.toContain("toastSuccess('현재 단계까지 마치고 멈췄습니다.')");

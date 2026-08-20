@@ -29,11 +29,9 @@ describe('mobile Markdown document experience', () => {
   });
 
   it('closes the mobile sidebar after direct Home or Files navigation', () => {
-    const selectedProjectHeader = sidebar.slice(
-      sidebar.indexOf("rememberAgentWorkspaceLocation(project.id, 'home');", sidebar.indexOf('selectedAgentProjectId && navigationGroupedSessions')),
-      sidebar.indexOf('agentNavScope ===', sidebar.indexOf('selectedAgentProjectId && navigationGroupedSessions')),
-    );
-    expect(selectedProjectHeader).toContain("rememberAgentWorkspaceLocation(project.id, 'files');");
-    expect(selectedProjectHeader.match(/setSidebarOpen\(false\)/g)?.length).toBeGreaterThanOrEqual(2);
+    expect(sidebar).toContain("rememberAgentWorkspaceLocation(project.id, 'home');");
+    expect(sidebar).toContain("rememberAgentWorkspaceLocation(project.id, 'files');");
+    expect(sidebar).toContain("if (useSessionStore.getState().isMobile) useSessionStore.getState().setSidebarOpen(false);");
+    expect(sidebar).toContain("setMobileProjectPickerOpen(false);");
   });
 });

@@ -21,6 +21,87 @@ beforeEach(() => {
     mobileContextOpen: false,
     mobileTabBeforeContext: 'ai',
     activeView: 'chat',
+    hydratedProjectSessionIds: new Set(),
+    projectSessionsLoading: new Set(),
+  });
+});
+
+function session(id: string, projectId: string, updatedAt: string): any {
+  return {
+    id,
+    projectId,
+    name: id,
+    cwd: '/workspace',
+    tags: [],
+    favorite: false,
+    totalCost: 0,
+    totalTokens: 0,
+    createdAt: updatedAt,
+    updatedAt,
+  };
+}
+
+describe('session list scope reconciliation', () => {
+  it('preserves fully hydrated project sessions when the global recent window refreshes', () => {
+    const recent = session('recent', 'project-b', '2026-08-20T02:00:00Z');
+    const oldProjectSession = session('old-project-session', 'project-a', '2025-01-01T00:00:00Z');
+    useSessionStore.setState({
+      sessions: [recent, oldProjectSession],
+      hydratedProjectSessionIds: new Set(['project-a']),
+    } as any);
+
+    useSessionStore.getState().setRecentSessions([
+      session('recent-next', 'project-b', '2026-08-20T03:00:00Z'),
+    ]);
+
+    expect(useSessionStore.getState().sessions.map((item) => item.id)).toEqual([
+      'recent-next',
+      'old-project-session',
+    ]);
+  });
+
+  it('preserves the active deep-linked session outside both the recent window and hydrated projects', () => {
+    const active = session('active-deep-link', 'project-c', '2024-01-01T00:00:00Z');
+    useSessionStore.setState({ sessions: [active], activeSessionId: active.id } as any);
+
+    useSessionStore.getState().setRecentSessions([
+      session('recent', 'project-b', '2026-08-20T03:00:00Z'),
+    ]);
+
+    expect(useSessionStore.getState().sessions.map((item) => item.id)).toEqual([
+      'recent',
+      'active-deep-link',
+    ]);
+  });
+
+  it('replaces one hydrated project scope authoritatively and deduplicates concurrent requests', async () => {
+    const projectSession = session('project-session', 'project-a', '2026-08-20T01:00:00Z');
+    let resolveFetch!: (value: unknown) => void;
+    global.fetch = vi.fn(() => new Promise((resolve) => { resolveFetch = resolve; })) as any;
+
+    const first = useSessionStore.getState().hydrateProjectSessions('project-a');
+    const second = useSessionStore.getState().hydrateProjectSessions('project-a');
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+
+    resolveFetch({ ok: true, json: async () => [projectSession] });
+    await Promise.all([first, second]);
+
+    expect(useSessionStore.getState().sessions).toEqual([projectSession]);
+    expect(useSessionStore.getState().hydratedProjectSessionIds.has('project-a')).toBe(true);
+    expect(useSessionStore.getState().projectSessionsLoading.has('project-a')).toBe(false);
+  });
+
+  it('allows a failed project hydration to be retried', async () => {
+    global.fetch = vi.fn()
+      .mockResolvedValueOnce({ ok: false, status: 503, json: async () => ({}) })
+      .mockResolvedValueOnce({ ok: true, json: async () => [session('retry-session', 'project-a', '2026-08-20T01:00:00Z')] }) as any;
+
+    await useSessionStore.getState().hydrateProjectSessions('project-a');
+    expect(useSessionStore.getState().hydratedProjectSessionIds.has('project-a')).toBe(false);
+
+    await useSessionStore.getState().hydrateProjectSessions('project-a');
+    expect(global.fetch).toHaveBeenCalledTimes(2);
+    expect(useSessionStore.getState().sessions[0].id).toBe('retry-session');
   });
 });
 

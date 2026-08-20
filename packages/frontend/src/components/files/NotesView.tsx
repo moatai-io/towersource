@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import type { Project } from '@tower/shared';
 import { useFileStore, type FileEntry } from '../../stores/file-store';
 import { FileTree } from './FileTree';
@@ -170,6 +171,7 @@ function ProjectNotesSection({
   query: string;
   onFileClick: (path: string) => void;
 }) {
+  const { t } = useTranslation('files');
   const expandedProjects = useFileStore((s) => s.expandedProjects);
   const toggleProjectExpanded = useFileStore((s) => s.toggleProjectExpanded);
   const expandedPaths = useFileStore((s) => s.expandedPaths);
@@ -198,10 +200,10 @@ function ProjectNotesSection({
       .then((data) => setState({ status: 'ready', data }))
       .catch((err) => {
         if (controller.signal.aborted) return;
-        setState({ status: 'error', error: err?.message || 'Notes index failed' });
+        setState({ status: 'error', error: err?.message || t('notesView.loadFailed') });
       });
     return () => controller.abort();
-  }, [effectiveExpanded, rootPath]);
+  }, [effectiveExpanded, rootPath, t]);
 
   const ready = state.status === 'ready' ? state.data : null;
   const entries = useMemo(() => {
@@ -246,7 +248,7 @@ function ProjectNotesSection({
       {effectiveExpanded && (
         <div className="ml-1.5 pl-2 border-l border-surface-700/25">
           {state.status === 'loading' && entries.length === 0 && (
-            <p className="text-[14px] text-gray-500 py-2">Loading...</p>
+            <p className="text-[14px] text-gray-500 py-2">{t('notesView.loading')}</p>
           )}
           {state.status === 'error' && (
             <p className="text-[14px] tone-danger tone-text py-2">{state.error}</p>
@@ -259,7 +261,7 @@ function ProjectNotesSection({
             />
           )}
           {state.status === 'ready' && entries.length === 0 && (
-            <p className="text-[14px] text-surface-600 py-2">No note files</p>
+            <p className="text-[14px] text-surface-600 py-2">{t('notesView.empty')}</p>
           )}
         </div>
       )}
@@ -274,6 +276,7 @@ export function NotesView({
   projects: Project[];
   onFileClick: (path: string) => void;
 }) {
+  const { t } = useTranslation('files');
   const [query, setQuery] = useState('');
   const visibleProjects = useMemo(() => projects.filter((p) => !!p.rootPath), [projects]);
 
@@ -286,11 +289,11 @@ export function NotesView({
         <input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="문서 파일명이나 폴더 검색"
+          placeholder={t('notesView.searchPlaceholder')}
           className="min-w-0 flex-1 bg-transparent text-[13px] text-gray-200 placeholder:text-surface-700 outline-none"
         />
         {query && (
-          <button type="button" onClick={() => setQuery('')} className="text-[12px] text-surface-600 hover:text-gray-300">clear</button>
+          <button type="button" onClick={() => setQuery('')} className="text-[12px] text-surface-600 hover:text-gray-300">{t('notesView.clear')}</button>
         )}
       </div>
 

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 
 export type SkillInvocationMeta = {
   skillName?: string;
@@ -24,6 +25,7 @@ export function SkillInvocationChip({
   meta?: SkillInvocationMeta | null;
   align?: 'left' | 'right';
 }) {
+  const { t } = useTranslation('chat');
   const [expanded, setExpanded] = useState(false);
   if (!meta?.skillName && !meta?.displayName) return null;
 
@@ -56,14 +58,14 @@ export function SkillInvocationChip({
 
         {expanded && (
           <div className="max-w-[320px] rounded-lg border border-violet-500/15 bg-surface-900/85 px-3 py-2 text-[12px] text-gray-400 shadow-lg">
-            <div className="font-medium text-violet-300">{label} 스킬이 이 턴에 적용됨</div>
+            <div className="font-medium text-violet-300">{t('skillInvocation.applied', { name: label })}</div>
             <div className="mt-1 space-y-0.5">
               {meta.skillName && <div><span className="text-gray-500">name:</span> {meta.skillName}</div>}
               {meta.canonicalCommand && <div><span className="text-gray-500">command:</span> {meta.canonicalCommand}</div>}
               {meta.matchedAlias && <div><span className="text-gray-500">matched:</span> {meta.matchedAlias}</div>}
               {meta.source && <div><span className="text-gray-500">source:</span> {meta.source}</div>}
               <div><span className="text-gray-500">trigger:</span> {trigger}</div>
-              {isNatural && <div className="pt-1 text-violet-200/70">명시적인 자연어 신호로 자동 선택되었습니다.</div>}
+              {isNatural && <div className="pt-1 text-violet-200/70">{t('skillInvocation.naturalSelection')}</div>}
             </div>
           </div>
         )}

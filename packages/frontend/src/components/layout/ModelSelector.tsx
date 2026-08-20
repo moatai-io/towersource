@@ -73,7 +73,7 @@ export function ModelSelector() {
       applyPickedModel(pendingSwitch.modelId);
       setPendingSwitch(null);
     } else {
-      setSwitchError(result.error?.message ?? '엔진 전환에 실패했습니다.');
+      setSwitchError(result.error?.message ?? t('engineSwitchFailed'));
     }
   };
 

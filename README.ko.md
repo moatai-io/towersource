@@ -435,31 +435,39 @@ flowchart TB
 
 ## 빠른 시작
 
-> Tower는 Research Alpha 단계입니다. 먼저 통제된 환경에서 실행하고, `.env.example`을 검토하십시오. Runtime과 권한 모델을 이해하기 전에는 운영 자격증명을 연결하지 마십시오.
+> Tower는 Research Alpha 단계입니다. 깨끗한 Ubuntu 22.04 또는 24.04 서버에서 시작하고, Runtime과 권한 모델을 이해하기 전에는 운영 자격증명을 연결하지 마십시오.
+
+### Ubuntu 서버에 설치
+
+설치기가 Node.js, 필요한 확장이 포함된 PostgreSQL, Tower 시스템 서비스, nginx, 로컬 비밀값과 최종 상태 점검을 한 번에 구성합니다.
 
 ```bash
 git clone https://github.com/moatai-io/towersource.git tower
 cd tower
-npm install
-cp .env.example .env
-npm run dev
+sudo bash scripts/oss/install.sh --public-url http://서버_IP
 ```
 
-기본 로컬 포트:
+설치가 끝나면 `http://서버_IP`를 열어 첫 관리자 계정을 만드십시오. 모델 호출이 필요할 때 **설정 → Connections**에서 AI 공급자를 연결하면 됩니다.
 
-- Frontend: `http://localhost:32354`
-- Backend: `http://localhost:32355`
-
-주요 명령:
+도메인이 이미 서버를 가리킨다면 같은 명령에서 HTTPS까지 구성할 수 있습니다.
 
 ```bash
-npm run typecheck
-npm test
-npm run build
-npm run preflight
+sudo bash scripts/oss/install.sh \
+  --domain tower.example.com \
+  --email admin@example.com
 ```
 
-전체 설치 방법은 [INSTALL.md](INSTALL.md)를 참고하십시오.
+도메인 경로는 nginx 설정, Let's Encrypt 인증서 발급, 자동 갱신, HTTP→HTTPS 전환을 함께 처리합니다.
+
+언제든 다음 명령으로 상태를 확인할 수 있습니다.
+
+```bash
+sudo bash /opt/tower/scripts/oss/doctor.sh --url http://서버_IP
+sudo systemctl status tower
+sudo journalctl -u tower -f
+```
+
+로컬 개발과 고급 배포 방식은 [INSTALL.md](INSTALL.md)를 참고하십시오.
 
 ---
 
