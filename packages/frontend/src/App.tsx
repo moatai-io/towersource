@@ -313,6 +313,7 @@ function App() {
   });
   const [authError, setAuthError] = useState('');
   const [firstRunInferenceSetup, setFirstRunInferenceSetup] = useState(() => localStorage.getItem('tower:firstRunInferenceSetup') === 'pending');
+  const [openFirstTeammateAfterSetup, setOpenFirstTeammateAfterSetup] = useState(false);
   const [sessionsLoaded, setSessionsLoaded] = useState(false);
   const [newSessionCreating, setNewSessionCreating] = useState(false);
   const newSessionCreatingRef = useRef(false);
@@ -1949,6 +1950,14 @@ function App() {
   }, []);
 
   useEffect(() => {
+    if (!openFirstTeammateAfterSetup) return;
+    // This effect is declared after the Agent Academy listener effect so the
+    // first-run handoff cannot dispatch before the creator is ready.
+    window.dispatchEvent(new CustomEvent('tower-start-agent-academy'));
+    setOpenFirstTeammateAfterSetup(false);
+  }, [openFirstTeammateAfterSetup]);
+
+  useEffect(() => {
     const handler = () => {
       useSessionStore.getState().setActiveView('chat');
       useSessionStore.getState().setSidebarOpen(true);
@@ -2409,8 +2418,8 @@ function App() {
   if (firstRunInferenceSetup && token) {
     return <FirstRunInferenceSetup token={token} onComplete={() => {
       localStorage.removeItem('tower:firstRunInferenceSetup');
+      setOpenFirstTeammateAfterSetup(true);
       setFirstRunInferenceSetup(false);
-      window.setTimeout(() => window.dispatchEvent(new CustomEvent('tower-start-agent-academy')), 0);
     }} />;
   }
 
