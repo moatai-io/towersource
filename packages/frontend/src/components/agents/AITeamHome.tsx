@@ -28,7 +28,9 @@ export function AITeamHome({ projects, sessions, activeSessionId, onSelectSessio
     rootRef.current?.closest<HTMLElement>('[data-ai-team-scroll]')?.scrollTo({ top: 0 });
   }, []);
   const helper = projects.find((project) => project.systemKey === 'ai-talent-team');
-  const teammates = projects.filter((project) => project.systemKey !== 'ai-talent-team' && !project.archived);
+  // AI Team lists staffed Primary Agents, not every file-bearing Project.
+  // General/shared Projects remain available in Files until a real Agent profile exists.
+  const teammates = projects.filter((project) => project.agent?.explicit === true && project.systemKey !== 'ai-talent-team' && !project.archived);
   const startCreator = () => window.dispatchEvent(new CustomEvent('tower-start-agent-academy'));
   const stats=React.useMemo(()=>teammates.map(project=>{const related=sessions.filter(session=>session.projectId===project.id&&!isPureAgentSession(session));const turns=Number((project as any).recentUsage?.recent7||0);const latest=related.reduce((max,session)=>Math.max(max,new Date(session.updatedAt||session.createdAt||0).getTime()),0);const level=(project.agent?.careerLevel||'intern') as AgentCareerLevel;return{project,sessions:related.length,turns,latest,level}}),[teammates,sessions]);
   const activeCount=stats.filter(item=>item.latest>Date.now()-14*864e5).length;

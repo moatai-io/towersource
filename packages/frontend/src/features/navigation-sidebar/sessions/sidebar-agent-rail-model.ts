@@ -34,7 +34,9 @@ export function buildSidebarAgentRailModel(input: BuildSidebarAgentRailModelInpu
     sessionsByProject.set(session.projectId, projectSessions);
   }
 
-  const groups = input.projects.map((project) => ({
+  const groups = input.projects
+    .filter((project) => project.agent?.explicit === true && project.systemKey !== 'ai-talent-team' && !project.archived)
+    .map((project) => ({
     project,
     sessions: [...(sessionsByProject.get(project.id) ?? [])].sort(
       (a, b) => sidebarSessionTimestampMs(b.updatedAt) - sidebarSessionTimestampMs(a.updatedAt),

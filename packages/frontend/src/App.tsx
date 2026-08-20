@@ -58,6 +58,7 @@ import { useRoomStore } from './stores/room-store';
 import { useAiPanelStore } from './stores/ai-panel-store';
 import { useOnboarding } from './hooks/useOnboarding';
 import { WhatsNewModal } from './components/onboarding/WhatsNewModal';
+import { FirstRunInferenceSetup } from './components/onboarding/FirstRunInferenceSetup';
 import { TourProvider } from './tours/TourProvider';
 import { useTheme } from './hooks/useTheme';
 import { useFontSize } from './hooks/useFontSize';
@@ -311,6 +312,7 @@ function App() {
     } catch { return null; }
   });
   const [authError, setAuthError] = useState('');
+  const [firstRunInferenceSetup, setFirstRunInferenceSetup] = useState(() => localStorage.getItem('tower:firstRunInferenceSetup') === 'pending');
   const [sessionsLoaded, setSessionsLoaded] = useState(false);
   const [newSessionCreating, setNewSessionCreating] = useState(false);
   const newSessionCreatingRef = useRef(false);
@@ -772,6 +774,8 @@ function App() {
       // 로그인 성공 시 캐시 갱신 → 다음 앱 시작 시 로딩 없이 바로 메인 화면
       try { localStorage.setItem('tower:authCache', JSON.stringify({ authEnabled: true, hasUsers: true })); } catch {}
       if (isSetup) {
+        localStorage.setItem('tower:firstRunInferenceSetup', 'pending');
+        setFirstRunInferenceSetup(true);
         setAuthStatus({ ...authStatus!, hasUsers: true });
       }
     } catch {
@@ -2400,6 +2404,14 @@ function App() {
         error={authError}
       />
     );
+  }
+
+  if (firstRunInferenceSetup && token) {
+    return <FirstRunInferenceSetup token={token} onComplete={() => {
+      localStorage.removeItem('tower:firstRunInferenceSetup');
+      setFirstRunInferenceSetup(false);
+      window.setTimeout(() => window.dispatchEvent(new CustomEvent('tower-start-agent-academy')), 0);
+    }} />;
   }
 
   return (

@@ -1,0 +1,29 @@
+{
+  "provider": {
+    "step": "First, connect the AI",
+    "title": "Connect the model Tower will use",
+    "description": "Tower needs one working AI provider before you create a teammate or start a conversation. We verify the connection before saving it.",
+    "choose": "Choose an AI provider",
+    "options": {
+      "openrouter": {
+        "name": "OpenRouter",
+        "description": "Use OpenRouter Auto as the starting model and change it later if needed."
+      },
+      "openai-responses-compatible": {
+        "name": "OpenAI-compatible Responses",
+        "description": "Use OpenAI or another endpoint that supports the Responses API."
+      }
+    },
+    "apiKey": "API key",
+    "apiKeyPlaceholder": "Enter the key for this Tower server",
+    "apiKeyRequired": "Enter an API key to test the connection.",
+    "secretNote": "The key is sent only to this Tower server, verified with the provider, and then stored encrypted. It is not added to chat or project files.",
+    "advanced": "Advanced connection settings",
+    "baseUrl": "Base URL",
+    "modelId": "Model ID",
+    "connectionFailed": "Could not connect the AI provider.",
+    "next": "After the connection succeeds, Tower will open the first AI teammate setup.",
+    "connecting": "Verifying and saving…",
+    "connect": "Connect AI and continue"
+  }
+}

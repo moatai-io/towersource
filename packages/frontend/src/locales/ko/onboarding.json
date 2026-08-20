@@ -1,0 +1,29 @@
+{
+  "provider": {
+    "step": "먼저 AI를 연결합니다",
+    "title": "Tower가 사용할 모델을 연결하세요",
+    "description": "AI 동료를 만들거나 대화를 시작하려면 정상 작동하는 AI Provider가 하나 필요합니다. 저장하기 전에 실제 연결을 확인합니다.",
+    "choose": "AI Provider 선택",
+    "options": {
+      "openrouter": {
+        "name": "OpenRouter",
+        "description": "OpenRouter Auto를 시작 모델로 사용하고 필요할 때 나중에 변경합니다."
+      },
+      "openai-responses-compatible": {
+        "name": "OpenAI-compatible Responses",
+        "description": "OpenAI 또는 Responses API를 지원하는 호환 Endpoint를 사용합니다."
+      }
+    },
+    "apiKey": "API Key",
+    "apiKeyPlaceholder": "이 Tower 서버에서 사용할 Key를 입력하세요",
+    "apiKeyRequired": "연결을 확인할 API Key를 입력하세요.",
+    "secretNote": "Key는 이 Tower 서버로만 전송되어 Provider 확인 후 암호화 저장됩니다. 대화나 Project 파일에는 기록되지 않습니다.",
+    "advanced": "고급 연결 설정",
+    "baseUrl": "Base URL",
+    "modelId": "Model ID",
+    "connectionFailed": "AI Provider에 연결하지 못했습니다.",
+    "next": "연결에 성공하면 첫 AI 동료 만들기를 바로 시작합니다.",
+    "connecting": "확인하고 저장하는 중…",
+    "connect": "AI 연결하고 계속"
+  }
+}

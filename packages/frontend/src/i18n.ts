@@ -18,6 +18,7 @@ import enSchedule from './locales/en/schedule.json';
 import enAutomation from './locales/en/automation.json';
 import enSkills from './locales/en/skills.json';
 import enFiles from './locales/en/files.json';
+import enOnboarding from './locales/en/onboarding.json';
 
 // -- Korean --
 import koCommon from './locales/ko/common.json';
@@ -36,6 +37,7 @@ import koSchedule from './locales/ko/schedule.json';
 import koAutomation from './locales/ko/automation.json';
 import koSkills from './locales/ko/skills.json';
 import koFiles from './locales/ko/files.json';
+import koOnboarding from './locales/ko/onboarding.json';
 
 export const defaultNS = 'common';
 export const resources = {
@@ -56,6 +58,7 @@ export const resources = {
     automation: enAutomation,
     skills: enSkills,
     files: enFiles,
+    onboarding: enOnboarding,
   },
   ko: {
     common: koCommon,
@@ -74,6 +77,7 @@ export const resources = {
     automation: koAutomation,
     skills: koSkills,
     files: koFiles,
+    onboarding: koOnboarding,
   },
 } as const;
 

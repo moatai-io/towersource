@@ -9,6 +9,7 @@ const project = (id: string, options: Partial<Project> = {}) => ({
   createdAt: '2026-08-01 00:00:00',
   sortOrder: 0,
   pinned: false,
+  agent: { explicit: true },
   ...options,
 } as Project);
 const session = (id: string, projectId: string | null, updatedAt: string) => ({ id, projectId, updatedAt } as SessionMeta);
@@ -22,10 +23,18 @@ describe('Sidebar Agent rail model', () => {
     expect(result[0].sessions.map(({ id }) => id)).toEqual(['new', 'old']);
   });
 
-  it('Conversation filter 없이 Session이 없는 Project도 유지한다', () => {
+  it('Conversation filter 없이 Session이 없는 AI 동료도 유지한다', () => {
     const result = buildSidebarAgentRailModel({ projects: [project('empty')], sessions: [] });
     expect(result).toHaveLength(1);
     expect(result[0].sessions).toEqual([]);
+  });
+
+  it('Primary Agent profile이 없는 공용 Project는 AI 동료 rail에서 제외한다', () => {
+    const result = buildSidebarAgentRailModel({
+      projects: [project('general', { agent: undefined }), project('teammate')],
+      sessions: [session('general-chat', 'general', '2026-08-09 00:00:00')],
+    });
+    expect(result.map(({ project: owner }) => owner.id)).toEqual(['teammate']);
   });
 
   it('고정 Project를 활동 시점보다 우선하고 pinOrder를 적용한다', () => {
