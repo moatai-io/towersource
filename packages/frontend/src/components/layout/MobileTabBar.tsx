@@ -43,13 +43,15 @@ export function MobileTabBar() {
   const agentFirstEnabled = useSettingsStore((s) => s.serverConfig?.agentFirstEnabled === true);
   const activeSessionId = useSessionStore((s) => s.activeSessionId);
   const sessions = useSessionStore((s) => s.sessions);
+  const workAttentionCount = useSessionStore((s) => s.unreadSessions.size);
   const projects = useProjectStore((s) => s.projects);
   const capabilityProjectId = useSettingsStore((s) => s.capabilityProjectId);
   const setCapabilityProjectId = useSettingsStore((s) => s.setCapabilityProjectId);
 
   const tabs: { id: MobileTab | 'settings'; label: string; icon: React.ReactNode; badge?: number }[] = agentFirstEnabled
     ? [
-        { id: 'ai', label: t('aiTeamNav'), icon: tabIcons.chat },
+        { id: 'ai', label: t('conversationsNav'), icon: tabIcons.chat },
+        { id: 'work', label: t('workHubNav'), icon: tabIcons.work, badge: workAttentionCount },
         { id: 'files', label: t('files'), icon: tabIcons.files },
         { id: 'settings', label: t('settings'), icon: tabIcons.settings },
       ]
@@ -70,6 +72,11 @@ export function MobileTabBar() {
     if (tab === 'ai') {
       setAiNavigationSurface();
       setSidebarOpen(true);
+      setMobileContextOpen(false);
+    } else if (tab === 'work') {
+      useFileStore.getState().activateChatSlot();
+      setActiveView('work');
+      setSidebarOpen(false);
       setMobileContextOpen(false);
     } else if (tab === 'files') {
       const activeSessionProjectId = sessions.find((session) => session.id === activeSessionId)?.projectId || null;
@@ -103,7 +110,7 @@ export function MobileTabBar() {
         >
           <span className="relative">
             {tab.icon}
-            {tab.badge != null && tab.badge > 0 && mobileTab !== tab.id && (
+            {tab.badge != null && tab.badge > 0 && (
               <span className="absolute -right-2 -top-1.5 flex h-3.5 min-w-[14px] items-center justify-center rounded-full bg-red-500 px-0.5 text-[10px] font-bold leading-none text-white">
                 {tab.badge > 99 ? '99+' : tab.badge}
               </span>

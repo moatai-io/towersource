@@ -86,7 +86,13 @@ export function NotificationBell({ onSelectSession }: NotificationBellProps) {
   }, [markAllRead]);
 
   const handleMarkOne = useCallback((notifId: string) => {
-    useRoomStore.getState().markNotificationRead(notifId);
+    const roomStore = useRoomStore.getState();
+    const notification = roomStore.notifications.find((item) => item.id === notifId);
+    roomStore.markNotificationRead(notifId);
+    const sessionId = notification && (notification.metadata?.sessionId || notification.sessionId);
+    if (typeof sessionId === 'string' && sessionId) {
+      useSessionStore.getState().markSessionRead(sessionId);
+    }
     fetch(`${API}/api/notifications/${notifId}/read`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${getToken()}` },

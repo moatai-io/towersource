@@ -22,7 +22,7 @@ const PROVIDERS: Record<PublicInferenceProvider, {
   'openai-responses-compatible': {
     secretName: 'TOWER_INFERENCE_RESPONSES_API_KEY',
     defaultBaseUrl: 'https://api.openai.com/v1',
-    defaultModel: 'gpt-5.1',
+    defaultModel: 'gpt-5.6-terra',
     displayName: 'OpenAI-compatible Responses',
     badge: 'API',
     api: 'openai-responses',

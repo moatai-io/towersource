@@ -233,8 +233,8 @@ describe('frontend copy i18n contract', () => {
     const modelSelector = fs.readFileSync(path.join(sourceRoot, 'components/layout/ModelSelector.tsx'), 'utf8');
     const spaceFilter = fs.readFileSync(path.join(sourceRoot, 'components/layout/SpaceFilter.tsx'), 'utf8');
 
-    expect(mobileTabs).toMatch(/t\('(aiTeamNav|workHistory)'\)/);
-    for (const key of ['aiTeamNav', 'aiTeam', 'settings']) expect(mobileTabs).toContain(`t('${key}')`);
+    expect(mobileTabs).toMatch(/t\('(conversationsNav|workHubNav)'\)/);
+    for (const key of ['conversationsNav', 'workHubNav', 'aiTeam', 'settings']) expect(mobileTabs).toContain(`t('${key}')`);
     for (const key of ['modelSelection', 'localLlm']) expect(modelSelector).toContain(`t('${key}')`);
     expect(spaceFilter).toContain("t('all')");
     for (const key of ['modelLabel', 'userMessageCount', 'enterPathHint', 'parentDirectory', 'noSubdirectories']) {
@@ -254,7 +254,7 @@ describe('frontend copy i18n contract', () => {
   it('routes Header navigation, model groups, and copy-reference labels through layout locale keys', () => {
     const header = fs.readFileSync(path.join(sourceRoot, 'components/layout/Header.tsx'), 'utf8');
     for (const key of [
-      'aiTeam', 'mySpace', 'myTodo', 'workHistory', 'pendingReplies',
+      'conversationsNav', 'workHubNav', 'ai', 'mySpace', 'myTodo', 'workHistory', 'pendingReplies',
       'favorites', 'sessionHistory', 'operations', 'automation',
       'beta', 'skillWorkbench', 'settingsAndManagement', 'personalCredentials',
       'externalAgentDeployment', 'modelSelection', 'localLlm', 'copied', 'copyReference',

@@ -5,19 +5,19 @@ import { describe, expect, it } from 'vitest';
 const home = fs.readFileSync(path.resolve(import.meta.dirname, './AITeamHome.tsx'), 'utf8');
 const styles = fs.readFileSync(path.resolve(import.meta.dirname, '../../index.css'), 'utf8');
 
-describe('AI Team quiet control room visual contract', () => {
-  it('uses one hero with an integrated divided stats row instead of four stat cards', () => {
+describe('AI teammate management visual contract', () => {
+  it('uses one restrained directory hero instead of a work metrics dashboard', () => {
     expect(home).toContain('ai-team-control-room');
     expect(home).toContain('ai-team-hero');
-    expect(home).toContain('ai-team-stats');
-    expect(home).toContain('ai-team-stat');
-    expect(home).not.toContain('mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4');
+    expect(home).not.toContain('ai-team-stats');
+    expect(home).not.toContain('ai-team-stat');
+    expect(home).not.toContain('dailyTurns');
   });
 
-  it('uses dedicated semantic surfaces for people operations and teammate cards', () => {
-    expect(home).toContain('ai-team-people-ops');
+  it('uses dedicated teammate cards and a single primary creation action', () => {
     expect(home).toContain('ai-team-member-card');
     expect(home).toContain('ai-team-primary-action');
+    expect(home).not.toContain('ai-team-people-ops');
   });
 
   it('defines a light-first neutral canvas and restrained two-layer depth', () => {

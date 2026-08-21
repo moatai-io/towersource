@@ -15,11 +15,12 @@ describe('AI team home and ACL', () => {
     expect(manager).toContain('accessibleIds.includes(r.id)');
   });
 
-  it('shows team state, direct creation, helper consultation and per-agent usage', () => {
-    for (const key of ['aiTeamHomeTitle', 'aiTeamHomeDescription', 'aiTeamHelper', 'aiTeammateCount', 'aiTeammateList']) {
+  it('shows teammate role and status management without duplicating work usage', () => {
+    for (const key of ['aiTeammateManagement', 'aiTeammateManagementDescription', 'aiTeamHelper', 'aiTeammateCount', 'aiTeammateList', 'manageTeammate']) {
       expect(home).toContain(`t('${key}')`);
     }
-    expect(home).toContain('turns');
+    expect(home).not.toContain('dailyTurns');
+    expect(home).not.toContain('recentUsage');
     expect(home).not.toContain('AI 인재팀');
   });
 });

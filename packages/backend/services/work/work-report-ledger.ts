@@ -79,7 +79,7 @@ function extractArtifacts(value: string): string[] {
   return Array.from(artifacts);
 }
 
-const REPORT_LABEL_PATTERN = /^\s*(?:#{1,6}\s*)?(?:Work Summary|업무보고)\s*[:：]?\s*$/i;
+const REPORT_LABEL_PATTERN = /^\s*(?:>\s*)?(?:[-*+]\s*)?(?:#{1,6}\s*)?(?:\*\*|__)?\s*(?:Work Summary|업무보고)\s*[:：]?\s*(?:\*\*|__)?\s*$/i;
 
 function normalizeFieldLabel(label: string | null): string {
   return (label || '').replace(/\s+/g, '').toLocaleLowerCase('en-US');
@@ -88,10 +88,13 @@ function normalizeFieldLabel(label: string | null): string {
 /** Parse the final visible `Work Summary:` block (or legacy `업무보고:` block). */
 export function parseWorkReportBlock(content: unknown): ParsedWorkReport | null {
   const text = asTextContent(content);
-  if (!/Work Summary|업무보고/i.test(text)) return null;
+  if (!/(?:Work\s+Summary|업무보고)/i.test(text)) return null;
 
   const lines = text.replace(/\r\n/g, '\n').split('\n');
-  const labelIndex = lines.findIndex((line) => REPORT_LABEL_PATTERN.test(line));
+  const labelIndexes = lines
+    .map((line, index) => (REPORT_LABEL_PATTERN.test(line) ? index : -1))
+    .filter((index) => index >= 0);
+  const labelIndex = labelIndexes.at(-1) ?? -1;
   if (labelIndex < 0) return null;
 
   const bullets: string[] = [];

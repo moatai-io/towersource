@@ -50,8 +50,12 @@ describe('API route composition contracts', () => {
     for (const route of projectFilesCoreRoutes) expect(rootRoutes.has(route)).toBe(false);
   });
 
-  it('normalizes session model PATCH values at the route boundary', () => {
+  it('normalizes and validates session model PATCH values at the route boundary', () => {
+    expect(apiSource).toContain("modelUsed must be a string or null");
+    expect(apiSource).toContain("const current = await getSession(req.params.id as string)");
     expect(apiSource).toContain("normalizePiSessionModelId(normalizedModelUsed)");
     expect(apiSource).toContain("modelUsed does not match session engine");
+    expect(apiSource.indexOf("normalizePiSessionModelId(normalizedModelUsed)"))
+      .toBeLessThan(apiSource.indexOf("await updateSession(req.params.id as string, updates)"));
   });
 });

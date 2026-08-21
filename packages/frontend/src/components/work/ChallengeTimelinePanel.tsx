@@ -203,7 +203,7 @@ function activityStatus(session: WorkSession, challenge: ChallengeRow): { label:
   return { label: tr('challenge.timeline.status.needsReview', { ns: 'common' }), tone: 'text-surface-300 bg-surface-800 border-surface-700' };
 }
 
-export function ChallengeTimelinePanel() {
+export function ChallengeTimelinePanel({ embedded = false }: { embedded?: boolean } = {}) {
   const initialLocation = React.useMemo(() => readWorkstreamLocation(), []);
   const [rangeHours, setRangeHours] = React.useState(48);
   const bucketHours = 24;
@@ -285,16 +285,19 @@ export function ChallengeTimelinePanel() {
   }, [data, selectedWorkstreamKey]);
 
   return (
-    <div data-testid="work-timeline" className="relative z-10 flex h-full min-h-0 w-full max-w-full flex-col overflow-x-hidden overflow-y-auto overscroll-x-none bg-surface-950 text-surface-100 md:overflow-hidden">
-      <div className="border-b border-surface-800/80 bg-surface-950/95 px-4 py-3 backdrop-blur-xl md:shrink-0 md:px-5 md:py-4">
+    <div data-testid="work-timeline" className="relative z-10 flex w-full max-w-full flex-col overflow-x-hidden bg-surface-950 text-surface-100 md:h-full md:min-h-0 md:overflow-hidden">
+      <div className={`border-b border-surface-800/80 bg-surface-950/95 px-4 py-3 backdrop-blur-xl md:shrink-0 md:px-5 ${embedded ? 'md:py-3' : 'md:py-4'}`}>
         <div className="flex flex-wrap items-start justify-between gap-3 md:gap-4">
-          <div>
-            <h1 className="text-[20px] font-semibold tracking-tight text-surface-50 md:text-[24px]">{tr('challenge.timeline.title')}</h1>
-            <p className="mt-1 hidden max-w-3xl text-[13px] leading-6 text-surface-500 md:block">
-              {tr('challenge.timeline.description')}
-            </p>
-          </div>
-          <div className="flex w-full flex-wrap items-center gap-2 md:w-auto">
+          {!embedded && (
+            <div>
+              <h1 className="text-[20px] font-semibold tracking-tight text-surface-50 md:text-[24px]">{tr('challenge.timeline.title')}</h1>
+              <p className="mt-1 hidden max-w-3xl text-[13px] leading-6 text-surface-500 md:block">
+                {tr('challenge.timeline.description')}
+              </p>
+            </div>
+          )}
+          {embedded && <div className="min-w-0"><h2 className="text-[16px] font-semibold text-surface-100">{tr('challenge.timeline.workList')}</h2><p className="mt-0.5 hidden text-[12px] text-surface-500 lg:block">{tr('challenge.timeline.workListDescription')}</p></div>}
+          <div className={`flex w-full flex-wrap items-center gap-2 ${embedded ? 'md:ml-auto' : ''} md:w-auto`}>
             <select value={rangeHours} onChange={(e) => setRangeHours(Number(e.target.value))} className="h-9 rounded-lg border border-surface-700 bg-surface-900 px-3 text-[13px] text-surface-200 outline-none focus:border-primary-500/70">
               <option value={48}>{tr('challenge.timeline.last2Days')}</option>
               <option value={168}>{tr('challenge.timeline.last7Days')}</option>
@@ -323,24 +326,24 @@ export function ChallengeTimelinePanel() {
         ) : selectedChallenge ? (
           <WorkstreamOverview challenge={selectedChallenge} onBack={returnToActivity} />
         ) : (
-          <WorkstreamList projects={data.projects} selectedWorkstreamKey={selectedWorkstreamKey} onSelectWorkstream={(key) => selectWorkstream(key, data.projects.flatMap((project) => project.challenges).find((challenge) => workstreamKey(challenge) === key)?.projectId || 'all')} />
+          <WorkstreamList embedded={embedded} projects={data.projects} selectedWorkstreamKey={selectedWorkstreamKey} onSelectWorkstream={(key) => selectWorkstream(key, data.projects.flatMap((project) => project.challenges).find((challenge) => workstreamKey(challenge) === key)?.projectId || 'all')} />
         )}
       </div>
     </div>
   );
 }
 
-function WorkstreamList({ projects, selectedWorkstreamKey, onSelectWorkstream }: { projects: ProjectGroup[]; selectedWorkstreamKey: string | null; onSelectWorkstream: (key: string) => void }) {
+function WorkstreamList({ embedded = false, projects, selectedWorkstreamKey, onSelectWorkstream }: { embedded?: boolean; projects: ProjectGroup[]; selectedWorkstreamKey: string | null; onSelectWorkstream: (key: string) => void }) {
   const workstreams = projects
     .flatMap((project) => project.challenges)
     .sort((a, b) => new Date(b.lastAt).getTime() - new Date(a.lastAt).getTime());
 
   return (
-    <section aria-labelledby="work-list-title" className="overflow-hidden rounded-xl border border-surface-800 bg-surface-900/55">
-      <div className="border-b border-surface-800 bg-surface-950/45 px-4 py-3">
+    <section aria-labelledby={embedded ? undefined : 'work-list-title'} aria-label={embedded ? tr('challenge.timeline.workList') : undefined} className={`overflow-hidden ${embedded ? 'border-y border-surface-800 bg-surface-950 lg:border-x-0' : 'rounded-xl border border-surface-800 bg-surface-900/55'}`}>
+      {!embedded && <div className="border-b border-surface-800 bg-surface-950/45 px-4 py-3">
         <h2 id="work-list-title" className="text-[17px] font-semibold text-surface-100">{tr('challenge.timeline.workList')}</h2>
         <p className="mt-1 text-[12px] leading-5 text-surface-500">{tr('challenge.timeline.workListDescription')}</p>
-      </div>
+      </div>}
       <div className="divide-y divide-surface-800">
         {workstreams.map((challenge) => {
           const sessions = [...(challenge.sessions || [])].sort((a, b) => new Date(b.lastAt).getTime() - new Date(a.lastAt).getTime());

@@ -77,7 +77,8 @@ describe('Sidebar realtime performance source contracts', () => {
     expect(src).toContain('const [agentNavScope, setAgentNavScope] = useState<AgentNavScope>');
     expect(src).toContain("aria-label={t('openAiTeamHome')}");
     expect(src).toContain("aria-label={t('openRecentConversations')}");
-    expect(src).toContain("title={t('workNavTitle')}");
+    expect(src).toContain("title={t('conversationsNavTitle')}");
+    expect(src).toContain("title={t('aiTeammateManagementTitle')}");
     expect(src).toContain('M12 7.25V12l3 1.75');
     expect(src).toContain("agentNavScope === 'team'");
     expect(src).toContain("aria-label={t('aiTeamHomeSummary')}");
@@ -106,7 +107,7 @@ describe('Sidebar realtime performance source contracts', () => {
     expect(src).toContain('overflow-x-hidden overflow-y-auto overscroll-contain');
     expect(src).not.toContain("<div className={`min-h-full ${isMobile ? 'flex flex-col' : 'grid h-full min-h-0 grid-cols-[176px_minmax(0,1fr)] overflow-hidden'}`}>");
     expect(src).not.toContain('latestSessionsCollapsed');
-    expect(src).toContain("title={t('aiTeamNavTitle')}");
+    expect(src).toContain("title={t('aiTeammateManagementTitle')}");
     expect(src).toContain("agentNavScope === 'work' && !isSearching");
     expect(src).toContain("setActiveView('aiTeam')");
     expect(src).toContain("rememberAgentWorkspaceLocation(project.id, 'home')");

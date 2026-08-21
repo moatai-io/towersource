@@ -14,16 +14,16 @@ describe('AI navigation density and Work-first contract', () => {
   });
 
   it('keeps Work above Team Home inside AI navigation, not as a top navigation tab', () => {
-    expect(source).toContain("title={t('aiTeamNavTitle')}");
-    expect(source).toContain("title={t('workNavTitle')}");
+    expect(source).toContain("title={t('aiTeammateManagementTitle')}");
+    expect(source).toContain("title={t('conversationsNavTitle')}");
     expect(source).toContain("agentNavScope === 'team'");
     expect(source).toContain("agentNavScope === 'work'");
-    expect(source.indexOf("title={t('workNavTitle')}")).toBeLessThan(source.indexOf("title={t('aiTeamNavTitle')}"));
+    expect(source.indexOf("title={t('conversationsNavTitle')}")).toBeLessThan(source.indexOf("title={t('aiTeammateManagementTitle')}"));
   });
 
   it('opens Team Home immediately and returns Work to the conversation surface', () => {
-    const workButton = source.slice(source.indexOf("title={t('workNavTitle')}") - 700, source.indexOf("title={t('workNavTitle')}") + 400);
-    const teamHomeButton = source.slice(source.indexOf("title={t('aiTeamNavTitle')}") - 700, source.indexOf("title={t('aiTeamNavTitle')}") + 400);
+    const workButton = source.slice(source.indexOf("title={t('conversationsNavTitle')}") - 700, source.indexOf("title={t('conversationsNavTitle')}") + 400);
+    const teamHomeButton = source.slice(source.indexOf("title={t('aiTeammateManagementTitle')}") - 700, source.indexOf("title={t('aiTeammateManagementTitle')}") + 400);
     expect(workButton).toContain("setAgentNavScope('work')");
     expect(workButton).toContain('activateChatSlot()');
     expect(workButton).toContain("setActiveView('chat')");

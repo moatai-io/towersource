@@ -34,6 +34,29 @@ Work Summary:
     expect(report?.artifacts).toContain('packages/backend/services/work/work-report-ledger.ts');
   });
 
+  it('accepts bold Work Summary labels emitted in final answers', () => {
+    expect(parseWorkReportBlock(`작업을 마쳤습니다.\n\n**Work Summary:**\n- 내비게이션을 대화·업무·파일로 정렬했습니다.\n- 관련 테스트를 통과했습니다.`)).toMatchObject({
+      conclusion: '내비게이션을 대화·업무·파일로 정렬했습니다.',
+      bullets: [
+        '내비게이션을 대화·업무·파일로 정렬했습니다.',
+        '관련 테스트를 통과했습니다.',
+      ],
+    });
+  });
+
+  it('accepts quoted or listed report labels without depending on Korean wording', () => {
+    expect(parseWorkReportBlock(`> **Work Summary:**\n- Outcome: quoted label indexed.`)).toMatchObject({
+      conclusion: 'quoted label indexed.',
+    });
+  });
+
+  it('uses the final report block when earlier text contains a format example', () => {
+    expect(parseWorkReportBlock(`작성 예시:\n\nWork Summary:\n- Outcome: 무엇을 판단하거나 완료했는가.\n\n실제 작업을 마쳤습니다.\n\n**Work Summary:**\n- Outcome: 실제 내비게이션 구현을 완료했습니다.\n- Next: 회귀 테스트를 실행합니다.`)).toMatchObject({
+      conclusion: '실제 내비게이션 구현을 완료했습니다.',
+      next: '회귀 테스트를 실행합니다.',
+    });
+  });
+
   it('keeps legacy 업무보고 blocks readable', () => {
     expect(parseWorkReportBlock(`업무보고:\n- 결론: 기존 기록 호환\n- 산출물: packages/backend/legacy.ts\n- 다음: 새 형식으로 전환`)).toMatchObject({
       conclusion: '기존 기록 호환',

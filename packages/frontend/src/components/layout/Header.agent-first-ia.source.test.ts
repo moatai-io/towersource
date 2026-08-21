@@ -9,13 +9,13 @@ const agentFirstReturn = tabDefinitions.indexOf('return [', agentFirstStart);
 const agentFirstNav = tabDefinitions.slice(agentFirstStart, tabDefinitions.indexOf('];', agentFirstReturn) + 2);
 
 describe('Agent-first top information architecture', () => {
-  it('keeps AI Team and Files without the retired Channel workspace', () => {
+  it('keeps Conversations, Work, and Files without the retired Channel workspace', () => {
     expect(source).toContain('if (agentFirstEnabled)');
-    expect(agentFirstNav).toContain("label: t('aiTeam')");
+    expect(agentFirstNav).toContain("label: t('conversationsNav')");
+    expect(agentFirstNav).toContain("{ key: 'work', label: t('workHubNav'), badge: workAttentionCount }");
     expect(agentFirstNav).not.toContain("key: 'channel'");
-    expect(agentFirstNav).toContain("{ key: 'files', label: t('files') }");
+    expect(agentFirstNav).toContain("{ key: 'files', label: t('files'), badge: 0 }");
     expect(agentFirstNav).not.toContain('if (pgEnabled)');
-    expect(agentFirstNav).not.toContain("key: 'work'");
     expect(agentFirstNav).not.toContain("key: 'schedule'");
     expect(agentFirstNav).not.toContain("key: 'ai-services'");
   });
@@ -49,7 +49,7 @@ describe('Agent-first top information architecture', () => {
   it('removes Channel from the legacy navigation too', () => {
     const legacyNav = tabDefinitions.slice(tabDefinitions.lastIndexOf('return ['));
     expect(legacyNav).not.toContain("key: 'channel'");
-    expect(legacyNav).toContain("{ key: 'files', label: t('files') }");
+    expect(legacyNav).toContain("{ key: 'files', label: t('files'), badge: 0 }");
     expect(legacyNav).not.toContain('if (pgEnabled)');
     expect(legacyNav).not.toContain("key: 'schedule'");
   });

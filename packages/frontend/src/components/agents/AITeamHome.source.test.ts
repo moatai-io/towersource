@@ -18,7 +18,7 @@ describe('existing-user AI Team home', () => {
     expect(home).toContain('agent?.displayName?.trim() || project.name');
     expect(home).toContain('project.description?.trim()');
     expect(home).toContain('AgentIdentityAvatar');
-    expect(home).toContain("t('aiTeammateCount')");
+    expect(home).toContain("t('aiTeammateManagement')");
     expect(home).not.toContain('Primary AI 팀원');
   });
 
@@ -30,25 +30,26 @@ describe('existing-user AI Team home', () => {
     expect(home).toContain('onNewSession(helper.id)');
     expect(home).not.toContain('AI 인재팀');
     expect(home).toContain("t('newAiTeammate')");
-    expect(home).toContain("{t('workspace')} · {project.name}");
+    expect(home).toContain("<dt className=\"text-surface-600\">{t('workspace')}</dt>");
     expect(header).not.toContain('label={t(\'newProject\')}');
     expect(header).not.toContain('label="새 에이전트"');
   });
 
-  it('uses visible sessions and offers teammate-home and recent-conversation actions', () => {
+  it('uses visible sessions only for availability and offers management and conversation actions', () => {
     expect(home).not.toContain('/api/sessions');
-    expect(home).toContain("t('recentConversation')");
-    expect(home).toContain("t('openTeammateHome'");
+    expect(home).toContain("t('manageTeammate')");
+    expect(home).toContain("t('startConversation')");
     expect(home).toContain('onOpenProjectHome(project)');
+    expect(home).toContain('onNewSession(project.id)');
   });
 
-  it('uses the quiet control-room surface and unified statistics hierarchy', () => {
+  it('uses a quiet teammate directory without a duplicate work dashboard', () => {
     expect(home).toContain('ai-team-control-room');
     expect(home).toContain('ai-team-hero');
-    expect(home).toContain('ai-team-stats');
-    expect(home).toContain('ai-team-stat');
     expect(home).toContain('ai-team-member-card');
-    expect(home).not.toContain('shadow-xl shadow-black/20');
+    expect(home).not.toContain('dailyTurns');
+    expect(home).not.toContain('recentUsage');
+    expect(home).not.toContain('ai-team-people-ops');
   });
 
   it('keeps narrow layouts usable without fixed card widths', () => {

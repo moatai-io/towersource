@@ -48,6 +48,7 @@ function NavTabs({ onRequestFileTree }: { onRequestFileTree?: () => void }) {
   const sidebarOpen = useSessionStore((s) => s.sidebarOpen);
   const sessions = useSessionStore((s) => s.sessions);
   const activeSessionId = useSessionStore((s) => s.activeSessionId);
+  const workAttentionCount = useSessionStore((s) => s.unreadSessions.size);
   const agentFirstEnabled = useSettingsStore((s) => s.serverConfig?.agentFirstEnabled === true);
   const containerRef = React.useRef<HTMLDivElement>(null);
   const [indicator, setIndicator] = React.useState({ left: 0, width: 0 });
@@ -56,20 +57,22 @@ function NavTabs({ onRequestFileTree }: { onRequestFileTree?: () => void }) {
   const tabs = React.useMemo(() => {
     if (agentFirstEnabled) {
       return [
-        { key: 'ai', label: t('aiTeam') },
-        { key: 'files', label: t('files') },
+        { key: 'ai', label: t('conversationsNav'), badge: 0 },
+        { key: 'work', label: t('workHubNav'), badge: workAttentionCount },
+        { key: 'files', label: t('files'), badge: 0 },
       ];
     }
     return [
-      { key: 'ai', label: t('ai') },
-      { key: 'files', label: t('files') },
+      { key: 'ai', label: t('ai'), badge: 0 },
+      { key: 'files', label: t('files'), badge: 0 },
     ];
 
-  }, [agentFirstEnabled, t]);
+  }, [agentFirstEnabled, t, workAttentionCount]);
 
   // Determine active key
   const activeKey = activeView === 'aiServices' ? ''
     : activeView === 'aiTeam' ? 'ai'
+    : activeView === 'work' || activeView === 'inbox' ? 'work'
     : activeView === 'schedules' ? 'schedule'
     : activeView === 'automations' ? 'schedule'
     : activeView === 'projectFiles' ? 'files'
@@ -101,6 +104,11 @@ function NavTabs({ onRequestFileTree }: { onRequestFileTree?: () => void }) {
         store.setAiNavigationSurface();
         store.setSidebarOpen(true);
         break;
+      case 'work':
+        useFileStore.getState().activateChatSlot();
+        setActiveView('work');
+        store.setSidebarOpen(false);
+        break;
       case 'files': {
         const currentProjectId = sessions.find((session) => session.id === activeSessionId)?.projectId || null;
         setSidebarTab('files');
@@ -131,7 +139,7 @@ function NavTabs({ onRequestFileTree }: { onRequestFileTree?: () => void }) {
         className="absolute top-0.5 bottom-0.5 rounded-md bg-surface-700/80 transition-all duration-200 ease-out pointer-events-none"
         style={{ left: indicator.left, width: indicator.width }}
       />
-      {tabs.map(({ key, label }) => (
+      {tabs.map(({ key, label, badge }) => (
         <button
           key={key}
           data-nav-tab
@@ -143,8 +151,14 @@ function NavTabs({ onRequestFileTree }: { onRequestFileTree?: () => void }) {
               : 'text-surface-500 hover:text-gray-300'
           }`}
         >
-          {label}
-
+          <span className="inline-flex items-center gap-1.5">
+            {label}
+            {badge > 0 && (
+              <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-primary-500/18 px-1 text-[10px] font-bold tabular-nums text-primary-300" aria-label={t('workHub.unreadResults', { count: badge })}>
+                {badge > 99 ? '99+' : badge}
+              </span>
+            )}
+          </span>
         </button>
       ))}
     </div>

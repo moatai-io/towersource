@@ -1,1 +1,24 @@
-import fs from'fs';import path from'path';import{describe,it,expect}from'vitest';const source=fs.readFileSync(path.resolve(import.meta.dirname,'./AITeamHome.tsx'),'utf8');describe('AI teammate directory cards',()=>{it('makes the teammate home explicit while keeping the whole card navigable',()=>{expect(source).toContain('role="link"');expect(source).toContain('onClick={() => onOpenProjectHome(project)}');expect(source).toContain("t('teammateHome')");expect(source).not.toContain('>새 대화</button>')});it('surfaces career, usage and Project membership count',()=>{for(const copy of ["t('careerLevel')","t('recent7Days')","t('recentDailyUsage')","t('collaborators')",'memberCount','recentUsage','changePercent','dailyTurns'])expect(source).toContain(copy);expect(source).not.toContain("?'활동 중':'휴식 중'")});it('keeps recent conversation as an optional secondary action',()=>{expect(source).toContain("t('recentConversation')");expect(source).toContain('event.stopPropagation()')})});
+import fs from 'node:fs';
+import path from 'node:path';
+import { describe, expect, it } from 'vitest';
+
+const source = fs.readFileSync(path.resolve(import.meta.dirname, './AITeamHome.tsx'), 'utf8');
+
+describe('AI teammate management cards', () => {
+  it('offers explicit management and conversation actions without turning the whole card into navigation', () => {
+    expect(source).toContain('onClick={() => onOpenProjectHome(project)}');
+    expect(source).toContain('onClick={() => onNewSession(project.id)}');
+    expect(source).toContain("t('manageTeammate')");
+    expect(source).toContain("t('startConversation')");
+    expect(source).not.toContain('role="link"');
+  });
+
+  it('surfaces identity, role, workspace, and availability instead of work usage', () => {
+    for (const copy of ["t('teammateRole')", "t('teammateInstruction')", "t('workspace')", "t('teammateStatus.available')"]) {
+      expect(source).toContain(copy);
+    }
+    for (const removed of ['memberCount', 'recentUsage', 'changePercent', 'dailyTurns']) {
+      expect(source).not.toContain(removed);
+    }
+  });
+});

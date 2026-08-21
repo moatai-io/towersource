@@ -60,6 +60,16 @@ export function SidebarSessionsToolbar({
         <input
           ref={searchInputRef}
           type="text"
+          name="tower-session-search"
+          role="searchbox"
+          aria-label={t("searchSessions")}
+          autoComplete="off"
+          autoCorrect="off"
+          autoCapitalize="none"
+          spellCheck={false}
+          data-1p-ignore
+          data-bwignore
+          data-lpignore="true"
           placeholder={t("searchSessions")}
           value={searchQuery}
           onChange={(event) => setSearchQuery(event.target.value)}

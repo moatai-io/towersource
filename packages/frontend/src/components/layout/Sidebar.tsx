@@ -1151,11 +1151,11 @@ export function Sidebar({
       <div className="space-y-1">
         <button type="button" onClick={() => { setSelectedAgentProjectId(null); setAgentNavScope('work'); setMobileAgentPane('detail'); useFileStore.getState().activateChatSlot(); useSessionStore.getState().setActiveView('chat'); }} className="flex min-h-14 w-full items-center gap-3 rounded-xl px-3 text-left text-surface-200 hover:bg-surface-800/70">
           <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-primary-500/10 text-primary-300"><svg className="h-4.5 w-4.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" d="M12 7.25V12l3 1.75M4.75 8.5H2.5V6.25M3.2 8.1A9 9 0 1 1 3 15.5" /></svg></span>
-          <span className="min-w-0 flex-1"><span className="block text-[14px] font-semibold">{t('workNav')}</span><span className="mt-0.5 block text-[11px] text-surface-600">{t('mobileNewDescription')}</span></span><span className="text-surface-600" aria-hidden="true">›</span>
+          <span className="min-w-0 flex-1"><span className="block text-[14px] font-semibold">{t('recentConversationsNav')}</span><span className="mt-0.5 block text-[11px] text-surface-600">{t('mobileNewDescription')}</span></span><span className="text-surface-600" aria-hidden="true">›</span>
         </button>
         <button type="button" onClick={() => { setSelectedAgentProjectId(null); setAgentNavScope('team'); setMobileAgentPane('detail'); useSessionStore.getState().setActiveView('aiTeam'); window.requestAnimationFrame(() => document.querySelector<HTMLElement>('[data-ai-team-scroll]')?.scrollTo({ top: 0 })); }} className="flex min-h-14 w-full items-center gap-3 rounded-xl px-3 text-left text-surface-200 hover:bg-surface-800/70">
           <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-surface-800 text-surface-400"><svg className="h-4.5 w-4.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" d="M4 19.5V8.25L12 3l8 5.25V19.5M8 19.5v-5h8v5" /></svg></span>
-          <span className="min-w-0 flex-1"><span className="block text-[14px] font-semibold">{t('aiTeamNav')}</span><span className="mt-0.5 block text-[11px] text-surface-600">{t('mobileHomeDescription')}</span></span><span className="text-surface-600" aria-hidden="true">›</span>
+          <span className="min-w-0 flex-1"><span className="block text-[14px] font-semibold">{t('aiTeammateManagement')}</span><span className="mt-0.5 block text-[11px] text-surface-600">{t('mobileHomeDescription')}</span></span><span className="text-surface-600" aria-hidden="true">›</span>
         </button>
       </div>
       <div className="mx-1 mt-3 border-t border-surface-800 pt-3"><div className="px-1 pb-1.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-surface-600">{t('chooseAiTeammate')}</div>
@@ -1293,22 +1293,22 @@ export function Sidebar({
                   onClick={() => { setSelectedAgentProjectId(null); setAgentNavScope('work'); useFileStore.getState().activateChatSlot(); useSessionStore.getState().setActiveView('chat'); }}
                   className={`flex h-9 w-40 shrink-0 items-center rounded-xl text-[11px] font-bold transition-colors ${agentNavScope === 'work' && selectedAgentProjectId === null ? 'bg-primary-500/15 text-primary-700 ring-1 ring-primary-500/30 dark:text-primary-200' : 'text-surface-500 hover:bg-surface-800 hover:text-surface-200'}`}
                   aria-label={t('openRecentConversations')}
-                  title={t('workNavTitle')}
+                  title={t('conversationsNavTitle')}
                   aria-pressed={agentNavScope === 'work' && selectedAgentProjectId === null}
                 >
                   <span className="grid h-9 w-10 shrink-0 place-items-center"><svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" d="M12 7.25V12l3 1.75M4.75 8.5H2.5V6.25M3.2 8.1A9 9 0 1 1 3 15.5" /></svg></span>
-                  <span className={`min-w-0 flex-1 truncate text-left text-[13px] font-semibold transition-opacity duration-150 motion-reduce:transition-none ${agentNavExpanded ? 'opacity-100' : 'opacity-0'}`}>{t('workNav')}</span>
+                  <span className={`min-w-0 flex-1 truncate text-left text-[13px] font-semibold transition-opacity duration-150 motion-reduce:transition-none ${agentNavExpanded ? 'opacity-100' : 'opacity-0'}`}>{t('recentConversationsNav')}</span>
                 </button>
                 <button
                   type="button"
                   onClick={() => { setSelectedAgentProjectId(null); setAgentNavScope('team'); useSessionStore.getState().setActiveView('aiTeam'); window.requestAnimationFrame(() => document.querySelector<HTMLElement>('[data-ai-team-scroll]')?.scrollTo({ top: 0 })); }}
                   className={`mt-1 flex h-9 w-40 shrink-0 items-center rounded-xl text-[11px] font-bold transition-colors ${agentNavScope === 'team' && selectedAgentProjectId === null ? 'bg-primary-500/15 text-primary-700 ring-1 ring-primary-500/30 dark:text-primary-200' : 'text-surface-500 hover:bg-surface-800 hover:text-surface-200'}`}
                   aria-label={t('openAiTeamHome')}
-                  title={t('aiTeamNavTitle')}
+                  title={t('aiTeammateManagementTitle')}
                   aria-pressed={agentNavScope === 'team' && selectedAgentProjectId === null}
                 >
                   <span className="grid h-9 w-10 shrink-0 place-items-center"><svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" d="M4 19.5V8.25L12 3l8 5.25V19.5M8 19.5v-5h8v5" /></svg></span>
-                  <span className={`min-w-0 flex-1 truncate text-left text-[13px] font-semibold transition-opacity duration-150 motion-reduce:transition-none ${agentNavExpanded ? 'opacity-100' : 'opacity-0'}`}>{t('aiTeamNav')}</span>
+                  <span className={`min-w-0 flex-1 truncate text-left text-[13px] font-semibold transition-opacity duration-150 motion-reduce:transition-none ${agentNavExpanded ? 'opacity-100' : 'opacity-0'}`}>{t('aiTeammateManagement')}</span>
                 </button>
                 <div className={`mt-2 h-px bg-surface-800 transition-[width] duration-200 motion-reduce:transition-none ${agentNavExpanded ? 'w-40' : 'ml-1.5 w-7'}`} />
                 </div>
@@ -1967,7 +1967,7 @@ export function Sidebar({
                 </div>
               </nav>
             )}
-            <div data-sidebar-files-scroll="true" className="flex min-h-0 min-w-0 flex-col overflow-x-hidden overflow-y-auto overscroll-contain">
+            <div className="flex min-h-0 min-w-0 flex-col overflow-hidden">
             {isMobile && mobileProjectPickerOpen && (
               <section className="min-h-full px-3 py-3">
                 <button type="button" onClick={() => { setMobileProjectPickerOpen(false); setMobileProjectQuery(''); }} className="mb-2 flex min-h-9 items-center gap-1 rounded-lg px-1 text-sm font-semibold text-surface-300 active:bg-surface-800"><span aria-hidden="true">‹</span><span>{t('files')}</span></button>
@@ -2095,7 +2095,7 @@ export function Sidebar({
               onUnpin={(id) => onUnpinFile?.(id)}
             />
             </div>}
-            {mobileQuickFilesView === null && <div className="px-2 space-y-1 flex-1 flex flex-col">
+            {mobileQuickFilesView === null && <div className="flex min-h-0 flex-1 flex-col space-y-1 px-2">
               {!isMobile && (
                 <SessionFilesMenuSection
                   activeSessionId={activeSessionId}
@@ -2115,16 +2115,18 @@ export function Sidebar({
                     }}
                     projects={[activeFileProject]}
                   />
-                  <div className="min-w-0 flex-1 overflow-x-hidden">
-                    {!isMobile && <div className="mb-1 mt-2 px-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-surface-600">{t('workspaceFiles')}</div>}
-                    <SidebarProjectFiles
-                      key={activeFileProject.id}
-                      project={activeFileProject}
-                      onFileClick={onFileClick}
-                      onPinFile={onPinFile}
-                      onNewSessionInFolder={onNewSessionInFolder}
-                    />
-                </div>
+                  <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+                    {!isMobile && <div className="mb-1 mt-2 shrink-0 px-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-surface-600">{t('workspaceFiles')}</div>}
+                    <div data-sidebar-files-scroll="true" className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain">
+                      <SidebarProjectFiles
+                        key={activeFileProject.id}
+                        project={activeFileProject}
+                        onFileClick={onFileClick}
+                        onPinFile={onPinFile}
+                        onNewSessionInFolder={onNewSessionInFolder}
+                      />
+                    </div>
+                  </div>
               </>
               ) : (
                 <div className="mx-2 mt-3 rounded-lg border border-surface-800 px-3 py-4 text-sm text-surface-500">{t('selectAiTeammateForFiles')}</div>

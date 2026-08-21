@@ -141,7 +141,7 @@ import { HistoryPanel } from './components/history/HistoryPanel';
 import { RetiredChannelNotice } from './components/rooms/RetiredChannelNotice';
 import { AiPanel } from './components/rooms/AiPanel';
 import { InboxPanel } from './components/inbox/InboxPanel';
-import { ChallengeTimelinePanel } from './components/work/ChallengeTimelinePanel';
+import { WorkHub } from './components/work/WorkHub';
 import { FavoritesPanel } from './components/favorites/FavoritesPanel';
 import { UploadPanel } from './components/uploads/UploadPanel';
 import { BetaPanel } from './components/beta/BetaPanel';
@@ -2641,7 +2641,7 @@ function App() {
                   ) : activeView === 'inbox' ? (
                     <InboxPanel onSelectSession={handleSelectSession} />
                   ) : activeView === 'work' ? (
-                    <ChallengeTimelinePanel />
+                    <WorkHub onSelectSession={handleSelectSession} />
                   ) : activeView === 'favorites' ? (
                     <FavoritesPanel
                       projects={projects}
@@ -2868,7 +2868,7 @@ function App() {
                 ) : activeView === 'inbox' ? (
                   <InboxPanel onSelectSession={handleSelectSession} />
                 ) : activeView === 'work' ? (
-                  <ChallengeTimelinePanel />
+                  <WorkHub onSelectSession={handleSelectSession} />
                 ) : activeView === 'favorites' ? (
                   <FavoritesPanel
                     projects={projects}

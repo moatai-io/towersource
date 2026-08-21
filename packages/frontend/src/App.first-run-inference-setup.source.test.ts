@@ -23,6 +23,7 @@ describe('OSS first-run inference setup', () => {
   it('creates and opens the first default teammate without a reload', () => {
     const gate = app.slice(app.indexOf('if (firstRunInferenceSetup && token)'), app.indexOf('\n\n  return (', app.indexOf('if (firstRunInferenceSetup && token)')));
     expect(setup).toContain("modelId: 'openrouter/auto'");
+    expect(setup).toContain("modelId: 'gpt-5.6-terra'");
     expect(setup).toContain('/primary-agent-commands/bootstrap');
     expect(setup).toContain("face: 'character:core-talent'");
     expect(setup).not.toContain('onChange={(event) => setDraft({ ...draft, modelId: event.target.value })}');

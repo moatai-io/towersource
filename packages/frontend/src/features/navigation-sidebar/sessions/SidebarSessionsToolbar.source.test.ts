@@ -25,6 +25,19 @@ describe('Sidebar Session toolbar composition contract', () => {
     expect(toolbar).toContain(`toggleFilter("labels")`);
   });
 
+  it('keeps the Session query out of browser and password-manager autofill', () => {
+    expect(toolbar).toContain('name="tower-session-search"');
+    expect(toolbar).toContain('role="searchbox"');
+    expect(toolbar).toContain('aria-label={t("searchSessions")}');
+    expect(toolbar).toContain('autoComplete="off"');
+    expect(toolbar).toContain('autoCorrect="off"');
+    expect(toolbar).toContain('autoCapitalize="none"');
+    expect(toolbar).toContain('spellCheck={false}');
+    expect(toolbar).toContain('data-1p-ignore');
+    expect(toolbar).toContain('data-bwignore');
+    expect(toolbar).toContain('data-lpignore="true"');
+  });
+
   it('does not take ownership of Session list or App navigation state', () => {
     expect(toolbar).not.toContain('useSessionStore');
     expect(toolbar).not.toContain('streamingSessions');

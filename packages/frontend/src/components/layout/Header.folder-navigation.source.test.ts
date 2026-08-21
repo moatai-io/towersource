@@ -6,8 +6,9 @@ const source = fs.readFileSync(path.resolve(import.meta.dirname, './Header.tsx')
 
 describe('Header desktop folder navigation', () => {
   it('shows AI team and folder without the retired Channel tab', () => {
-    expect(source).toContain("{ key: 'ai', label: t('aiTeam') }");
-    expect(source).toContain("{ key: 'files', label: t('files') }");
+    expect(source).toContain("{ key: 'ai', label: t('conversationsNav'), badge: 0 }");
+    expect(source).toContain("{ key: 'work', label: t('workHubNav'), badge: workAttentionCount }");
+    expect(source).toContain("{ key: 'files', label: t('files'), badge: 0 }");
     expect(source).not.toContain("key: 'channel'");
     expect(source).not.toContain('totalRoomUnread');
   });

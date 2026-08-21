@@ -24,6 +24,7 @@ import {
 import { useSettingsStore } from "../../stores/settings-store";
 import { AgentIdentityAvatar } from "../../features/agent-profile/AgentIdentityAvatar";
 import { serverNowMs } from "../../utils/server-clock";
+import { saveLongContextModel } from "./long-context-toggle";
 
 const DEFAULT_CONTEXT_MODEL_USED = "litellm-responses/smartest";
 const LONG_CONTEXT_MODEL_USED = "litellm-responses/smartest-long";
@@ -701,22 +702,11 @@ export function SessionItem({
     const nextModel = longContext
       ? DEFAULT_CONTEXT_MODEL_USED
       : LONG_CONTEXT_MODEL_USED;
-    const headers: Record<string, string> = {
-      "Content-Type": "application/json",
-    };
-    const token = localStorage.getItem("token");
-    if (token) headers["Authorization"] = `Bearer ${token}`;
     setLongContextPending(true);
     try {
-      const res = await fetch(`/api/sessions/${session.id}`, {
-        method: "PATCH",
-        headers,
-        body: JSON.stringify({ modelUsed: nextModel }),
+      await saveLongContextModel(session.id, nextModel, {
+        token: localStorage.getItem("token"),
       });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data.error || `HTTP ${res.status}`);
-      }
       useSessionStore
         .getState()
         .updateSessionMeta(session.id, { modelUsed: nextModel });
@@ -903,14 +893,22 @@ export function SessionItem({
             {isKanbanTask
               ? session.name.replace(/^\[task\]\s*/, "").replace(/^🟢\s*/, "")
               : session.name}
-            {longContext && (
+            {longContextPending ? (
+              <span
+                className="ml-1 inline-flex h-3 w-3 align-middle"
+                role="status"
+                aria-label={t("useLongContext")}
+              >
+                <span className="h-3 w-3 animate-spin rounded-full border border-amber-300/40 border-t-amber-200" />
+              </span>
+            ) : longContext ? (
               <span
                 className="ml-1 text-[9px] font-bold text-amber-200 bg-amber-500/15 ring-1 ring-amber-400/25 px-1 rounded align-middle"
                 title={t('longContextRouteHint')}
               >
                 LONG
               </span>
-            )}
+            ) : null}
             {(session as any).engine === "local" && (
               <span className="tone-pill tone-success ml-1 text-[10px] font-bold px-1 rounded align-middle">
                 LOCAL

@@ -30,8 +30,11 @@ describe('SessionItem context menu positioning', () => {
     expect(source).toContain(`const DEFAULT_CONTEXT_MODEL_USED = "litellm-responses/smartest";`);
     expect(source).toContain("onToggleLongContext={toggleLongContext}");
     expect(source).toContain(`{longContext ? t("restoreNormalContext") : t("useLongContext")}`);
-    expect(source).toContain("body: JSON.stringify({ modelUsed: nextModel }),");
+    expect(source).toContain('await saveLongContextModel(session.id, nextModel, {');
     expect(source).toContain('setLongContextPending(true);');
+    expect(source).toContain('setLongContextPending(false);');
+    expect(source).toContain('longContextPending ? (');
+    expect(source).toContain('animate-spin');
     expect(source).toContain('.getState()\n        .updateSessionMeta(session.id, { modelUsed: nextModel });');
     expect(source).not.toContain('const previousModel = session.modelUsed;');
   });

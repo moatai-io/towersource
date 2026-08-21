@@ -21,7 +21,7 @@ describe('Legacy personal hub extraction', () => {
 
   it('keeps personal materials out of the actual Workstream surface', () => {
     expect(timeline).toContain("tr('challenge.timeline.title')");
-    expect(timeline).toContain('<WorkstreamList projects={data.projects} selectedWorkstreamKey={selectedWorkstreamKey}');
+    expect(timeline).toContain('<WorkstreamList embedded={embedded} projects={data.projects} selectedWorkstreamKey={selectedWorkstreamKey}');
     expect(timeline).toContain('<WorkstreamOverview challenge={selectedChallenge} onBack={returnToActivity} />');
     expect(timeline).not.toContain('<PersonalWorkHub');
     expect(timeline).not.toContain('<ApprovalInbox />');

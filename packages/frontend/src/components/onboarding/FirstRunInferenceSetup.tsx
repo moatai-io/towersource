@@ -19,7 +19,7 @@ const PROVIDERS: Record<Provider, Omit<ProviderDraft, 'provider' | 'apiKey'>> = 
   },
   'openai-responses-compatible': {
     baseUrl: 'https://api.openai.com/v1',
-    modelId: 'gpt-5.1',
+    modelId: 'gpt-5.6-terra',
   },
 };
 

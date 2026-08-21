@@ -2,6 +2,7 @@ import React, { useEffect, useState, useMemo, useRef, useCallback } from 'react'
 import { useTranslation } from 'react-i18next';
 import i18n from '../../i18n';
 import { useSessionStore } from '../../stores/session-store';
+import { useRoomStore } from '../../stores/room-store';
 import { useProjectStore } from '../../stores/project-store';
 import { useKanbanStore } from '../../stores/kanban-store';
 import { useChatStore } from '../../stores/chat-store';
@@ -45,6 +46,7 @@ function sendToSession(sessionId: string, message: string) {
 
 interface InboxPanelProps {
   onSelectSession?: (session: SessionMeta) => void;
+  variant?: 'full' | 'work-results';
 }
 
 function joinAssistantPreviewText(parts: string[]): string {
@@ -55,7 +57,26 @@ function joinAssistantPreviewText(parts: string[]): string {
     .trim();
 }
 
-export function InboxPanel({ onSelectSession }: InboxPanelProps = {}) {
+export function extractSemanticLead(text: string, maxChars = 160): string {
+  const cleaned = text
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/^#{1,6}\s+/gm, '')
+    .replace(/^[-*+]\s+/gm, '')
+    .replace(/^>\s?/gm, '')
+    .replace(/\[[^\]]+\]\([^\)]+\)/g, (match) => match.replace(/\[|\]\([^\)]+\)/g, ''))
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!cleaned) return '';
+
+  const lowInformationLead = /^(안녕하세요[.!?]?|완료했습니다[.!?]?|확인했습니다[.!?]?|좋습니다[.!?]?|hello[.!?]?|done[.!?]?|completed[.!?]?)\s*/i;
+  const informative = cleaned.replace(lowInformationLead, '').trim() || cleaned;
+  const sentence = informative.match(/^.{20,}?[.!?](?=\s|$)/)?.[0] || informative;
+  if (sentence.length <= maxChars) return sentence;
+  return `${sentence.slice(0, maxChars).trimEnd()}…`;
+}
+
+export function InboxPanel({ onSelectSession, variant = 'full' }: InboxPanelProps = {}) {
   const { t } = useTranslation('layout');
   const sessions = useSessionStore((s) => s.sessions);
   const unreadSessions = useSessionStore((s) => s.unreadSessions);
@@ -314,6 +335,19 @@ export function InboxPanel({ onSelectSession }: InboxPanelProps = {}) {
 
   const openSession = useCallback((session: SessionMeta) => {
     markSessionRead(session.id);
+    const roomStore = useRoomStore.getState();
+    const relatedUnreadNotifications = roomStore.notifications.filter((notification) => {
+      if (notification.read) return false;
+      const notificationSessionId = notification.metadata?.sessionId || notification.sessionId;
+      return notificationSessionId === session.id;
+    });
+    for (const notification of relatedUnreadNotifications) {
+      roomStore.markNotificationRead(notification.id);
+      fetch(`/api/notifications/${notification.id}/read`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${localStorage.getItem('token') || ''}` },
+      }).catch(() => {});
+    }
     // Use the App-level handleSelectSession which properly loads messages,
     // handles cache, claudeSessionId, etc.
     if (onSelectSession) {
@@ -360,7 +394,7 @@ export function InboxPanel({ onSelectSession }: InboxPanelProps = {}) {
   const unreadCount = latestSessions.filter((s) => unreadSessions.has(s.id)).length;
   const isEmpty = latestSessions.length === 0;
 
-  if (isEmpty) {
+  if (isEmpty && variant === 'full') {
     return (
       <div data-testid="inbox-panel" className="flex-1 flex flex-col items-center justify-center gap-3 text-surface-500">
         <svg className="w-10 h-10 opacity-30" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -374,6 +408,53 @@ export function InboxPanel({ onSelectSession }: InboxPanelProps = {}) {
   const allCards: Array<{ session: SessionMeta; isUnread: boolean }> = latestSessions
     .map((s) => ({ session: s, isUnread: unreadSessions.has(s.id) }))
     .sort((a, b) => new Date(b.session.updatedAt).getTime() - new Date(a.session.updatedAt).getTime());
+
+  if (variant === 'work-results') {
+    const resultCards = allCards.filter(({ isUnread }) => isUnread);
+    return (
+      <section data-testid="work-result-list" className="bg-surface-950 px-4 py-3 md:px-5 md:py-4 lg:px-4">
+        <div className="mx-auto max-w-6xl lg:max-w-none">
+          <div className="mb-2.5 flex items-end justify-between gap-3">
+            <div>
+              <h2 className="text-[16px] font-semibold text-surface-100">{t('workHub.newResults')}</h2>
+              <p className="mt-0.5 text-[12px] text-surface-500">{t('workHub.newResultsDescription')}</p>
+            </div>
+            {resultCards.length > 0 && <span className="rounded-full bg-primary-500/12 px-2 py-0.5 text-[11px] font-semibold tabular-nums text-primary-300">{resultCards.length}</span>}
+          </div>
+          {resultCards.length === 0 ? (
+            <p className="py-2 text-[13px] text-surface-600">{t('workHub.noNewResults')}</p>
+          ) : (
+            <div className="divide-y divide-surface-800/70 rounded-lg border border-surface-800/80 bg-surface-900/35 px-3 lg:border-0 lg:bg-transparent lg:px-0">
+              {resultCards.map(({ session }) => {
+                const project = projects.find((item) => item.id === session.projectId);
+                const message = effectiveLastMessages[session.id];
+                return (
+                  <button
+                    key={session.id}
+                    type="button"
+                    onClick={() => openSession(session)}
+                    className="group flex min-h-16 w-full items-start gap-3 py-3 text-left transition-colors hover:bg-surface-900/60"
+                  >
+                    <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-primary-400" />
+                    <span className="min-w-0 flex-1">
+                      <span className="flex min-w-0 items-baseline gap-2">
+                        <span className="truncate text-[13px] font-semibold text-surface-100">{session.name}</span>
+                        {project && <span className="hidden shrink-0 text-[11px] text-surface-600 sm:inline">{project.agent?.displayName || project.name}</span>}
+                      </span>
+                      <span className="mt-1 line-clamp-2 block text-[13px] leading-5 text-surface-400 group-hover:text-surface-300">
+                        {message?.content ? extractSemanticLead(message.content) : t('workHub.loadingResult')}
+                      </span>
+                    </span>
+                    <span className="shrink-0 text-[11px] text-surface-600">{relativeTime(session.updatedAt)}</span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </section>
+    );
+  }
 
   return (
     <div data-testid="inbox-panel" ref={scrollRef} className="flex-1 overflow-y-auto relative z-10">
