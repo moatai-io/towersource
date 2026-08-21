@@ -19,11 +19,12 @@ describe('Tower beginner guide', () => {
     ]);
   });
 
-  it('opens only the AI team scene for a target that is not initially visible', () => {
+  it('finishes at the persistent Agent rail creation entry point', () => {
     const steps = getTourDefinition('beginner')?.steps ?? [];
-    const scenes = steps.filter((step) => step.scene).map((step) => [step.id, step.scene]);
+    const agentStep = steps.find((step) => step.id === 'agent-create');
 
-    expect(scenes).toEqual([['agent-create', 'ai-team-home']]);
+    expect(agentStep?.target).toBe('[data-tour-id="agent-rail-create"]');
+    expect(agentStep?.scene).toBeUndefined();
   });
 
   it('reflects the current agent-first navigation and progressive teammate onboarding', () => {

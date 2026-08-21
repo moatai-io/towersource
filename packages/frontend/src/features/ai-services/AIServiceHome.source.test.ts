@@ -6,6 +6,14 @@ const source = fs.readFileSync(path.resolve(import.meta.dirname, './AIServiceHom
 const store = fs.readFileSync(path.resolve(import.meta.dirname, './ai-services-store.ts'), 'utf8');
 
 describe('AI Service first-class operations home', () => {
+  it('opens the create dialog with an Agent Home project preselected', () => {
+    expect(source).toContain("sessionStorage.getItem('tower-ai-service-create-project-id')");
+    expect(source).toContain("sessionStorage.removeItem('tower-ai-service-create-project-id')");
+    expect(source).toContain('setProjectId(requestedProjectId)');
+    expect(source).toContain('setCreateOpen(true)');
+    expect(source).toContain("if (projectId && !nextProjects.some((item: { id?: string }) => item.id === projectId)) setProjectId('')");
+  });
+
   it('keeps the selected deployment detail in one fluid column inside the split management view', () => {
     expect(source).toContain('grid min-w-0 grid-cols-1 gap-4');
     expect(source).not.toContain('lg:grid-cols-[minmax(0,1fr)_220px_180px]');
@@ -90,20 +98,17 @@ describe('AI Service first-class operations home', () => {
     expect(store).toContain('refreshIdentityFromSourceAgent?: boolean');
   });
 
-  it('shows a human-readable capability and approval policy prototype', () => {
+  it('shows only capabilities that the deployment flow can actually configure', () => {
     expect(source).toContain("i18n.t('aiServices.home.ui.materialsSystems')");
-    expect(source).toContain("i18n.t('aiServices.home.ui.capabilities')");
-    expect(source).toContain("i18n.t('aiServices.home.ui.approvalNeeded')");
-    expect(source).toContain("i18n.t('aiServices.home.ui.capabilityKnowledgeTitle')");
-    expect(source).toContain("i18n.t('aiServices.home.ui.capabilityDataTitle')");
-    expect(source).toContain("i18n.t('aiServices.home.ui.capabilityProposeTitle')");
-    expect(source).toContain("i18n.t('aiServices.home.ui.capabilityExecuteTitle')");
-    expect(source).toContain("i18n.t('aiServices.home.ui.permissionPreview')");
-    expect(source).toContain("i18n.t('aiServices.home.ui.approvalEveryTitle')");
-    expect(source).toContain("i18n.t('aiServices.home.ui.approvalPolicyTitle')");
-    expect(source).toContain("i18n.t('aiServices.home.ui.approvalDisabledTitle')");
+    expect(source).toContain("i18n.t('aiServices.home.ui.answerFromMaterials')");
     expect(source).toContain("i18n.t('aiServices.home.ui.deploymentSummary')");
     expect(source).toContain("i18n.t('aiServices.home.ui.impossibleActions')");
+    expect(source).not.toContain("i18n.t('aiServices.home.copy.externalApi')");
+    expect(source).not.toContain("i18n.t('aiServices.home.ui.capabilityDataTitle')");
+    expect(source).not.toContain("i18n.t('aiServices.home.ui.capabilityProposeTitle')");
+    expect(source).not.toContain("i18n.t('aiServices.home.ui.capabilityExecuteTitle')");
+    expect(source).not.toContain('capabilityPreview');
+    expect(source).not.toContain('actionApproval');
   });
 
   it('uses a one-click deploy flow and hides review/approval from the primary UI', () => {
@@ -197,7 +202,9 @@ describe('AI Service first-class operations home', () => {
     expect(source).toContain("aiServices.home.ui.accessMethod");
     expect(source).toContain('function accessModeLabel');
     expect(source).toContain('aiServices.home.accessMode.${mode}');
-    expect(source).toContain("(['unlisted', 'password', 'disabled', 'login_required', 'public'] as const)");
+    expect(source).toContain("(['unlisted', 'password', 'disabled', 'public'] as const)");
+    expect(source).toContain("accessMode === 'login_required' && <option value=\"login_required\" disabled>");
+    expect(source).toContain("accessMode === 'login_required' ||");
     expect(source).toContain("i18n.t('aiServices.home.ui.createPassword')");
     expect(source).toContain('makeSharePassword');
     expect(source).toContain("aiServices.home.copy.passwordGuidance");

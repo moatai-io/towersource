@@ -119,6 +119,13 @@ const frontendPath = config.frontendDir;
 if (fs.existsSync(frontendPath)) {
   // sw.js & index.html must never be cached — ensures PWA updates propagate immediately
   // CDN-Bypass: Cloudflare respects CDN-Cache-Control separately from browser Cache-Control
+  app.get('/runtime-config.js', (_req, res) => {
+    const defaultLanguage = process.env.TOWER_DEFAULT_LANGUAGE === 'ko' ? 'ko' : 'en';
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.type('application/javascript').send(
+      `window.__TOWER_RUNTIME_CONFIG__=${JSON.stringify({ defaultLanguage })};`,
+    );
+  });
   app.get('/sw.js', (_req, res) => {
     res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
     res.setHeader('CDN-Cache-Control', 'no-store');

@@ -5,6 +5,16 @@ import { describe, expect, it } from 'vitest';
 const API_PATH = path.resolve(process.cwd(), 'packages/backend/routes/api.ts');
 
 describe('reply suggestion source contracts', () => {
+  it('keeps the product-wide autocomplete kill switch off', () => {
+    const settingsPath = path.resolve(process.cwd(), 'packages/backend/services/settings/app-settings.ts');
+    const settingsSource = fs.readFileSync(settingsPath, 'utf8');
+    const apiSource = fs.readFileSync(API_PATH, 'utf8');
+
+    expect(settingsSource).toContain('export const AI_COMPOSER_AUTOCOMPLETE_ENABLED = false');
+    expect(settingsSource).toContain('{ ...settings, enabled: false, emptyDraftEnabled: false, inlineDraftEnabled: false }');
+    expect(apiSource).toContain("return res.status(503).json({ error: 'AI composer autocomplete is temporarily disabled' });");
+  });
+
   it('keeps draft completion in the human user voice', () => {
     const src = fs.readFileSync(API_PATH, 'utf8');
     const route = src.match(/router\.post\('\/ai\/reply-suggestion'[\s\S]*?\/\/ Auto-name session/);

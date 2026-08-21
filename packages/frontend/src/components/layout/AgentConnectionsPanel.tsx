@@ -22,6 +22,22 @@ type AgentConnectionCatalog = {
   connections: AgentConnection[];
 };
 
+type ProjectMcpSummary = {
+  manifestPath: string;
+  manifestPresent: boolean;
+  servers: Array<{
+    name: string;
+    catalogId: string | null;
+    type: 'stdio' | 'streamable-http';
+    description: string | null;
+    enabled: boolean;
+    managed: boolean;
+    requiredCredentials: string[];
+    valid: boolean;
+    problems: string[];
+  }>;
+};
+
 type ConnectionPreview = {
   intentId: string;
   proposalHash: string;
@@ -49,6 +65,8 @@ export function AgentConnectionsPanel({ projectId, spacious = false }: { project
   const [error, setError] = useState('');
   const [changingId, setChangingId] = useState<string | null>(null);
   const [connectingGoogle, setConnectingGoogle] = useState(false);
+  const [mcpSummary, setMcpSummary] = useState<ProjectMcpSummary | null>(null);
+  const [mcpError, setMcpError] = useState('');
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -65,7 +83,19 @@ export function AgentConnectionsPanel({ projectId, spacious = false }: { project
     }
   }, [projectId, t]);
 
-  useEffect(() => { void load(); }, [load]);
+  const loadMcp = useCallback(async () => {
+    try {
+      const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/mcp-connections`, { headers: authHeaders() });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body.error || t('mcpConnections.loadFailed'));
+      setMcpSummary(body);
+      setMcpError('');
+    } catch (reason) {
+      setMcpError(reason instanceof Error ? reason.message : t('mcpConnections.loadFailed'));
+    }
+  }, [projectId, t]);
+
+  useEffect(() => { void load(); void loadMcp(); }, [load, loadMcp]);
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     if (params.get('oauth') !== 'google-agent' || params.get('projectId') !== projectId) return;
@@ -200,15 +230,27 @@ export function AgentConnectionsPanel({ projectId, spacious = false }: { project
           </div>
         );
       })}
-      <div className={`rounded-lg border border-dashed border-surface-700 bg-surface-850/40 ${spacious ? 'flex min-h-44 flex-col p-4' : 'p-2.5'}`}>
+      <div className={`rounded-lg border border-surface-700 bg-surface-850/70 ${spacious ? 'flex min-h-44 flex-col p-4' : 'p-2.5'}`}>
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0">
             <div className="text-[14px] font-semibold text-surface-200">{t('mcpConnections.title')}</div>
             <div className="mt-1 text-[12px] leading-5 text-surface-500">{t('mcpConnections.description')}</div>
           </div>
-          <span className="tone-pill tone-muted shrink-0 px-2 py-0.5 text-[11px]">{t('mcpConnections.comingSoon')}</span>
+          <span className="tone-pill tone-accent shrink-0 px-2 py-0.5 text-[11px]">{t('mcpConnections.serverCount', { count: mcpSummary?.servers.length ?? 0 })}</span>
         </div>
-        <div className="mt-auto pt-3 text-[11px] leading-4 text-surface-600">{t('mcpConnections.scopeHint')}</div>
+        {mcpError && <div className="tone-card tone-warning mt-3 rounded-md p-2 text-[11px]">{mcpError}</div>}
+        {!mcpError && mcpSummary?.servers.map((server) => (
+          <div key={server.name} className="mt-3 rounded-md border border-surface-700 bg-surface-900/50 p-2">
+            <div className="flex items-center justify-between gap-2">
+              <span className="truncate text-[12px] font-semibold text-surface-200">{server.name}</span>
+              <span className={`tone-pill px-1.5 py-0.5 text-[10px] ${!server.valid ? 'tone-warning' : server.enabled ? 'tone-success' : 'tone-muted'}`}>{!server.valid ? t('mcpConnections.invalid') : server.enabled ? t('mcpConnections.enabled') : t('mcpConnections.disabled')}</span>
+            </div>
+            {server.description && <div className="mt-1 text-[11px] leading-4 text-surface-500">{server.description}</div>}
+            {server.requiredCredentials.length > 0 && <div className="mt-1 text-[10px] text-surface-600">{t('mcpConnections.credentialsRequired', { names: server.requiredCredentials.join(', ') })}</div>}
+            {server.problems.length > 0 && <div className="mt-1 text-[10px] text-amber-300">{server.problems.join(' · ')}</div>}
+          </div>
+        ))}
+        <div className="mt-auto pt-3 text-[11px] leading-4 text-surface-600">{t('mcpConnections.scopeHint', { path: mcpSummary?.manifestPath || '.tower/mcp/manifest.json' })}</div>
       </div>
       <p className="text-[11px] leading-4 text-surface-500 sm:col-span-2">{t('connectionSecretSafetyNotice')}</p>
     </div>

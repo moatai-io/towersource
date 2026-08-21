@@ -60,6 +60,7 @@ import { useOnboarding } from './hooks/useOnboarding';
 import { WhatsNewModal } from './components/onboarding/WhatsNewModal';
 import { FirstRunInferenceSetup } from './components/onboarding/FirstRunInferenceSetup';
 import { TourProvider } from './tours/TourProvider';
+import { hasSeenTowerGuide } from './tours/tourState';
 import { useTheme } from './hooks/useTheme';
 import { useFontSize } from './hooks/useFontSize';
 import { useMediaQuery } from './hooks/useMediaQuery';
@@ -313,7 +314,7 @@ function App() {
   });
   const [authError, setAuthError] = useState('');
   const [firstRunInferenceSetup, setFirstRunInferenceSetup] = useState(() => localStorage.getItem('tower:firstRunInferenceSetup') === 'pending');
-  const [openFirstTeammateAfterSetup, setOpenFirstTeammateAfterSetup] = useState(false);
+
   const [sessionsLoaded, setSessionsLoaded] = useState(false);
   const [newSessionCreating, setNewSessionCreating] = useState(false);
   const newSessionCreatingRef = useRef(false);
@@ -1947,12 +1948,6 @@ function App() {
   }, [openAgentAcademy]);
 
   useEffect(() => {
-    if (!openFirstTeammateAfterSetup) return;
-    openAgentAcademy();
-    setOpenFirstTeammateAfterSetup(false);
-  }, [openAgentAcademy, openFirstTeammateAfterSetup]);
-
-  useEffect(() => {
     const handler = () => {
       useSessionStore.getState().setActiveView('chat');
       useSessionStore.getState().setSidebarOpen(true);
@@ -1982,6 +1977,14 @@ function App() {
     userId,
     sessionsLoaded,
   });
+
+  useEffect(() => {
+    if (!token || !userId || !sessionsLoaded || firstRunInferenceSetup || hasSeenTowerGuide(userId)) return;
+    const timer = window.setTimeout(() => {
+      window.dispatchEvent(new CustomEvent('tower-start-tour', { detail: { tourId: 'beginner' } }));
+    }, 500);
+    return () => window.clearTimeout(timer);
+  }, [firstRunInferenceSetup, sessionsLoaded, token, userId]);
 
   // v3 (path B): activate a chat tab by sessionId. Looks up the SessionMeta and
   // routes through handleSelectSession (which loads messages + ensures the tab).
@@ -2278,8 +2281,10 @@ function App() {
   const activeView = useSessionStore((s) => s.activeView);
 
   useEffect(() => {
-    const openAIServiceHome = () => {
+    const openAIServiceHome = (event: Event) => {
       if (!useSettingsStore.getState().serverConfig?.aiServicesEnabled) return;
+      const projectId = (event as CustomEvent<{ projectId?: string }>).detail?.projectId;
+      if (projectId) sessionStorage.setItem('tower-ai-service-create-project-id', projectId);
       useSessionStore.getState().setActiveView('aiServices');
       useSessionStore.getState().setSidebarOpen(false);
     };
@@ -2411,9 +2416,17 @@ function App() {
   }
 
   if (firstRunInferenceSetup && token) {
-    return <FirstRunInferenceSetup token={token} onComplete={() => {
+    return <FirstRunInferenceSetup token={token} onComplete={({ model, project, session }) => {
       localStorage.removeItem('tower:firstRunInferenceSetup');
-      setOpenFirstTeammateAfterSetup(true);
+      useModelStore.getState().setDefaults({ session: model, ai_reply: model, ai_task: model });
+      useModelStore.getState().setSelectedModel(model);
+      if (project?.id) useProjectStore.getState().addProject(project);
+      if (session?.id) {
+        useSessionStore.getState().addSession(session);
+        useSessionStore.getState().setActiveSessionId(session.id);
+        useChatStore.getState().setSessionId(session.id);
+        useFileStore.getState().openChatTab(session.id);
+      }
       setFirstRunInferenceSetup(false);
     }} />;
   }

@@ -10,9 +10,18 @@ import { createTowerVoiceDelegate } from './tower-voice-delegate.js';
 import { DEFAULT_KOREAN_TTS_VOICE, TOWER_VOICE_AGENT_INSTRUCTIONS } from './livekit-inference-worker.js';
 import { resolveVoiceTtsConfig } from './voice-tts-config.js';
 import { createVoiceTurnToken, verifyVoiceTurnToken } from './voice-turn-token.js';
+import { isVoiceRuntimeEnabled } from './voice-router.js';
 
 const voiceGatewaySource = fs.readFileSync(path.join(process.cwd(), 'packages/backend/services/voice-runtime/tower-session-turn-gateway.ts'), 'utf8');
 const livekitAgentSource = fs.readFileSync(path.join(process.cwd(), 'packages/backend/services/voice-runtime/livekit-agent-entry.ts'), 'utf8');
+
+describe('voice feature flag', () => {
+  it('keeps the backend voice runtime off unless explicitly enabled', () => {
+    expect(isVoiceRuntimeEnabled(undefined)).toBe(false);
+    expect(isVoiceRuntimeEnabled('false')).toBe(false);
+    expect(isVoiceRuntimeEnabled('true')).toBe(true);
+  });
+});
 
 describe('VoiceSessionManager', () => {
   it('links ephemeral voice state to a durable Tower Session and clamps spoken duration', () => {

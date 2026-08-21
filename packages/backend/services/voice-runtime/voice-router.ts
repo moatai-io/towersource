@@ -23,17 +23,29 @@ const VoiceTurnSchema = z.object({ token: z.string().min(32), transcript: z.stri
 
 export interface VoiceRouterDependencies {
   manager?: VoiceSessionManager;
+  enabled?: boolean;
   createLiveKitAccess?: (input: { roomName: string; userIdentity: string; projectId: string; userId: number; dispatchMetadata?: string }) => Promise<{ url: string; token: string } | null>;
+}
+
+export function isVoiceRuntimeEnabled(value = process.env.TOWER_VOICE_ENABLED): boolean {
+  return value === 'true';
 }
 
 /** Create the voice API router; mount it after Tower auth middleware. */
 export function createVoiceRouter(deps: VoiceRouterDependencies = {}): Router {
   const router = Router();
   const manager = deps.manager ?? new VoiceSessionManager();
+  const enabled = deps.enabled ?? isVoiceRuntimeEnabled();
 
-  // This router is mounted at the broad /api boundary, so auth must only
-  // intercept voice routes and let /health and every unrelated API continue.
-  router.use('/sessions/:sessionId/voice', authMiddleware);
+  const requireVoiceEnabled = (_req: any, res: any, next: any) => {
+    if (enabled) return next();
+    return res.status(503).json({ error: 'Voice is disabled' });
+  };
+
+  // This router is mounted at the broad /api boundary, so feature gating and
+  // auth must only intercept voice routes and let every unrelated API continue.
+  router.use('/sessions/:sessionId/voice', requireVoiceEnabled, authMiddleware);
+  router.use('/voice/internal', requireVoiceEnabled);
 
   router.post('/sessions/:sessionId/voice/start', async (req, res) => {
     const userId = Number((req as any).user?.userId);

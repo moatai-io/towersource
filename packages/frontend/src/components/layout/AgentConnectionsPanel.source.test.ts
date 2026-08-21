@@ -37,10 +37,15 @@ const sidebar = fs.readFileSync(path.join(__dirname, 'Sidebar.tsx'), 'utf8');
     expect(source).toContain("t('connectionRequiredFields', { connected: connection.connectedFieldCount ?? 0, total: connection.fieldCount })");
   });
 
-  it('shows MCP connections as a distinct coming-soon capability', () => {
+  it('loads and renders secret-free Project MCP configuration status', () => {
+    expect(source).toContain('/mcp-connections`');
+    expect(source).toContain('ProjectMcpSummary');
     expect(source).toContain("t('mcpConnections.title')");
-    expect(source).toContain("t('mcpConnections.comingSoon')");
-    expect(source).toContain("t('mcpConnections.scopeHint')");
+    expect(source).toContain("t('mcpConnections.serverCount'");
+    expect(source).toContain("t('mcpConnections.credentialsRequired'");
+    expect(source).toContain("t('mcpConnections.scopeHint'");
+    expect(source).not.toContain("t('mcpConnections.comingSoon')");
+    expect(source).not.toContain('credentialValue');
   });
 
   it('moves Connection management out of compact Agent settings into the dedicated Credential surface', () => {

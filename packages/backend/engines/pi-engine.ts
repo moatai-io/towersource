@@ -9,7 +9,7 @@
 
 import crypto from 'crypto';
 import path from 'path';
-import { config } from '../config.js';
+import { config, loadModelsFile } from '../config.js';
 import type { Engine, RunOpts, EngineCallbacks, TowerMessage, TowerContentBlock, QuickReplyOpts, ChannelReplyOpts, ChannelReplyResult } from './types.js';
 import { clearCurrentRootTurn, getCurrentRootTurn, setCurrentRootTurn } from '../services/agent-turn/current-root-turn.js';
 import { completeAgentTurnRecovery, releaseAgentTurnRecovery, renewAgentTurnRecovery, tryClaimAgentTurnRecovery, tryClaimForegroundAgentTurn } from '../services/agent-turn/recovery-coordinator.js';
@@ -2713,9 +2713,8 @@ export class PiEngine implements Engine {
       toolCount: harnessFingerprint.toolCount,
     }));
 
-    const defaultThinkingLevel = model.provider === 'litellm-responses' && (model.id === 'smartest' || model.id === 'smartest-long')
-      ? 'low'
-      : 'medium';
+    const configuredModel = loadModelsFile().pi.find(entry => entry.provider === model.provider && entry.modelId === model.id);
+    const defaultThinkingLevel = configuredModel?.defaultReasoning || 'medium';
     const effectiveThinkingLevel = opts.effort === 'low' || opts.effort === 'medium' || opts.effort === 'high' || opts.effort === 'xhigh'
       ? opts.effort
       : opts.effort === 'max'

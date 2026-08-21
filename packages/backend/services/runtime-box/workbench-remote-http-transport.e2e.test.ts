@@ -32,8 +32,8 @@ async function fixture(projections?: Record<string, string>, operatorGitIdentity
 }
 
 const baseSpec = {
-  jobId: 1, projectId: 'project-a', command: 'cat work/input.txt', cwd: '/workspace',
-  timeoutSec: 10, workbenchRevision: 3, environmentKeys: [],
+  jobId: 1, projectId: 'project-a', sessionId: '11111111-1111-4111-8111-111111111111',
+  command: 'cat work/input.txt', cwd: '/workspace', timeoutSec: 10, workbenchRevision: 3, environmentKeys: [],
 };
 
 describe('Remote Workbench HTTP transport localhost E2E', () => {
@@ -108,13 +108,13 @@ describe('Remote Workbench HTTP transport localhost E2E', () => {
     await expect(fs.access(path.join(root, 'work', 'timeout-should-not-exist.txt'))).rejects.toThrow();
   });
 
-  it('uses the Worker native shell without requiring a sandbox runtime', async () => {
+  it('uses the Worker native shell and injects non-secret Tower session attribution', async () => {
     const { transport } = await fixture();
     const result = await transport.execute({
-      spec: { ...baseSpec, command: "printf '%s|%s' \"$TOWER_WORKSTATION_SHELL\" \"$HOME\"" },
+      spec: { ...baseSpec, command: "printf '%s|%s|%s' \"$TOWER_WORKSTATION_SHELL\" \"$HOME\" \"$TOWER_SESSION_ID\"" },
       signal: new AbortController().signal, onStdout: () => {}, onStderr: () => {},
     });
-    expect(result.execResult.stdout).toBe(`native|${process.env.HOME}`);
+    expect(result.execResult.stdout).toBe(`native|${process.env.HOME}|${baseSpec.sessionId}`);
     expect(result.execResult.runtime_context.workstation).toMatchObject({
       shell: 'native', persistent_home: true, host_tools: 'available', default_scope: 'current-project',
     });

@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import type { FileEntry as FileEntryBase } from '@tower/shared';
 import { useSessionStore } from './session-store';
 import { clearSessionViewportSnapshot } from '../features/conversation-viewport/sessionViewportSnapshot';
+import { generateUUID } from '../utils/uuid';
 
 export interface FileEntry extends FileEntryBase {
   children?: FileEntry[];
@@ -958,7 +959,7 @@ export const useFileStore = create<FileState>((set, get) => ({
     }
 
     let newTab: FileTab = {
-      id: crypto.randomUUID(),
+      id: generateUUID(),
       path,
       content,
       language,
@@ -1038,7 +1039,7 @@ export const useFileStore = create<FileState>((set, get) => ({
     }
     const pinned = options?.pinned ?? kind === 'publishing';
     let newTab: SystemTab = {
-      id: crypto.randomUUID(),
+      id: generateUUID(),
       kind,
       refId,
       title: options?.title || (kind === 'publishing' ? 'Publishing Hub' : kind === 'projectFiles' ? '프로젝트 홈' : '스케줄'),
@@ -1099,7 +1100,7 @@ export const useFileStore = create<FileState>((set, get) => ({
       return { activeTabId: null, activeSystemTabId: null, activeFilePane: 'main' };
     }
 
-    const newTab: ChatTab = { id: crypto.randomUUID(), sessionId, pinned: false };
+    const newTab: ChatTab = { id: generateUUID(), sessionId, pinned: false };
     const activeSessionId = useSessionStore.getState().activeSessionId;
 
     let newChatTabs: ChatTab[];

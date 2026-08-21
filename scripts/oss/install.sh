@@ -220,12 +220,39 @@ TOWER_DATA_DIR=$DATA_DIR/app-data
 DATABASE_URL=postgresql://tower:${PG_PASSWORD_URL}@127.0.0.1:${PG_PORT}/tower
 JWT_SECRET=$JWT_SECRET
 SECRET_STORE_MASTER_KEY=$MASTER_KEY
+# Public self-hosted product mode. `standalone` means this server owns its own
+# providers, publishing credentials, and operations instead of depending on a
+# Tower-managed gateway. Do not omit this line: an unset role currently falls
+# back to standalone for some backend policies, but feature gates intentionally
+# require the role to be explicit.
+TOWER_ROLE=standalone
+
+# Primary inference engine for new Sessions. The OSS installer does not enable
+# Claude subscription execution; the first-run screen configures a Pi-compatible
+# OpenRouter or OpenAI Responses provider instead.
 PI_ENABLED=true
 DEFAULT_ENGINE=pi
 CLAUDE_ENABLED=false
+
+# Agent-first is opt-in for standalone servers. This flag enables the first-level
+# Agent rail, AI Team home, Primary Agent profiles, and the guarded Agent creation
+# APIs. It has no effect unless TOWER_ROLE=standalone is also explicit above.
+# Set to false only as an emergency UI/API rollback; doing so hides existing Agent
+# profiles without deleting their Projects or data.
 TOWER_AGENT_FIRST_ENABLED=true
+
+# Materialize the curated public skill seed into each eligible Project Runtime.
+# The installer seeds only export-approved skills; provider-specific/private
+# skills are intentionally excluded by scripts/oss/public-denylist.txt.
 RUNTIME_BOX_MATERIALIZE_SKILLS=true
+
+# Stable ID of this host's local Project Worker. New Projects use this healthy
+# production Worker for Worker-first execution; Doctor and bootstrap must agree
+# on the same identifier.
 TOWER_PRIMARY_WORKER_ID=tower-oss-local-01
+
+# AI response-language fallback before a user or organization preference exists.
+# This does not force the web UI language and users can override it later.
 WORKSPACE_LANGUAGE=en
 EOF
 chmod 600 "$ENV_FILE"
@@ -285,8 +312,23 @@ Unit=tower-oss-worker-bootstrap.service
 [Install]
 WantedBy=timers.target
 EOF
+# The first-admin API writes this request file. A path unit starts bootstrap
+# immediately instead of waiting for the fallback timer. The app never needs
+# systemd privileges; it only writes inside TOWER_DATA_DIR.
+mkdir -p "$DATA_DIR/workers"
+cat > /etc/systemd/system/tower-oss-worker-bootstrap.path <<EOF
+[Unit]
+Description=Start Tower OSS local Worker bootstrap after first administrator setup
+
+[Path]
+PathChanged=$DATA_DIR/workers/bootstrap.request
+Unit=tower-oss-worker-bootstrap.service
+
+[Install]
+WantedBy=multi-user.target
+EOF
 systemctl daemon-reload
-systemctl enable --now tower tower-oss-worker-bootstrap.timer
+systemctl enable --now tower tower-oss-worker-bootstrap.timer tower-oss-worker-bootstrap.path
 
 log "Configuring nginx"
 NGINX_NAME=tower
@@ -298,6 +340,21 @@ server {
     listen [::]:80 default_server;
     server_name $SERVER_NAME;
     client_max_body_size 220m;
+
+    # The app shell and Service Worker must always revalidate. Mobile Safari can
+    # otherwise keep an old onboarding bundle after a self-host upgrade even
+    # though fingerprinted /assets files are safe to cache independently.
+    location = /index.html {
+        proxy_pass http://127.0.0.1:$PORT;
+        proxy_set_header Host \$host;
+        add_header Cache-Control "no-store, no-cache, must-revalidate" always;
+    }
+
+    location = /sw.js {
+        proxy_pass http://127.0.0.1:$PORT;
+        proxy_set_header Host \$host;
+        add_header Cache-Control "no-store, no-cache, must-revalidate" always;
+    }
 
     location / {
         proxy_pass http://127.0.0.1:$PORT;

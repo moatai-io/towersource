@@ -14,6 +14,7 @@ import i18n from '../i18n';
 import { useProjectStore } from '../stores/project-store';
 import { useUploadStore } from '../stores/upload-store';
 import { calculateUploadPercent, type UploadProgressSnapshot } from './upload-with-progress';
+import { generateUUID } from './uuid';
 
 export type DroppedFile = { file: File; relativePath: string };
 
@@ -175,7 +176,7 @@ async function uploadDroppedFilesResumable(
   totalBytes: number,
   onProgress?: (snapshot: UploadProgressSnapshot) => void,
 ): Promise<{ results: UploadResult[]; ok: number; fail: number }> {
-  const uploadId = crypto.randomUUID();
+  const uploadId = generateUUID();
   const uploadName = items[0]?.relativePath.split('/')[0] || 'Upload';
   const uploadStore = useUploadStore.getState();
   uploadStore.upsertUpload({

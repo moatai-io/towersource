@@ -48,6 +48,10 @@ describe('AI teammate operating profile', () => {
     expect(project).toContain('onEditTeammate={editTeammate}');
     expect(project).toContain('collaboration={agentHome?.collaboration}');
     expect(project).toContain("onOpenAllWork={() => setHomeTab('work')}");
+    expect(project).toContain("window.dispatchEvent(new CustomEvent('tower-open-ai-services'");
+    expect(project).toContain('detail: { projectId: project.id }');
+    expect(home).toContain('onClick={onExternalDeploy}');
+    expect(home).not.toContain('externalDeployComingSoon');
     expect(app).toContain("setActiveView('chat')");
   });
 });

@@ -196,7 +196,7 @@ export function KanbanCard({ task, onClick, isDragOverlay, onDelete, onSpawn, on
         <h3 className="text-base font-medium text-gray-200 line-clamp-2">{task.title}</h3>
         <div className="flex items-center gap-1 shrink-0">
           {task.status === 'in_progress' && (
-            <RunIndicator size="xs" label="태스크 실행 중" className="mt-0.5 text-blue-400" />
+            <RunIndicator size="xs" label={t('taskRunning')} className="mt-0.5 text-blue-400" />
           )}
           {task.status === 'done' && (
             <span className="tone-success tone-text text-sm mt-0.5">&#10003;</span>

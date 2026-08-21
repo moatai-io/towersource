@@ -83,6 +83,13 @@ export function createArtifactShadowApp(env: NodeJS.ProcessEnv = process.env): A
     });
   });
 
+  app.get('/runtime-config.js', (_req, res) => {
+    const defaultLanguage = env.TOWER_DEFAULT_LANGUAGE === 'ko' ? 'ko' : 'en';
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.type('application/javascript').send(
+      `window.__TOWER_RUNTIME_CONFIG__=${JSON.stringify({ defaultLanguage })};`,
+    );
+  });
   app.get('/sw.js', (_req, res) => {
     res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
     res.sendFile(path.join(frontendPath, 'sw.js'));

@@ -21,6 +21,12 @@
     "advanced": "Advanced connection settings",
     "baseUrl": "Base URL",
     "modelId": "Model ID",
+    "modelAutomatic": "Initial setup uses the verified default model {{model}}. You can choose another OpenRouter model in Settings after connecting.",
+    "firstAgentFailed": "The AI connection was saved, but Tower could not prepare your first AI teammate. Please try again shortly.",
+    "firstAgent": {
+      "name": "AI Work Partner",
+      "expertise": "A general AI work partner that uses project materials and conversations to clarify goals and help with research, writing, planning, and concrete next actions"
+    },
     "connectionFailed": "Could not connect the AI provider.",
     "next": "After the connection succeeds, Tower will open the first AI teammate setup.",
     "connecting": "Verifying and saving…",

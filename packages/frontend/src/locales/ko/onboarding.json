@@ -21,6 +21,12 @@
     "advanced": "고급 연결 설정",
     "baseUrl": "Base URL",
     "modelId": "Model ID",
+    "modelAutomatic": "첫 설정에서는 검증된 기본 모델 {{model}}을 사용합니다. 연결 후 설정에서 다른 OpenRouter 모델로 변경할 수 있습니다.",
+    "firstAgentFailed": "AI 연결은 저장했지만 첫 AI 동료를 준비하지 못했습니다. 잠시 후 다시 시도해 주세요.",
+    "firstAgent": {
+      "name": "AI 업무 파트너",
+      "expertise": "프로젝트 자료와 대화를 바탕으로 목표를 정리하고, 조사·문서 작성·계획 수립·다음 행동 실행을 함께하는 범용 AI 업무 파트너"
+    },
     "connectionFailed": "AI Provider에 연결하지 못했습니다.",
     "next": "연결에 성공하면 첫 AI 동료 만들기를 바로 시작합니다.",
     "connecting": "확인하고 저장하는 중…",

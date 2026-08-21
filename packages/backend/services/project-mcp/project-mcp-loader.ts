@@ -43,7 +43,7 @@ interface ProjectMcpManifest {
   servers?: ProjectMcpServerManifest[];
 }
 
-interface ProjectMcpServerManifest {
+export interface ProjectMcpServerManifest {
   name: string;
   type?: 'stdio' | 'streamable-http';
   /** Optional admin-curated provider id. Members may mount catalog entries but not arbitrary commands. */
@@ -265,6 +265,51 @@ function makeTool(server: MountedProjectMcpServer, tool: any): ToolDefinition | 
       }
     },
   } as ToolDefinition;
+}
+
+export interface ProjectMcpConfigurationSummary {
+  manifestPath: string;
+  manifestPresent: boolean;
+  servers: Array<{
+    name: string;
+    catalogId: string | null;
+    type: 'stdio' | 'streamable-http';
+    description: string | null;
+    enabled: boolean;
+    managed: boolean;
+    requiredCredentials: string[];
+    valid: boolean;
+    problems: string[];
+  }>;
+}
+
+/** Inspect project MCP configuration without starting processes or contacting remote servers. */
+export async function inspectProjectMcpConfiguration(projectRoot: string): Promise<ProjectMcpConfigurationSummary> {
+  const manifest = await readManifest(projectRoot);
+  const declaredServers = manifest?.servers ?? [];
+  const agentStoreDeclaration = declaredServers.find(server => server.catalogId === 'agent-store');
+  const baselineServers = agentStoreDeclaration
+    ? declaredServers
+    : [{ name: 'agent-store', catalogId: 'agent-store' }, ...declaredServers];
+  return {
+    manifestPath: MANIFEST_RELATIVE_PATH,
+    manifestPresent: manifest !== null,
+    servers: baselineServers.slice(0, MAX_SERVERS).map((declared, index) => {
+      const server = applyCatalogDefaults(declared);
+      const problems = validateServerManifest(server, index);
+      return {
+        name: server.name,
+        catalogId: server.catalogId ?? null,
+        type: server.type ?? 'stdio',
+        description: server.description ?? null,
+        enabled: server.enabled !== false,
+        managed: Boolean(server.catalogId),
+        requiredCredentials: (server.secrets ?? []).map(secret => secret.env),
+        valid: problems.length === 0,
+        problems,
+      };
+    }),
+  };
 }
 
 /**

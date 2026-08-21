@@ -32,7 +32,7 @@ function beginnerTour(): TourDefinition {
       { id: 'sidebar', target: '[data-tour-id="sidebar"]', title: tourText('sidebarTitle'), description: tourText('sidebarDescription'), placement: 'right' },
       { id: 'chat-input', target: '[data-tour-id="chat-input"]', title: tourText('chatTitle'), description: tourText('chatDescription'), placement: 'top' },
       { id: 'workspace-tabs', target: '[data-tour-id="file-tabbar"]', title: tourText('tabsTitle'), description: tourText('tabsDescription'), placement: 'bottom' },
-      { id: 'agent-create', target: '[data-tour-id="agent-create"]', title: tourText('agentTitle'), description: tourText('agentDescription'), placement: 'bottom', scene: 'ai-team-home' },
+      { id: 'agent-create', target: '[data-tour-id="agent-rail-create"]', title: tourText('agentTitle'), description: tourText('agentDescription'), placement: 'right' },
     ],
   };
 }

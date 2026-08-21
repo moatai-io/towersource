@@ -27,6 +27,13 @@ function expectedExpertiseInput(draft: AgentDraftArtifact) {
 
 const FACE_OPTIONS = ['🧑‍💻', '📄', '💼', '🎧', '📑', '🔎', '🗂️', '🧭', '✨', '🤖'];
 
+const STARTER_AGENTS = [
+  { id: 'research', characterId: 'korean-diverse-1', nameKey: 'agentCreation.starters.research.name', expertiseKey: 'agentCreation.starters.research.expertise' },
+  { id: 'editor', characterId: 'core-editor', nameKey: 'agentCreation.starters.editor.name', expertiseKey: 'agentCreation.starters.editor.expertise' },
+  { id: 'operations', characterId: 'korean-diverse-2', nameKey: 'agentCreation.starters.operations.name', expertiseKey: 'agentCreation.starters.operations.expertise' },
+  { id: 'guide', characterId: 'korean-diverse-10', nameKey: 'agentCreation.starters.guide.name', expertiseKey: 'agentCreation.starters.guide.expertise' },
+] as const;
+
 function FieldLabel({ children }: { children: React.ReactNode }) {
   return <span className="text-[11px] font-black uppercase tracking-[0.16em] text-surface-500">{children}</span>;
 }
@@ -177,6 +184,24 @@ export function AgentDraftPreview({ content }: { content: string }) {
           <h1 className="mt-2 text-2xl font-black tracking-tight text-surface-100">{t('agentCreation.heading')}</h1>
           <p className="mt-2 max-w-xl text-sm leading-6 text-surface-400">{t('agentCreation.description')}</p>
         </header>
+
+        <section className="rounded-3xl border border-surface-700 bg-surface-900 p-4">
+          <FieldLabel>{t('agentCreation.starters.label')}</FieldLabel>
+          <p className="mt-2 text-xs leading-5 text-surface-500">{t('agentCreation.starters.description')}</p>
+          <div className="mt-3 grid gap-2 sm:grid-cols-2">
+            {STARTER_AGENTS.map((starter) => (
+              <button
+                key={starter.id}
+                type="button"
+                onClick={() => updateDraft({ face: `character:${starter.characterId}`, name: t(starter.nameKey), expectedExpertise: t(starter.expertiseKey), role: t(starter.expertiseKey) })}
+                className="flex min-h-20 items-center gap-3 rounded-2xl border border-surface-700 bg-surface-950/70 p-3 text-left transition-colors hover:border-primary-500/50 hover:bg-primary-500/8 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/70"
+              >
+                <AgentCharacterAvatar id={starter.characterId} className="h-12 w-12 shrink-0 rounded-xl" title={t(starter.nameKey)} />
+                <span className="min-w-0"><span className="block text-sm font-bold text-surface-100">{t(starter.nameKey)}</span><span className="mt-1 line-clamp-2 block text-[11px] leading-4 text-surface-500">{t(starter.expertiseKey)}</span></span>
+              </button>
+            ))}
+          </div>
+        </section>
 
         <section className="grid gap-5 rounded-3xl border border-surface-700 bg-surface-900 p-5 shadow-xl shadow-black/20 sm:grid-cols-[112px_1fr]">
           <div className="shrink-0">

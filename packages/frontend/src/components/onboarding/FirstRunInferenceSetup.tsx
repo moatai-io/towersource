@@ -27,7 +27,7 @@ function providerDraft(provider: Provider): ProviderDraft {
   return { provider, apiKey: '', ...PROVIDERS[provider] };
 }
 
-export function FirstRunInferenceSetup({ token, onComplete }: { token: string; onComplete: () => void }) {
+export function FirstRunInferenceSetup({ token, onComplete }: { token: string; onComplete: (result: { model: string; project: any; session: any }) => void }) {
   const { t } = useTranslation('onboarding');
   const [draft, setDraft] = useState<ProviderDraft>(() => providerDraft('openrouter'));
   const [busy, setBusy] = useState(false);
@@ -57,7 +57,24 @@ export function FirstRunInferenceSetup({ token, onComplete }: { token: string; o
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.error || t('provider.connectionFailed'));
       setDraft((current) => ({ ...current, apiKey: '' }));
-      onComplete();
+      const projectsResponse = await fetch(`${API_BASE}/projects`, { headers: { Authorization: `Bearer ${token}` } });
+      const projects = await projectsResponse.json().catch(() => []);
+      if (!projectsResponse.ok) throw new Error(projects?.error || t('provider.firstAgentFailed'));
+      const sourceProject = projects.find((project: any) => project.systemKey === 'general' || String(project.name).toLowerCase() === 'general') || projects[0];
+      if (!sourceProject?.id) throw new Error(t('provider.firstAgentFailed'));
+      const agentResponse = await fetch(`${API_BASE}/primary-agent-commands/bootstrap`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sourceProjectId: sourceProject.id,
+          name: t('provider.firstAgent.name'),
+          face: 'character:core-talent',
+          expectedExpertise: t('provider.firstAgent.expertise'),
+        }),
+      });
+      const agent = await agentResponse.json().catch(() => ({}));
+      if (!agentResponse.ok) throw new Error(agent?.error || t('provider.firstAgentFailed'));
+      onComplete({ model: String(data.model || draft.modelId), project: agent.project, session: agent.session });
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : t('provider.connectionFailed'));
     } finally {
@@ -98,13 +115,9 @@ export function FirstRunInferenceSetup({ token, onComplete }: { token: string; o
               <input type="password" autoComplete="off" value={draft.apiKey} onChange={(event) => setDraft({ ...draft, apiKey: event.target.value })} placeholder={t('provider.apiKeyPlaceholder')} className="mt-2 h-11 w-full rounded-xl border border-surface-700 bg-surface-950 px-3 text-sm text-surface-100 outline-none placeholder:text-surface-650 focus:border-primary-500/70 focus:ring-2 focus:ring-primary-500/15" />
               <span className="mt-2 block text-xs leading-5 text-surface-500">{t('provider.secretNote')}</span>
             </label>
-            <details className="rounded-xl border border-surface-800 bg-surface-950/40 px-4 py-3">
-              <summary className="cursor-pointer text-xs font-semibold text-surface-400">{t('provider.advanced')}</summary>
-              <div className="mt-4 grid gap-4">
-                <label className="block"><span className="text-xs text-surface-500">{t('provider.baseUrl')}</span><input value={draft.baseUrl} onChange={(event) => setDraft({ ...draft, baseUrl: event.target.value })} className="mt-1.5 h-10 w-full rounded-lg border border-surface-700 bg-surface-950 px-3 text-sm text-surface-200 outline-none focus:border-primary-500/70" /></label>
-                <label className="block"><span className="text-xs text-surface-500">{t('provider.modelId')}</span><input value={draft.modelId} onChange={(event) => setDraft({ ...draft, modelId: event.target.value })} className="mt-1.5 h-10 w-full rounded-lg border border-surface-700 bg-surface-950 px-3 text-sm text-surface-200 outline-none focus:border-primary-500/70" /></label>
-              </div>
-            </details>
+            <div className="rounded-xl border border-surface-800 bg-surface-950/40 px-4 py-3 text-xs leading-5 text-surface-500">
+              {t('provider.modelAutomatic', { model: draft.modelId })}
+            </div>
           </div>
 
           {error && <div role="alert" className="mt-4 rounded-xl border border-red-500/25 bg-red-500/8 px-4 py-3 text-sm leading-5 text-red-200">{error}</div>}

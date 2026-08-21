@@ -3,6 +3,7 @@ import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { VoiceConversationButton } from '../../components/chat/VoiceConversationButton';
 import { isAllowedDevHost } from '../../config/dev-hosts';
+import { isVoiceEnabled } from '../../config/voice-feature';
 
 const SESSION_KEY = 'tower:voice-lab:session-id';
 const DEV_DEFAULT_SESSION_ID = '171dc31d-5c7c-41f9-b457-a492428a93da';
@@ -17,6 +18,10 @@ export function VoiceLabPage() {
   const normalizedSessionId = sessionId.trim();
   const validSessionId = SESSION_ID_RE.test(normalizedSessionId);
   const devHost = isAllowedDevHost(window.location.hostname);
+
+  if (!isVoiceEnabled()) {
+    return <main className="flex min-h-screen items-center justify-center bg-surface-950 p-6 text-surface-100">음성 기능은 현재 비활성화되어 있습니다.</main>;
+  }
 
   if (!devHost) {
     return <main className="flex min-h-screen items-center justify-center bg-surface-950 p-6 text-surface-100">{t('voiceLab.devOnly')}</main>;

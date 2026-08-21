@@ -1338,6 +1338,17 @@ export function Sidebar({
                     </button>
                   );
                 })}
+                <button
+                  type="button"
+                  data-tour-id="agent-rail-create"
+                  onClick={() => window.dispatchEvent(new CustomEvent('tower-start-agent-academy'))}
+                  className="mt-2 flex h-10 w-40 shrink-0 items-center rounded-xl border border-dashed border-primary-500/30 text-primary-300 transition-colors hover:border-primary-500/55 hover:bg-primary-500/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/70"
+                  aria-label={t('newAiTeammate')}
+                  title={t('newAiTeammate')}
+                >
+                  <span className="grid h-10 w-10 shrink-0 place-items-center text-lg" aria-hidden="true">+</span>
+                  <span className={`min-w-0 flex-1 truncate text-left text-[13px] font-semibold transition-opacity duration-150 motion-reduce:transition-none ${agentNavExpanded ? 'opacity-100' : 'opacity-0'}`}>{t('newAiTeammate')}</span>
+                </button>
                 </div>
               </nav>
             )}

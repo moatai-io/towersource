@@ -30,6 +30,7 @@ export function createRemoteWorkbenchExecutionProvider(
         spec: {
           jobId: 800_000_000 + randomInt(100_000_000),
           projectId: input.projectId,
+          sessionId: input.sessionId,
           command: input.command,
           cwd: input.cwd,
           timeoutSec: input.timeoutSec,

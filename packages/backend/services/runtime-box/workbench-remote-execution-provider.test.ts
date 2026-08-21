@@ -19,7 +19,7 @@ describe('Remote Workbench execution provider', () => {
       projectId: 'p', userId: 7, sessionId: 's', command: 'pwd', cwd: '/workspace', timeoutSec: 10, env: { API_TOKEN: 'hidden' },
     })).resolves.toBe(execResult);
     expect(execute).toHaveBeenCalledWith(expect.objectContaining({
-      spec: expect.objectContaining({ projectId: 'p', command: 'pwd', cwd: '/workspace', timeoutSec: 10, environmentKeys: ['API_TOKEN'] }),
+      spec: expect.objectContaining({ projectId: 'p', sessionId: 's', command: 'pwd', cwd: '/workspace', timeoutSec: 10, environmentKeys: ['API_TOKEN'] }),
       credentials: { API_TOKEN: 'hidden' },
     }));
   });

@@ -128,7 +128,6 @@
   "noContent": "No content to display.",
   "shareWithCompany": "Add to company catalog",
   "createProjectCopy": "Create project copy",
-  "legacyEditNotice": "Editing and deletion remain in the legacy editor",
   "fileCount": "{{count}} files",
   "fileCountWithFolders": "{{count}} files · {{raw}} items including folders",
   "metaType": "Type",

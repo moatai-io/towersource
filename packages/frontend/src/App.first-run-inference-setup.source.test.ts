@@ -20,17 +20,17 @@ describe('OSS first-run inference setup', () => {
     expect(setup).not.toContain('localStorage.setItem');
   });
 
-  it('continues into first teammate creation only after the creator listener is ready', () => {
+  it('creates and opens the first default teammate without a reload', () => {
     const gate = app.slice(app.indexOf('if (firstRunInferenceSetup && token)'), app.indexOf('\n\n  return (', app.indexOf('if (firstRunInferenceSetup && token)')));
-    const creatorIndex = app.indexOf('const openAgentAcademy = useCallback(() => {');
-    const handoffEffectIndex = app.indexOf('if (!openFirstTeammateAfterSetup) return;');
+    expect(setup).toContain("modelId: 'openrouter/auto'");
+    expect(setup).toContain('/primary-agent-commands/bootstrap');
+    expect(setup).toContain("face: 'character:core-talent'");
+    expect(setup).not.toContain('onChange={(event) => setDraft({ ...draft, modelId: event.target.value })}');
     expect(gate).toContain("localStorage.removeItem('tower:firstRunInferenceSetup')");
-    expect(gate).toContain('setOpenFirstTeammateAfterSetup(true)');
-    expect(creatorIndex).toBeGreaterThan(-1);
-    expect(handoffEffectIndex).toBeGreaterThan(creatorIndex);
-    expect(app.slice(handoffEffectIndex, handoffEffectIndex + 500)).toContain('openAgentAcademy()');
-    expect(app).toContain("window.addEventListener('tower-start-agent-academy', openAgentAcademy)");
-    expect(app).toContain("{ split: 'right', name: t('newAiTeammate') }");
+    expect(gate).toContain('setDefaults({ session: model, ai_reply: model, ai_task: model })');
+    expect(gate).toContain('useProjectStore.getState().addProject(project)');
+    expect(gate).toContain('useSessionStore.getState().addSession(session)');
+    expect(gate).toContain('useFileStore.getState().openChatTab(session.id)');
   });
 
   it('does not count a file-only Project as an AI teammate', () => {

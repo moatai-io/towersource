@@ -304,6 +304,7 @@ export function ProjectHome({ project, onOpenFiles, onOpenFile }: ProjectHomePro
   const homeTabClass = (active: boolean) => `pointer-events-auto min-h-11 touch-manipulation rounded-lg px-3 py-2 text-xs font-bold transition-colors ${active ? 'tone-accent tone-action' : 'text-surface-400 hover:bg-surface-800 hover:text-surface-100'}`;
   const openSkillsBrowser = useSettingsStore((s) => s.setSkillsBrowserOpen);
   const openAgentsPanel = useSettingsStore((s) => s.setAgentsPanelOpen);
+  const aiServicesEnabled = useSettingsStore((s) => s.serverConfig?.aiServicesEnabled === true);
   const setCapabilityProjectId = useSettingsStore((s) => s.setCapabilityProjectId);
   const sessions = useSessionStore((s) => s.sessions);
   const hydrateProjectSessions = useSessionStore((s) => s.hydrateProjectSessions);
@@ -695,6 +696,7 @@ export function ProjectHome({ project, onOpenFiles, onOpenFile }: ProjectHomePro
               onOpenSession={openSession}
               onOpenWork={openWork}
               onOpenAllWork={() => setHomeTab('work')}
+              onExternalDeploy={aiServicesEnabled ? () => window.dispatchEvent(new CustomEvent('tower-open-ai-services', { detail: { projectId: project.id } })) : undefined}
             />
       </div>}
 

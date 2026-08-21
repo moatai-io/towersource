@@ -3,6 +3,14 @@
     "newAiTeammate": "New AI teammate",
     "heading": "Describe the teammate you want to work with",
     "description": "Start with a name and the expertise you expect. You can refine working style and tools together after the teammate joins.",
+    "starters": {
+      "label": "Which teammate should you start with?",
+      "description": "Choose the closest starting point to fill in a face, name, and expected role. You can edit everything below.",
+      "research": { "name": "Research Partner", "expertise": "Research the web and project materials, separate claims from evidence and uncertainty, and prepare sourced answers." },
+      "editor": { "name": "Document Editor", "expertise": "Clarify the conclusion and reader for reports, proposals, and guides, then create a draft that is ready to review." },
+      "operations": { "name": "Operations Coordinator", "expertise": "Organize progress, decisions, risks, and next actions, and turn repeated work into an executable operating flow." },
+      "guide": { "name": "Knowledge Guide", "expertise": "Read project documents and decisions, explain them to new participants, and avoid guessing when the source is incomplete." }
+    },
     "name": "Name",
     "namePlaceholder": "For example: Customer proposal partner",
     "expectedExpertise": "Expected expertise",

@@ -239,6 +239,8 @@
   "defaultModelDisableBlocked": "A model used by the default execution policy cannot be disabled. Select a different model in Execution Model Policy first.",
   "defaultModelDeleteBlocked": "A model used by the default execution policy cannot be deleted. Select a different model in Execution Model Policy first.",
   "toggleModel": "Change enabled state for {{name}}",
+  "defaultReasoning": "Default reasoning",
+  "defaultReasoningForModel": "Default reasoning level for {{name}}",
   "noAccountsHint": "No accounts registered. All sessions use default",
   "unassignedHintFull": "Unassigned projects use the default account:",
   "noneFallback": "— none —",

@@ -51,7 +51,7 @@ interface FilterDef {
  *      workspace/projects/tower/published/skill-ui-v3-24a9b8/index.html (dashboard prototype)
  *      workspace/projects/tower/published/skill-ui-v2-87fa8f/index.html (V2 catalog prototype)
  */
-export function SkillsBrowserV2({ onSwitchToV1: _onSwitchToV1 }: { onSwitchToV1: () => void }) {
+export function SkillsBrowserV2() {
   const { t } = useTranslation('skills');
   const setOpen = useSettingsStore((s) => s.setSkillsBrowserOpen);
   const [skills, setSkills] = useState<SkillMeta[]>([]);
@@ -1081,7 +1081,6 @@ function SkillDetailContent({ skill, isActive, onBack, onCopy, onShareCompany, r
           </button>
         )}
         <div className="flex-1" />
-        <span className="text-[12px] text-gray-600">{t('legacyEditNotice')}</span>
       </div>
     </main>
   );

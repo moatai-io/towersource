@@ -1145,7 +1145,7 @@ code, pre, .font-mono {
   --tower-login-label: rgba(153, 246, 228, 0.84);
   --tower-login-button-text: #03110f;
   height: var(--vvh, 100dvh);
-  min-height: 100dvh;
+  min-height: var(--vvh, 100dvh);
   overflow-x: hidden;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
@@ -1406,7 +1406,8 @@ code, pre, .font-mono {
 
 @media (max-width: 560px) {
   .tower-login-layout {
-    padding: 24px 18px 30px;
+    min-height: var(--vvh, 100dvh);
+    padding: 24px 18px calc(30px + env(safe-area-inset-bottom));
   }
 
   .tower-login-title {
@@ -1415,6 +1416,43 @@ code, pre, .font-mono {
 
   .tower-login-form {
     padding: 24px;
+  }
+
+  .tower-login-input {
+    scroll-margin-top: 88px;
+  }
+
+  .tower-input-focused .tower-login-shell {
+    scroll-behavior: smooth;
+  }
+
+  .tower-input-focused .tower-login-layout {
+    display: block;
+    padding-top: max(10px, env(safe-area-inset-top));
+    padding-bottom: calc(16px + env(safe-area-inset-bottom));
+  }
+
+  .tower-input-focused .tower-login-hero,
+  .tower-input-focused .tower-login-logo,
+  .tower-input-focused .tower-login-footer {
+    display: none;
+  }
+
+  .tower-input-focused .tower-login-card-wrap {
+    max-width: none;
+  }
+
+  .tower-input-focused .tower-login-form {
+    padding: 16px 18px 20px;
+    border-radius: 20px;
+  }
+
+  .tower-input-focused .tower-login-form-kicker {
+    margin-bottom: 12px;
+  }
+
+  .tower-input-focused .tower-login-form.space-y-5 > :not([hidden]) ~ :not([hidden]) {
+    margin-top: 12px;
   }
 }
 

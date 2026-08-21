@@ -1029,8 +1029,13 @@
   },
   "mcpConnections": {
     "title": "MCP 연결",
-    "description": "이 에이전트가 사용할 MCP 서버와 도구 연결을 여기에서 관리할 수 있게 됩니다.",
-    "comingSoon": "준비 중",
-    "scopeHint": "에이전트별 서버 선택, 권한 범위, Credential 연결 상태를 함께 보여줄 예정입니다."
+    "description": "이 AI 팀원의 Project Runtime에 구성된 외부 MCP 서버입니다.",
+    "serverCount": "{{count}}개 서버",
+    "enabled": "사용",
+    "disabled": "중지",
+    "invalid": "구성 오류",
+    "credentialsRequired": "필요한 Credential: {{names}}",
+    "loadFailed": "MCP 연결 상태를 불러오지 못했습니다.",
+    "scopeHint": "Project 범위 설정: {{path}} · 실제 연결은 새 AI 세션을 시작할 때 확인됩니다."
   }
 }

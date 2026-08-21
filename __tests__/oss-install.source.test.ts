@@ -8,8 +8,6 @@ describe('Tower OSS single-host installer contract', () => {
   const installer = read('install.sh');
   const doctor = read('doctor.sh');
   const bootstrap = read('bootstrap-local-worker.sh');
-  const publicAllowlist = read('public-allowlist.txt');
-  const publicDenylist = read('public-denylist.txt');
 
   it('provisions one complete server path without partial profiles', () => {
     expect(installer).toContain('setup_22.x');
@@ -26,6 +24,13 @@ describe('Tower OSS single-host installer contract', () => {
     expect(installer).toContain('/nix/var/nix/profiles/default/bin/nix');
     expect(installer).toContain('runtime-compute-doctor');
     expect(installer).toContain('tower-oss-worker-bootstrap.timer');
+    expect(installer).toContain('tower-oss-worker-bootstrap.path');
+    expect(installer).toContain('PathChanged=$DATA_DIR/workers/bootstrap.request');
+    expect(installer).toContain('TOWER_ROLE=standalone');
+    expect(installer).toContain('TOWER_AGENT_FIRST_ENABLED=true');
+    expect(installer).toContain('location = /index.html');
+    expect(installer).toContain('location = /sw.js');
+    expect(installer).toContain('Cache-Control "no-store, no-cache, must-revalidate"');
   });
 
   it('keeps generated secrets local and URL-encodes the database password', () => {
@@ -49,10 +54,10 @@ describe('Tower OSS single-host installer contract', () => {
     expect(doctor).toContain('/api/auth/status');
   });
 
-  it('ships the Worker bootstrap and does not seed skills excluded from the public export', () => {
-    expect(publicAllowlist).toContain('scripts/oss/bootstrap-local-worker.sh');
+  it('ships the Worker bootstrap and keeps provider-specific skills out of the default seed', () => {
     const defaultSkillsBlock = installer.match(/DEFAULT_SKILLS=\(([^)]*)\)/s)?.[1] ?? '';
-    const deniedSkills = [...publicDenylist.matchAll(/^skills\/managed\/([^/]+)\/\*\*$/gm)].map((match) => match[1]);
-    for (const skill of deniedSkills) expect(defaultSkillsBlock).not.toMatch(new RegExp(`\\b${skill}\\b`));
+    for (const skill of ['gws', 'issue', 'naver-search', 'tiro', 'youtube-transcript', 'image-slide-gen']) {
+      expect(defaultSkillsBlock).not.toMatch(new RegExp(`\\b${skill}\\b`));
+    }
   });
 });

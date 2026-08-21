@@ -3599,6 +3599,7 @@ interface PiModelEntry {
   enabled: boolean;
   api?: string;
   reasoning?: boolean;
+  defaultReasoning?: 'low' | 'medium' | 'high' | 'xhigh';
   contextWindow?: number;
   maxTokens?: number;
   roles?: string[];
@@ -3712,6 +3713,12 @@ function ModelManagement({ token }: { token?: string | null }) {
       return;
     }
     const updated = { ...models, pi: models.pi.filter((_, i) => i !== idx) };
+    void save(updated);
+  };
+
+  const updatePiReasoning = (idx: number, defaultReasoning: PiModelEntry['defaultReasoning']) => {
+    if (!models) return;
+    const updated = { ...models, pi: models.pi.map((model, i) => i === idx ? { ...model, defaultReasoning } : model) };
     void save(updated);
   };
 
@@ -3966,6 +3973,23 @@ function ModelManagement({ token }: { token?: string | null }) {
                 {references.length > 0 && <div className="mt-1 flex flex-wrap gap-1">{references.map(reference => <span key={reference} className="rounded bg-primary-500/10 px-1.5 py-0.5 text-[11px] text-primary-300">{reference}</span>)}</div>}
               </div>
               <span className="text-[13px] text-gray-500 font-mono">{modelId}</span>
+              {m.reasoning && (
+                <label className="flex items-center gap-1.5 text-[12px] text-surface-500">
+                  <span>{t('defaultReasoning')}</span>
+                  <select
+                    aria-label={t('defaultReasoningForModel', { name: m.name })}
+                    value={m.defaultReasoning ?? 'medium'}
+                    onChange={(event) => updatePiReasoning(i, event.target.value as PiModelEntry['defaultReasoning'])}
+                    disabled={saving}
+                    className="min-h-8 rounded border border-surface-600 bg-surface-700 px-2 text-[13px] text-surface-200"
+                  >
+                    <option value="low">low</option>
+                    <option value="medium">medium</option>
+                    <option value="high">high</option>
+                    <option value="xhigh">xhigh</option>
+                  </select>
+                </label>
+              )}
               {m.badge && <span className="text-[13px] px-1.5 py-0.5 rounded bg-surface-700 text-gray-400">{m.badge}</span>}
               <button
                 onClick={() => deletePi(i)}

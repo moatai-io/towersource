@@ -15,6 +15,10 @@ const SIGNUP_APPROVAL_MODE_KEY = 'signup.approval_mode';
 const DEFAULT_RESPONSE_LANGUAGE_KEY = 'language.default_response';
 const AI_COMPOSER_SETTINGS_KEY = 'ai.composer_autocomplete';
 
+// Temporary product-wide kill switch. Keep persisted preferences intact so the
+// experiment can be reviewed later without stale clients invoking the model.
+export const AI_COMPOSER_AUTOCOMPLETE_ENABLED = false;
+
 export interface AiComposerSettings {
   enabled: boolean;
   emptyDraftEnabled: boolean;
@@ -63,7 +67,10 @@ function normalizeAiComposerSettings(value: unknown): AiComposerSettings {
 /** Return live VM-wide AI composer settings from PostgreSQL. */
 export async function getAiComposerSettings(): Promise<AiComposerSettings> {
   const row = await queryOne<{ value: unknown }>('SELECT value FROM app_settings WHERE key = $1', [AI_COMPOSER_SETTINGS_KEY]);
-  return normalizeAiComposerSettings(row?.value);
+  const settings = normalizeAiComposerSettings(row?.value);
+  return AI_COMPOSER_AUTOCOMPLETE_ENABLED
+    ? settings
+    : { ...settings, enabled: false, emptyDraftEnabled: false, inlineDraftEnabled: false };
 }
 
 /** Validate and persist live VM-wide AI composer settings. */

@@ -24,5 +24,5 @@ export function SkillsBrowser() {
   }, []);
 
   if (!open) return null;
-  return <SkillsBrowserV2 onSwitchToV1={() => {}} />;
+  return <SkillsBrowserV2 />;
 }

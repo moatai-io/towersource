@@ -10,6 +10,7 @@ CONTROL_PLANE_URL="${TOWER_LOCAL_WORKER_CONTROL_PLANE_URL:-http://127.0.0.1:3236
 EXECUTION_USER="${TOWER_EXECUTION_USER:-tower-worker}"
 WORKER_DIR="$DATA_DIR/workers/$WORKER_ID"
 STATE_FILE="$WORKER_DIR/activated"
+REQUEST_FILE="$DATA_DIR/workers/bootstrap.request"
 
 log(){ printf '[tower-oss-worker] %s\n' "$*"; }
 fail(){ printf '[tower-oss-worker] ERROR: %s\n' "$*" >&2; exit 1; }
@@ -23,7 +24,11 @@ mkdir -p "$WORKER_DIR" /etc/tower-workers
 chmod 700 "$WORKER_DIR"
 chown root:"$EXECUTION_USER" /etc/tower-workers
 chmod 750 /etc/tower-workers
-[[ ! -f "$STATE_FILE" ]] || exit 0
+if [[ -f "$STATE_FILE" ]]; then
+  rm -f "$REQUEST_FILE"
+  systemctl stop tower-oss-worker-bootstrap.timer >/dev/null 2>&1 || true
+  exit 0
+fi
 
 # App boot creates General before the first administrator. Credentials intentionally
 # wait for the first administrator because identity records require an actor user.
@@ -109,4 +114,6 @@ node "$APP_DIR/dist/backend/packages/backend/scripts/materialize-managed-skills.
 
 printf '%s\n' "$(date -u +%FT%TZ)" > "$STATE_FILE"
 chmod 600 "$STATE_FILE"
+rm -f "$REQUEST_FILE"
+systemctl stop tower-oss-worker-bootstrap.timer >/dev/null 2>&1 || true
 log 'local Worker and General project are ready'

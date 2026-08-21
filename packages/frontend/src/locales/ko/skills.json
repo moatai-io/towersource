@@ -128,7 +128,6 @@
   "noContent": "표시할 내용이 없습니다.",
   "shareWithCompany": "회사 공용으로 등록",
   "createProjectCopy": "프로젝트 사본 만들기",
-  "legacyEditNotice": "편집/삭제는 레거시 편집 화면에서 유지",
   "fileCount": "{{count}}개 파일",
   "fileCountWithFolders": "{{count}}개 파일 · 폴더 포함 {{raw}}개",
   "metaType": "구분",

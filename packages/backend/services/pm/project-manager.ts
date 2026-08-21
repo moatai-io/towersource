@@ -1345,14 +1345,42 @@ export async function restoreProject(id: string): Promise<Project | null> {
   });
 }
 
+export class SessionRuntimeRebindRequiredError extends Error {
+  readonly code = 'SESSION_RUNTIME_REBIND_REQUIRED';
+
+  constructor() {
+    super('This session has a pinned runtime and cannot be moved between projects. Create a project transfer instead.');
+    this.name = 'SessionRuntimeRebindRequiredError';
+  }
+}
+
 export async function moveSessionToProject(sessionId: string, projectId: string | null): Promise<boolean> {
-  // Validate projectId exists if not null. Moving into a project also moves the
-  // session's working directory to that project root so future AI turns,
-  // Runtime Box mounts, and credential lookup all share the same context.
-  if (projectId) {
-    const project = await queryOne<{ id: string; root_path: string | null }>('SELECT id, root_path FROM projects WHERE id = $1', [projectId]);
+  const session = await queryOne<{
+    project_id: string | null;
+    claude_session_id: string | null;
+    pi_session_file: string | null;
+    has_runtime_snapshot: boolean;
+  }>(
+    `SELECT s.project_id, s.claude_session_id, s.pi_session_file,
+            EXISTS(SELECT 1 FROM session_runtime_snapshots rs WHERE rs.session_id = s.id) AS has_runtime_snapshot
+       FROM sessions s
+      WHERE s.id = $1`,
+    [sessionId],
+  );
+  if (!session) return false;
+
+  const targetProjectId = projectId || null;
+  const changesProject = session.project_id !== targetProjectId;
+  const hasPinnedRuntime = Boolean(session.claude_session_id || session.pi_session_file || session.has_runtime_snapshot);
+  if (changesProject && hasPinnedRuntime) throw new SessionRuntimeRebindRequiredError();
+
+  // Validate projectId exists if not null. Sessions without a pinned native
+  // runtime may still be reassigned safely because their next turn resolves the
+  // target Project's current Runtime Box, Harness, and credential policy.
+  if (targetProjectId) {
+    const project = await queryOne<{ id: string; root_path: string | null }>('SELECT id, root_path FROM projects WHERE id = $1', [targetProjectId]);
     if (!project) return false;
-    const result = await execute('UPDATE sessions SET project_id = $1, cwd = COALESCE($2, cwd) WHERE id = $3', [projectId, project.root_path, sessionId]);
+    const result = await execute('UPDATE sessions SET project_id = $1, cwd = COALESCE($2, cwd) WHERE id = $3', [targetProjectId, project.root_path, sessionId]);
     return result.changes > 0;
   }
 

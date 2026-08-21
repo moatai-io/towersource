@@ -67,6 +67,15 @@ export function LoginPage({ isSetup, onLogin, onSignup, error }: LoginPageProps)
       : 'rgba(153, 246, 228, 0.84)',
   });
 
+  const focusField = (field: string) => (event: React.FocusEvent<HTMLInputElement>) => {
+    setFocused(field);
+    if (window.matchMedia('(max-width: 560px)').matches) {
+      window.setTimeout(() => {
+        event.currentTarget.scrollIntoView({ block: 'start', behavior: 'smooth' });
+      }, 320);
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSubmitted(true);
@@ -170,7 +179,7 @@ export function LoginPage({ isSetup, onLogin, onSignup, error }: LoginPageProps)
                   type="text"
                   value={inviteCode}
                   onChange={(e) => setInviteCode(e.target.value)}
-                  onFocus={() => setFocused('inviteCode')}
+                  onFocus={focusField('inviteCode')}
                   onBlur={() => setFocused(null)}
                   className="tower-login-input w-full rounded-xl px-4 py-3 text-base text-white transition-all duration-300 outline-none"
                   style={inputStyle('inviteCode')}
@@ -200,7 +209,7 @@ export function LoginPage({ isSetup, onLogin, onSignup, error }: LoginPageProps)
                 type="text"
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
-                onFocus={() => setFocused('username')}
+                onFocus={focusField('username')}
                 onBlur={() => setFocused(null)}
                 className="tower-login-input w-full rounded-xl px-4 py-3 text-base text-white transition-all duration-300 outline-none [&:-webkit-autofill]:[-webkit-text-fill-color:white] [&:-webkit-autofill]:[transition:background-color_9999s]"
                 style={inputStyle('username')}
@@ -229,7 +238,7 @@ export function LoginPage({ isSetup, onLogin, onSignup, error }: LoginPageProps)
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                onFocus={() => setFocused('password')}
+                onFocus={focusField('password')}
                 onBlur={() => setFocused(null)}
                 className="tower-login-input w-full rounded-xl px-4 py-3 text-base text-white transition-all duration-300 outline-none [&:-webkit-autofill]:[-webkit-text-fill-color:white] [&:-webkit-autofill]:[transition:background-color_9999s]"
                 style={inputStyle('password')}
@@ -259,7 +268,7 @@ export function LoginPage({ isSetup, onLogin, onSignup, error }: LoginPageProps)
                     type="text"
                     value={displayName}
                     onChange={(e) => setDisplayName(e.target.value)}
-                    onFocus={() => setFocused('displayName')}
+                    onFocus={focusField('displayName')}
                     onBlur={() => setFocused(null)}
                     placeholder={t('displayNamePlaceholder')}
                     className="tower-login-input w-full rounded-xl px-4 py-3 text-base text-white transition-all duration-300 outline-none"
@@ -287,7 +296,7 @@ export function LoginPage({ isSetup, onLogin, onSignup, error }: LoginPageProps)
                     type="text"
                     value={affiliation}
                     onChange={(e) => setAffiliation(e.target.value)}
-                    onFocus={() => setFocused('affiliation')}
+                    onFocus={focusField('affiliation')}
                     onBlur={() => setFocused(null)}
                     placeholder={t('affiliationPlaceholder')}
                     className="tower-login-input w-full rounded-xl px-4 py-3 text-base text-white transition-all duration-300 outline-none"

@@ -81,7 +81,7 @@ describe('Remote Workbench durable Job runner', () => {
     await new Promise(resolve => setImmediate(resolve));
     release?.();
     expect(execute).toHaveBeenCalledWith(expect.objectContaining({
-      spec: expect.objectContaining({ projectId: 'p', workbenchRevision: 6, environmentKeys: [] }),
+      spec: expect.objectContaining({ projectId: 'p', sessionId: 's', workbenchRevision: 6, environmentKeys: [] }),
       signal: expect.any(AbortSignal),
     }));
     expect(appendWorkbenchJobOutput).toHaveBeenCalledWith(expect.objectContaining({ stream: 'stdout', chunk: 'remote 1/3\n' }));

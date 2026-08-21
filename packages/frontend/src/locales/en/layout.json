@@ -1029,8 +1029,13 @@
   },
   "mcpConnections": {
     "title": "MCP connections",
-    "description": "Manage the MCP servers and tool connections available to this Agent here.",
-    "comingSoon": "Coming soon",
-    "scopeHint": "This will show per-Agent server selection, permission scope, and Credential connection status."
+    "description": "External MCP servers configured for this AI teammate's Project Runtime.",
+    "serverCount": "{{count}} servers",
+    "enabled": "Enabled",
+    "disabled": "Disabled",
+    "invalid": "Invalid config",
+    "credentialsRequired": "Required Credentials: {{names}}",
+    "loadFailed": "Could not load MCP connection status.",
+    "scopeHint": "Project-scoped config: {{path}} · Live connectivity is checked when a new AI session starts."
   }
 }

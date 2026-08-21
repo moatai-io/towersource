@@ -168,6 +168,7 @@ function validSpec(value: unknown): value is RemoteWorkbenchJobSpec {
   const spec = value as Record<string, unknown>;
   return Number.isSafeInteger(spec.jobId)
     && typeof spec.projectId === 'string'
+    && (spec.sessionId === undefined || (typeof spec.sessionId === 'string' && /^[0-9a-fA-F-]{36}$/.test(spec.sessionId)))
     && (spec.workspaceId === undefined || (typeof spec.workspaceId === 'string' && /^[a-zA-Z0-9._-]{1,120}$/.test(spec.workspaceId)))
     && typeof spec.command === 'string'
     && spec.command.trim().length > 0
@@ -401,6 +402,7 @@ async function executeRun(
     TOWER_WORKSTATION_SHELL: 'native',
     TOWER_PROJECT_ROOT: projectRoot,
     ...processCredentials,
+    ...(spec.sessionId ? { TOWER_SESSION_ID: spec.sessionId } : {}),
     ...(operatorGitIdentity ? {
       GIT_AUTHOR_NAME: operatorGitIdentity.name,
       GIT_AUTHOR_EMAIL: operatorGitIdentity.email,

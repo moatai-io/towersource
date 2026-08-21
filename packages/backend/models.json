@@ -9,6 +9,7 @@
       "enabled": true,
       "api": "openai-responses",
       "reasoning": true,
+      "defaultReasoning": "medium",
       "cost": {
         "input": 5,
         "output": 30,
@@ -32,6 +33,7 @@
       "enabled": true,
       "api": "openai-responses",
       "reasoning": true,
+      "defaultReasoning": "low",
       "cost": {
         "input": 5,
         "output": 30,

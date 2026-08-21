@@ -25,7 +25,7 @@ const keys = [
   'originTowerSubtitle', 'originCompany', 'originCompanySubtitle', 'originProject',
   'originProjectSubtitle', 'all', 'backToList', 'list', 'renderedView', 'sourceView',
   'fileLoading', 'binaryPreviewUnavailable', 'binaryMetadataOnly', 'noContentMarkdown',
-  'binaryFile', 'noContent', 'shareWithCompany', 'createProjectCopy', 'legacyEditNotice',
+  'binaryFile', 'noContent', 'shareWithCompany', 'createProjectCopy',
   'fileCount', 'fileCountWithFolders', 'metaType', 'metaVisibility', 'metaAccess', 'metaRisk',
   'connectionRequired', 'runtimeSetupRequired', 'checkRuntimeRequirements', 'private',
   'projectUse', 'close', 'skillNameFormat', 'skillNameValidation', 'descriptionHint',

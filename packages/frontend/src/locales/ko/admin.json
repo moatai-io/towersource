@@ -239,6 +239,8 @@
   "defaultModelDisableBlocked": "기본 실행 정책에서 사용 중인 모델은 비활성화할 수 없습니다. 먼저 실행 모델 정책에서 다른 모델을 선택하세요.",
   "defaultModelDeleteBlocked": "기본 실행 정책에서 사용 중인 모델은 삭제할 수 없습니다. 먼저 실행 모델 정책에서 다른 모델을 선택하세요.",
   "toggleModel": "{{name}} 모델 활성 상태 변경",
+  "defaultReasoning": "기본 추론",
+  "defaultReasoningForModel": "{{name}} 기본 추론 수준",
   "noAccountsHint": "등록된 계정이 없습니다. 모든 세션이 기본",
   "unassignedHintFull": "할당되지 않은 프로젝트는 기본 계정을 사용합니다:",
   "noneFallback": "— 없음 —",

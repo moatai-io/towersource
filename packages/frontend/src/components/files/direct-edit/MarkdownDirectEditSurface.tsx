@@ -2,6 +2,7 @@
 // See README.md and docs/plans/2026-06-04-preview-direct-edit.md.
 
 import React, { useMemo, useRef, type CSSProperties } from 'react';
+import { useTranslation } from 'react-i18next';
 import ReactMarkdown from 'react-markdown';
 import rehypeHighlight from 'rehype-highlight';
 import rehypeRaw from 'rehype-raw';
@@ -96,7 +97,13 @@ function blockInnerRange(content: string, tag: EditableTag, block: { start: numb
   return null;
 }
 
-function createEditableBlock(tag: EditableTag, content: string, sourceStart: number, onContentChange: (next: string) => void) {
+function createEditableBlock(
+  tag: EditableTag,
+  content: string,
+  sourceStart: number,
+  onContentChange: (next: string) => void,
+  editTitle: string,
+) {
   return function EditableMarkdownBlock({ children, className, node, ...props }: any) {
     const elRef = useRef<HTMLElement | null>(null);
     const originalTextRef = useRef('');
@@ -163,7 +170,7 @@ function createEditableBlock(tag: EditableTag, content: string, sourceStart: num
         className: cls || undefined,
         contentEditable: editable ? 'plaintext-only' : undefined,
         suppressContentEditableWarning: editable || undefined,
-        title: editable ? '클릭해서 바로 수정' : undefined,
+        title: editable ? editTitle : undefined,
         onFocus: editable ? handleFocus : undefined,
         onBlur: editable ? handleBlur : undefined,
         onKeyDown: editable ? handleKeyDown : undefined,
@@ -178,14 +185,16 @@ function MarkdownSegmentRenderer({
   components,
   content,
   onContentChange,
+  editTitle,
 }: {
   segment: Segment;
   components: any;
   content: string;
   onContentChange: (next: string) => void;
+  editTitle: string;
 }) {
   const directComponents = useMemo(() => {
-    const wrap = (tag: EditableTag) => createEditableBlock(tag, content, segment.sourceStart, onContentChange);
+    const wrap = (tag: EditableTag) => createEditableBlock(tag, content, segment.sourceStart, onContentChange, editTitle);
     return {
       ...components,
       p: wrap('p'),
@@ -199,7 +208,7 @@ function MarkdownSegmentRenderer({
       td: wrap('td'),
       th: wrap('th'),
     };
-  }, [components, content, onContentChange, segment.sourceStart]);
+  }, [components, content, editTitle, onContentChange, segment.sourceStart]);
 
   return (
     <ReactMarkdown
@@ -221,6 +230,7 @@ interface Props {
 }
 
 export function MarkdownDirectEditSurface({ content, components, onContentChange, className, style }: Props) {
+  const { t } = useTranslation('files');
   const segments = useMemo(() => splitMermaidSegments(content), [content]);
 
   return (
@@ -235,6 +245,7 @@ export function MarkdownDirectEditSurface({ content, components, onContentChange
             components={components}
             content={content}
             onContentChange={onContentChange}
+            editTitle={t('markdownDirectEdit.clickToEdit')}
           />
         ),
       )}

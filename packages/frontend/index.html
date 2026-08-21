@@ -1,6 +1,19 @@
 <!DOCTYPE html>
-<html lang="ko">
+<html lang="en">
   <head>
+    <script src="/runtime-config.js"></script>
+    <script>
+      (function() {
+        var saved = localStorage.getItem('tower:lang');
+        var configured = window.__TOWER_RUNTIME_CONFIG__ && window.__TOWER_RUNTIME_CONFIG__.defaultLanguage;
+        var language = saved === 'ko' || saved === 'en'
+          ? saved
+          : configured === 'ko' || configured === 'en'
+            ? configured
+            : 'en';
+        document.documentElement.lang = language;
+      })();
+    </script>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, interactive-widget=resizes-content" />
     <title>Tower</title>

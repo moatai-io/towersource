@@ -302,7 +302,8 @@ describe('Pi engine — model safety', () => {
     expect(src).toMatch(/Do not inject service_tier=priority for Smartest by default/);
     expect(src).not.toMatch(/serviceTier: 'priority'/);
     expect(src).not.toMatch(/service_tier: 'priority'/);
-    expect(src).toMatch(/const defaultThinkingLevel = model\.provider === 'litellm-responses' && \(model\.id === 'smartest' \|\| model\.id === 'smartest-long'\)[\s\S]*?\? 'low'[\s\S]*?: 'medium'/);
+    expect(src).toMatch(/const configuredModel = loadModelsFile\(\)\.pi\.find\(entry => entry\.provider === model\.provider && entry\.modelId === model\.id\)/);
+    expect(src).toMatch(/const defaultThinkingLevel = configuredModel\?\.defaultReasoning \|\| 'medium'/);
     expect(src).toMatch(/thinkingLevel: effectiveThinkingLevel/);
     expect(src).toMatch(/requestedEffort: opts\.requestedEffort \|\| opts\.effort \|\| defaultThinkingLevel/);
     expect(src).toMatch(/reasoning: isReasoningModel \? 'medium' : undefined/);

@@ -187,6 +187,8 @@ interface PiModelEntry {
   api?: string;
   /** Optional: enable reasoning param wiring in Pi SDK (e.g. for thinking models). */
   reasoning?: boolean;
+  /** Default Pi thinking level when a run does not provide an explicit effort override. */
+  defaultReasoning?: 'low' | 'medium' | 'high' | 'xhigh';
   /** Optional per-million-token rates used by Pi/Tower usage metadata. */
   cost?: { input: number; output: number; cacheRead: number; cacheWrite: number };
   /** Optional: max input context tokens (defaults to 400_000). */

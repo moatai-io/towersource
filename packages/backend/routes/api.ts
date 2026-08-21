@@ -20,6 +20,7 @@ import aiServicePublicRouter from './ai-service-public-api.js';
 import workspaceAppsRouter from './workspace-apps-api.js';
 import harnessRouter from './harness-api.js';
 import primaryAgentRouter from './primary-agent-api.js';
+import { inspectProjectMcpConfiguration } from '../services/project-mcp/project-mcp-loader.js';
 import {
   authenticateUser, createUser, hasUsers, generateToken, generateScopedToken, verifyToken, authMiddleware, extractToken,
   adminMiddleware, operatorOrAboveMiddleware, listUsers, updateUserRole,
@@ -104,7 +105,7 @@ import fsPromises from 'fs/promises';
 import { execute, query, queryOne } from '../db/pg-repo.js';
 import {
   getProjects, getProject, createProject, updateProject, retireProject, restoreProject,
-  moveSessionToProject, reorderProjects, saveUserProjectPins,
+  moveSessionToProject, reorderProjects, saveUserProjectPins, SessionRuntimeRebindRequiredError,
 } from '../services/pm/project-manager.js';
 import { listAdminAgents, previewAgentPurge } from '../services/pm/agent-purge-preview.js';
 import { createAgentPurgeJob, getAgentPurgeJob, runAgentPurgeJob } from '../services/pm/agent-purge-job.js';
@@ -658,6 +659,15 @@ router.all('/auth/logout', (_req, res) => {
   res.json({ ok: true });
 });
 
+async function requestOssWorkerBootstrapAfterFirstAdmin(): Promise<void> {
+  if (process.env.TOWER_ROLE !== 'standalone' || process.env.TOWER_AGENT_FIRST_ENABLED !== 'true') return;
+  const dataDir = process.env.TOWER_DATA_DIR || process.env.DATA_DIR;
+  if (!dataDir) return;
+  const requestPath = path.join(dataDir, 'workers', 'bootstrap.request');
+  await fs.promises.mkdir(path.dirname(requestPath), { recursive: true });
+  await fs.promises.writeFile(requestPath, `${new Date().toISOString()}\n`, { mode: 0o600 });
+}
+
 router.post('/auth/setup', authMutationLimiter, async (req, res) => {
   if (await hasUsers()) return res.status(400).json({ error: 'Admin already exists' });
   const { username, password, displayName, affiliation } = req.body;
@@ -668,6 +678,11 @@ router.post('/auth/setup', authMutationLimiter, async (req, res) => {
       displayName: displayName ?? null,
       affiliation: affiliation ?? null,
     });
+    try {
+      await requestOssWorkerBootstrapAfterFirstAdmin();
+    } catch (bootstrapError) {
+      console.warn('[auth] Failed to request OSS local Worker bootstrap after first admin creation', bootstrapError);
+    }
     const token = generateToken({ userId: user.id, username: user.username, role: user.role });
     setTokenCookie(res, token);
     res.json({ token, user: { id: user.id, username: user.username, role: user.role } });
@@ -2570,7 +2585,10 @@ router.post('/admin/inference-setup/apply', adminMiddleware, async (req, res) =>
 router.put('/admin/models', adminMiddleware, (req, res) => {
   try {
     const data = req.body;
-    if (!data.claude || !data.pi) return res.status(400).json({ error: 'claude and pi arrays required' });
+    if (!Array.isArray(data.claude) || !Array.isArray(data.pi)) return res.status(400).json({ error: 'claude and pi arrays required' });
+    const allowedReasoningLevels = new Set(['low', 'medium', 'high', 'xhigh']);
+    const invalidReasoningModel = data.pi.find((model: any) => model.defaultReasoning !== undefined && !allowedReasoningLevels.has(model.defaultReasoning));
+    if (invalidReasoningModel) return res.status(400).json({ error: 'defaultReasoning must be low, medium, high, or xhigh' });
     saveModelsFile(data);
     const reloaded = reloadModels();
     // Broadcast updated model list to all connected clients
@@ -6647,6 +6665,21 @@ async function broadcastToProjectMembers(
   }
 }
 
+router.get('/projects/:id/mcp-connections', async (req, res) => {
+  try {
+    const userId = (req as any).user?.userId as number | undefined;
+    const role = String((req as any).user?.role || 'member');
+    if (!userId) return res.status(401).json({ error: 'auth required' });
+    const projectId = req.params.id;
+    const project = (await getProjects(userId, role)).find((item: any) => item.id === projectId);
+    if (!project?.rootPath) return res.status(404).json({ error: 'project not found' });
+    res.json(await inspectProjectMcpConfiguration(project.rootPath));
+  } catch (err: any) {
+    console.error('[api] project MCP configuration inspection failed:', err);
+    res.status(500).json({ error: err?.message || 'failed to inspect project MCP configuration' });
+  }
+});
+
 router.get('/projects/:id/activity-graph', async (req, res) => {
   try {
     const userId = (req as any).user?.userId as number | undefined;
@@ -7181,6 +7214,12 @@ router.post('/sessions/:id/move', async (req, res) => {
     broadcast({ type: 'session_moved', sessionId: req.params.id as string, projectId: projectId ?? null });
     res.json({ ok: true });
   } catch (err: any) {
+    if (err instanceof SessionRuntimeRebindRequiredError || err?.code === 'SESSION_RUNTIME_REBIND_REQUIRED') {
+      return res.status(409).json({
+        error: 'session_runtime_rebind_required',
+        message: '고정된 실행 문맥이 있는 세션은 프로젝트만 변경할 수 없습니다. 프로젝트 간 이관 기능을 사용해야 합니다.',
+      });
+    }
     res.status(500).json({ error: err.message });
   }
 });

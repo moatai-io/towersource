@@ -48,6 +48,8 @@ export interface RemoteWorkbenchCancellationAcknowledgement {
 export interface RemoteWorkbenchJobSpec {
   jobId: number;
   projectId: string;
+  /** Non-secret Tower session attribution propagated to user-initiated Worker child processes. */
+  sessionId?: string;
   /** Optional operator-prepared per-Job workspace directory under the allowlisted Project root. */
   workspaceId?: string;
   command: string;
@@ -170,6 +172,7 @@ async function runRemoteJob(
         spec: {
           jobId: job.id,
           projectId: job.project_id,
+          sessionId: job.requested_by_session_id,
           ...(prepared ? { workspaceId: prepared.workspaceId } : {}),
           command: job.command,
           cwd: job.cwd ?? undefined,
