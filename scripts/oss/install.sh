@@ -152,11 +152,10 @@ else
   rsync -a --delete --exclude='.git' --exclude='.env' --exclude='node_modules' --exclude='dist' "$SOURCE_DIR/" "$APP_DIR/"
 fi
 cd "$APP_DIR"
-if ! npm ci --no-audit --no-fund; then
-  printf '\033[1;33m[WARN]\033[0m package-lock.json is not synchronized; falling back to npm install.\n' >&2
-  printf '\033[1;33m[WARN]\033[0m Public releases should fix the lockfile so npm ci succeeds.\n' >&2
-  npm install --no-audit --no-fund
-fi
+# A public release must be reproducible from its committed lockfile. Falling
+# back to `npm install` can silently select different transitive dependencies
+# on each host, so fail clearly and fix the release instead.
+npm ci --no-audit --no-fund
 npm run build
 
 # Production ESM imports resolve @tower/shared from node_modules, while the
@@ -256,6 +255,16 @@ TOWER_PRIMARY_WORKER_ID=tower-oss-local-01
 WORKSPACE_LANGUAGE=en
 EOF
 chmod 600 "$ENV_FILE"
+
+log "Applying PostgreSQL migrations"
+set -a
+# shellcheck disable=SC1090
+source "$ENV_FILE"
+set +a
+node "$APP_DIR/dist/backend/packages/backend/scripts/apply-db-migrations.js" apply
+MIGRATION_STATUS=$(node "$APP_DIR/dist/backend/packages/backend/scripts/apply-db-migrations.js" status)
+python3 -c 'import json,sys; d=json.loads(sys.argv[1]); assert d.get("pendingCount") == 0, d' "$MIGRATION_STATUS"
+ok "PostgreSQL schema is current"
 
 cat > /etc/systemd/system/tower.service <<EOF
 [Unit]

@@ -74,7 +74,9 @@ if [[ "$has_users" == "true" ]]; then
   check "Local Worker heartbeat active" systemctl is-active --quiet "tower-workbench-worker-$WORKER_ID-heartbeat.service"
   check "General skills materialized" bash -c 'manifest=$(find "$1/workspace/projects/general" -path "*/.tower/skills/manifest.json" -print -quit); [[ -n "$manifest" ]] && python3 -c '\''import json,sys; d=json.load(open(sys.argv[1])); assert len(d.get("skills", [])) > 0'\'' "$manifest"' _ "$DATA_DIR"
 else
-  check "Post-setup Worker bootstrap armed" systemctl is-enabled --quiet tower-oss-worker-bootstrap.timer
+  check "Post-setup Worker bootstrap timer enabled" systemctl is-enabled --quiet tower-oss-worker-bootstrap.timer
+  check "Post-setup Worker bootstrap timer active" systemctl is-active --quiet tower-oss-worker-bootstrap.timer
+  check "Post-setup Worker bootstrap path active" systemctl is-active --quiet tower-oss-worker-bootstrap.path
 fi
 
 printf '\nDoctor result: %d passed, %d failed\n' "$PASS" "$FAIL"

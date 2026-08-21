@@ -1,14 +1,18 @@
 # Tower
 
-> **The open-source operating system for running a business with AI agents.**
+> **Build the AI operating system your whole company can use — and own.**
 
-Give every agent a real computer, a persistent workspace, memory, tools, credentials, and clear authority. Put them to work across research, sales, documents, data, operations, publishing, and customer service.
+Tower is an open-source **multiplayer agent harness with persistent compute access**, wrapped in a business-friendly workspace. Multiple people can direct AI teammates, continue their work, share what they learn, and keep every project inside a clear operating boundary.
 
-Your team uses Tower from the web and mobile. You choose the infrastructure, models, and services behind it.
+Every AI teammate gets a real computer, a persistent workspace, memory, tools, credentials, and clear authority. Your people work with them from the web and mobile across research, sales, documents, data, operations, publishing, and customer service.
 
-Tower was shaped through five months of real customer work. The difference between an agent demo and an operating system is thousands of small details. **Tower was built in those details.**
+The goal is not another clever assistant in another private chat. It is a company-wide learning loop: work becomes shared context, successful methods become reusable skills, and every project makes the system more useful to the next person.
 
-**Skip rebuilding agent infrastructure. Start building the AI-operated company only you can build.**
+Run it on infrastructure you control. Choose the models and services that fit each job. Keep the operating knowledge your company creates.
+
+**We are open-sourcing the product foundation we use to build Tower, run our own work, and support real customer operations. Tower was built with Tower — one experiment, failure, automation, and reusable system at a time.**
+
+This is a seed, not a finished idea of how your company should work. Make it yours. Let your knowledge accumulate inside it, change the code, bring in new open-source tools, and keep incorporating what the community builds next.
 
 [![License](https://img.shields.io/badge/license-Apache_2.0-blue.svg)](LICENSE)
 [![Status](https://img.shields.io/badge/status-research_alpha-orange)]()
@@ -52,7 +56,7 @@ Tower is not tied to one model vendor. Connect supported cloud providers, model 
 - [What Tower is](#what-tower-is)
 - [Who should try Tower](#who-should-try-tower)
 - [What Tower gives a team](#what-tower-gives-a-team)
-- [Why I built Tower](#why-i-built-tower)
+- [Why we are opening Tower](#why-we-are-opening-tower)
 - [How Tower is different](#how-tower-is-different)
 - [Architecture at a glance](#architecture-at-a-glance)
 - [Feature map](#feature-map)
@@ -117,7 +121,9 @@ Over the last five months, Tower has been applied to real customer work and refi
 
 ## What Tower is
 
-**Tower is a self-hosted platform for creating, operating, and deploying AI agents with their own accountable computing environments.**
+**Tower is a self-hosted, multiplayer agent harness for creating, operating, and deploying AI agents with persistent access to accountable computing environments.**
+
+“Multiplayer” means AI work is not trapped in one operator's terminal or private chat. Authorized teammates can direct agents, continue sessions, inspect files and artifacts, and build on shared operating knowledge. Each agent can retain its own workspace and compute context across work instead of starting from an empty conversation every time.
 
 Create an agent, assign its role and operating policy, connect the models and services it needs, and give it an independent workspace where it can execute real work. Then deploy it to your internal team, a customer, or an external audience while preserving the agent’s files, memory, authority, and audit trail.
 
@@ -270,40 +276,25 @@ AI work often ends as something people need to open: a static page, report, dash
 
 ---
 
-## Why I built Tower
+## Why we are opening Tower
 
-Tower began as an attempt to build the most capable agent environment I could use for my own work.
+Several projects showed important parts of the future before Tower.
 
-Starting from the Pi coding agent, I wanted to configure a high-agency harness myself — choosing the models, tools, prompts, skills, and execution patterns instead of being limited to a fixed chat experience or a predefined agent builder. I wanted an environment that could work with real files and code, accept new tools, and keep evolving around the job. That freedom felt essential to getting the best performance from an agent.
+[OpenClaw](https://github.com/openclaw/openclaw) made the open-source personal assistant tangible: an agent on your own machine, available through the channels you already use. But the moment we tried to extend the personal-assistant model across a company, the operating burden moved to the humans. Someone still had to keep countless projects and sessions understandable, separate credentials and authority, protect customer work, and make the result safely shareable.
 
-But using a powerful harness alone was not enough. **I wanted my teammates to use the same deeply configurable harness through the web and mobile, without rebuilding my development environment.** It needed to become a team structure: people working from anywhere, sharing context and operating rules, and assigning work to AI teammates without every person becoming a terminal expert.
+[Grok Bot](https://docs.x.ai/grok-bot/teams-and-enterprises) recognized another essential fact: a useful AI coworker needs persistent compute, not just a chat window. Its managed approach makes that compute convenient for teams. The tradeoff is that the model, infrastructure, economics, and customization boundary remain largely the provider's. That can be a good choice for many teams; it is a difficult foundation for organizations that need long-term self-hosting, on-premise control, or freedom to assemble their own model stack.
 
-I also wanted to give every agent more than a chat session. I wanted to give it **an actual independent computer** — its own files and runtime, tools and credentials, memory and authority boundaries — so it could keep running the many automations a business needs across research, documents, code, publishing, monitoring, and recurring operations.
+Y Combinator's [QM](https://github.com/yc-software/qm) deserves particular credit for open-sourcing a multiplayer agent harness it uses internally. It is a strong expression of what highly technical teams can build when agents receive isolated workspaces and real tools. To us, it still feels closest to organizations already comfortable with developer workflows.
 
-That made the product shape clear:
+We believe there is another path for owner-led companies and non-IT teams: preserve the agency of a developer-grade harness, but wrap it in a business-friendly system the whole company can operate. Projects and sessions should remain understandable. Files, credentials, approvals, and authority should have explicit homes. Every AI teammate should have accountable compute. And the organization should remain independent of any single model or infrastructure vendor.
 
-```text
-a high-agency agent harness
-+ a shared web and mobile workspace
-+ an independent computer and work context for every agent
-+ the models, tools, and credentials you choose
-+ business automation and persistent execution
-= Tower
-```
+The most important asset is not the answer from today's best model. Models will change. **The durable asset is the learning loop the company owns:** the context it preserves, the decisions it records, the skills it refines, the automations it trusts, and the ability for one person's successful work to improve how everyone works next time.
 
-Most AI products solve one part of this experience well:
+That is why we are publishing the source we use ourselves and have shaped through real customer work. Tower was built with Tower. We used it to inspect its own code, design features, prepare releases, create documents, test new workflows, recover from failed experiments, and turn repeated work into automation. Building this way convinced us that an open, adaptable system is the best environment for trying many new things every day without throwing away what you learn.
 
-- **Chat products** make models easy to access, but offer limited control over the agent harness and rarely give each agent an independent environment for persistent execution.
-- **Agent builders** make prompts and tools easier to assemble and deploy, but the freedom to change the harness beyond their abstractions — or give an agent a complete working computer — varies widely.
-- **Coding agents** provide powerful tool use and computer access, but are commonly centered on one technical user and that user’s local environment.
-- **Workflow automation tools** repeat defined processes reliably, but broader work that requires context, tool choice, and exception handling needs an agent layer around the workflow.
-- **Managed AI services** reduce operational work, but require the organization to accept someone else’s infrastructure, model choices, and control boundary.
+Tower is a seed. As you use it, your organization's knowledge should accumulate inside it. You should be able to change the code, incorporate improvements from the community, apply new open-source models and tools, and grow a system that increasingly reflects how your own company works.
 
-Tower connects those strengths in a team platform. It aims to preserve the power and freedom of a deeply configurable harness, make it available through the web and mobile, give every agent independent computing, and run it on infrastructure and models you choose.
-
-The goal is not to reserve meaningful AI leverage for large organizations. It is to help **solo businesses and small teams build their own AI team and automation foundation, execute at a speed that once required a much larger organization, and move ahead.**
-
-That is the difference Tower is trying to make real.
+**Our hope is that Tower becomes a shorter path to building your own AI-operated company — business-friendly enough for the whole team, open enough to keep changing, and independent enough to remain yours.**
 
 ---
 
@@ -326,7 +317,7 @@ That is the difference Tower is trying to make real.
 | Bring your own model endpoints | ✓ | varies | varies | varies |
 | Self-hosted organizational boundary | ✓ | varies | uncommon | ✓ |
 
-**Short version:** chat products make models accessible and agent tools make them capable. Tower makes that capability shared, governable, and cumulative for an organization.
+**Short version:** chat products make models accessible and agent tools make them capable. Tower turns that capability into a multiplayer system with persistent compute — shared, governable, and cumulative for an organization.
 
 ---
 

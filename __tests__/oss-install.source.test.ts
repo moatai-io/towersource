@@ -5,9 +5,17 @@ import { describe, expect, it } from 'vitest';
 const read = (name: string) => fs.readFileSync(path.join(process.cwd(), 'scripts/oss', name), 'utf8');
 
 describe('Tower OSS single-host installer contract', () => {
+  const bootstrap = read('bootstrap.sh');
   const installer = read('install.sh');
   const doctor = read('doctor.sh');
-  const bootstrap = read('bootstrap-local-worker.sh');
+  const workerBootstrap = read('bootstrap-local-worker.sh');
+
+  it('bootstraps a blank supported Ubuntu host from the public repository', () => {
+    expect(bootstrap).toContain('https://github.com/moatai-io/towersource.git');
+    expect(bootstrap).toContain("apt-get install -y -qq ca-certificates curl git");
+    expect(bootstrap).toContain('git clone --filter=blob:none');
+    expect(bootstrap).toContain('scripts/oss/install.sh');
+  });
 
   it('provisions one complete server path without partial profiles', () => {
     expect(installer).toContain('setup_22.x');
@@ -31,6 +39,8 @@ describe('Tower OSS single-host installer contract', () => {
     expect(installer).toContain('location = /index.html');
     expect(installer).toContain('location = /sw.js');
     expect(installer).toContain('Cache-Control "no-store, no-cache, must-revalidate"');
+    expect(installer).toContain('apply-db-migrations.js" apply');
+    expect(installer).toContain('pendingCount')
   });
 
   it('keeps generated secrets local and URL-encodes the database password', () => {
@@ -44,7 +54,7 @@ describe('Tower OSS single-host installer contract', () => {
     expect(installer).toContain('dist/runtime-packages/@tower/shared');
     expect(installer).toContain('skills/managed/');
     expect(installer).toContain('bootstrap-local-worker.sh');
-    expect(bootstrap).toContain('activate-oss-local-worker.js');
+    expect(workerBootstrap).toContain('activate-oss-local-worker.js');
     expect(doctor).toContain('Runtime shared package linked');
     expect(doctor).toContain('Tower Nix closure linked');
     expect(doctor).toContain('Compute baseline ready');
@@ -52,6 +62,12 @@ describe('Tower OSS single-host installer contract', () => {
     expect(doctor).toContain('General skills materialized');
     expect(doctor).toContain('/api/health');
     expect(doctor).toContain('/api/auth/status');
+  });
+
+  it('requires the committed npm lockfile instead of silently selecting new dependencies', () => {
+    expect(installer).toContain('npm ci --no-audit --no-fund');
+    expect(installer).not.toContain('npm install --no-audit --no-fund');
+    expect(installer).not.toContain('falling back to npm install');
   });
 
   it('ships the Worker bootstrap and keeps provider-specific skills out of the default seed', () => {

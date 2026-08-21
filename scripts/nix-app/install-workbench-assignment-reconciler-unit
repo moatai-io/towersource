@@ -7,36 +7,53 @@ app_root="${TOWER_APP_ROOT:-${1:-}}"
 app_root="$(realpath "$app_root")"
 reconciler="$app_root/bin/tower-workbench-assignment-reconciler"
 [[ -x "$reconciler" ]] || fail 'Assignment reconciler launcher is missing from Nix closure'
+
 worker_id="${TOWER_ASSIGNMENT_PRIMARY_WORKER_ID:-tower-prod-local-01}"
+deployment_id="${TOWER_ASSIGNMENT_DEPLOYMENT_ID:-production}"
+working_directory="${TOWER_ASSIGNMENT_WORKING_DIRECTORY:-$PWD}"
+environment_file="${TOWER_ASSIGNMENT_ENVIRONMENT_FILE:-$working_directory/.env}"
+workspace_root="${TOWER_ASSIGNMENT_WORKSPACE_ROOT:-${WORKSPACE_ROOT:-$HOME/workspace}}"
+actor_user_id="${TOWER_ASSIGNMENT_ACTOR_USER_ID:-1}"
+worker_max_runs="${TOWER_ASSIGNMENT_PRIMARY_MAX_RUNS:-5}"
 config_file="${TOWER_ASSIGNMENT_WORKER_CONFIG:-$HOME/.config/tower-workers/$worker_id.json}"
 identity_file="${TOWER_ASSIGNMENT_WORKER_IDENTITY:-$HOME/.config/tower-workers/$worker_id.identity.jwt}"
+
+for path_value in "$working_directory" "$environment_file" "$workspace_root" "$config_file" "$identity_file"; do
+  [[ "$path_value" = /* ]] || fail "all configured paths must be absolute: $path_value"
+done
+working_directory="$(realpath -e "$working_directory")"
+workspace_root="$(realpath -e "$workspace_root")"
+[[ -f "$environment_file" ]] || fail "Environment file is required: $environment_file"
 [[ -f "$config_file" && -f "$identity_file" ]] || fail 'Primary Worker config and identity are required'
+[[ "$actor_user_id" =~ ^[1-9][0-9]*$ ]] || fail 'TOWER_ASSIGNMENT_ACTOR_USER_ID must be a positive integer'
+[[ "$worker_max_runs" =~ ^[1-9][0-9]*$ ]] || fail 'TOWER_ASSIGNMENT_PRIMARY_MAX_RUNS must be a positive integer'
 
 unit_dir="$HOME/.config/systemd/user"
 mkdir -p "$unit_dir"
 cat >"$unit_dir/tower-workbench-assignment-reconciler.service" <<EOF
 [Unit]
-Description=Tower production Project Worker assignment reconciler
-After=network-online.target tower-prod-workbench-worker.service
+Description=Tower Project Worker assignment reconciler
+After=network-online.target
+Wants=network-online.target
 
 [Service]
 Type=oneshot
-WorkingDirectory=/home/enterpriseai/tower
-EnvironmentFile=/home/enterpriseai/tower/.env
+WorkingDirectory=$working_directory
+EnvironmentFile=$environment_file
 Environment=NODE_ENV=production
-Environment=WORKSPACE_ROOT=/home/enterpriseai/workspace
-Environment=TOWER_ASSIGNMENT_DEPLOYMENT_ID=production
+Environment=WORKSPACE_ROOT=$workspace_root
+Environment=TOWER_ASSIGNMENT_DEPLOYMENT_ID=$deployment_id
 Environment=TOWER_ASSIGNMENT_PRIMARY_WORKER_ID=$worker_id
 Environment=TOWER_ASSIGNMENT_WORKER_CONFIG=$config_file
 Environment=TOWER_ASSIGNMENT_WORKER_IDENTITY=$identity_file
-Environment=TOWER_ASSIGNMENT_PRIMARY_MAX_RUNS=5
-Environment=TOWER_ASSIGNMENT_ACTOR_USER_ID=1
+Environment=TOWER_ASSIGNMENT_PRIMARY_MAX_RUNS=$worker_max_runs
+Environment=TOWER_ASSIGNMENT_ACTOR_USER_ID=$actor_user_id
 ExecStart=$reconciler
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths=/home/enterpriseai/.config/tower-workers /home/enterpriseai/.config/systemd/user /home/enterpriseai/workspace/projects
+ReadWritePaths=$HOME/.config/tower-workers $HOME/.config/systemd/user $workspace_root/projects
 EOF
 
 cat >"$unit_dir/tower-workbench-assignment-reconciler.timer" <<EOF

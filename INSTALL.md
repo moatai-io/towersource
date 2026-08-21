@@ -7,7 +7,7 @@
 | Requirement | Version | Check |
 |-------------|---------|-------|
 | **Ubuntu** | 22.04+ | `lsb_release -a` |
-| **Node.js** | 20+ | `node -v` |
+| **Node.js** | 22+ (installer가 자동 설치) | `node -v` |
 | **Git** | any | `git --version` |
 | **At least one AI engine** | Pi preferred; Claude legacy fallback optional | — |
 | **Azure OpenAI / OpenRouter / OpenAI** *(Pi path)* | any provider you use | — |
@@ -25,7 +25,9 @@
 
 ## Quick Start — Ubuntu Server
 
-For a fresh Ubuntu 22.04 or 24.04 server, use the OSS installer. It provisions Node.js 22, PostgreSQL 18 with `uuid-ossp`/`pg_trgm`/`vector`, secure local secrets, a systemd service, nginx, and a final doctor check.
+For a fresh Ubuntu 22.04 or 24.04 server, use the OSS installer. It provisions base build packages, Node.js 22, PostgreSQL 18 with `uuid-ossp`/`pg_trgm`/`vector`, the reproducible Nix compute closure, secure local secrets, the Tower build, nginx, systemd services, the local Project Worker bootstrap, and the curated public skill seed.
+
+If Git is already installed:
 
 ```bash
 git clone https://github.com/moatai-io/towersource.git tower
@@ -33,7 +35,15 @@ cd tower
 sudo bash scripts/oss/install.sh --public-url http://YOUR_SERVER_IP
 ```
 
-Open `http://YOUR_SERVER_IP` and create the first administrator account. Configure model access later from **Settings → Connections**.
+On a blank supported Ubuntu VM, install only `curl` and run the public bootstrap entry point. It installs Git, clones the requested public revision, and delegates to the same installer:
+
+```bash
+sudo apt-get update && sudo apt-get install -y curl ca-certificates
+curl -fsSL https://raw.githubusercontent.com/moatai-io/towersource/main/scripts/oss/bootstrap.sh -o /tmp/tower-bootstrap.sh
+sudo bash /tmp/tower-bootstrap.sh --public-url http://YOUR_SERVER_IP
+```
+
+Open `http://YOUR_SERVER_IP`, create the first administrator account, and choose an inference provider in the guided first-run screen. OpenRouter uses `openrouter/auto`; direct OpenAI Responses uses `gpt-5.6-terra`. Tower then creates the first AI teammate and activates the local Worker automatically.
 
 For automatic nginx + Let's Encrypt HTTPS, point a domain at the server first:
 
@@ -53,15 +63,15 @@ sudo bash /opt/tower/scripts/oss/doctor.sh --url http://YOUR_SERVER_IP
 
 ---
 
-## Step-by-Step Setup
+## Manual Development Setup
 
-If you prefer to understand each step, or if `setup.sh` fails at any point:
+The OSS installer above is the canonical production path. The following sections are for contributors who intentionally want a development checkout and need to understand individual components; do not combine these PM2/dev commands with the systemd installation.
 
 ### 1. System Prerequisites (Ubuntu)
 
 ```bash
-# Node.js 20+ (via NodeSource)
-curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+# Node.js 22+ (via NodeSource)
+curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
 sudo apt install -y nodejs
 
 # Build tools (needed for a few native deps + git)
@@ -78,11 +88,10 @@ PI_ENABLED=true
 DEFAULT_ENGINE=pi
 CLAUDE_ENABLED=false
 
-# Configure at least one provider
-# Recommended: OPENROUTER_API_KEY=sk-or-v1-...
-# Or an OpenAI-compatible Responses endpoint:
-# OPENAI_RESPONSES_BASE_URL=https://api.openai.com/v1
-# OPENAI_RESPONSES_API_KEY=sk-...
+# Provider credentials are entered in Tower's first-run secure setup screen.
+# Default routes:
+# - OpenRouter: openrouter/auto
+# - Direct OpenAI Responses: gpt-5.6-terra
 ```
 
 Claude Code CLI is now an **archived break-glass fallback**. Install/authenticate it only if you explicitly need to test the old Claude engine path, then set both `CLAUDE_ENABLED=true` and `TOWER_ENABLE_ARCHIVED_CLAUDE_ENGINE=true`.
@@ -187,9 +196,7 @@ cp -r templates/workspace/* ~/workspace/
 bash memory-hooks/install.sh
 ```
 
-> **스킬 설치**: 신규 경로는 teamskills + project `.tower/skills` materialization입니다.
-> 자체 호스팅 서버 목록은 `~/workspace/projects/self-hosted-server-deploy/records/self-hosted-servers.yaml`을 사용하고,
-> managed skill rollout은 `/fleet` / `/managed-skill-rollout` 경로로 실행합니다.
+> **스킬 설치**: 공개 installer는 검토된 기본 skill seed를 설치하고, 첫 관리자 이후 General 프로젝트의 `.tower/skills`에 자동 materialize합니다.
 
 ### 8. Start
 
@@ -199,10 +206,10 @@ npm run dev
 # → Frontend: http://localhost:32354 (Vite HMR)
 # → Backend:  http://localhost:32355 (tsx watch, auto-restart)
 
-# Production (real prod instance = tower-prod on :32364)
-npm install -g pm2    # one-time
+# Local production-style build for contributor testing
+npm ci
 npm run build
-./start.sh prod-start
+# For an actual server, return to the canonical systemd installer above.
 ```
 
 ---
@@ -393,74 +400,32 @@ Migrations run automatically on server start when `DATABASE_URL` is set.
 
 ---
 
-## Azure VM Deployment
+## Cloud VM Networking
 
-If you're deploying to an Azure VM, prefer the dedicated end-to-end guide:
+The installer is cloud-provider neutral. Create a supported Ubuntu 22.04 or 24.04 VM, allow inbound SSH for administration, and expose HTTP/HTTPS through your provider firewall or security group.
 
-- `docs/azure-customer-deployment-runbook.md` — self-hosted deployment VM canonical runbook
-- `docs/new-vm-install-checklist.md` — one-page checklist
-- `docs/azure-prod-deployment.md`
-- `scripts/azure/create-vm.sh`
-- `scripts/azure/bootstrap-prod.sh`
-- `scripts/azure/deploy-e2e.sh`
+Recommended inbound ports:
 
-### Important repo-specific notes
+| Port | Purpose | Public exposure |
+|------|---------|-----------------|
+| `22/tcp` | SSH administration | Restrict to trusted source IPs |
+| `80/tcp` | HTTP and Let's Encrypt challenge | Public when using nginx |
+| `443/tcp` | HTTPS | Public when using a domain |
 
-- Real production runs as PM2 process **`tower-prod`** on **`:32364`**
-- The production start command is **`./start.sh prod-start`**
-- External exposure should usually be **nginx + domain + 80/443**, not direct public access to `32364`
-- `ecosystem.config.cjs` contains the `tower-prod` `PUBLIC_URL`, so it must match your new domain
+Do not expose PostgreSQL or Tower's internal application port directly. The installer binds Tower to `127.0.0.1:32364` and exposes it through nginx.
 
-### Open Port in Network Security Group
+For IP-based testing:
 
 ```bash
-# Replace <RG> and <VM> with your resource group and VM name
-# Recommended: open only 80/443 publicly (plus 22 for SSH)
-az vm open-port \
-  --resource-group <RG> \
-  --name <VM> \
-  --port 80 \
-  --priority 1010
-
-az vm open-port \
-  --resource-group <RG> \
-  --name <VM> \
-  --port 443 \
-  --priority 1020
+sudo bash scripts/oss/install.sh --public-url http://YOUR_SERVER_IP
 ```
 
-### End-to-end deployment example
+For a production domain, create the DNS record first and let the installer configure nginx and Let's Encrypt:
 
 ```bash
-bash scripts/azure/deploy-e2e.sh \
-  --resource-group tower_self_hosted \
-  --location koreacentral \
-  --vm-name <customer> \
-  --admin-user toweradmin \
-  --size Standard_B2ms \
-  --repo-url https://github.com/moatai-io/towersource.git \
-  --domain <customer>.tower.example.com \
-  --ssl-mode letsencrypt-wildcard \
-  --certbot-email support@example.com \
-  --tier managed
-```
-
-### Optional: Custom Domain with Cloudflare
-
-1. Point your domain's DNS A record to the VM's public IP
-2. Enable Cloudflare Proxy (orange cloud) for SSL
-3. Ensure `PUBLIC_URL=https://your-domain.com` is reflected in both `.env` and `ecosystem.config.cjs` for `tower-prod`
-
-### Optional: Cloudflare Quick Tunnel (temporary URL)
-
-```bash
-# Install cloudflared
-curl -L --output /tmp/cloudflared.deb \
-  https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
-sudo dpkg -i /tmp/cloudflared.deb
-
-# Temporary tunnel to the real prod port
-cloudflared tunnel --url http://localhost:32364
+sudo bash scripts/oss/install.sh \
+  --domain tower.example.com \
+  --email admin@example.com
 ```
 
 ---
@@ -507,56 +472,34 @@ Copy `.env.example` to `.env` and edit:
 
 ---
 
-## Server Management
-
-### Dev PM2 instance (`tower` on `:32354`)
+## Server Management (OSS systemd install)
 
 ```bash
-./start.sh start
-./start.sh stop
-./start.sh restart
-./start.sh logs
-./start.sh status
-./start.sh verify
+sudo systemctl status tower
+sudo systemctl restart tower
+sudo journalctl -u tower -f
+sudo systemctl status tower-oss-worker-bootstrap.path
+sudo systemctl status tower-workbench-worker-tower-oss-local-01.service
 ```
 
-### Production PM2 instance (`tower-prod` on `:32364`)
-
-```bash
-./start.sh prod-start
-./start.sh prod-stop
-./start.sh prod-restart
-./start.sh prod-logs
-./start.sh prod-status
-./start.sh prod-verify
-```
-
-> **Warning**: Do NOT mix `npm run dev` and `./start.sh`. They use different ports and process layouts. Pick one.
+Do not start a second PM2 or Vite instance on a server installed by `scripts/oss/install.sh`. The canonical public install uses the `tower` system service, binds the application to `127.0.0.1:32364`, and exposes it through nginx.
 
 ---
 
 ## Verify Installation
 
-After starting, run these checks:
-
 ```bash
-# Development instance health
-curl -s http://localhost:32354/api/health
+# Complete readiness check (pre-admin or post-admin aware)
+sudo bash /opt/tower/scripts/oss/doctor.sh --url http://YOUR_SERVER_IP
 
-# Production instance health
-curl -s http://localhost:32364/api/health
+# Internal backend health
+curl -fsS http://127.0.0.1:32364/api/health
 
-# Production WebSocket upgrade
-curl -s -i --http1.1 \
-  -H "Upgrade: websocket" -H "Connection: Upgrade" \
-  -H "Sec-WebSocket-Key: <base64-websocket-nonce>" \
-  -H "Sec-WebSocket-Version: 13" \
-  http://localhost:32364/ws 2>&1 | head -3
-# → Should return HTTP/1.1 101
-
-# Pi / AI Router configured
-grep -E '^(PI_ENABLED|DEFAULT_ENGINE|CLAUDE_ENABLED|TOWER_ENABLE_ARCHIVED_CLAUDE_ENGINE|OPENROUTER_|OPENAI_RESPONSES_)=' .env
+# Public nginx path
+curl -fsS http://YOUR_SERVER_IP/api/health
 ```
+
+After the first administrator and Provider are configured, Doctor additionally verifies the local Worker, heartbeat, and General skill materialization.
 
 ---
 
@@ -582,15 +525,6 @@ npm run dev
 # Check project materialized skills
 find ~/workspace/projects -path '*/.tower/skills/manifest.json' -maxdepth 5 -print
 
-# 관리형 자체 호스팅 서버인 경우 중앙 서버에서:
-/fleet skills <customer> verify
-# or run the materialize-managed-skills workflow for the target project.
-```
-
-### PM2 not found (production mode)
-
-```bash
-npm install -g pm2
 ```
 
 ### File tree shows nothing / "Cannot read directory"
