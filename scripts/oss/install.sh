@@ -219,7 +219,7 @@ TOWER_DATA_DIR=$DATA_DIR/app-data
 DATABASE_URL=postgresql://tower:${PG_PASSWORD_URL}@127.0.0.1:${PG_PORT}/tower
 JWT_SECRET=$JWT_SECRET
 SECRET_STORE_MASTER_KEY=$MASTER_KEY
-# Public self-hosted product mode. `standalone` means this server owns its own
+# Public self-hosted product mode. standalone means this server owns its own
 # providers, publishing credentials, and operations instead of depending on a
 # Tower-managed gateway. Do not omit this line: an unset role currently falls
 # back to standalone for some backend policies, but feature gates intentionally
@@ -262,7 +262,7 @@ set -a
 source "$ENV_FILE"
 set +a
 node "$APP_DIR/dist/backend/packages/backend/scripts/apply-db-migrations.js" apply
-MIGRATION_STATUS=$(node "$APP_DIR/dist/backend/packages/backend/scripts/apply-db-migrations.js" status)
+MIGRATION_STATUS=$(node "$APP_DIR/dist/backend/packages/backend/scripts/apply-db-migrations.js" status | grep -E '^\{"status":"ok"' | tail -n 1)
 python3 -c 'import json,sys; d=json.loads(sys.argv[1]); assert d.get("pendingCount") == 0, d' "$MIGRATION_STATUS"
 ok "PostgreSQL schema is current"
 

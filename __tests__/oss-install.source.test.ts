@@ -40,7 +40,10 @@ describe('Tower OSS single-host installer contract', () => {
     expect(installer).toContain('location = /sw.js');
     expect(installer).toContain('Cache-Control "no-store, no-cache, must-revalidate"');
     expect(installer).toContain('apply-db-migrations.js" apply');
-    expect(installer).toContain('pendingCount')
+    expect(installer).toContain("apply-db-migrations.js\" status | grep -E '^\\{\"status\":\"ok\"' | tail -n 1");
+    expect(installer).toContain('pendingCount');
+    const envHeredoc = installer.slice(installer.indexOf('cat > "$ENV_FILE" <<EOF'), installer.indexOf('\nEOF', installer.indexOf('cat > "$ENV_FILE" <<EOF')));
+    expect(envHeredoc).not.toContain('`');
   });
 
   it('keeps generated secrets local and URL-encodes the database password', () => {
