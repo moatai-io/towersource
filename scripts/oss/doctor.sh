@@ -60,6 +60,33 @@ health_ok() {
 }
 check "Public health endpoint" health_ok
 
+release_identity_ok() {
+  local manifest="$CLOSURE_LINK/share/tower/release-manifest.json"
+  local release_env="$DATA_DIR/release.env"
+  local body
+  [[ -s "$manifest" && -s "$release_env" ]] || return 1
+  body=$(curl -fsS --max-time 10 "$URL/api/health") || return 1
+  python3 - "$manifest" "$release_env" "$body" <<'PY'
+import json
+import pathlib
+import sys
+
+manifest = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding='utf-8'))
+env = {}
+for line in pathlib.Path(sys.argv[2]).read_text(encoding='utf-8').splitlines():
+    if line and not line.startswith('#'):
+        name, value = line.split('=', 1)
+        env[name] = value
+health = json.loads(sys.argv[3])
+assert health.get('version') == manifest.get('version'), (health, manifest)
+assert health.get('baseVersion') == manifest.get('baseVersion'), (health, manifest)
+assert health.get('sourceRev') == env.get('SOURCE_REV'), (health, env)
+assert health.get('gitSha') == env.get('GIT_SHA'), (health, env)
+assert health.get('metadataSource') == 'injected', health
+PY
+}
+check "Release identity matches Nix manifest" release_identity_ok
+
 status_ok() {
   local body
   body=$(curl -fsS --max-time 10 "$URL/api/auth/status") || return 1

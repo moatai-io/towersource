@@ -26,7 +26,7 @@ chown root:"$EXECUTION_USER" /etc/tower-workers
 chmod 750 /etc/tower-workers
 if [[ -f "$STATE_FILE" ]]; then
   rm -f "$REQUEST_FILE"
-  systemctl stop tower-oss-worker-bootstrap.timer >/dev/null 2>&1 || true
+  systemctl disable --now tower-oss-worker-bootstrap.timer >/dev/null 2>&1 || true
   exit 0
 fi
 
@@ -115,5 +115,5 @@ node "$APP_DIR/dist/backend/packages/backend/scripts/materialize-managed-skills.
 printf '%s\n' "$(date -u +%FT%TZ)" > "$STATE_FILE"
 chmod 600 "$STATE_FILE"
 rm -f "$REQUEST_FILE"
-systemctl stop tower-oss-worker-bootstrap.timer >/dev/null 2>&1 || true
+systemctl disable --now tower-oss-worker-bootstrap.timer >/dev/null 2>&1 || true
 log 'local Worker and General project are ready'

@@ -26,7 +26,7 @@ describe('first administrator OSS Worker bootstrap trigger', () => {
 
   it('clears the request and stops fallback retries when activation is complete', () => {
     expect(bootstrap).toContain('rm -f "$REQUEST_FILE"');
-    expect(bootstrap).toContain('systemctl stop tower-oss-worker-bootstrap.timer');
-    expect(bootstrap).toMatch(/if \[\[ -f "\$STATE_FILE" \]\];[\s\S]*rm -f "\$REQUEST_FILE"[\s\S]*systemctl stop tower-oss-worker-bootstrap.timer[\s\S]*exit 0/);
+    expect(bootstrap).toContain('systemctl disable --now tower-oss-worker-bootstrap.timer');
+    expect(bootstrap).toMatch(/if \[\[ -f "\$STATE_FILE" \]\];[\s\S]*rm -f "\$REQUEST_FILE"[\s\S]*systemctl disable --now tower-oss-worker-bootstrap.timer[\s\S]*exit 0/);
   });
 });
