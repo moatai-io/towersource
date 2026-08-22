@@ -27,7 +27,6 @@ export interface IssueMcpContext {
   cwd?: string | null;
 }
 
-const DEFAULT_REPO = 'juliuschun/tower';
 const FORCED_LABEL = 'from:tower-skill';
 
 const SECRET_PATTERNS: Array<{ name: string; re: RegExp }> = [
@@ -77,7 +76,11 @@ function cleanLabel(raw: string): string | null {
 }
 
 function serviceRepo(): string {
-  return process.env.GITHUB_ISSUE_REPO?.trim() || DEFAULT_REPO;
+  const repo = process.env.GITHUB_ISSUE_REPO?.trim();
+  if (!repo) {
+    throw new Error('GITHUB_ISSUE_REPO is not configured. Ask an operator to set the organization-owned issue repository.');
+  }
+  return repo;
 }
 
 async function gh(args: string[], opts?: { input?: string; timeoutMs?: number }): Promise<{ stdout: string; stderr: string }> {
@@ -197,7 +200,7 @@ export function createIssueMcpServer(ctx: IssueMcpContext) {
           title: z.string().min(1).max(200).describe('GitHub issue title.'),
           body: z.string().min(1).max(30000).describe('Issue body in markdown. Do not include secrets.'),
           labels: z.array(z.string()).max(10).optional().describe('Optional labels such as bug, enhancement, ux.'),
-          repo: z.string().regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/).optional().describe('Optional target repo override. Defaults to server GITHUB_ISSUE_REPO or juliuschun/tower.'),
+          repo: z.string().regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/).optional().describe('Optional target repo override. Defaults to the server-configured GITHUB_ISSUE_REPO.'),
           allowPublicRepo: z.boolean().optional().describe('Allow filing to a public repo. Default false.'),
         },
         async (args) => {
@@ -254,7 +257,7 @@ export function createIssueMcpServer(ctx: IssueMcpContext) {
         GET_ISSUE_DESCRIPTION,
         {
           issue_number: z.number().int().positive().describe('GitHub issue number to read.'),
-          repo: z.string().regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/).optional().describe('Optional target repo override. Defaults to server GITHUB_ISSUE_REPO or juliuschun/tower.'),
+          repo: z.string().regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/).optional().describe('Optional target repo override. Defaults to the server-configured GITHUB_ISSUE_REPO.'),
           includeComments: z.boolean().optional().describe('Include up to 5 recent comment previews. Default true.'),
           allowPublicRepo: z.boolean().optional().describe('Allow reading from a public repo. Default false.'),
         },
@@ -304,7 +307,7 @@ export function createIssueMcpServer(ctx: IssueMcpContext) {
         {
           issue_number: z.number().int().positive().describe('GitHub issue number to comment on.'),
           body: z.string().min(1).max(30000).describe('Comment body in markdown. Do not include secrets.'),
-          repo: z.string().regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/).optional().describe('Optional target repo override. Defaults to server GITHUB_ISSUE_REPO or juliuschun/tower.'),
+          repo: z.string().regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/).optional().describe('Optional target repo override. Defaults to the server-configured GITHUB_ISSUE_REPO.'),
           allowPublicRepo: z.boolean().optional().describe('Allow commenting on a public repo. Default false.'),
         },
         async (args) => {

@@ -1,13 +1,11 @@
 /**
- * Cloudflare DNS Manager — 고객별 서브도메인 자동 설정
+ * Cloudflare DNS Manager — deployment subdomain automation
  *
- * Phase 4 핵심 서비스. 새 고객 온보딩 시:
- *   1. createWildcardForCustomer() → *.customer.tower.example.com 와일드카드 DNS 생성
- *   2. 자체 호스팅 서버에 nginx 와일드카드 서버 블록 + certbot 와일드카드 SSL
- *   3. 이후 사이트 publish → sites/my-site/ 폴더만 생성하면 바로 접근 가능
+ * Optional control-plane service for organizations that operate a shared
+ * publishing domain. It creates wildcard DNS records for registered nodes.
  *
- * DNS 관리는 Moat AI 서버(TOWER_ROLE=full)에서만 실행.
- * 자체 호스팅 서버에서는 실행되지 않음.
+ * DNS management runs only on TOWER_ROLE=full. Independent standalone and
+ * managed self-hosts do not receive or require these operator credentials.
  */
 
 const CF_API = 'https://api.cloudflare.com/client/v4';

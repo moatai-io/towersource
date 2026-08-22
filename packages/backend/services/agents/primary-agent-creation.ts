@@ -11,7 +11,6 @@ import { createSession, getSession } from '../session/session-manager.js';
 import { consumePrimaryAgentCreationIntent } from './primary-agent-creation-intent.js';
 import type { PrimaryAgentCapabilityRequirements } from './primary-agent-staffing.js';
 import { validatePrimaryAgentHarnessBinding } from './primary-agent-staffing.js';
-import { ensurePrimaryAgentOnboardingDocument } from './primary-agent-onboarding.js';
 
 export interface PrimaryAgentCreationInput {
   idempotencyKey:string;actorUserId:number;sourceProjectId:string;approvedCardHash:string;approvalIntentId:string;
@@ -75,7 +74,7 @@ async function assertProfile(projectId:string,input:PrimaryAgentCreationInput,co
   assertEqual(row.role,input.role.trim(),'Profile role');
   assertEqual(row.promise,input.promise.trim(),'Profile promise');
   assertEqual(row.instruction,input.instruction.trim(),'Profile instruction');
-  assertEqual(row.onboarding_state,input.creationMode==='bootstrap'?'onboarding':'ready','Profile onboarding state');
+  assertEqual(row.onboarding_state,'ready','Profile onboarding state');
   if(!sameJson(row.authority_policy,input.authorityPolicy||{}))throw new Error('Primary Agent resume conflict: authority policy does not match the approved command');
   if(!sameJson(row.tool_policy,input.toolPolicy||{}))throw new Error('Primary Agent resume conflict: tool policy does not match the approved command');
   assertEqual(row.metadata?.creationCommandId,commandId,'Profile creation command');
@@ -112,19 +111,13 @@ export async function createPrimaryAgentCommand(input:PrimaryAgentCreationInput)
       assertEqual(projectProvenance?.creation_command_id,command.id,'Project creation command');
       await state(command.id,'provisioning_profile',{projectId:project.id});
       const bootstrap=input.creationMode==='bootstrap';
-      const profileMetadata={creationCommandId:command.id,sourceProjectId:input.sourceProjectId,creationMode:bootstrap?'bootstrap':'staffed',...(bootstrap?{sourceExpertiseIntent:input.sourceExpertiseIntent,starterHarness:true,onboardingStartedAt:new Date().toISOString()}: {})};
-      await execute(`INSERT INTO project_agent_profiles(project_id,display_name,face,tagline,role,promise,instruction,instruction_source,default_engine,authority_policy,tool_policy,memory_policy,budget_policy,onboarding_state,metadata) VALUES($1,$2,$3,$4,$5,$6,$7,'employee-card','pi',$8::jsonb,$9::jsonb,'{}'::jsonb,'{}'::jsonb,$10,$11::jsonb) ON CONFLICT(project_id) DO NOTHING`,[project.id,input.name.trim(),input.face.trim(),input.tagline.trim(),input.role.trim(),input.promise.trim(),input.instruction.trim(),JSON.stringify(input.authorityPolicy||{}),JSON.stringify(input.toolPolicy||{}),bootstrap?'onboarding':'ready',JSON.stringify(profileMetadata)]);
+      const profileMetadata={creationCommandId:command.id,sourceProjectId:input.sourceProjectId,creationMode:bootstrap?'bootstrap':'staffed',...(bootstrap?{sourceExpertiseIntent:input.sourceExpertiseIntent,starterHarness:true}: {})};
+      await execute(`INSERT INTO project_agent_profiles(project_id,display_name,face,tagline,role,promise,instruction,instruction_source,default_engine,authority_policy,tool_policy,memory_policy,budget_policy,onboarding_state,metadata) VALUES($1,$2,$3,$4,$5,$6,$7,'employee-card','pi',$8::jsonb,$9::jsonb,'{}'::jsonb,'{}'::jsonb,'ready',$10::jsonb) ON CONFLICT(project_id) DO NOTHING`,[project.id,input.name.trim(),input.face.trim(),input.tagline.trim(),input.role.trim(),input.promise.trim(),input.instruction.trim(),JSON.stringify(input.authorityPolicy||{}),JSON.stringify(input.toolPolicy||{}),JSON.stringify(profileMetadata)]);
       await assertProfile(project.id,input,command.id);
-      if(bootstrap)await event(command.id,'onboarding_started',{expertiseIntent:input.sourceExpertiseIntent});
       await state(command.id,'binding_harness',{projectId:project.id});
       const actualBinding=await ensureBinding(project.id,input,command.id);
       await state(command.id,'provisioning_files',{projectId:project.id});
       ensureProjectAgentInstruction(project.rootPath!,{displayName:input.name,face:input.face,tagline:input.tagline,role:input.role,promise:input.promise,instruction:input.instruction});
-      if(bootstrap){
-        const expectedExpertise=input.sourceExpertiseIntent?.trim();
-        if(!expectedExpertise)throw new Error('Bootstrap Primary Agent requires source expertise intent');
-        ensurePrimaryAgentOnboardingDocument(project.rootPath!,{name:input.name,expectedExpertise});
-      }
       await state(command.id,'creating_session',{projectId:project.id});
       command=await queryOne<any>('SELECT * FROM primary_agent_creation_commands WHERE id=$1',[command.id]);
       let session=command?.session_id?await getSession(command.session_id,input.actorUserId):null;

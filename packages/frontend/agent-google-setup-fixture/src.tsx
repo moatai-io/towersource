@@ -7,7 +7,7 @@ const params = new URLSearchParams(location.search);
 document.documentElement.dataset.theme = params.get('theme') === 'light' ? 'light' : 'dark';
 
 const connections = [
-  { id: 'gws-organization-primary', displayName: '조직 Google Workspace · juliuschun@doomoolmori.com', googleAccount: 'juliuschun@doomoolmori.com' },
+  { id: 'gws-organization-primary', displayName: '조직 Google Workspace · workspace-admin@example.com', googleAccount: 'workspace-admin@example.com' },
   { id: 'gws-organization-publishing', displayName: '조직 Google Workspace · publishing@example.com', googleAccount: 'publishing@example.com' },
 ];
 

@@ -121,7 +121,7 @@ describe('AiPanel empty thread draft', () => {
     render(<AiPanel />);
 
     expect(await screen.findByText('Ask AI anything about this session')).toBeInTheDocument();
-    expect(screen.getByText('Summarize the entire conversation in this session.')).toBeInTheDocument();
+    expect(screen.getByText('Summarize this session.')).toBeInTheDocument();
     expect(screen.getByText('List the decisions and remaining TODOs from this session.')).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith('/api/sessions?parentSessionId=parent-session-1&includeProject=1', expect.any(Object));
     expect(fetchMock).not.toHaveBeenCalledWith('/api/sessions', expect.objectContaining({ method: 'POST' }));
@@ -160,10 +160,10 @@ describe('AiPanel empty thread draft', () => {
 
     render(<AiPanel />);
 
-    const sample = await screen.findByText('Summarize the entire conversation in this session.');
+    const sample = await screen.findByText('Summarize this session.');
     fireEvent.click(sample);
     const input = screen.getByPlaceholderText('Ask AI...') as HTMLTextAreaElement;
-    expect(input.value).toBe('Summarize the entire conversation in this session.');
+    expect(input.value).toBe('Summarize this session.');
 
     fireEvent.click(screen.getByRole('button', { name: 'Send message' }));
 

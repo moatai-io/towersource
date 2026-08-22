@@ -9,14 +9,14 @@ v0.3 부터 **한국식 컨설팅 톤** (한투운용 / PwC 한국 / demo-org �
 meta:
   title: "키움 조건검색식 AI 답변 시스템"
   subtitle: "Markdown Brain System · 제안서"
-  presenter: "MOAT AI · 천영록"
+  presenter: "EXAMPLE ORG · 김예시"
   date: "2026-04-17"
 
   # ── 한국식 chrome (모든 콘텐츠 슬라이드에 자동 적용) ──
-  company: "MOAT AI"                          # 헤더 좌
+  company: "EXAMPLE ORG"                          # 헤더 좌
   project_short: "키움 MBS"                   # 헤더 가운데
   confidential: "대외비"                      # 헤더 우 (옵션, 금융권 필수)
-  source_default: "MOAT AI · proposal.md v4.2.1"  # 모든 슬라이드 footer 출처
+  source_default: "EXAMPLE ORG · proposal.md v1.0"  # 모든 슬라이드 footer 출처
 
   # ── 챕터 진행 트래커 (section 페이지에서 활용) ──
   chapters:
@@ -169,7 +169,7 @@ value 길이에 따라 자동 폰트 축소 (≤5자 64pt / ≤8자 48pt / 그 �
   title: "다음 단계"
   bullets: [...]
   contact:
-    name: "천영록 · MOAT AI"
+    name: "김예시 · EXAMPLE ORG"
     email: "jules@example.com"
 ```
 
@@ -183,14 +183,14 @@ value 길이에 따라 자동 폰트 축소 (≤5자 64pt / ≤8자 48pt / 그 �
 ### 헤더 바 (상단 0.4")
 ```
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-MOAT AI         키움 MBS · 01. 왜 지금        대외비
+EXAMPLE ORG     샘플 제안 · 01. 왜 지금      샘플
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ```
 
 ### 푸터 바 (하단 7.0")
 ```
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-* 자료: MOAT AI · proposal.md v4.2.1            05 / 15
+* 자료: EXAMPLE ORG · proposal.md v1.0            05 / 15
 ```
 
 ### Takeaway (제목 바로 아래)

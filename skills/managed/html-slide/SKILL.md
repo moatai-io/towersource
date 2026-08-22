@@ -140,7 +140,7 @@ HTML 슬라이드는 나중에 공유 링크, Publishing, PDF export, 파일 뷰
 <body>
   <section class="slide cover">
     <div class="slide-body">
-      <div class="eyebrow">MOAT AI · PROPOSAL</div>
+      <div class="eyebrow">EXAMPLE ORG · PROPOSAL</div>
       <h1>슬라이드 제목</h1>
       <p>핵심 메시지를 한 문단으로 씁니다.</p>
     </div>

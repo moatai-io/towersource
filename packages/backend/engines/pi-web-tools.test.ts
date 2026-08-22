@@ -145,7 +145,9 @@ describe('Pi web tools (Firecrawl-first)', () => {
       { query: 'anything' },
       undefined as any,
     );
-    expect(result.content[0].text).toContain('FIRECRAWL_API_KEY');
+    expect(result.content[0].text).toContain('Live web search is not connected');
+    expect(result.content[0].text).toContain('Firecrawl Connection');
+    expect(result.content[0].text).not.toContain('FIRECRAWL_API_KEY');
     expect(firecrawlMocks.search).not.toHaveBeenCalled();
   });
 

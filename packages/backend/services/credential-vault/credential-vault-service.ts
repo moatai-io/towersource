@@ -651,6 +651,32 @@ export async function resolveRuntimeBoxCredentialFileMaterialization(opts: {
   return { materialize, skipped };
 }
 
+/** Check project policy and enabled metadata without reading or materializing a secret. */
+export async function hasProjectApiKeyCredential(opts: { projectId: string; envName: string }): Promise<boolean> {
+  assertSecretName(opts.envName);
+  const row = await queryOne<{ credential_id: string }>(
+    `SELECT c.id AS credential_id
+       FROM workspace_credentials c
+       LEFT JOIN project_credential_policies p
+         ON p.credential_id = c.id AND p.project_id = $1
+       LEFT JOIN workspace_connection_defaults d
+         ON d.connection_id = 'credential:' || c.id
+       JOIN (
+         SELECT p.*, s.slug AS space_slug
+           FROM projects p LEFT JOIN spaces s ON s.id = p.space_id
+          WHERE p.id = $1
+       ) prj ON true
+      WHERE c.kind = 'api_key'
+        AND c.enabled = true
+        AND ${allowedProjectCredentialWhere('c', 'p', 'd', 'prj')}
+        AND COALESCE(p.target_env_name, c.default_env_name, c.secret_name) = $2
+      ORDER BY c.id
+      LIMIT 1`,
+    [opts.projectId, opts.envName],
+  );
+  return Boolean(row);
+}
+
 /**
  * Resolve one project-granted API-key credential as an env-style secret value.
  *

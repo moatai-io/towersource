@@ -19,7 +19,7 @@
   "orCreateNew": "or create a new one in Admin",
   "loadingMessages": "Loading messages...",
   "noMessagesYet": "No messages yet",
-  "startConversation": "Start the conversation",
+  "startConversation": "Start the session",
   "aiPanel": "AI Panel",
   "manageMembers": "Manage members",
   "replyPlaceholder": "Reply...",
@@ -137,7 +137,7 @@
       "Make this file easier to read."
     ],
     "session": [
-      "Summarize the entire conversation in this session.",
+      "Summarize this session.",
       "List the decisions and remaining TODOs from this session.",
       "Find what this session said about a specific topic.",
       "Draft a GitHub issue from the discussion we just had."
@@ -157,7 +157,7 @@
     "openAiTeam": "Go to AI team"
   },
   "thread": {
-    "noConversationYet": "No conversation yet",
+    "noConversationYet": "No session yet",
     "cadWorkbenchPrefix": "CAD Workbench: ",
     "automationPrefix": "Automation: ",
     "currentFilePrefix": "Current file: ",

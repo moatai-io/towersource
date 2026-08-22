@@ -472,7 +472,7 @@ function extractAbsolutePathsFromBashCommand(command: string): string[] {
   if (!matches) return [];
   return matches
     .map(p => p.trim())
-    // Slash commands such as `/self-host deploy demo-server` or `/commit-session`
+    // Slash commands such as `/deploy-target run demo-server` or `/commit-session`
     // are not filesystem paths. Treat single-segment /name tokens as commands,
     // while still enforcing real paths like /etc/passwd or /home/.../file.
     .filter(p => !/^\/[A-Za-z][A-Za-z0-9_-]*$/.test(p));

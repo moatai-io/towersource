@@ -32,7 +32,7 @@ description: >
   - 외부 영업·도입 제안 (→ 별도 제안/소개 자료 흐름)
   - 새 스킬 만들기 (→ /skill-architect)
   - 발표 자료 *생성* 자체 (→ /image-slide-gen, /html-slide 또는 /pptx-template; 단 본 스킬이 §8 묶음 골라서 위임은 OK)
-  - 사용자 도메인 업무 (한투 분석 / 보고서 작성 등) 진행 중 끼어들기 — 그건 본 스킬 영역 아님
+  - 사용자 도메인 업무 (재무 분석 / 보고서 작성 등) 진행 중 끼어들기 — 그건 본 스킬 영역 아님
 version: 1.2.0
 tags:
   - core
@@ -54,11 +54,11 @@ owner: moat
 - **2차**: organization source `workspace/projects/teamskills/skills/tower-intro/handbook.md`.
 - **3차**: Tower seed/reference `skills/managed/tower-intro/handbook.md`.
 - 본 스킬은 host-global provider config 경로를 읽지 않는다. 본 스킬은 핸드북 절대경로를 사용자에게 *직접 안내하지 않는다*.
-- **4차** (필요 시): `~/workspace/docs/tower/` (외부 영업 문서 — 임원 톤 자료가 필요할 때만)
+- **4차** (선택): 조직이 별도로 제공한 Tower 안내 문서 (있는 경우에만)
 - **5차**: `~/workspace/principles.md` (다섯 원칙 — tour 모드 끝부분)
 
 핸드북 정본이 없으면:
-- 구 self-hosted server 이거나 materialization 전일 가능성. `~/workspace/docs/tower/overview.md` 로 폴백.
+- 구 self-hosted 설치이거나 materialization 전일 가능성. 프로젝트/조직의 공개 안내 문서가 있으면 폴백.
 - 둘 다 없으면 사용자에게 "이 워크스페이스에 Tower 소개 자료가 아직 없습니다. 운영자에게 managed `tower-intro` materialization 갱신을 요청하세요" 안내
 
 ## 모드 1 — default (인자 없음 또는 자연어 질문)
@@ -91,7 +91,7 @@ owner: moat
 
 응답의 *두 번째 문장부터* 사용자 역할 톤 (admin/operator/member/viewer) 으로 분기.
 
-근거: `~/workspace/decisions/2026-05-12-tower-positioning.md`, `~/workspace/decisions/2026-06-19-tower-ax-positioning.md`
+이 문구는 모든 배포 프로필에서 동일한 제품 카테고리 설명으로 사용한다.
 
 **수행 순서**:
 1. 사용자 컨텍스트 파악:
@@ -134,7 +134,7 @@ owner: moat
 
 각 단계마다:
 - 핸드북에서 해당 섹션 인용 (3-5 줄)
-- 사용자 역할에 맞는 짧은 예시 1개 ("당신이 한투 프로젝트에서 X 를 한다면…")
+- 사용자 역할에 맞는 합성 예시 1개 ("당신이 재무 프로젝트에서 X 를 한다면…")
 - 시각화 (mermaid / steps / datatable) 1개 — 텍스트 단조롭지 않게
 - "다음 단계 갈까요? 아니면 여기서 멈출까요?" 대화형 확인
 
@@ -253,12 +253,12 @@ owner: moat
 
 - **tag**: `core` (모든 사용자 노출)
 - **profile**: `standalone` / `managed` / `full` 모두 포함 (= 모든 자체 호스팅 서버 에 배포)
-- **데이터 소스 의존**: managed bundle에 `handbook.md`를 포함한다. 구 self-hosted server이나 materialization 누락 시에만 `~/workspace/docs/tower/overview.md` 로 폴백.
-  Full 톤은 운영자 (Moat AI 내부) 에서만 가능. 이 차이는 모드 안에서 자동 분기.
+- **데이터 소스 의존**: 모든 프로필에 public-safe `handbook.md` seed를 포함한다. 조직이 별도 materialized handbook을 제공하면 그것이 우선한다.
+- `full`은 조직 control-plane 운영 맥락, `managed`는 명시적 조직 gateway 연결, `standalone`은 독립 self-host 맥락으로 설명한다.
 
 ## 운영
 
-- **소유**: Moat AI 운영팀, 작성자 줄리어스 + AI (최초 2026-05-12, 최신 갱신 2026-06-26)
+- **소유**: Tower maintainers. 조직별 안내는 organization source에서 별도 관리한다.
 - **변경 시**: 핸드북 구조 (섹션 번호) 가 바뀌면 본 SKILL.md 의 `토픽 매핑 표`
   와 `tour 단계 설명` 의 섹션 참조를 같이 갱신
 - **검증**: `workspace/projects/teamskills/skills/tower-intro/handbook.md` 와 `skills/managed/tower-intro/handbook.md` 갱신 시 본 스킬의 매핑 표가 여전히 유효한지 점검 (운영자가 한 달 1회)

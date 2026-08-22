@@ -1,8 +1,9 @@
 /**
- * Fleet Manager — Managed service self-hosted server operations
+ * Fleet Manager — optional multi-instance operator control plane
  *
- * Reads customer registry from docs/customer-servers.md, SSHs into VMs to collect status.
- * Admin-only functionality for Moat AI internal use.
+ * Reads a deployment-local registry and connects to registered nodes to collect status.
+ * This is disabled by default for standalone self-hosts and requires operator-owned
+ * registry data plus an explicit full deployment profile.
  */
 
 import { execFile } from 'child_process';
@@ -60,11 +61,20 @@ export interface WorkspaceCheck {
 
 // ── Customer registry reader ─────────────────────────────────────
 
-const CUSTOMER_SERVERS_MD = path.resolve(process.cwd(), 'docs/customer-servers.md');
+function fleetRegistryPath(): string {
+  const configured = process.env.TOWER_FLEET_REGISTRY_PATH?.trim();
+  if (!configured) {
+    throw new Error('TOWER_FLEET_REGISTRY_PATH is required for Fleet management on the full operator profile.');
+  }
+  return path.resolve(configured);
+}
 
-/** Parse docs/customer-servers.md's server registry table as the fleet customer source. */
+/** Parse the deployment-local registry configured by the full-profile operator. */
 export async function getCustomers(): Promise<CustomerInfo[]> {
-  const markdown = await fs.readFile(CUSTOMER_SERVERS_MD, 'utf8');
+  if (config.towerRole !== 'full') {
+    throw new Error('Fleet management is available only on the full operator profile. Standalone and managed self-hosts do not require a fleet registry.');
+  }
+  const markdown = await fs.readFile(fleetRegistryPath(), 'utf8');
   const rows = parseCustomerRegistryTable(markdown);
   return rows
     .filter(row => row.ssh && row.ssh !== '-' && !row.ssh.startsWith('—'))

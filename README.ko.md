@@ -441,6 +441,16 @@ flowchart TB
 
 설치기가 Node.js, 필요한 확장이 포함된 PostgreSQL, Tower 시스템 서비스, nginx, 로컬 비밀값과 최종 상태 점검을 한 번에 구성합니다.
 
+빈 Ubuntu 서버에서는 공개 bootstrap 진입점을 사용합니다.
+
+```bash
+sudo apt-get update && sudo apt-get install -y curl ca-certificates
+curl -fsSL https://raw.githubusercontent.com/moatai-io/towersource/main/scripts/oss/bootstrap.sh -o /tmp/tower-bootstrap.sh
+sudo bash /tmp/tower-bootstrap.sh --public-url http://서버_IP
+```
+
+Git이 이미 설치되어 있다면 공개 저장소를 직접 clone할 수도 있습니다.
+
 ```bash
 git clone https://github.com/moatai-io/towersource.git tower
 cd tower
@@ -448,6 +458,8 @@ sudo bash scripts/oss/install.sh --public-url http://서버_IP
 ```
 
 설치가 끝나면 `http://서버_IP`를 열어 첫 관리자 계정을 만드십시오. 모델 호출이 필요할 때 **설정 → Connections**에서 AI 공급자를 연결하면 됩니다.
+
+외부 능력은 선택 사항입니다. 실시간 웹 검색은 현재 Firecrawl을 사용하며, Google Workspace와 이미지 생성은 각각 별도 Connection이 필요합니다. Tower의 기본 Workspace 사용을 막지 않고 나중에 연결할 수 있습니다.
 
 도메인이 이미 서버를 가리킨다면 같은 명령에서 HTTPS까지 구성할 수 있습니다.
 

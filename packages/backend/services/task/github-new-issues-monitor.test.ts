@@ -10,7 +10,7 @@ function issue(number: number, createdAt = `2026-06-${String(number).padStart(2,
   return {
     number,
     title: `Issue ${number}`,
-    url: `https://github.com/juliuschun/tower/issues/${number}`,
+    url: `https://github.com/example-org/tower-issues/issues/${number}`,
     createdAt,
     author: 'tester',
     body: '',
@@ -68,7 +68,7 @@ describe('github_new_issues monitor selection', () => {
   });
 
   it('asks issue research tasks to prepare selectable plans and impact before editing', () => {
-    const prompt = buildIssueResearchPrompt('juliuschun/tower', issue(120));
+    const prompt = buildIssueResearchPrompt('example-org/tower-issues', issue(120));
 
     expect(prompt).toContain('오케이');
     expect(prompt).toContain('즉시 수정 가능한 지점');

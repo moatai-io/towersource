@@ -12,8 +12,11 @@ describe('Primary Agent bootstrap staffing',()=>{
     const second=await buildPrimaryAgentBootstrapPayload({name:'새 팀원',face:'🤖',expertiseIntent:'복잡한 자료에서 핵심 찾기'});
     expect(first.payload).toEqual(second.payload);
     expect(first.payload).toMatchObject({creationMode:'bootstrap',sourceExpertiseIntent:'복잡한 자료에서 핵심 찾기',harnessBinding:{harnessId:'tower-default',harnessVersion:1,runtimeProfileId:'standard',runtimeProfileVersion:1},capabilityRequirements:{required:['project_file_write','public_web_research']}});
-    expect(first.payload.role).toContain('실제 역할과 책임 범위는 온보딩 대화에서 구체화');
-    expect(first.card.profileStatus).toBe('provisional');
+    expect(first.payload.role).toContain('사용자의 실제 업무를 수행');
+    expect(first.payload.instruction).toContain('별도의 입사 인터뷰나 온보딩 절차를 시작하지 마세요');
+    expect(first.payload.instruction).toContain('시스템 지침을 따르세요');
+    expect(first.payload.firstMission).toBe('사용자의 첫 실제 업무를 수행하기');
+    expect(first.card.profileStatus).toBe('ready');
     expect(queryOne.mock.calls[0][0]).toContain("rp.profile_id='standard'");
     expect(queryOne.mock.calls[0][0]).toContain('v.staffing_capability_ids');
   });

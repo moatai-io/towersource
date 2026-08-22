@@ -83,7 +83,7 @@ import { oauthManager } from '../services/auth/oauth-manager-instance.js';
 import { getGoogleOAuthReadiness, getGoogleAuthUrl, exchangeGoogleCode, getGoogleUserInfo, GOOGLE_DEFAULT_SCOPES } from '../services/auth/google-oauth.js';
 import { findOAuthProvider, listOAuthProviders } from '../services/auth/oauth-provider-registry.js';
 import { setSecret, SecretAccessDeniedError } from '../services/secret/secret-store.js';
-import { upsertAgentGwsCredential, upsertOrganizationGwsCredential } from '../services/credential-vault/credential-vault-service.js';
+import { hasProjectApiKeyCredential, upsertAgentGwsCredential, upsertOrganizationGwsCredential } from '../services/credential-vault/credential-vault-service.js';
 import { AgentCharacterGenerationError, generateAgentCharacter, generatedCharacterPath } from '../services/agent-character/generated-character.js';
 import { search } from '../services/workspace/search.js';
 import { scanNotesIndex, type NotesIndexMode } from '../services/workspace/notes-index.js';
@@ -2844,7 +2844,7 @@ router.delete('/admin/system-prompts/:name', adminMiddleware, async (req, res) =
 // ───── Service tokens (admin only) ─────
 // Long-lived scoped JWTs for fleet et al. Audited in service_tokens table.
 // 결정: workspace/decisions/2026-05-27-fleet-service-tokens.md
-// Issue: https://github.com/juliuschun/tower/issues/36
+// Issue: internal issue #36
 
 router.post('/admin/service-tokens', adminMiddleware, async (req, res) => {
   try {
@@ -6065,6 +6065,14 @@ router.get('/config', (_req, res) => {
     localModels: config.localEnabled ? config.localModels : [],
     defaults: getModelDefaults(),
     inferenceReadiness: getInferenceProviderReadiness(),
+    uiCapabilities: {
+      agentCreation: {
+        // Connection readiness answers whether Google can work. This policy
+        // separately controls whether the optional connection belongs in the
+        // hiring flow for each deployment product profile.
+        googleConnection: config.towerRole === 'full' ? 'inline' : config.towerRole === 'managed' ? 'optional' : 'hidden',
+      },
+    },
     agentFirstEnabled: config.agentFirstEnabled,
     aiServicesEnabled: config.aiServicesEnabled,
     workspaceAppsEnabled: config.workspaceAppsEnabled,
@@ -6904,6 +6912,22 @@ router.get('/agent-characters/generated/:id', async (req, res) => {
   if (!imagePath || !fs.existsSync(imagePath)) return res.status(404).json({ error: 'character not found' });
   res.setHeader('Cache-Control', 'private, max-age=86400');
   res.type('png').sendFile(imagePath);
+});
+
+router.get('/agent-characters/readiness', async (req, res) => {
+  try {
+    const userId = (req as any).user?.userId as number | undefined;
+    const role = (req as any).user?.role;
+    if (!userId) return res.status(401).json({ error: 'auth required' });
+    const projectId = String(req.query.projectId || '');
+    if (!projectId || (!isPrivilegedRole(role) && !(await isProjectMember(projectId, userId)))) {
+      return res.status(403).json({ error: 'character readiness is unavailable for this project' });
+    }
+    const ready = await hasProjectApiKeyCredential({ projectId, envName: 'OPENAI_IMAGE_API_KEY' });
+    res.json({ ready, provider: 'openai-image', reason: ready ? 'ready' : 'connection_required' });
+  } catch {
+    res.status(503).json({ ready: false, provider: 'openai-image', reason: 'readiness_unavailable' });
+  }
 });
 
 router.post('/agent-characters/generate', async (req, res) => {
@@ -9246,6 +9270,9 @@ import {
 } from '../services/deploy/fleet-manager.js';
 
 function fleetAccessMiddleware(req: any, res: any, next: any) {
+  if (config.towerRole !== 'full') {
+    return res.status(404).json({ error: 'Fleet management is not enabled for this deployment profile' });
+  }
   const user = req.user;
   if (!user || !['admin', 'operator', 'customer_manager'].includes(user.role)) {
     return res.status(403).json({ error: 'Fleet access required' });

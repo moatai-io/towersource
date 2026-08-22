@@ -335,7 +335,7 @@ describe('buildToolGuard — user-accessible cross-project file writes', () => {
       sessionProjectRoot: sessionRoot,
     });
     const result = guard('Bash', {
-      command: '/self-host deploy demo-server',
+      command: '/deploy-target run demo-server',
     });
     expect(result.allowed).toBe(true);
   });

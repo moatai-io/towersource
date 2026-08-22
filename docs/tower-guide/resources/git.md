@@ -35,4 +35,4 @@ EOF
 - **자기 변경만 commit** 하려면 `/commit-session` 스킬 사용 (multi-session 환경에서 다른 세션의 dirty 파일 안 건드림). single-session 확신할 때만 직접 `git add` / `git commit`.
 - **PR 만들기**: `/finish-branch` 스킬 또는 사용자 명시 요청 시 `gh pr create --title ... --body "$(cat <<'EOF' ... EOF
 )"`.
-- **push 후 self-host deploy 자동 실행 금지** — 사용자가 명시 요청 시만 (`/self-host deploy <customer>`). git push 의 자연스런 다음 단계가 *아닙니다*. 근거: workspace/decisions/2026-05-05-fleet-deploy-explicit-only.md.
+- **push 후 실행 중인 self-host 자동 변경 금지** — 배포는 사용자가 명시 요청하고 운영자가 승인한 별도 절차로 수행합니다. git push의 자연스러운 다음 단계가 아닙니다.

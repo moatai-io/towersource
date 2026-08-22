@@ -17,6 +17,12 @@ export interface ServerConfig {
   piEnabled?: boolean;
   localEnabled?: boolean;
   defaults?: Record<string, string>;
+  /** Product-profile presentation policy computed by the server. */
+  uiCapabilities?: {
+    agentCreation?: {
+      googleConnection?: 'inline' | 'optional' | 'hidden';
+    };
+  };
   /** Internal Agent-first / AI talent team dogfood. Requires full role + explicit server opt-in. */
   agentFirstEnabled?: boolean;
   /** External Agent deployment management surface. Enabled on supported Agent-first VMs. */

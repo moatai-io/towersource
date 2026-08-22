@@ -1,8 +1,9 @@
 /**
- * Publish Client — used by TOWER_ROLE=managed servers
+ * Publish Client — used by TOWER_ROLE=managed self-hosts
  *
- * Packages a source directory into tar.gz and sends it to the
- * Central Publish Gateway (Moat AI's full-role server) for deployment.
+ * Packages a source directory into tar.gz and sends it to the explicitly
+ * configured organization Publish Gateway. Standalone self-hosts do not use
+ * or depend on this client.
  */
 import { execFile } from 'child_process';
 import { promisify } from 'util';

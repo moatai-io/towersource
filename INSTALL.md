@@ -160,7 +160,19 @@ When `CLAUDE_ENABLED=false`:
 - Quick-replies (`@ai`) and `@task` run on the Pi engine automatically.
 - The Claude CLI is never invoked, so no `~/.claude/.credentials.json` is needed.
 
-### 3c. Optional Google Workspace OAuth (self-hosted)
+### 3c. Optional live web search with Firecrawl
+
+Tower's current live web and news search Provider is Firecrawl. It is optional: chat, local files, document tools, the Project Worker, and Agent creation remain usable without it. `WebFetch` can still read some simple public pages through a direct fallback, but reliable `WebSearch` requires a Firecrawl Connection.
+
+After core setup, ask the Agent to connect Firecrawl or add a project-authorized API-key Connection with this runtime environment name through Tower's secure input:
+
+```text
+FIRECRAWL_API_KEY
+```
+
+Do not paste the key into chat, source files, `.env.example`, or documentation. The Connection must be allowed for the Agent's Project before the backend web tools can use it. Provider usage and charges are governed by the Firecrawl account you connect.
+
+### 3d. Optional Google Workspace OAuth (self-hosted)
 
 Google Workspace is optional and is **not** configured by the blank-host installer. Each self-hosted organization owns its Google OAuth application, consent screen, allowed users, and callback domain. Tower does not ship a shared Google client secret or require a central OAuth broker.
 
@@ -640,37 +652,25 @@ psql "$DATABASE_URL" -c "SELECT count(*), state FROM pg_stat_activity GROUP BY s
 
 ## Backup & Restore
 
-### Manual backup
+The research-alpha OSS release does not yet ship a verified automated backup or restore command. The private operations backup script is intentionally excluded from the public export because it assumes deployment-specific storage and paths.
 
-```bash
-bash scripts/backup.sh
+For the canonical single-host systemd installation, the durable state that an operator must protect is:
+
+```text
+PostgreSQL database: tower
+Workspace and generated state: /var/lib/tower
+Installed source/build: /opt/tower (reproducible from the release source)
 ```
 
-`scripts/backup.sh` is the **PostgreSQL edition**. It runs `pg_dump` against `DATABASE_URL`, tars `~/workspace` and, when present, legacy `~/.claude`, and optionally pushes backup artifacts to Azure Blob when `BACKUP_TO_BLOB=1`.
+Do not treat a file copy taken while Tower and PostgreSQL are actively writing as a verified backup. Before production-like use, establish and rehearse an organization-owned procedure that includes:
 
-### Automated (cron)
+1. a consistent PostgreSQL backup (`pg_dump` or a managed PostgreSQL snapshot),
+2. a protected copy or filesystem snapshot of `/var/lib/tower`,
+3. retention and off-host storage,
+4. a restore test on a separate host,
+5. the exact Tower release SHA used with the backup.
 
-```bash
-crontab -e
-# Add this line:
-0 3 * * * cd ~/tower && bash scripts/backup.sh >> ~/tower-backups/backup.log 2>&1
-```
-
-Keeps last 7 local days by default (`KEEP_DAYS=7`) and 30 days in Blob (`BLOB_KEEP_DAYS=30`) when enabled.
-
-### Restore
-
-```bash
-# Stop the server (PM2: ./start.sh prod-stop)
-
-# Restore the database:
-gunzip -c backups/20260228_030000/tower-pg-*.sql.gz | psql "$DATABASE_URL"
-
-# Restore the workspace:
-tar -xzf backups/20260228_030000/workspace.tar.gz -C ~/
-
-# Restart the server
-```
+A public `scripts/oss/backup.sh` and tested restore runbook remain release work. Until they exist, Tower should be treated as evaluation software unless your organization supplies and validates this operating layer.
 
 ---
 
@@ -687,7 +687,7 @@ Before going live, verify:
 - [ ] Non-admin users have `allowed_path` set appropriately
 - [ ] Server is behind HTTPS (Cloudflare, nginx, or tunnel)
 - [ ] Firewall allows only port 443 (HTTPS) inbound, or your chosen port
-- [ ] Backup cron is running (`crontab -l`)
+- [ ] A PostgreSQL + `/var/lib/tower` backup and restore procedure has been tested off-host
 
 ---
 

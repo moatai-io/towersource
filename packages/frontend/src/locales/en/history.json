@@ -18,7 +18,7 @@
   "noArchivedTasks": "No archived tasks",
   "restore": "Restore",
   "deletePermanently": "Delete permanently",
-  "deleteSessionPermanentConfirm": "Permanently deleting this session removes its conversation and work history. This cannot be undone.",
+  "deleteSessionPermanentConfirm": "Permanently deleting this session removes its session and work history. This cannot be undone.",
   "justNow": "Just now",
   "minutesAgo": "{{count}}m ago",
   "hoursAgo": "{{count}}h ago",

@@ -34,7 +34,7 @@ This resource is loaded on demand by Pi via `guide_read` when exact Tower subage
   1. **사용자 명시 요청** — "사이드바에 새 세션 띄워서 ~", "그 자식 세션에 ~ 도 물어봐줘", "어제 작업하던 X 세션에 ~ 알려줘", "spawn / send 해줘" 류 직접 트리거.
   2. **활성 스킬 명시 호출** — 스킬 SKILL.md 가 도구를 흐름의 일부로 박아둔 경우 (예: `/research`, `/best-of-n`).
 
-`/self-host deploy` 와 같은 정책. 근거: workspace/decisions/2026-05-09-l3-spawn-phase2-orchestration.md
+배포 같은 외부 변경과 동일하게 사용자 명시 요청이 필요한 정책입니다.
 
 ### 도구 선택
 

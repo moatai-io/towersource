@@ -428,6 +428,16 @@ flowchart TB
 
 Tower's installer configures Node.js, PostgreSQL with the required extensions, the Tower system service, nginx, secure local secrets, and a final readiness check.
 
+On a blank Ubuntu server, use the public bootstrap entry point:
+
+```bash
+sudo apt-get update && sudo apt-get install -y curl ca-certificates
+curl -fsSL https://raw.githubusercontent.com/moatai-io/towersource/main/scripts/oss/bootstrap.sh -o /tmp/tower-bootstrap.sh
+sudo bash /tmp/tower-bootstrap.sh --public-url http://YOUR_SERVER_IP
+```
+
+If Git is already installed, you can clone the public repository instead:
+
 ```bash
 git clone https://github.com/moatai-io/towersource.git tower
 cd tower
@@ -435,6 +445,8 @@ sudo bash scripts/oss/install.sh --public-url http://YOUR_SERVER_IP
 ```
 
 Then open `http://YOUR_SERVER_IP` and create the first administrator account. Connect an AI provider from **Settings → Connections** when you are ready to run model calls.
+
+External capabilities are optional: live web search currently uses Firecrawl, while Google Workspace and image generation require their own Connections. You can add them later without blocking the core Tower workspace.
 
 If a domain already points to the server, install HTTPS in the same command:
 

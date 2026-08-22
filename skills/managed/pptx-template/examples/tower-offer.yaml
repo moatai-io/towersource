@@ -8,7 +8,7 @@
 meta:
   title: "Tower 도입 제안"
   subtitle: "[클라이언트명] / 2026 Q2"
-  presenter: "Moat AI · 전성훈"
+  presenter: "Example Org · 김예시"
   date: "2026-05-01"
 
 theme:
@@ -50,7 +50,7 @@ slides:
       - { value: "100%", label: "팀 가시성",   desc: "사용량 · 비용 · 권한 한 곳에서" }
       - { value: "60+",  label: "빌트인 스킬", desc: "보고서 · 문서 · SMS · 메일" }
       - { value: "4주",  label: "본 운영까지", desc: "셋업부터 안정화까지" }
-    caption: "* Moat AI 운영 데이터 기반 (2026 Q1)"
+    caption: "* 합성 데모 데이터 (실제 운영 수치 아님)"
 
   # 5. 핵심 기능 카드
   - layout: feature_grid
@@ -112,5 +112,5 @@ slides:
       - "다음 주 — PoC 환경 셋업 (3일)"
       - "1개월 내 — 팀 전체 본 운영"
     contact:
-      name: "전성훈 · Moat AI"
-      email: "juliuschun@doomoolmori.com"
+      name: "김예시 · Example Org"
+      email: "hello@example.com"

@@ -4,7 +4,6 @@
  */
 import { queryOne } from '../../db/pg-repo.js';
 import type { PrimaryAgentStaffingPayload } from './primary-agent-creation-intent.js';
-import { buildPrimaryAgentOfficeHoursInstruction } from './primary-agent-office-hours.js';
 
 export interface PrimaryAgentBootstrapInput {
   name: string;
@@ -49,7 +48,7 @@ async function resolveDefaultPrimaryAgentHarness(): Promise<DefaultHarnessRow> {
 /** Deterministically expand a minimal request without treating expertise intent as a finalized role. */
 export async function buildPrimaryAgentBootstrapPayload(input: PrimaryAgentBootstrapInput): Promise<{
   payload: PrimaryAgentStaffingPayload;
-  card: { name: string; face: string; expertiseIntent: string; profileStatus: 'provisional'; harnessSummary: string; approvalBoundary: string };
+  card: { name: string; face: string; expertiseIntent: string; profileStatus: 'ready'; harnessSummary: string; approvalBoundary: string };
 }> {
   const name = requiredText(input.name, 'name', 120);
   const face = requiredText(input.face, 'face', 120);
@@ -61,13 +60,13 @@ export async function buildPrimaryAgentBootstrapPayload(input: PrimaryAgentBoots
 
   const payload: PrimaryAgentStaffingPayload = {
     name,
-    description: `${expertiseIntent}을(를) 잘하는 AI 팀원으로 성장하기 위한 Workspace`,
+    description: `${expertiseIntent}을(를) 잘 수행하는 AI 팀원의 Workspace`,
     face,
-    tagline: `${expertiseIntent}을(를) 잘하는 팀원으로 성장합니다.`,
-    role: `현재 기대 전문성은 “${expertiseIntent}”이며, 실제 역할과 책임 범위는 온보딩 대화에서 구체화합니다.`,
-    promise: '실제 사례를 먼저 이해하고, 확인되지 않은 역할·권한·규칙을 확정하지 않겠습니다.',
-    instruction: buildPrimaryAgentOfficeHoursInstruction(expertiseIntent),
-    firstMission: '팀 합류와 첫 업무 인수인계',
+    tagline: `${expertiseIntent}을(를) 잘하는 팀원입니다.`,
+    role: `“${expertiseIntent}”을(를) 중심으로 사용자의 실제 업무를 수행합니다.`,
+    promise: '불필요한 인터뷰보다 실제 업무와 유용한 결과를 우선하겠습니다.',
+    instruction: `사용자가 기대하는 핵심 전문성은 “${expertiseIntent}”입니다. 이 방향에 맞춰 사용자의 실제 요청을 정확하고 실용적으로 수행하세요. 별도의 입사 인터뷰나 온보딩 절차를 시작하지 마세요. 공통 작업 방식, 질문 기준, 권한과 안전 경계는 시스템 지침을 따르세요.`,
+    firstMission: '사용자의 첫 실제 업무를 수행하기',
     authorityPolicy: { externalActions: 'confirm', destructiveActions: 'confirm', crossProjectAccess: 'explicit-target-and-acl' },
     toolPolicy: { harnessSelection: 'server-default', privilegedPlatformActions: 'forbidden' },
     capabilityRequirements: { required: capabilities, approvalConditions: [BOOTSTRAP_BOUNDARY] },
@@ -86,8 +85,8 @@ export async function buildPrimaryAgentBootstrapPayload(input: PrimaryAgentBoots
       name,
       face,
       expertiseIntent,
-      profileStatus: 'provisional',
-      harnessSummary: 'Tower의 공통 기본 업무 환경으로 시작하며, 전문성에 따라 도구를 임의로 축소하거나 확정하지 않습니다.',
+      profileStatus: 'ready',
+      harnessSummary: 'Tower의 공통 기본 업무 환경에서 바로 실제 업무를 시작합니다.',
       approvalBoundary: BOOTSTRAP_BOUNDARY,
     },
   };

@@ -7,7 +7,7 @@
  * 15분짜리 'ideas' scope 같은 일회성은 직접 generateScopedToken 호출.
  *
  * 결정: workspace/decisions/2026-05-27-fleet-service-tokens.md
- * Issue: https://github.com/juliuschun/tower/issues/36
+ * Issue: internal issue #36
  * See also: auth.ts (generateScopedToken, SCOPE_PREFIXES).
  */
 

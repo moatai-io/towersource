@@ -13,6 +13,7 @@ const koLayout = JSON.parse(fs.readFileSync(path.resolve(import.meta.dirname, '.
 const creationKeys = [
   'newAiTeammate', 'heading', 'description', 'name', 'expectedExpertise', 'chooseFace',
   'create', 'creating', 'recoveryCreated', 'reopenConversation', 'employeeFallback', 'characterLabel',
+  'customCharacterConnectionRequired', 'optionalConnections', 'connectionsLater',
 ];
 const googleKeys = ['title', 'description', 'none', 'organization', 'dedicated', 'loadFailed', 'grantFailed', 'oauthFailed', 'readinessFailed', 'setupRequired', 'httpsRequired', 'redirectMismatch', 'callbackLabel', 'adminSetupHint'];
 const homeKeys = ['aiTeamHomeTitle', 'newAiTeammate', 'createAiTeammate', 'aiTeammateList', 'noAiTeammates'];

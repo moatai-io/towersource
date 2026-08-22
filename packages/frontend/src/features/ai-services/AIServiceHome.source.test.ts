@@ -189,7 +189,7 @@ describe('AI Service first-class operations home', () => {
     expect(source).not.toContain('웹사이트 열기');
     expect(source).toContain("i18n.t('aiServices.home.ui.openAdvanced')");
     expect(source).toContain('/credentials/revoke');
-    expect(source).toContain('Conversation API URL');
+    expect(source).toContain('Session API URL');
     expect(source).toContain('Message API URL template');
     expect(source).toContain("i18n.t('aiServices.home.ui.copyToken')");
     expect(source).toContain("i18n.t('aiServices.home.ui.copyApi')");

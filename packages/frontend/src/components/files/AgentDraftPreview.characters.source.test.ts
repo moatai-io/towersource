@@ -23,7 +23,8 @@ describe("AI teammate character picker", () => {
   it("provides an explicit custom generation request", () => {
     expect(source).toContain("t('agentCreation.customCharacterQuestion')");
     expect(source).toContain("fetch('/api/agent-characters/generate'");
-    expect(source).toContain("projectId: draft?.sourceProjectId");
+    expect(source).toContain("const sourceProjectId = draft?.sourceProjectId || sessions.find");
+    expect(source).toContain("projectId: sourceProjectId");
     expect(source).toContain("t('agentCreation.generateNewFace')");
     expect(source).toContain("agentFaceImageUrl(draft?.face)");
   });

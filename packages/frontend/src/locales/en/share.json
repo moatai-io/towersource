@@ -12,7 +12,7 @@
   "currentShares": "Current shares",
   "shareComplete": "Share complete",
   "shareCancelled": "Share cancelled",
-  "externalLinkWarning": "External links contain a snapshot of the conversation at the time of sharing. Future messages will not be included.",
+  "externalLinkWarning": "External links contain a snapshot of the session at the time of sharing. Future messages will not be included.",
   "internalShareDescription": "Sharing internally lets the user see this session in their session list.",
   "codePreview": "Code preview",
   "invalidLink": "This link is invalid.",

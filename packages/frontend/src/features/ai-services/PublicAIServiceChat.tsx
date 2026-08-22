@@ -355,7 +355,7 @@ export function PublicAIServiceChat() {
       resumeToken: typeof created.resumeToken === 'string' ? created.resumeToken : undefined,
       resumeExpiresAt: typeof created.expiresAt === 'string' ? created.expiresAt : undefined,
     };
-    if (!next.id) throw new Error('Conversation id missing');
+    if (!next.id) throw new Error('Session id missing');
     setConversation(next);
     setRestoredConversation(false);
     const storage = token ? window.sessionStorage : window.localStorage;

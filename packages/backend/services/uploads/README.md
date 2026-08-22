@@ -20,4 +20,4 @@ Important rules:
 - Project quota defaults to 4GiB.
 
 Decision: `workspace/decisions/2026-06-08-large-folder-resumable-upload.md`.
-Issue: https://github.com/juliuschun/tower/issues/79
+Issue: internal issue #79

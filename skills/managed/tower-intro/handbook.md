@@ -3,21 +3,19 @@ title: Tower Handbook — 사용자·발표·설명서용 통합 안내서
 audience: 워크스페이스 사용자 / 발표 자료 작성자 / 외부 설명용 / 새로 합류한 팀원
 status: live (수동 갱신 + `/skill-architect refine tower-intro` 보조)
 last_updated: 2026-06-26
-owner: Moat AI 운영 (admin / operator)
+owner: Tower maintainers (organization overrides may replace this seed)
 source_of_truth:
-  - workspace/decisions/ (정책·구조 변경 이력)
-  - tower/docs/tower-guide/ (개발자·운영자 위키)
-  - workspace/projects/teamskills/skills/ (조직 공용 스킬 정본)
-  - tower/config/skills/managed-skills.yaml / workspace/projects/teamskills/skillset.json (스킬 메타·기본셋)
-  - tower/AGENTS.md / workspace/AGENTS.md (런타임 매뉴얼)
-  - workspace/docs/tower/ (고객 영업 톤 문서)
+  - docs/tower-guide/ (공개 제품·개발 가이드)
+  - skills/managed/ (공개 기본 스킬 seed)
+  - organization skill source (조직별 materialized override, 선택)
+  - AGENTS.md (프로젝트 런타임 매뉴얼)
 ---
 
 # Tower Handbook
 
 > **이 문서의 용도** — "Tower 가 뭐예요?" "이거 어떻게 활용할 수 있어요?" "발표 자료 만들 때 뭐를 강조해야 해요?" 같은 질문에 단일 출처로 답하기 위한 핸드북. 워크스페이스 안에서 *프로젝트 세션 AI* 와 *사용자* 가 함께 보는 1차 안내서.
 >
-> **이 문서가 *아닌* 것** — 코드 변경 시 참조하는 개발 위키(`tower/docs/tower-guide/`)나 외부 영업 자료(`workspace/docs/tower/`) 의 *대체* 가 아닙니다. 그 둘을 *재료* 로 통합해 *워크스페이스 안 모든 사용자가 한 페이지에서 Tower 를 이해* 하게 만드는 합성물입니다. 깊이 들어갈 때는 §10 의 길잡이를 따라가십시오.
+> **이 문서가 *아닌* 것** — 조직별 운영 runbook이나 영업 자료가 아닙니다. 모든 배포에서 안전하게 공유할 수 있는 제품 안내 seed이며, 조직별 정보는 별도 materialized handbook에서 관리합니다.
 
 ---
 
@@ -61,9 +59,9 @@ Tower 는 **AI를 쓰는 회사를 넘어, AI가 함께 일할 수 있는 회사
 
 ### 1-3. "그래서 누가 이걸 만들었어요?"
 
-- **제공사**: Moat AI (모트AI), 한국. 줄리어스 (Julius Chun) PM.
-- **단계**: 자체 호스팅 서버 운영과 내부 dogfooding을 병행하는 Agent OS 제품. demo-org, demo-server 등 managed 자체 호스팅 서버과 Moat AI 내부 full VM에서 운영 중입니다.
-- **라이선스 / 모델**: 고객사 서버에 직접 설치·운영하는 on-premise/self-hosted VM 모델. 일반 SaaS가 아니라 고객 데이터 경계 안에 Tower를 둡니다.
+- **배포 모델**: 조직이 직접 운영하는 self-hosted Agent OS입니다.
+- **프로필**: 독립 운영은 `standalone`, 조직 gateway에 명시적으로 연결한 노드는 `managed`, 조직 control plane은 `full`을 사용합니다.
+- **데이터 경계**: 각 운영자가 자기 서버·워크스페이스·credential 정책을 소유합니다.
 - **기반 기술**: Tower AI runtime, React + Express + PostgreSQL, Project Runtime Box/Sandbox, Credential Vault, Tower-managed skill system.
 
 ---
@@ -81,11 +79,11 @@ Tower 의 권한은 이제 단순한 "서버 역할" 하나가 아니라 **역�
 | **member** | 초대받은 프로젝트 안에서 파일·세션·스킬·산출물 작업 | 프로젝트 팀원 |
 | **viewer / guest** | 초대받은 범위 읽기·검토 중심 | 외부 방청자·검토자 |
 
-운영팀 (Moat AI 내부) 은 admin/operator, 고객사 일반 사용자는 보통 member, 외부 이해관계자는 viewer/guest로 시작합니다.
+조직 운영자는 admin/operator, 일반 프로젝트 사용자는 member, 외부 검토자는 viewer/guest로 시작하는 구성이 일반적입니다.
 
 ### 2-2. 프로젝트 멤버십 (수평)
 
-같은 member 라도 "한투 프로젝트 멤버" vs "오쿠시스템 프로젝트 멤버" 는 서로 다른 데이터에 접근합니다. 프로젝트가 Tower의 1차 작업 경계입니다.
+같은 member라도 "재무 프로젝트 멤버"와 "고객지원 프로젝트 멤버"는 서로 다른 데이터에 접근합니다. 프로젝트가 Tower의 1차 작업 경계입니다.
 
 - 프로젝트에 초대받지 않으면 **그 프로젝트 폴더와 세션 자체가 보이지 않거나 접근이 차단**됩니다.
 - 프로젝트는 파일·채널·세션·AGENTS.md·결정문서·스킬·Runtime Box 설정·credential grant를 함께 묶습니다.
@@ -100,7 +98,7 @@ Tower 의 권한은 이제 단순한 "서버 역할" 하나가 아니라 **역�
 |---|---|---|
 | **Capability grant** | 어떤 고위험/운영 행동을 할 수 있는가 | `fleet:deploy`, `skill:materialize-project`, `credential:grant-project` |
 | **Credential grant** | 어떤 secret 이름을 Runtime Box에 주입할 수 있는가 | `OPENAI_API_KEY`, `APIFY_TOKEN`, `NAVER_CLIENT_SECRET`, `TIRO_KEY` |
-| **명시 의도** | 배포·전송·삭제·공개 같은 위험 행동을 사용자가 지금 원했는가 | `/self-host deploy demo-org`, "공개 URL로 publish" |
+| **명시 의도** | 배포·전송·삭제·공개 같은 위험 행동을 사용자가 지금 원했는가 | "새 버전을 배포", "공개 URL로 publish" |
 | **감사 가능성** | 누가 언제 어떤 권한으로 실행했는가 | session id, run id, audit log, decision |
 
 Credential 값은 AI가 보지 않습니다. 스킬과 Runtime Box는 `secrets: ["NAME"]`처럼 **이름만** 요구하고, Tower Credential Orchestrator가 허용된 대상에만 값을 주입합니다.
@@ -414,7 +412,7 @@ AI가 임의 JavaScript나 DOM selector를 실행하는 방식은 금지입니�
 │   └── shared/                ← 공유 타입·파서
 ├── templates/workspace/       ← 신규 자체 호스팅 서버 시드 (CLAUDE.md, principles.md, ...)
 ├── docs/tower-guide/          ← 개발자·운영자 위키 (architecture, operations, skills, ...)
-├── docs/customer-servers.md   ← 자체 호스팅 서버 목록
+├── docs/                      ← 공개 제품·개발 가이드
 ├── start.sh                   ← prod-restart 등 운영 명령
 └── CLAUDE.md                  ← 코드베이스 작업 시 AI 가 읽는 룰
 ```
@@ -441,48 +439,36 @@ AI가 임의 JavaScript나 DOM selector를 실행하는 방식은 금지입니�
 |---|---|
 | Frontend | React 19, TypeScript, Vite 6 |
 | Backend | Express, TypeScript, WebSocket, tsx watch |
-| DB | PostgreSQL (Moat AI 내부) / SQLite 옵션 (경량 고객) |
+| DB | PostgreSQL (기본 production) / SQLite 옵션 (경량·개발 환경) |
 | AI | Tower AI runtime, provider routing, Local 옵션 |
 | 외부 API | Anthropic, OpenRouter, Azure/OpenAI, Google/Naver/Tiro 등 grant 기반 통합 |
 | 인증 | JWT + AES-256-GCM, httpOnly 쿠키 |
 | 프로세스 | PM2 (prod), tsx watch (dev) |
 | 리버스 프록시 | Nginx + LE wildcard cert |
-| 배포 자동화 | git push + `./start.sh prod-restart` (자체) / `/self-host deploy <customer>` (자체 호스팅 서버) |
+| 배포 자동화 | 공개 installer/upgrade 흐름 또는 운영자가 선택한 CI/CD |
 | 격리 실행 | Project Runtime Box + Docker sandbox (in-process MCP, 형제 execution VM) |
 
-### 6-2. 환경 매트릭스 (Moat AI 내부)
+### 6-2. 배포 프로필
 
-| 환경 | 도메인 | 포트 | 프로세스 |
+| 프로필 | 누구를 위한 것인가 | 외부 운영자 의존 | 핵심 계약 |
 |---|---|---|---|
-| Dev | `desk-dev.tower.example.com` | :32354 (Vite) → :32355 (backend) | `npm run dev` (tsx watch) |
-| Prod | `tower.tower.example.com` | :32364 | PM2 `tower-prod` |
-| Redirect | `desk.tower.example.com` | — | Nginx 301 → Prod |
+| `standalone` | 일반 self-host 운영자 | 없음 | 기본값. 이 서버가 provider·credential·upgrade를 직접 소유 |
+| `managed` | 조직 gateway를 사용하는 self-host 노드 | 명시적으로 설정된 gateway만 | `PUBLISH_GATEWAY_URL` 등 연결 설정 필요 |
+| `full` | 여러 노드를 운영하는 조직 control plane | 조직 자체가 운영자 | operator surface·gateway·registry를 선택적으로 제공 |
 
-DB / workspace / engine session storage / API 키는 dev/prod 공유. Dev 코드 수정 → 즉시 prod 영향 없음.
+### 6-3. Self-host 운영 원칙
 
-### 6-3. 자체 호스팅 서버 (Self-hosted servers)
-
-대표 운영 대상 (2026-06 기준):
-
-| 고객 | 도메인 | 프로필 | 상태 |
-|---|---|---|---|
-| Moat AI 내부 | `tower.tower.example.com` | full | 운영 중 |
-| demo-org | `demo-org.tower.example.com` | managed | 첫 managed 고객 (2026-04-04) |
-| demo-server | `demo-server.tower.example.com` | managed | 데모용 |
-
-각 self-hosted server 옆에 **형제 execution/sandbox VM** 또는 Runtime Box 실행면을 둡니다:
-- `execution-tower-vm` (10.0.0.4, B1ms) — Moat AI
-- `execution-demo-org-vm` (20.196.213.144, 10.0.0.6) — demo-org
-- ... (각 고객마다)
-
-상세: `tower/docs/customer-servers.md`
+- 새 설치는 `TOWER_ROLE=standalone`으로 시작합니다.
+- `managed`는 조직 gateway URL과 인증을 운영자가 명시적으로 제공한 경우에만 선택합니다.
+- `full`은 일반 self-host의 상위 버전이 아니라, 여러 설치를 책임지는 조직 control plane 프로필입니다.
+- Runtime Box는 같은 호스트 또는 운영자가 선택한 별도 실행면에서 구성할 수 있으며, 실제 주소와 credential은 저장소 밖 설정으로 관리합니다.
 
 ### 6-4. 배포 흐름
 
-- **자체 Prod**: dev 세션에서 `./start.sh prod-restart`
-- **자체 호스팅 서버**: `/self-host deploy <customer>` 한 줄 (git pull + build + pm2 restart + managed skill sync/materialize). SSH 직타 합성 금지.
-- **사용자 명시 요청 시에만 배포** — `git push` 의 다음 단계가 *아님*. local main ↔ origin/main 동기화 가드가 선행됩니다.
-- **Skill rollout**: 자체 호스팅 서버 스킬 반영은 `/managed-skill-rollout` 또는 `/fleet skills` 흐름에서 diff/sync/materialize/verify를 봅니다.
+- **일반 self-host**: `INSTALL.md`와 공개 installer/doctor 흐름을 따릅니다.
+- **조직 운영 환경**: 조직이 승인한 CI/CD와 exact revision 정책을 따릅니다.
+- **배포는 별도 행동**: git push가 자동으로 실행 중 서버를 변경하지 않도록 구성합니다.
+- **설정 분리**: 도메인·registry·SSH target·credential은 코드와 공개 handbook에 넣지 않습니다.
 
 ---
 
@@ -554,7 +540,7 @@ DB / workspace / engine session storage / API 키는 dev/prod 공유. Dev 코드
 4. **축적** — 문서·결정·스킬·산출물이 회사 자산으로 남음
 5. **보안** — 데이터 흐름 + Credential Vault + 감사 트레일 — §7
 6. **도입 시나리오** — 프로젝트 단위로 작은 업무부터 Runtime Box/스킬화
-7. **레퍼런스** — demo-org, demo-server, 내부 full VM 운영 사례
+7. **검증 근거** — 합성 데모와 공개 가능한 운영 지표
 8. **비용** — 개인 구독이 아니라 조직 실행력·감사·재사용성 관점
 
 ### 8-2. 톤 B — 현업 사용자용 (워크숍 / 온보딩)
@@ -621,7 +607,7 @@ DB / workspace / engine session storage / API 키는 dev/prod 공유. Dev 코드
 A. ChatGPT Team 은 개인/팀용 AI 채팅에 가깝습니다. Tower 는 프로젝트, 파일, 권한, Credential Vault, Runtime Box, 스킬, 스케줄, Agent Worker가 묶인 회사용 Agent OS입니다. 핵심 차이는 "답변"보다 "회사 업무 구조와 실행 흔적이 남는다"는 점입니다. §1-2 표.
 
 **Q. 인터넷 안 되는 환경에서도 써요?**
-A. 부분적 가능. AI API 호출만 외부 (Anthropic) — 폐쇄망에서는 VPN/프록시 또는 로컬 LLM (향후) 옵션. 그 외 모든 기능은 사내에서 동작. `workspace/docs/tower/on-premise-install.md §폐쇄망`.
+A. 부분적 가능. AI API 호출만 외부 (Anthropic) — 폐쇄망에서는 VPN/프록시 또는 로컬 LLM (향후) 옵션. 그 외 모든 기능은 사내에서 동작. 조직의 네트워크 정책과 `INSTALL.md`를 함께 검토해야 합니다.
 
 **Q. AI 가 잘못된 파일 지우면 어떡해요?**
 A. (1) Permission Mode 로 사전 통제, (2) git 자동 커밋으로 복구, (3) damage-control 가드가 위험 명령 차단, (4) sandbox VM 으로 격리 실행, (5) decisions/ 는 immutable. §7.
@@ -641,21 +627,18 @@ A. 의사결정자용은 §8-1의 AX/Agent OS 흐름을 쓰고, 보안 담당자
 
 ### 10-1. 워크스페이스 안 (모든 멤버 가능)
 
-- `workspace/docs/tower/` — 외부 영업·도입 검토용 4문서
-- `workspace/docs/publishing-guide.md` — 사이트 배포 전체
-- `workspace/decisions/` — 정책·구조 변경 이력 (특히 2026-03-20 project-centric, 2026-04-28~05-02 sandbox D11/D12/D13, 2026-04-23 publishing visibility)
+- 프로젝트의 `AGENTS.md` — 현재 작업 경계와 운영 규칙
+- 조직이 제공한 안내 문서 — 조직별 정책과 지원 범위
+- Project decisions — 프로젝트별 중요한 판단 기록
 - `workspace/principles.md` — 다섯 원칙
 - `workspace/AGENTS.md` — 런타임 매뉴얼
 
 ### 10-2. 코드베이스 (admin/operator)
 
-- `tower/docs/tower-guide/architecture.md` — 5-레이어 컨텍스트, 시스템 프롬프트 구조
-- `tower/docs/tower-guide/ai-execution-paths.md` — Session / Channel AI / Task 비교 매트릭스
-- `tower/docs/tower-guide/skills.md` — 스킬 시스템 3축
-- `tower/docs/tower-guide/operations.md` — 환경·배포·고객
-- `tower/docs/tower-guide/visual-formats.md` — 15+ 시각화 포맷 스키마
-- `tower/docs/tower-guide/update-map.md` — "이걸 바꾸려면 어디를"
-- `tower/docs/customer-servers.md` — 자체 호스팅 서버 목록
+- `docs/tower-guide/architecture.md` — 컨텍스트와 시스템 구조
+- `docs/tower-guide/skills.md` — 스킬 시스템
+- `docs/tower-guide/visual-formats.md` — 시각화 포맷
+- `INSTALL.md` — 일반 self-host 설치와 운영 확인
 - `tower/AGENTS.md` — 코드 작업 시 룰
 
 ### 10-3. 스킬
@@ -676,9 +659,9 @@ A. 의사결정자용은 §8-1의 AX/Agent OS 흐름을 쓰고, 보안 담당자
 | 임원·의사결정자 | 이 문서 §0~§2 + §8-1 |
 | 현업 신규 사용자 | 이 문서 §0~§4 + §8-2 |
 | IT/보안 담당자 | 이 문서 §7 + `tower/security-architecture.md` |
-| 개발자 | 이 문서 §5~§6 + `tower/docs/tower-guide/` 전체 |
-| 운영자 (admin) | `tower/CLAUDE.md` + `tower/docs/tower-guide/operations.md` + `update-map.md` |
-| 외부 데모 / 영업 | `workspace/docs/tower/` 4문서 + 이 문서 §8-1 |
+| 개발자 | 이 문서 §5~§6 + `docs/tower-guide/` |
+| 운영자 (admin) | `AGENTS.md` + `INSTALL.md` + 조직별 runbook |
+| 외부 데모 / 설명 | 이 문서 §8-1 + 공개 가능한 조직 자료 |
 
 ---
 
@@ -710,13 +693,13 @@ A. 의사결정자용은 §8-1의 AX/Agent OS 흐름을 쓰고, 보안 담당자
 
 | 날짜 | 변경 | 작성자 |
 |---|---|---|
-| 2026-05-12 | 최초 작성 (워크스페이스 / 코드 위키 / 결정문서 / 스킬 카탈로그 통합 합성) | 줄리어스 + AI |
-| 2026-05-12 | §10-3 에 `/tower-intro` (사용자용) 신설 표기 + 운영자용 핸드북 갱신 흐름의 역할 구분 명시 | 줄리어스 + AI |
-| 2026-05-12 | 핸드북 갱신을 별도 운영자 흐름으로 분리하고 사용자용 `tower-intro` 는 안내/Q&A 역할로 유지 | 줄리어스 + AI |
-| 2026-05-12 | 핸드북을 스킬 번들과 함께 두는 방향 확정. 과거 provider-specific 정본은 legacy compatibility가 되었고, 현재 managed source는 `skills/managed/tower-intro/handbook.md`. | 줄리어스 + AI |
-| 2026-05-12 | 사용자 진입은 모두 스킬 호출(`/tower-intro`)로 일원화. 파일 경로는 사용자에게 직접 안내하지 않는다. | 줄리어스 + AI |
-| 2026-05-13 | 운영자 유지보수 흐름은 `tower-intro` 핸드북 갱신으로 정리. 현재 정본은 managed bundle source `skills/managed/tower-intro/handbook.md`. | 줄리어스 + AI |
-| 2026-06-26 | AX/Agent OS 포지셔닝, Project Runtime Box, teamskills SSOT, Credential Orchestrator, Agent Session 통합, task/schedule 리포트 정책, UI Action Bus 방향 반영. | 줄리어스 + AI |
+| 2026-05-12 | 최초 작성 (워크스페이스 / 코드 위키 / 결정문서 / 스킬 카탈로그 통합 합성) | Tower maintainers |
+| 2026-05-12 | §10-3 에 `/tower-intro` (사용자용) 신설 표기 + 운영자용 핸드북 갱신 흐름의 역할 구분 명시 | Tower maintainers |
+| 2026-05-12 | 핸드북 갱신을 별도 운영자 흐름으로 분리하고 사용자용 `tower-intro` 는 안내/Q&A 역할로 유지 | Tower maintainers |
+| 2026-05-12 | 핸드북을 스킬 번들과 함께 두는 방향 확정. 과거 provider-specific 정본은 legacy compatibility가 되었고, 현재 managed source는 `skills/managed/tower-intro/handbook.md`. | Tower maintainers |
+| 2026-05-12 | 사용자 진입은 모두 스킬 호출(`/tower-intro`)로 일원화. 파일 경로는 사용자에게 직접 안내하지 않는다. | Tower maintainers |
+| 2026-05-13 | 운영자 유지보수 흐름은 `tower-intro` 핸드북 갱신으로 정리. 현재 정본은 managed bundle source `skills/managed/tower-intro/handbook.md`. | Tower maintainers |
+| 2026-06-26 | AX/Agent OS 포지셔닝, Project Runtime Box, teamskills SSOT, Credential Orchestrator, Agent Session 통합, task/schedule 리포트 정책, UI Action Bus 방향 반영. | Tower maintainers |
 
 ---
 

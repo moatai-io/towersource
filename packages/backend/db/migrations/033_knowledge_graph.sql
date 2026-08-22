@@ -12,8 +12,8 @@
 -- owner, different failure model (D3).
 --
 -- Deployment scope (alpha):
---   - Full profile (Moat AI internal) only. Self-hosted VMs and standalone
---     customer deploys MUST NOT receive this feature yet. The migration
+--   - Full organization control-plane profile only. Managed and standalone
+--     self-host deployments MUST NOT receive this feature yet. The migration
 --     itself is harmless (empty tables), but the distiller + UI are
 --     gated by AI_PM_ENABLED env var.
 --

@@ -4,7 +4,7 @@
 -- Stores metadata for chunked, resumable project uploads. File bytes live in
 -- project-local staging directories under workspace/projects/<p>/uploads/.staging/.
 -- Decision: workspace/decisions/2026-06-08-large-folder-resumable-upload.md
--- Issue: https://github.com/juliuschun/tower/issues/79
+-- Issue: internal issue #79
 
 CREATE TABLE IF NOT EXISTS upload_sessions (
   id TEXT PRIMARY KEY,

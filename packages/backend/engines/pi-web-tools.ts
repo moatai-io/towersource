@@ -334,7 +334,7 @@ export function createWebSearchTool(ctx?: PiWebToolContext): ToolDefinition {
         return {
           content: [{
             type: 'text' as const,
-            text: 'WebSearch unavailable: FIRECRAWL_API_KEY is not configured on the server or granted to this project via Credential Vault.',
+            text: 'Live web search is not connected for this workspace. Tower currently uses Firecrawl for web and news search. Ask an administrator to add a Firecrawl Connection, or continue using the project files and information already available.',
           }],
           details: undefined,
         };

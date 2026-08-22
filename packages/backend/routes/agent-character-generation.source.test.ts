@@ -11,8 +11,16 @@ describe('agent character generation route', () => {
     expect(api).toContain("const projectId = String(req.body?.projectId || '')");
     expect(api).toContain('isProjectMember(projectId, userId)');
     expect(api).toContain('generateAgentCharacter({ projectId, userId');
-    expect(draft).toContain('projectId: draft?.sourceProjectId');
+    expect(draft).toContain('projectId: sourceProjectId');
     expect(home).toContain('projectId: project.id');
+  });
+
+  it('reports secret-free project readiness before exposing custom generation', () => {
+    expect(api).toContain("router.get('/agent-characters/readiness'");
+    expect(api).toContain("hasProjectApiKeyCredential({ projectId, envName: 'OPENAI_IMAGE_API_KEY' })");
+    expect(draft).toContain("fetch(`/api/agent-characters/readiness?projectId=");
+    expect(draft).toContain('characterGenerationReady ?');
+    expect(draft).toContain("t('agentCreation.customCharacterConnectionRequired')");
   });
 
   it('never returns raw provider authentication errors or key fragments', () => {

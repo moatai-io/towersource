@@ -15,6 +15,14 @@ describe('Primary Agent Google setup during creation', () => {
     expect(setup).toContain("credential?.provider === 'google'");
   });
 
+  it('applies product-profile prominence separately from secret-free readiness', () => {
+    expect(preview).toContain("googleConnection ?? 'hidden'");
+    expect(preview).toContain("googleDisplayMode === 'inline'");
+    expect(preview).toContain("googleDisplayMode === 'optional'");
+    expect(preview).toContain("googleDisplayMode === 'hidden'");
+    expect(preview).toContain("if (googleDisplayMode === 'hidden')");
+  });
+
   it('gates Google choices on secret-free server readiness', () => {
     expect(setup).toContain("fetch('/api/auth/google/readiness'");
     expect(setup).toContain("disabled={loading || !googleReady || connections.length === 0}");

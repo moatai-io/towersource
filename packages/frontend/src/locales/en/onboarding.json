@@ -2,7 +2,7 @@
   "provider": {
     "step": "First, connect the AI",
     "title": "Connect the model Tower will use",
-    "description": "Tower needs one working AI provider before you create a teammate or start a conversation. We verify the connection before saving it.",
+    "description": "Tower needs one working AI provider before you create a teammate or start a session. We verify the connection before saving it.",
     "choose": "Choose an AI provider",
     "options": {
       "openrouter": {
@@ -25,7 +25,7 @@
     "firstAgentFailed": "The AI connection was saved, but Tower could not prepare your first AI teammate. Please try again shortly.",
     "firstAgent": {
       "name": "AI Work Partner",
-      "expertise": "A general AI work partner that uses project materials and conversations to clarify goals and help with research, writing, planning, and concrete next actions"
+      "expertise": "A general AI work partner that uses project materials and sessions to clarify goals and help with research, writing, planning, and concrete next actions"
     },
     "connectionFailed": "Could not connect the AI provider.",
     "next": "After the connection succeeds, Tower will open the first AI teammate setup.",

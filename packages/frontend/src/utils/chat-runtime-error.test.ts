@@ -6,11 +6,11 @@ describe('presentChatRuntimeError', () => {
   beforeEach(async () => { await i18n.changeLanguage('en'); });
 
   it.each([
-    ['SESSION_LIMIT', 'Too many conversations are running at once. Try again after another response finishes.'],
+    ['SESSION_LIMIT', 'Too many sessions are running at once. Try again after another response finishes.'],
     ['SDK_HANG', 'The response was delayed for too long and the run was stopped. Continue to resume it.'],
     ['ACCESS_DENIED', 'You do not have permission to run this action.'],
-    ['NO_SESSION_ID', 'Conversation connection information is unavailable. Refresh the page and try again.'],
-    ['COMPACT_FAILED', 'Conversation cleanup could not be completed. Try again shortly.'],
+    ['NO_SESSION_ID', 'Session connection information is unavailable. Refresh the page and try again.'],
+    ['COMPACT_FAILED', 'Session cleanup could not be completed. Try again shortly.'],
   ])('maps %s to user-facing language', (code, expected) => {
     expect(presentChatRuntimeError(code).message).toBe(expected);
   });

@@ -5,6 +5,7 @@ import { useProjectStore } from '../../stores/project-store';
 import { useSessionStore } from '../../stores/session-store';
 import { useChatStore } from '../../stores/chat-store';
 import { useFileStore } from '../../stores/file-store';
+import { useSettingsStore } from '../../stores/settings-store';
 import { AGENT_CHARACTERS, AgentCharacterAvatar, agentFaceImageUrl, characterFace } from '../../features/agent-profile/characters';
 import { AgentGoogleConnectionSetup, allowOrganizationGoogleConnection, loadGoogleOAuthReadiness, loadOrganizationGoogleConnections, startDedicatedGoogleOAuth, type AgentGoogleSetup, type GoogleOAuthReadiness, type OrganizationGoogleConnection } from './AgentGoogleConnectionSetup';
 
@@ -55,13 +56,23 @@ export function AgentDraftPreview({ content }: { content: string }) {
   const [error, setError] = React.useState<string | null>(null);
   const [characterPrompt, setCharacterPrompt] = React.useState('');
   const [characterGenerating, setCharacterGenerating] = React.useState(false);
+  const [characterGenerationReady, setCharacterGenerationReady] = React.useState(false);
   const [googleSetup, setGoogleSetup] = React.useState<AgentGoogleSetup>({ mode: 'none' });
   const [organizationGoogleConnections, setOrganizationGoogleConnections] = React.useState<OrganizationGoogleConnection[]>([]);
   const [googleOAuthReadiness, setGoogleOAuthReadiness] = React.useState<GoogleOAuthReadiness | null>(null);
   const [googleConnectionsLoading, setGoogleConnectionsLoading] = React.useState(true);
+  const googleDisplayMode = useSettingsStore((state) => state.serverConfig?.uiCapabilities?.agentCreation?.googleConnection ?? 'hidden');
 
   React.useEffect(() => {
+    if (googleDisplayMode === 'hidden') {
+      setGoogleOAuthReadiness(null);
+      setOrganizationGoogleConnections([]);
+      setGoogleSetup({ mode: 'none' });
+      setGoogleConnectionsLoading(false);
+      return;
+    }
     let active = true;
+    setGoogleConnectionsLoading(true);
     Promise.all([loadGoogleOAuthReadiness(), loadOrganizationGoogleConnections()])
       .then(([readiness, connections]) => {
         if (!active) return;
@@ -77,13 +88,27 @@ export function AgentDraftPreview({ content }: { content: string }) {
       })
       .finally(() => { if (active) setGoogleConnectionsLoading(false); });
     return () => { active = false; };
-  }, []);
+  }, [googleDisplayMode]);
 
   React.useEffect(() => {
     if (parsedDraft) setDraft(parsedDraft);
   }, [parsedDraft, setDraft]);
 
   const draft = storeDraft || parsedDraft;
+  const sourceProjectId = draft?.sourceProjectId || sessions.find((session) => session.id === activeSessionId)?.projectId;
+
+  React.useEffect(() => {
+    if (!sourceProjectId) {
+      setCharacterGenerationReady(false);
+      return;
+    }
+    let active = true;
+    fetch(`/api/agent-characters/readiness?projectId=${encodeURIComponent(sourceProjectId)}`, { headers: authHeaders(), cache: 'no-store' })
+      .then((response) => response.ok ? response.json() : { ready: false })
+      .then((result) => { if (active) setCharacterGenerationReady(result?.ready === true); })
+      .catch(() => { if (active) setCharacterGenerationReady(false); });
+    return () => { active = false; };
+  }, [sourceProjectId]);
   const expertiseInput = draft ? expectedExpertiseInput(draft) : '';
   const expertise = expertiseInput.trim();
   const faceImageUrl = agentFaceImageUrl(draft?.face);
@@ -97,7 +122,7 @@ export function AgentDraftPreview({ content }: { content: string }) {
       const response = await fetch('/api/agent-characters/generate', {
         method: 'POST',
         headers: authHeaders(),
-        body: JSON.stringify({ prompt: characterPrompt, projectId: draft?.sourceProjectId }),
+        body: JSON.stringify({ prompt: characterPrompt, projectId: sourceProjectId }),
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.error || `Request failed: ${response.status}`);
@@ -109,7 +134,6 @@ export function AgentDraftPreview({ content }: { content: string }) {
     }
   };
 
-  const sourceProjectId = draft?.sourceProjectId || sessions.find((session) => session.id === activeSessionId)?.projectId;
   const bootstrapPayload = draft ? {
     sourceProjectId,
     face: draft.face || '✨',
@@ -269,15 +293,32 @@ export function AgentDraftPreview({ content }: { content: string }) {
                 {FACE_OPTIONS.map((face) => <button key={face} type="button" onClick={() => setFace(face)} aria-pressed={draft.face === face} className={`flex h-11 items-center justify-center rounded-2xl border text-xl ${draft.face === face ? 'border-primary-400 bg-primary-500/20' : 'border-surface-700 bg-surface-950'}`}>{face}</button>)}
               </div>
             </details>
-            <details className="mt-3">
-              <summary className="cursor-pointer text-xs font-semibold text-surface-400 hover:text-surface-200">{t('agentCreation.customCharacterQuestion')}</summary>
-              <p className="mt-2 text-xs leading-5 text-surface-500">{t('agentCreation.customCharacterDescription')}</p>
-              <textarea value={characterPrompt} onChange={(event) => setCharacterPrompt(event.target.value)} rows={2} placeholder={t('agentCreation.customCharacterPlaceholder')} className="mt-3 w-full rounded-xl border border-surface-700 bg-surface-950 px-3 py-2 text-sm text-surface-100" />
-              <button type="button" onClick={generateCharacter} disabled={characterGenerating || !characterPrompt.trim()} className="mt-2 rounded-xl bg-primary-500 px-3 py-2 text-xs font-black text-white hover:bg-primary-400 disabled:opacity-50">{characterGenerating ? t('agentCreation.generating') : t('agentCreation.generateNewFace')}</button>
-            </details>
+            {characterGenerationReady ? (
+              <details className="mt-3">
+                <summary className="cursor-pointer text-xs font-semibold text-surface-400 hover:text-surface-200">{t('agentCreation.customCharacterQuestion')}</summary>
+                <p className="mt-2 text-xs leading-5 text-surface-500">{t('agentCreation.customCharacterDescription')}</p>
+                <textarea value={characterPrompt} onChange={(event) => setCharacterPrompt(event.target.value)} rows={2} placeholder={t('agentCreation.customCharacterPlaceholder')} className="mt-3 w-full rounded-xl border border-surface-700 bg-surface-950 px-3 py-2 text-sm text-surface-100" />
+                <button type="button" onClick={generateCharacter} disabled={characterGenerating || !characterPrompt.trim()} className="mt-2 rounded-xl bg-primary-500 px-3 py-2 text-xs font-black text-white hover:bg-primary-400 disabled:opacity-50">{characterGenerating ? t('agentCreation.generating') : t('agentCreation.generateNewFace')}</button>
+              </details>
+            ) : (
+              <p className="mt-3 text-xs leading-5 text-surface-500">{t('agentCreation.customCharacterConnectionRequired')}</p>
+            )}
         </section>
 
-        <AgentGoogleConnectionSetup value={googleSetup} onChange={setGoogleSetup} connections={organizationGoogleConnections} readiness={googleOAuthReadiness} loading={googleConnectionsLoading} />
+        {googleDisplayMode === 'inline' && (
+          <AgentGoogleConnectionSetup value={googleSetup} onChange={setGoogleSetup} connections={organizationGoogleConnections} readiness={googleOAuthReadiness} loading={googleConnectionsLoading} />
+        )}
+        {googleDisplayMode === 'optional' && (
+          <details className="rounded-3xl border border-surface-700 bg-surface-900 p-5">
+            <summary className="cursor-pointer text-sm font-bold text-surface-300">{t('agentCreation.optionalConnections')}</summary>
+            <div className="mt-4">
+              <AgentGoogleConnectionSetup value={googleSetup} onChange={setGoogleSetup} connections={organizationGoogleConnections} readiness={googleOAuthReadiness} loading={googleConnectionsLoading} />
+            </div>
+          </details>
+        )}
+        {googleDisplayMode === 'hidden' && (
+          <p className="rounded-2xl border border-surface-800 bg-surface-900/70 px-4 py-3 text-xs leading-5 text-surface-500">{t('agentCreation.connectionsLater')}</p>
+        )}
 
         <section className="rounded-3xl border border-surface-700 bg-surface-900 p-5 shadow-xl shadow-black/15">
           <h2 className="text-lg font-black text-surface-100">{t('agentCreation.readyHeading')}</h2>

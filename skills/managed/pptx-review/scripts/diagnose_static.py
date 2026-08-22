@@ -173,7 +173,7 @@ def issues_global(meta, slides):
     if not meta.get("company"):
         flag("info", "META_COMPANY_MISSING",
              "meta.company 미지정 — 헤더 좌측 빈칸",
-             'meta.company: "MOAT AI" 추가')
+             'meta.company: "EXAMPLE ORG" 추가')
 
     if not meta.get("project_short"):
         flag("info", "META_PROJECT_MISSING",

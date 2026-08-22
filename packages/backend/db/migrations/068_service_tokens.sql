@@ -1,7 +1,7 @@
 -- 068_service_tokens.sql — fleet service token audit table
 --
 -- 결정: workspace/decisions/2026-05-27-fleet-service-tokens.md
--- 이슈: https://github.com/juliuschun/tower/issues/36
+-- 이슈: internal issue #36
 --
 -- generateScopedToken 으로 발급된 long-lived service token 의 audit row.
 -- pm-capture 의 'ideas' scope 같은 15분짜리 tokens 는 audit 안 함 — 본 테이블은

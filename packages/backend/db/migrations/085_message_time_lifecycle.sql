@@ -7,7 +7,7 @@
 --   - completed_at: assistant response metrics finalized
 --
 -- Decision: workspace/decisions/2026-06-08-message-time-lifecycle.md
--- Issue: https://github.com/juliuschun/tower/issues/77
+-- Issue: internal issue #77
 
 ALTER TABLE messages
   ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ,

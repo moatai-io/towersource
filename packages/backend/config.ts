@@ -73,7 +73,7 @@ function findClaudeExecutable(): string {
 type PermissionMode = 'default' | 'acceptEdits' | 'bypassPermissions' | 'plan';
 
 /**
- * Bootstrap fallback for customer-facing skills materialized into Project Runtime Box.
+ * Bootstrap fallback for end-user skills materialized into Project Runtime Box.
  * Runtime defaults should come from teamskills/skillset.json when present.
  * Operators can override with RUNTIME_BOX_MATERIALIZED_SKILLS.
  */
@@ -569,9 +569,9 @@ export const config = {
     subject: process.env.WEB_PUSH_SUBJECT || process.env.PUBLIC_URL || 'mailto:admin@tower.example.com',
   },
 
-  // Customer branding: optional background images served from VM-local paths.
-  // These live in .env so customer-specific branding survives Tower code deploys.
-  // Example: /home/tower/workspace/brand/logo/png-hires/oku_horizontal_green_light_1500.png
+  // Organization branding: optional background images served from VM-local paths.
+  // These live in .env so deployment-specific branding survives Tower upgrades.
+  // Example: /home/tower/workspace/brand/login-background.png
   loginBackgroundImage: process.env.TOWER_LOGIN_BACKGROUND_IMAGE || '',
   appBackgroundImage: process.env.TOWER_APP_BACKGROUND_IMAGE || '',
 
@@ -584,10 +584,10 @@ export const config = {
   googleClientSecret: process.env.GOOGLE_CLIENT_SECRET || '',
   googleRedirectUri: process.env.GOOGLE_REDIRECT_URI || '',
 
-  // Tower role: determines publishing behavior and feature set
-  // 'full'       — Moat AI internal: all features + Publish Gateway server
-  // 'managed'    — Self-hosted server: publishes via central Gateway (no local credentials needed)
-  // 'standalone' — Self-hosted: customer manages their own Cloudflare/Azure credentials
+  // Deployment profile: determines publishing behavior and operator-only surfaces.
+  // 'full'       — Organization control plane: all product features + Publish Gateway server.
+  // 'managed'    — Self-hosted node connected to an explicitly configured operator gateway.
+  // 'standalone' — Independent self-host (default): no external operator dependency.
   towerRole: (process.env.TOWER_ROLE || 'standalone') as 'full' | 'managed' | 'standalone',
 
   // Publish Gateway (managed mode only)
