@@ -21,7 +21,11 @@ describe('Google OAuth state contract', () => {
     expect(source).toContain('invalid_or_expired_state');
   });
 
-  it('reports unavailable server configuration as a service readiness failure', () => {
-    expect(source).toContain("res.status(503).json({ error: 'Google OAuth is not configured on this Tower server' })");
+  it('publishes secret-free readiness and gates OAuth start routes on it', () => {
+    expect(source).toContain("router.get('/auth/google/readiness', authMiddleware");
+    expect(source).toContain('expectedRedirectUri: readiness.expectedRedirectUri');
+    expect(source).not.toContain('googleClientSecret:');
+    expect(source).toContain("error: 'Google OAuth is not ready on this Tower server'");
+    expect(source).toContain('reason: googleReadiness.reason');
   });
 });

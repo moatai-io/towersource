@@ -34,8 +34,45 @@ export const GOOGLE_DEFAULT_SCOPES = [
   'https://www.googleapis.com/auth/userinfo.profile',
 ];
 
+export interface GoogleOAuthReadiness {
+  configured: boolean;
+  ready: boolean;
+  publicUrl: string;
+  redirectUri: string;
+  expectedRedirectUri: string;
+  secureRedirect: boolean;
+  redirectMatchesPublicUrl: boolean;
+  reason: 'ready' | 'client_not_configured' | 'https_required' | 'redirect_uri_mismatch';
+}
+
+function isLoopbackHostname(hostname: string): boolean {
+  return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1';
+}
+
+export function getGoogleOAuthReadiness(): GoogleOAuthReadiness {
+  const publicUrl = config.publicUrl.replace(/\/$/, '');
+  const redirectUri = config.googleRedirectUri;
+  const expectedRedirectUri = publicUrl ? `${publicUrl}/api/auth/google/callback` : redirectUri;
+  let secureRedirect = false;
+  try {
+    const parsed = new URL(redirectUri);
+    secureRedirect = parsed.protocol === 'https:' || (parsed.protocol === 'http:' && isLoopbackHostname(parsed.hostname));
+  } catch {}
+  const configured = Boolean(config.googleClientId && config.googleClientSecret && redirectUri);
+  const redirectMatchesPublicUrl = Boolean(redirectUri && expectedRedirectUri && redirectUri === expectedRedirectUri);
+  const ready = configured && secureRedirect && redirectMatchesPublicUrl;
+  const reason = !configured
+    ? 'client_not_configured'
+    : !secureRedirect
+      ? 'https_required'
+      : !redirectMatchesPublicUrl
+        ? 'redirect_uri_mismatch'
+        : 'ready';
+  return { configured, ready, publicUrl, redirectUri, expectedRedirectUri, secureRedirect, redirectMatchesPublicUrl, reason };
+}
+
 export function isGoogleOAuthConfigured(): boolean {
-  return !!(config.googleClientId && config.googleClientSecret && config.googleRedirectUri);
+  return getGoogleOAuthReadiness().ready;
 }
 
 /**

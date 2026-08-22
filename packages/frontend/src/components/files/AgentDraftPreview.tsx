@@ -6,7 +6,7 @@ import { useSessionStore } from '../../stores/session-store';
 import { useChatStore } from '../../stores/chat-store';
 import { useFileStore } from '../../stores/file-store';
 import { AGENT_CHARACTERS, AgentCharacterAvatar, agentFaceImageUrl, characterFace } from '../../features/agent-profile/characters';
-import { AgentGoogleConnectionSetup, allowOrganizationGoogleConnection, loadOrganizationGoogleConnections, startDedicatedGoogleOAuth, type AgentGoogleSetup, type OrganizationGoogleConnection } from './AgentGoogleConnectionSetup';
+import { AgentGoogleConnectionSetup, allowOrganizationGoogleConnection, loadGoogleOAuthReadiness, loadOrganizationGoogleConnections, startDedicatedGoogleOAuth, type AgentGoogleSetup, type GoogleOAuthReadiness, type OrganizationGoogleConnection } from './AgentGoogleConnectionSetup';
 
 function authHeaders() {
   const token = localStorage.getItem('token');
@@ -57,13 +57,24 @@ export function AgentDraftPreview({ content }: { content: string }) {
   const [characterGenerating, setCharacterGenerating] = React.useState(false);
   const [googleSetup, setGoogleSetup] = React.useState<AgentGoogleSetup>({ mode: 'none' });
   const [organizationGoogleConnections, setOrganizationGoogleConnections] = React.useState<OrganizationGoogleConnection[]>([]);
+  const [googleOAuthReadiness, setGoogleOAuthReadiness] = React.useState<GoogleOAuthReadiness | null>(null);
   const [googleConnectionsLoading, setGoogleConnectionsLoading] = React.useState(true);
 
   React.useEffect(() => {
     let active = true;
-    loadOrganizationGoogleConnections()
-      .then((connections) => { if (active) setOrganizationGoogleConnections(connections); })
-      .catch(() => { if (active) setOrganizationGoogleConnections([]); })
+    Promise.all([loadGoogleOAuthReadiness(), loadOrganizationGoogleConnections()])
+      .then(([readiness, connections]) => {
+        if (!active) return;
+        setGoogleOAuthReadiness(readiness);
+        setOrganizationGoogleConnections(readiness.ready ? connections : []);
+        if (!readiness.ready) setGoogleSetup({ mode: 'none' });
+      })
+      .catch(() => {
+        if (!active) return;
+        setGoogleOAuthReadiness(null);
+        setOrganizationGoogleConnections([]);
+        setGoogleSetup({ mode: 'none' });
+      })
       .finally(() => { if (active) setGoogleConnectionsLoading(false); });
     return () => { active = false; };
   }, []);
@@ -266,7 +277,7 @@ export function AgentDraftPreview({ content }: { content: string }) {
             </details>
         </section>
 
-        <AgentGoogleConnectionSetup value={googleSetup} onChange={setGoogleSetup} connections={organizationGoogleConnections} loading={googleConnectionsLoading} />
+        <AgentGoogleConnectionSetup value={googleSetup} onChange={setGoogleSetup} connections={organizationGoogleConnections} readiness={googleOAuthReadiness} loading={googleConnectionsLoading} />
 
         <section className="rounded-3xl border border-surface-700 bg-surface-900 p-5 shadow-xl shadow-black/15">
           <h2 className="text-lg font-black text-surface-100">{t('agentCreation.readyHeading')}</h2>

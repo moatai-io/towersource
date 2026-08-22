@@ -160,6 +160,37 @@ When `CLAUDE_ENABLED=false`:
 - Quick-replies (`@ai`) and `@task` run on the Pi engine automatically.
 - The Claude CLI is never invoked, so no `~/.claude/.credentials.json` is needed.
 
+### 3c. Optional Google Workspace OAuth (self-hosted)
+
+Google Workspace is optional and is **not** configured by the blank-host installer. Each self-hosted organization owns its Google OAuth application, consent screen, allowed users, and callback domain. Tower does not ship a shared Google client secret or require a central OAuth broker.
+
+Before enabling Google connections:
+
+1. Give Tower a stable HTTPS URL, for example `https://tower.example.com`. A remote `http://<server-ip>` deployment cannot be used as a normal Google Web OAuth callback; HTTP is accepted only for local loopback development.
+2. In Google Cloud, enable the Gmail, Calendar, and Drive APIs required by your use case.
+3. Configure the OAuth consent screen and its test users or organization audience.
+4. Create an OAuth 2.0 Client ID with application type **Web application**.
+5. Register this exact Authorized redirect URI:
+
+   ```text
+   https://tower.example.com/api/auth/google/callback
+   ```
+
+6. Configure the Tower service without placing the secret in Git, documentation, or shell history:
+
+   ```env
+   PUBLIC_URL=https://tower.example.com
+   GOOGLE_CLIENT_ID=<google-web-client-id>
+   GOOGLE_CLIENT_SECRET=<stored securely on the server>
+   GOOGLE_REDIRECT_URI=https://tower.example.com/api/auth/google/callback
+   ```
+
+7. Restart Tower and verify the Google connection readiness in the Agent creation or Connections screen.
+
+Tower requires `GOOGLE_REDIRECT_URI` to exactly equal `${PUBLIC_URL}/api/auth/google/callback`. If the client is missing, the callback is HTTP on a remote host, or the URI does not match, Agent creation keeps Google choices disabled and shows the callback URI the administrator must register. Agents can still be created without Google and connected later.
+
+The default scopes include Gmail read/compose/send, Calendar read, Drive read, and basic profile information. Apps left in Google OAuth **Testing** mode may be limited to test users and may receive short-lived refresh-token behavior. Review Google verification requirements before organization-wide production use.
+
 ### 4. Clone & Install
 
 ```bash

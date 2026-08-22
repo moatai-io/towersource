@@ -15,6 +15,16 @@ describe('Primary Agent Google setup during creation', () => {
     expect(setup).toContain("credential?.provider === 'google'");
   });
 
+  it('gates Google choices on secret-free server readiness', () => {
+    expect(setup).toContain("fetch('/api/auth/google/readiness'");
+    expect(setup).toContain("disabled={loading || !googleReady || connections.length === 0}");
+    expect(setup).toContain("disabled={loading || !googleReady}");
+    expect(setup).toContain("readiness?.reason === 'https_required'");
+    expect(setup).toContain('readiness.expectedRedirectUri');
+    expect(preview).toContain('setOrganizationGoogleConnections(readiness.ready ? connections : [])');
+    expect(preview).toContain("if (!readiness.ready) setGoogleSetup({ mode: 'none' })");
+  });
+
   it('allows the selected organization Connection only after the new Project exists', () => {
     expect(preview.indexOf("fetch('/api/primary-agent-commands/bootstrap'")).toBeLessThan(preview.indexOf('allowOrganizationGoogleConnection(project.id'));
     expect(setup).toContain("body: JSON.stringify({ mode: 'allow'");

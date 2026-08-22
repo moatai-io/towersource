@@ -53,7 +53,13 @@
       "organizationAria": "조직 Google 계정",
       "empty": "사용 가능한 조직 Google 계정이 없습니다.",
       "dedicated": "이 팀원 전용 Google 계정 연결",
-      "dedicatedDescription": "팀원을 만든 직후 Google 로그인 화면으로 이동합니다."
+      "dedicatedDescription": "팀원을 만든 직후 Google 로그인 화면으로 이동합니다.",
+      "readinessFailed": "Google OAuth 준비 상태를 확인하지 못했습니다.",
+      "setupRequired": "이 Tower 서버에 Google OAuth 설정이 필요합니다.",
+      "httpsRequired": "Google 연결을 사용하려면 먼저 HTTPS 도메인을 설정해야 합니다. 현재 주소: {{publicUrl}}",
+      "redirectMismatch": "Google OAuth callback URI가 현재 Tower 주소와 일치하지 않습니다.",
+      "callbackLabel": "Google Cloud에 등록할 callback URI",
+      "adminSetupHint": "관리자는 Google Cloud에서 Web OAuth client를 만든 뒤 Client ID와 Secret을 Tower 서버에 설정하세요."
     },
     "characterLabels": {
       "core-talent": "AI 인재 파트너",

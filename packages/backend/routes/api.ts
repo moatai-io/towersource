@@ -80,7 +80,7 @@ import { config, availableModels, loadModelsFile, saveModelsFile, reloadModels, 
 import { getInferenceProviderReadiness } from '../services/ai/inference-provider-readiness.js';
 import { configureInferenceProvider, inferenceSetupStatus, probeInferenceProvider, type PublicInferenceProvider } from '../services/ai/inference-provider-setup.js';
 import { oauthManager } from '../services/auth/oauth-manager-instance.js';
-import { isGoogleOAuthConfigured, getGoogleAuthUrl, exchangeGoogleCode, getGoogleUserInfo, GOOGLE_DEFAULT_SCOPES } from '../services/auth/google-oauth.js';
+import { getGoogleOAuthReadiness, getGoogleAuthUrl, exchangeGoogleCode, getGoogleUserInfo, GOOGLE_DEFAULT_SCOPES } from '../services/auth/google-oauth.js';
 import { findOAuthProvider, listOAuthProviders } from '../services/auth/oauth-provider-registry.js';
 import { setSecret, SecretAccessDeniedError } from '../services/secret/secret-store.js';
 import { upsertAgentGwsCredential, upsertOrganizationGwsCredential } from '../services/credential-vault/credential-vault-service.js';
@@ -816,8 +816,22 @@ async function assertAgentGoogleConnectionAccess(user: { userId: number; role: s
   return isProjectMember(projectId, user.userId);
 }
 
+router.get('/auth/google/readiness', authMiddleware, (_req, res) => {
+  const readiness = getGoogleOAuthReadiness();
+  res.json({
+    configured: readiness.configured,
+    ready: readiness.ready,
+    publicUrl: readiness.publicUrl,
+    expectedRedirectUri: readiness.expectedRedirectUri,
+    secureRedirect: readiness.secureRedirect,
+    redirectMatchesPublicUrl: readiness.redirectMatchesPublicUrl,
+    reason: readiness.reason,
+  });
+});
+
 router.get('/auth/google/agent', authMiddleware, async (req, res) => {
-  if (!isGoogleOAuthConfigured()) return res.status(503).json({ error: 'Google OAuth is not configured on this Tower server' });
+  const googleReadiness = getGoogleOAuthReadiness();
+  if (!googleReadiness.ready) return res.status(503).json({ error: 'Google OAuth is not ready on this Tower server', reason: googleReadiness.reason, expectedRedirectUri: googleReadiness.expectedRedirectUri });
   const user = (req as any).user;
   const projectId = typeof req.query.projectId === 'string' ? req.query.projectId.trim() : '';
   const requestedCredentialId = typeof req.query.credentialId === 'string' ? req.query.credentialId.trim() : '';
@@ -843,7 +857,8 @@ router.get('/auth/google/agent', authMiddleware, async (req, res) => {
 });
 
 router.get('/auth/google/organization', authMiddleware, async (req, res) => {
-  if (!isGoogleOAuthConfigured()) return res.status(503).json({ error: 'Google OAuth is not configured on this Tower server' });
+  const googleReadiness = getGoogleOAuthReadiness();
+  if (!googleReadiness.ready) return res.status(503).json({ error: 'Google OAuth is not ready on this Tower server', reason: googleReadiness.reason, expectedRedirectUri: googleReadiness.expectedRedirectUri });
   const user = (req as any).user;
   if (user?.role !== 'admin') return res.status(403).json({ error: 'Admin required' });
   const requestedCredentialId = typeof req.query.credentialId === 'string' ? req.query.credentialId.trim() : '';

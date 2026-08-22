@@ -53,7 +53,13 @@
       "organizationAria": "Organization Google account",
       "empty": "No organization Google accounts are available.",
       "dedicated": "Connect a Google account dedicated to this teammate",
-      "dedicatedDescription": "After the teammate is created, you will be redirected to Google sign-in."
+      "dedicatedDescription": "After the teammate is created, you will be redirected to Google sign-in.",
+      "readinessFailed": "Could not check Google OAuth readiness.",
+      "setupRequired": "Google OAuth must be configured on this Tower server.",
+      "httpsRequired": "Set up an HTTPS domain before using Google connections. Current address: {{publicUrl}}",
+      "redirectMismatch": "The Google OAuth callback URI does not match this Tower server address.",
+      "callbackLabel": "Callback URI to register in Google Cloud",
+      "adminSetupHint": "An administrator must create a Web OAuth client in Google Cloud, then configure its Client ID and Secret on this Tower server."
     },
     "characterLabels": {
       "core-talent": "AI talent partner",

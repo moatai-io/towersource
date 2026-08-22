@@ -14,7 +14,7 @@ const creationKeys = [
   'newAiTeammate', 'heading', 'description', 'name', 'expectedExpertise', 'chooseFace',
   'create', 'creating', 'recoveryCreated', 'reopenConversation', 'employeeFallback', 'characterLabel',
 ];
-const googleKeys = ['title', 'description', 'none', 'organization', 'dedicated', 'loadFailed', 'grantFailed', 'oauthFailed'];
+const googleKeys = ['title', 'description', 'none', 'organization', 'dedicated', 'loadFailed', 'grantFailed', 'oauthFailed', 'readinessFailed', 'setupRequired', 'httpsRequired', 'redirectMismatch', 'callbackLabel', 'adminSetupHint'];
 const homeKeys = ['aiTeamHomeTitle', 'newAiTeammate', 'createAiTeammate', 'aiTeammateList', 'noAiTeammates'];
 
 describe('AI teammate creation locale contract', () => {
