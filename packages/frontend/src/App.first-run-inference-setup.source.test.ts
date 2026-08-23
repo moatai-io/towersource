@@ -5,6 +5,8 @@ import { describe, expect, it } from 'vitest';
 const app = fs.readFileSync(path.resolve(__dirname, 'App.tsx'), 'utf8');
 const setup = fs.readFileSync(path.resolve(__dirname, 'components/onboarding/FirstRunInferenceSetup.tsx'), 'utf8');
 const aiTeam = fs.readFileSync(path.resolve(__dirname, 'components/agents/AITeamHome.tsx'), 'utf8');
+const onboardingEn = JSON.parse(fs.readFileSync(path.resolve(__dirname, 'locales/en/onboarding.json'), 'utf8'));
+const onboardingKo = JSON.parse(fs.readFileSync(path.resolve(__dirname, 'locales/ko/onboarding.json'), 'utf8'));
 
 describe('OSS first-run inference setup', () => {
   it('routes only first-admin creation through the provider setup gate', () => {
@@ -20,6 +22,14 @@ describe('OSS first-run inference setup', () => {
     expect(setup).not.toContain('localStorage.setItem');
   });
 
+  it('makes clear that Firecrawl is optional during the required AI connection', () => {
+    expect(setup).toContain("t('provider.optionalWebSearch')");
+    expect(onboardingEn.provider.optionalWebSearch).toContain('enough to get started');
+    expect(onboardingEn.provider.optionalWebSearch).toContain('Firecrawl is optional');
+    expect(onboardingKo.provider.optionalWebSearch).toContain('AI 연결만으로 시작');
+    expect(onboardingKo.provider.optionalWebSearch).toContain('Firecrawl은 선택 사항');
+  });
+
   it('creates and opens the first default teammate without a reload', () => {
     const gate = app.slice(app.indexOf('if (firstRunInferenceSetup && token)'), app.indexOf('\n\n  return (', app.indexOf('if (firstRunInferenceSetup && token)')));
     expect(setup).toContain("modelId: 'openrouter/auto'");
@@ -32,6 +42,8 @@ describe('OSS first-run inference setup', () => {
     expect(gate).toContain('useProjectStore.getState().addProject(project)');
     expect(gate).toContain('useSessionStore.getState().addSession(session)');
     expect(gate).toContain('useFileStore.getState().openChatTab(session.id)');
+    expect(onboardingEn.provider.next).toContain('create and open your first AI teammate');
+    expect(onboardingKo.provider.next).toContain('첫 AI 동료를 만들고 바로 엽니다');
   });
 
   it('does not count a file-only Project as an AI teammate', () => {

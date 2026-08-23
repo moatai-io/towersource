@@ -97,7 +97,11 @@ export function FirstRunInferenceSetup({ token, onComplete }: { token: string; o
             </div>
           </div>
 
-          <div className="mt-7 grid gap-3 sm:grid-cols-2" role="radiogroup" aria-label={t('provider.choose')}>
+          <div className="mt-5 rounded-xl border border-surface-800 bg-surface-950/40 px-4 py-3 text-xs leading-5 text-surface-500">
+            {t('provider.optionalWebSearch')}
+          </div>
+
+          <div className="mt-5 grid gap-3 sm:grid-cols-2" role="radiogroup" aria-label={t('provider.choose')}>
             {(['openrouter', 'openai-responses-compatible'] as Provider[]).map((provider) => {
               const selected = draft.provider === provider;
               return (
