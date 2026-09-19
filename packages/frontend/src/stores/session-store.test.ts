@@ -74,6 +74,33 @@ describe('session list scope reconciliation', () => {
     ]);
   });
 
+  it('preserves a session created while an older recent-window request was in flight', () => {
+    const requestStartedAt = new Date('2026-08-20T02:00:00Z').getTime();
+    useSessionStore.setState({
+      sessions: [session('created-during-request', 'project-a', '2026-08-20T02:00:01Z')],
+    } as any);
+
+    useSessionStore.getState().setRecentSessions([
+      session('server-snapshot', 'project-b', '2026-08-20T01:59:59Z'),
+    ], { requestedAt: requestStartedAt });
+
+    expect(useSessionStore.getState().sessions.map((item) => item.id)).toEqual([
+      'created-during-request',
+      'server-snapshot',
+    ]);
+  });
+
+  it('still removes an old non-hydrated session omitted from a fresh recent window', () => {
+    const requestStartedAt = new Date('2026-08-20T02:00:00Z').getTime();
+    useSessionStore.setState({
+      sessions: [session('stale-local', 'project-a', '2026-08-20T01:00:00Z')],
+    } as any);
+
+    useSessionStore.getState().setRecentSessions([], { requestedAt: requestStartedAt });
+
+    expect(useSessionStore.getState().sessions).toEqual([]);
+  });
+
   it('replaces one hydrated project scope authoritatively and deduplicates concurrent requests', async () => {
     const projectSession = session('project-session', 'project-a', '2026-08-20T01:00:00Z');
     let resolveFetch!: (value: unknown) => void;

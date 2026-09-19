@@ -661,6 +661,7 @@ function App() {
 
     gate.inFlight = true;
     gate.lastAt = now;
+    const requestStartedAt = Date.now();
     const refreshStartedAt = perfNow();
     try {
       const headers: Record<string, string> = {};
@@ -693,7 +694,7 @@ function App() {
       // The response is only the global recent window. Reconcile that window
       // without deleting complete project lists that were hydrated separately.
       // Decision: workspace/decisions/2026-08-20-project-session-hydration-reconciliation.md
-      setRecentSessions(data);
+      setRecentSessions(data, { requestedAt: requestStartedAt });
     } catch (err) {
       console.warn(`[app] session list reconciliation failed (${reason}):`, err);
     } finally {
@@ -1268,6 +1269,7 @@ function App() {
       })
       .catch(() => []);
     const projectsPromise = loadProjects();
+    const sessionsRequestStartedAt = Date.now();
     const sessionsLoadStartedAt = perfNow();
 
     fetchWithRestartTolerantAuth(`${API_BASE}/sessions?limit=${STARTUP_SESSION_LIST_LIMIT}`, { headers })
@@ -1294,7 +1296,7 @@ function App() {
       .then(async (data) => {
         const setSessionsStartedAt = perfNow();
         resetProjectSessionHydration();
-        setRecentSessions(data);
+        setRecentSessions(data, { requestedAt: sessionsRequestStartedAt });
         sessionListRefreshRef.current.lastAt = Date.now();
         setSessionsLoaded(true);
         logClientPerf('startup-sessions-store-set', {

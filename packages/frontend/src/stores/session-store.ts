@@ -108,7 +108,7 @@ interface SessionState {
   clearPendingReply: (sessionId: string) => void;
 
   setSessions: (sessions: SessionMeta[]) => void;
-  setRecentSessions: (sessions: SessionMeta[]) => void;
+  setRecentSessions: (sessions: SessionMeta[], options?: { requestedAt?: number }) => void;
   mergeSessions: (sessions: SessionMeta[]) => void;
   hydratedProjectSessionIds: Set<string>;
   projectSessionsLoading: Set<string>;
@@ -185,11 +185,17 @@ export const useSessionStore = create<SessionState>((set) => ({
   setSessions: (sessions) => {
     set({ sessions: dedupeSessionsById(sessions) });
   },
-  setRecentSessions: (sessions) => set((s) => {
+  setRecentSessions: (sessions, options) => set((s) => {
     const byId = new Map<string, SessionMeta>();
+    const requestedAt = options?.requestedAt;
     for (const session of s.sessions) {
       const belongsToHydratedProject = !!session.projectId && s.hydratedProjectSessionIds.has(session.projectId);
-      if (belongsToHydratedProject || session.id === s.activeSessionId) {
+      const createdDuringRequest = requestedAt !== undefined
+        && new Date(session.createdAt || 0).getTime() >= requestedAt;
+      // A recent-window response is only authoritative for the moment its request
+      // began. Preserve sessions created while that request was in flight so a
+      // slower stale response cannot make a successfully-created row disappear.
+      if (belongsToHydratedProject || session.id === s.activeSessionId || createdDuringRequest) {
         byId.set(session.id, session);
       }
     }
