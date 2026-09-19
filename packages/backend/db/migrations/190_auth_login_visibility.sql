@@ -1,0 +1,16 @@
+-- 190: Visible account login activity baseline
+ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMPTZ;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_ip TEXT;
+
+CREATE TABLE IF NOT EXISTS auth_login_events (
+  id BIGSERIAL PRIMARY KEY,
+  user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  username TEXT,
+  event_type TEXT NOT NULL CHECK (event_type IN ('login_success', 'login_failure', 'logout')),
+  ip_address TEXT,
+  user_agent TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_auth_login_events_user_time ON auth_login_events(user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_auth_login_events_time ON auth_login_events(created_at DESC);
+COMMENT ON TABLE auth_login_events IS 'Authentication visibility events. Never store passwords, tokens, cookies, or reset links.';

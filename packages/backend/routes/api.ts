@@ -25,7 +25,7 @@ import {
   authenticateUser, createUser, hasUsers, generateToken, generateScopedToken, verifyToken, authMiddleware, extractToken,
   adminMiddleware, operatorOrAboveMiddleware, listUsers, updateUserRole,
   resetUserPassword, disableUser, getUserAllowedPath, getUserRole,
-  updateUserProfile, updateUserUsername, changeOwnPassword, getOwnProfile,
+  updateUserProfile, updateUserUsername, changeOwnPassword, getOwnProfile, recordAuthEvent,
   UsernameTakenError, InvalidUsernameError,
 } from '../services/auth/auth.js';
 import {
@@ -654,7 +654,18 @@ function clearTokenCookie(res: any) {
   });
 }
 
-router.all('/auth/logout', (_req, res) => {
+router.all('/auth/logout', async (req, res) => {
+  const rawToken = extractToken(req);
+  const currentUser = rawToken ? verifyToken(rawToken) : null;
+  if (currentUser?.userId) {
+    await recordAuthEvent({
+      userId: currentUser.userId,
+      username: currentUser.username,
+      eventType: 'logout',
+      ip: req.ip || req.socket.remoteAddress || null,
+      userAgent: req.get('user-agent') || null,
+    });
+  }
   clearTokenCookie(res);
   res.json({ ok: true });
 });
@@ -750,7 +761,10 @@ router.post('/auth/signup', authMutationLimiter, async (req, res) => {
 
 router.post('/auth/login', authLoginLimiter, async (req, res) => {
   const { username, password } = req.body;
-  const result = await authenticateUser(username, password);
+  const result = await authenticateUser(username, password, {
+    ip: req.ip || req.socket.remoteAddress || null,
+    userAgent: req.get('user-agent') || null,
+  });
   if (!result.ok || !result.payload) {
     if (result.reason === 'pending_approval') return res.status(403).json({ error: 'Account is pending admin approval' });
     if (result.reason === 'rejected') return res.status(403).json({ error: 'Account was rejected by an admin' });
@@ -764,7 +778,10 @@ router.post('/auth/login', authLoginLimiter, async (req, res) => {
 
 router.post('/auth/cli-login', authLoginLimiter, async (req, res) => {
   const { username, password } = req.body;
-  const result = await authenticateUser(username, password);
+  const result = await authenticateUser(username, password, {
+    ip: req.ip || req.socket.remoteAddress || null,
+    userAgent: req.get('user-agent') || null,
+  });
   if (!result.ok || !result.payload) {
     if (result.reason === 'pending_approval') return res.status(403).json({ error: 'Account is pending admin approval' });
     if (result.reason === 'rejected') return res.status(403).json({ error: 'Account was rejected by an admin' });

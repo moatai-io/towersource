@@ -228,18 +228,45 @@ export interface AuthResult {
   reason?: AuthFailureReason;
 }
 
-export async function authenticateUser(username: string, password: string): Promise<AuthResult> {
+export async function recordAuthEvent(input: { userId?: number | null; username?: string | null; eventType: 'login_success' | 'login_failure' | 'logout'; ip?: string | null; userAgent?: string | null }): Promise<void> {
+  try {
+    await execute(
+      'INSERT INTO auth_login_events (user_id, username, event_type, ip_address, user_agent) VALUES ($1, $2, $3, $4, $5)',
+      [input.userId ?? null, input.username ?? null, input.eventType, input.ip ?? null, input.userAgent ?? null],
+    );
+  } catch (error) {
+    // Authentication observability must not make login or logout unavailable.
+    console.warn('[auth] failed to record auth event:', error);
+  }
+}
+
+export async function authenticateUser(username: string, password: string, context?: { ip?: string | null; userAgent?: string | null }): Promise<AuthResult> {
   const user = await queryOne<any>(
     'SELECT * FROM users WHERE username = $1 AND disabled = 0',
     [username]
   );
-  if (!user) return { ok: false, reason: 'invalid_credentials' };
+  if (!user) {
+    await recordAuthEvent({ username, eventType: 'login_failure', ...context });
+    return { ok: false, reason: 'invalid_credentials' };
+  }
 
   const approvalStatus = user.approval_status || 'active';
-  if (approvalStatus === 'pending') return { ok: false, reason: 'pending_approval' };
-  if (approvalStatus === 'rejected') return { ok: false, reason: 'rejected' };
-  if (approvalStatus === 'suspended') return { ok: false, reason: 'suspended' };
-  if (approvalStatus !== 'active') return { ok: false, reason: 'invalid_credentials' };
+  if (approvalStatus === 'pending') {
+    await recordAuthEvent({ userId: user.id, username: user.username, eventType: 'login_failure', ...context });
+    return { ok: false, reason: 'pending_approval' };
+  }
+  if (approvalStatus === 'rejected') {
+    await recordAuthEvent({ userId: user.id, username: user.username, eventType: 'login_failure', ...context });
+    return { ok: false, reason: 'rejected' };
+  }
+  if (approvalStatus === 'suspended') {
+    await recordAuthEvent({ userId: user.id, username: user.username, eventType: 'login_failure', ...context });
+    return { ok: false, reason: 'suspended' };
+  }
+  if (approvalStatus !== 'active') {
+    await recordAuthEvent({ userId: user.id, username: user.username, eventType: 'login_failure', ...context });
+    return { ok: false, reason: 'invalid_credentials' };
+  }
 
   const stored = user.password_hash;
   let ok = false;
@@ -258,7 +285,12 @@ export async function authenticateUser(username: string, password: string): Prom
     }
   }
 
-  if (!ok) return { ok: false, reason: 'invalid_credentials' };
+  if (!ok) {
+    await recordAuthEvent({ userId: user.id, username: user.username, eventType: 'login_failure', ...context });
+    return { ok: false, reason: 'invalid_credentials' };
+  }
+  await execute('UPDATE users SET last_login_at = NOW(), last_login_ip = $1 WHERE id = $2', [context?.ip ?? null, user.id]);
+  await recordAuthEvent({ userId: user.id, username: user.username, eventType: 'login_success', ...context });
   return { ok: true, payload: { userId: user.id, username: user.username, role: user.role } };
 }
 
