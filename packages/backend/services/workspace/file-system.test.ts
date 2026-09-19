@@ -65,4 +65,27 @@ describe('workspace file tree visibility', () => {
     expect(visibleWithHidden).toContain('SCAFFOLDING.md');
     expect(visibleWithHidden).toContain('notes.md');
   });
+
+  it('invalidates cached hidden and visible variants when an entry moves', async () => {
+    const dir = makeTempDir();
+    const sourceDir = path.join(dir, 'source');
+    const targetDir = path.join(dir, 'target');
+    fs.mkdirSync(sourceDir);
+    fs.mkdirSync(targetDir);
+    const sourceFile = path.join(sourceDir, 'note.md');
+    const targetFile = path.join(targetDir, 'note.md');
+    touch(sourceFile);
+
+    await getFileTreeAsync(sourceDir, 2, { skipSafetyCheck: true });
+    await getFileTreeAsync(sourceDir, 2, { skipSafetyCheck: true, showHidden: true });
+    await getFileTreeAsync(targetDir, 2, { skipSafetyCheck: true });
+
+    fs.renameSync(sourceFile, targetFile);
+    invalidateTreeCache(sourceFile);
+    invalidateTreeCache(targetFile);
+
+    expect((await getFileTreeAsync(sourceDir, 2, { skipSafetyCheck: true })).map((e) => e.name)).toEqual([]);
+    expect((await getFileTreeAsync(sourceDir, 2, { skipSafetyCheck: true, showHidden: true })).map((e) => e.name)).toEqual([]);
+    expect((await getFileTreeAsync(targetDir, 2, { skipSafetyCheck: true })).map((e) => e.name)).toEqual(['note.md']);
+  });
 });

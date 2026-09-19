@@ -78,12 +78,17 @@ const treeCache = new Map<string, { entries: FileEntry[]; expiry: number }>();
 const TREE_CACHE_TTL = 3000; // ms
 
 export function invalidateTreeCache(dirPath?: string): void {
-  if (dirPath) {
-    // Invalidate exact path + parent
-    treeCache.delete(dirPath);
-    treeCache.delete(path.dirname(dirPath));
-  } else {
+  if (!dirPath) {
     treeCache.clear();
+    return;
+  }
+
+  // Cache keys include the showHidden variant (`<path>:0|1`). Invalidate both
+  // variants for the changed entry and its parent directory.
+  const affectedPaths = new Set([dirPath, path.dirname(dirPath)]);
+  for (const cachedPath of affectedPaths) {
+    treeCache.delete(`${cachedPath}:0`);
+    treeCache.delete(`${cachedPath}:1`);
   }
 }
 

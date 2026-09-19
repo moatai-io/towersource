@@ -177,6 +177,8 @@ export function SelectionToolbar({ onRefresh }: { onRefresh: () => void }) {
           onComplete={() => {
             setShowMoveModal(false);
             clearSelection();
+            if (useFileStore.getState().selectMode) toggleSelectMode();
+            useFileStore.getState().bumpRefreshTrigger();
             onRefresh();
           }}
         />

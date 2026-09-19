@@ -1061,7 +1061,10 @@ export function FileTree({ entries, onFileClick, onDirectoryClick, onPinFile, on
           onClose={() => setMoveModalPaths(null)}
           onComplete={() => {
             setMoveModalPaths(null);
-            useFileStore.getState().clearSelection();
+            const store = useFileStore.getState();
+            store.clearSelection();
+            if (store.selectMode) store.toggleSelectMode();
+            store.bumpRefreshTrigger();
             onRefreshTree?.();
           }}
         />
