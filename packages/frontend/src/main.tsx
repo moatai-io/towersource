@@ -13,6 +13,9 @@ const ShortFileLinkRedirect = React.lazy(() => import('./components/files/ShortF
 const MeetingRecorderPage = React.lazy(() => import('./components/meeting/MeetingRecorderPage').then((module) => ({ default: module.MeetingRecorderPage })));
 const PublicAIServiceChat = React.lazy(() => import('./features/ai-services/PublicAIServiceChat').then((module) => ({ default: module.PublicAIServiceChat })));
 const VoiceLabPage = React.lazy(() => import('./features/voice-lab/VoiceLabPage').then((module) => ({ default: module.VoiceLabPage })));
+const InvalidLinkPage = React.lazy(() => import('./components/common/InvalidLinkPage').then((module) => ({ default: module.InvalidLinkPage })));
+
+const APP_SHELL_PATHS = ['/', '/s/:sessionId', '/r/:roomId', '/rooms/:roomId'] as const;
 
 async function resetStaleDevServiceWorker(): Promise<void> {
   if (!isAllowedDevHost(window.location.hostname)) return;
@@ -91,7 +94,8 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
             <Route path="/ai/:channelId" element={<PublicAIServiceChat />} />
             <Route path="/ai-service-chat/:channelId" element={<PublicAIServiceChat />} />
             <Route path="/shared/:token" element={<SharedViewer />} />
-            <Route path="*" element={<App />} />
+            {APP_SHELL_PATHS.map((path) => <Route key={path} path={path} element={<App />} />)}
+            <Route path="*" element={<InvalidLinkPage />} />
           </Routes>
         </React.Suspense>
       </BrowserRouter>

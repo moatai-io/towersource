@@ -875,6 +875,9 @@
     "expand": "Expand"
   },
   "newSessionCreateFailed": "Could not create a new session.",
+  "invalidLinkTitle": "This link cannot be opened",
+  "invalidLinkMessage": "The address may be incorrect, the target may have been removed, or your account may not have access.",
+  "invalidLinkHome": "Go to Tower home",
   "requestedSessionNotFound": "We couldn’t find that session.",
   "sessionHiddenRestoreFromHistory": "Session hidden · Restore it from History",
   "sessionHideFailed": "Could not hide the session.",
