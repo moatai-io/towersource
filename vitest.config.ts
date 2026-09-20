@@ -34,6 +34,20 @@ export default defineConfig({
     exclude: [
       '**/node_modules/**',
       '__tests__/build-smoke.test.ts',
+      // Operator-only source contracts depend on deployment, cache, Git-hook,
+      // private-skill, or checked-in sample assets intentionally absent from the
+      // public repository. Keep OSS preflight scoped to artifacts it ships.
+      'packages/backend/nix-cache-health-timer.source.test.ts',
+      'packages/backend/nix-cache-health.source.test.ts',
+      'packages/backend/nix-private-cache.source.test.ts',
+      'packages/backend/nix-production-launcher.source.test.ts',
+      'packages/backend/nix-signed-cache.source.test.ts',
+      'packages/backend/operator-prod-upgrade-orchestrator.source.test.ts',
+      'packages/backend/pre-push-verified-state.source.test.ts',
+      'packages/backend/push-main-safe.source.test.ts',
+      'packages/backend/db/migrations/channel-membership-migration-delivery.source.test.ts',
+      'packages/backend/services/runtime-box/gws-skill-profile.source.test.ts',
+      'packages/backend/services/workspace-apps/sample-app-smoke.test.ts',
     ],
   },
 });

@@ -910,7 +910,7 @@ describe('Pi stream watchdog — source contracts', () => {
     expect(wsSrc).toContain('session_refresh_needed');
   });
 
-  it('guards committed prod restart detached phase with a process lock', () => {
+  it.skipIf(!fs.existsSync(path.resolve(import.meta.dirname, '../../../../scripts/prod-restart-committed.sh')))('guards committed prod restart detached phase with a process lock', () => {
     const scriptSrc = fs.readFileSync(path.resolve(import.meta.dirname, '../../../../scripts/prod-restart-committed.sh'), 'utf-8');
     expect(scriptSrc).toContain('RUN_LOCK_DIR="/tmp/tower-prod-restart.running"');
     expect(scriptSrc).toContain('tower-prod restart is already running');
