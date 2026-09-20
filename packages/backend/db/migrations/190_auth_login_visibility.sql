@@ -11,6 +11,4 @@ CREATE TABLE IF NOT EXISTS auth_login_events (
   user_agent TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
-CREATE INDEX IF NOT EXISTS idx_auth_login_events_user_time ON auth_login_events(user_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_auth_login_events_time ON auth_login_events(created_at DESC);
 COMMENT ON TABLE auth_login_events IS 'Authentication visibility events. Never store passwords, tokens, cookies, or reset links.';
