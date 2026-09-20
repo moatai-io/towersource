@@ -806,18 +806,25 @@ export async function cloneSession(
     }
   }
 
-  // 5. Copy messages — each gets a fresh uuid, session_id rewired.
-  //    short_id 는 *복사하지 않음* (NULL) — 다음 부팅의 backfill 이 새 세션 안에서
-  //    fresh short_id 발급. 굳이 클론 시 즉시 부여하지 않는 이유: (session_id,
-  //    short_id) composite unique 라 새 세션은 어차피 비어 있어 충돌 risk 없음 +
-  //    한 SQL 안에서 메시지마다 random 생성하기 까다로움. backfill 패턴이 일관됨.
+  // 5. Copy the active conversation — each message gets a fresh uuid and the
+  //    session_id is rewired. Preserve metadata + message_seq because metadata
+  //    controls message visibility/rendering and message_seq is the durable
+  //    conversation ordering authority. Omitting either can revive superseded
+  //    turns or scramble cloned model context when timestamps tie.
+  //
+  //    short_id is intentionally not copied. The next backfill assigns fresh
+  //    per-session ids without colliding with the source session.
   await execute(
     `INSERT INTO messages (id, session_id, role, content, parent_tool_use_id,
-                           duration_ms, input_tokens, output_tokens, created_at, username)
+                           duration_ms, input_tokens, output_tokens, created_at, username,
+                           metadata, message_seq)
      SELECT gen_random_uuid()::text, $1, role, content, parent_tool_use_id,
-            duration_ms, input_tokens, output_tokens, created_at, username
+            duration_ms, input_tokens, output_tokens, created_at, username,
+            metadata, message_seq
        FROM messages
-      WHERE session_id = $2`,
+      WHERE session_id = $2
+        AND COALESCE(metadata->>'contextState', 'active') = 'active'
+      ORDER BY message_seq ASC`,
     [newId, sourceId],
   );
 
@@ -875,7 +882,7 @@ export async function cloneSession(
             AND role IN ('user', 'assistant')
             AND COALESCE(metadata->>'hidden', '') = ''
             AND NOT (metadata ? 'engineSwitch')
-          ORDER BY created_at ASC`,
+          ORDER BY message_seq ASC`,
         [newId],
       );
       const rehydrateInput: RehydrateInputMessage[] = [];

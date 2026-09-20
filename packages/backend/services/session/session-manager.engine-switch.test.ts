@@ -363,6 +363,13 @@ describe('cloneSession — Pi resume continuity', () => {
     expect(clonedSessionId).toEqual(expect.any(String));
     expect(insertSessionCall?.[1][2]).toBeNull(); // Pi clone must not mint/use claude_session_id.
 
+    const copyMessagesCall = executeMock.mock.calls.find(([sql]) => /INSERT INTO messages/.test(sql));
+    expect(copyMessagesCall?.[0]).toContain('metadata, message_seq');
+    expect(copyMessagesCall?.[0]).toContain("COALESCE(metadata->>'contextState', 'active') = 'active'");
+    expect(copyMessagesCall?.[0]).toContain('ORDER BY message_seq ASC');
+    expect(copyMessagesCall?.[1]).toEqual([clonedSessionId, 'source-sess']);
+    expect(queryMock.mock.calls[0]?.[0]).toContain('ORDER BY message_seq ASC');
+
     expect(executeMock).toHaveBeenCalledWith(
       expect.stringContaining('INSERT INTO session_runtime_snapshots'),
       [clonedSessionId, 'source-sess'],
