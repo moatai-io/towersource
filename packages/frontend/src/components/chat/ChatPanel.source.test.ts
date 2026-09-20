@@ -125,6 +125,13 @@ describe('ChatPanel scroll source guards', () => {
     expect(src).toContain('if (!userScrolledUp.current)');
   });
 
+  it('offers a clickable fallback when automatic older-message loading does not fire', () => {
+    const src = fs.readFileSync(CHAT_PANEL_PATH, 'utf-8');
+
+    expect(src).toContain('onClick={() => { void handleStartReached(); }}');
+    expect(src).toContain("{t('scrollForOlderMessages')}");
+  });
+
   it('places explicit deep-link targets near the top and highlights the exact message', () => {
     const src = fs.readFileSync(CHAT_PANEL_PATH, 'utf-8');
 

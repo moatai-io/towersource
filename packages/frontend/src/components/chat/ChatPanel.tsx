@@ -1669,11 +1669,17 @@ export function ChatPanel({ onSend, onAbort, onSafeStop, onFileClick, onAnswerQu
             <span>{t('loadingOlderMessages')}</span>
           </div>
         ) : (
-          <div className="text-[13px] text-gray-600">{t('scrollForOlderMessages')}</div>
+          <button
+            type="button"
+            onClick={() => { void handleStartReached(); }}
+            className="rounded-full border border-surface-700 bg-surface-900/80 px-3 py-1.5 text-[13px] text-surface-400 transition-colors hover:border-primary-500/40 hover:text-surface-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/60"
+          >
+            {t('scrollForOlderMessages')}
+          </button>
         )}
       </div>
     );
-  }, [hasMoreMessages, loadingMoreMessages]);
+  }, [hasMoreMessages, loadingMoreMessages, handleStartReached]);
 
   // ── Active turn status / live timer ──
   // Keep this OUTSIDE the Virtuoso/PlainMessageList scroll content. While a run
