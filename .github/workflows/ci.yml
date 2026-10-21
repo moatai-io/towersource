@@ -29,8 +29,8 @@ jobs:
       - name: Prepare integration test prerequisites
         run: |
           sudo apt-get update
-          sudo apt-get install -y bubblewrap python3-venv python3-pil python3-fitz python3-openpyxl python3-reportlab
-          /usr/bin/python3 -c "import PIL, fitz, openpyxl, reportlab"
+          sudo apt-get install -y bubblewrap python3-venv python3-pil python3-fitz python3-openpyxl python3-reportlab python3-ezdxf python3-matplotlib
+          /usr/bin/python3 -c "import PIL, fitz, openpyxl, reportlab, ezdxf, matplotlib"
           docker pull postgres:16-alpine
           # Ubuntu restricts unprivileged user namespaces by default; this
           # disposable runner executes the sandbox integration tests explicitly.

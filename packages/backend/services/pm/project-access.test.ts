@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import { existsSync } from 'fs';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
@@ -17,6 +18,13 @@ import {
 const TEST_HOME = process.env.HOME || '/tmp';
 const TEST_WORKSPACE_ROOT = process.env.WORKSPACE_ROOT || path.join(TEST_HOME, 'workspace');
 const TEST_TOWER_REPO_ROOT = process.env.TOWER_REPO_ROOT || path.join(TEST_HOME, 'tower');
+
+// Wrap the named builtin import used by the guard; default-object spies do not
+// replace Node's already-bound named imports in a clean ESM process.
+vi.mock('fs', async importOriginal => {
+  const actual = await importOriginal<typeof import('fs')>();
+  return { ...actual, existsSync: vi.fn(actual.existsSync) };
+});
 
 // Path-policy tests use an unregistered root; registered Project authority is tested separately.
 vi.mock('../../db/pg-repo.js', () => ({ query: vi.fn(async () => []), queryOne: vi.fn(async () => undefined) }));
@@ -669,15 +677,14 @@ describe('buildToolGuard — ghost project guard (always-on)', () => {
   });
 
   it('allows writes into a project slug that already exists on disk (grandfathered)', () => {
-    // 'demo-org' is one of many existing project folders; treat it as a stand-in.
-    // The guard checks existsSync on the slug path, so any actually-present
-    // directory counts. Use a slug we know exists in this repo: '_team' or
-    // 'auto-retro' (both seen in workspace/projects/).
-    const result = adminGuard()('Write', {
-      file_path: `${WORKSPACE}/projects/auto-retro/notes/${Date.now()}.md`,
-      content: 'x',
-    });
-    expect(result.allowed).toBe(true);
+    const projectRoot = `${WORKSPACE}/projects/fixture-existing-project`;
+    const actualExists = fs.existsSync.bind(fs);
+    const disk = vi.mocked(existsSync).mockImplementation(file => String(file) === projectRoot || actualExists(file));
+    try {
+      const result = adminGuard()('Write', { file_path: `${projectRoot}/notes/note.md`, content: 'x' });
+      expect(result.allowed).toBe(true);
+      expect(disk).toHaveBeenCalledWith(projectRoot);
+    } finally { disk.mockImplementation(actualExists); }
   });
 
   it('allows writes into shared workspace dirs (decisions, docs, published)', () => {

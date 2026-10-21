@@ -21,6 +21,7 @@ async function makeTempDir(prefix: string) {
 }
 
 afterEach(async () => {
+  vi.unstubAllEnvs();
   await Promise.all(tempDirs.splice(0).map((dir) => fs.rm(dir, { recursive: true, force: true })));
 });
 
@@ -194,11 +195,35 @@ FAAAAA+LiberationSans                CID TrueType      Identity-H       yes yes 
 // Gate fitz-dependent cases so a missing PyMuPDF skips instead of failing.
 function hasPythonFitz(): boolean {
   try {
-    execFileSync('python3', ['-c', 'import fitz'], { stdio: 'ignore' });
+    execFileSync(process.env.TOWER_DOCUMENT_PYTHON || 'python3', ['-c', 'import fitz'], { stdio: 'ignore' });
     return true;
   } catch {
     return false;
   }
+}
+// Keep these behavioral renderer cases independent of a runner's optional Poppler
+// executables. The fixtures still extract real PDF text and rasterize real pages.
+async function installPdfUtilities(cwd: string) {
+  const bin = path.join(cwd, 'pdf-test-bin');
+  await fs.mkdir(bin);
+  const python = execFileSync(process.env.TOWER_DOCUMENT_PYTHON || 'python3', ['-c', 'import sys;print(sys.executable)'], { encoding: 'utf8' }).trim();
+  const scripts = {
+    pdftotext: `import sys,fitz
+with fitz.open(sys.argv[1]) as doc:
+ print("".join(page.get_text() for page in doc))
+`,
+    pdftoppm: `import sys,fitz
+args=sys.argv[1:]
+dpi=float(args[args.index('-r')+1]); source,prefix=args[-2:]
+with fitz.open(source) as doc:
+ for i,page in enumerate(doc):
+  page.get_pixmap(matrix=fitz.Matrix(dpi/72,dpi/72)).save(prefix+'-'+str(i+1)+'.png')
+`,
+  };
+  for (const [name, script] of Object.entries(scripts)) {
+    await fs.writeFile(path.join(bin, name), `#!${python}\n${script}`, { mode: 0o755 });
+  }
+  vi.stubEnv('PATH', `${bin}${path.delimiter}${process.env.PATH || ''}`);
 }
 const chromiumAvailable = Boolean(findChromium());
 const fitzAvailable = hasPythonFitz();
@@ -523,7 +548,7 @@ flowchart LR
       preview_output_dir: previewDir,
     });
 
-    expect(result.isError).not.toBe(true);
+    expect(result.isError, JSON.stringify(result)).not.toBe(true);
     expect(result.details.pdfExported).toBe(true);
     expect(result.details.mode).toBe('image');
     expect(result.details.outputPath).toBe(pdfPath);
