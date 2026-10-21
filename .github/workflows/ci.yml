@@ -29,10 +29,10 @@ jobs:
       - name: Prepare integration test prerequisites
         run: |
           sudo apt-get update
-          sudo apt-get install -y bubblewrap python3-venv python3-pil python3-fitz python3-openpyxl python3-reportlab python3-ezdxf python3-matplotlib poppler-utils
+          sudo apt-get install -y bubblewrap python3-venv python3-pil python3-fitz python3-openpyxl python3-reportlab python3-ezdxf python3-matplotlib python3-pandas poppler-utils
           /usr/bin/python3 -m venv --system-site-packages "$RUNNER_TEMP/tower-test-python"
           "$RUNNER_TEMP/tower-test-python/bin/pip" install pdfplumber==0.11.7
-          "$RUNNER_TEMP/tower-test-python/bin/python" -c "import PIL, fitz, openpyxl, reportlab, ezdxf, matplotlib, pdfplumber"
+          "$RUNNER_TEMP/tower-test-python/bin/python" -c "import PIL, fitz, openpyxl, reportlab, ezdxf, matplotlib, pdfplumber, pandas"
           echo "$RUNNER_TEMP/tower-test-python/bin" >> "$GITHUB_PATH"
           echo "TOWER_DOCUMENT_PYTHON=$RUNNER_TEMP/tower-test-python/bin/python" >> "$GITHUB_ENV"
           docker pull postgres:16-alpine
