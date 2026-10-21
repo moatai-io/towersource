@@ -152,7 +152,7 @@ describe('runInlineEdit', () => {
     expect(call.prompt).toContain('<<<SELECTION>>>');
     expect(call.prompt).toContain('old text');
     expect(call.prompt).toContain('make it formal');
-    expect(call.model).toBe('litellm-responses/mini');
+    expect(call.model).toBe((await import('../../config.js')).getModelDefaults().ai_reply);
     expect(call.fallbackText).toBe('old text');
     expect(result.replacement).toBe('cleaned replacement');
   });

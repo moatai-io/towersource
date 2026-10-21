@@ -1,3 +1,4 @@
+import { towerHttpUrl } from '../../features/client-connection/connection';
 /**
  * Owns: 본문 상단 글로벌 탭 바.
  *   - 좌측 채팅 탭들 (useFileStore.chatTabs) — 세션 북마크, 동등 1급 시민
@@ -27,6 +28,7 @@
  * (Sidebar SessionItem → openChatTab forceNew, RichContent/file links →
  * openTab forceNew). 탭 바 자체에서는 해당 없음.
  */
+import { findOwningProjectForPath, normalizeSidebarFilePath } from '../../utils/sidebar-file-owner';
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { createPortal } from 'react-dom';
@@ -46,6 +48,7 @@ import { contextInputFromUsageOrRow, contextWindowForSession } from '../../utils
 import { toastQuiet } from '../../utils/toast';
 import { usePrompt } from '../../hooks/useDialog';
 import { AgentIdentityAvatar } from '../../features/agent-profile/AgentIdentityAvatar';
+import { MainTab, MainTabCloseButton, MainTabPinButton } from './MainTab';
 import { ShareModal } from '../files/ShareModal';
 import { RunIndicator } from '../common/RunIndicator';
 
@@ -72,7 +75,7 @@ function basename(path: string): string {
 }
 
 function normalizePath(path: string): string {
-  return path.replace(/\\/g, '/').replace(/\/+$/, '');
+  return normalizeSidebarFilePath(path);
 }
 
 function isPathInsideRoot(path: string, rootPath: string): boolean {
@@ -163,20 +166,6 @@ function mergeRevealEntries(
   return patchEntries(normalizedEntriesByPath.get(normalizePath(rootPath)) || rootEntries);
 }
 
-/**
- * Find the sidebar project section that actually owns a file path.
- *
- * Prefix-only matching is not enough because project roots can overlap, e.g.
- * `~/workspace/projects/project` vs `~/workspace/projects/project-835593ec`.
- * Choose the longest path-boundary match so "Reveal in Sidebar" expands the
- * correct project instead of intermittently no-oping on the wrong section.
- */
-function findOwningProjectForPath<T extends { rootPath?: string | null }>(projects: T[], path: string): T | undefined {
-  return projects
-    .filter((project) => project.rootPath && isPathInsideRoot(path, project.rootPath))
-    .sort((a, b) => normalizePath(b.rootPath || '').length - normalizePath(a.rootPath || '').length)[0];
-}
-
 function AwaitingUserMark({ active }: { active?: boolean }) {
   const { t } = useTranslation('layout');
   return (
@@ -224,7 +213,7 @@ export function SortableTabShell({ id, children, className = '' }: { id: string;
       ref={setNodeRef}
       data-main-tab-key={id}
       style={{ transform: translateOnlyTransform, transition }}
-      className={`tower-main-tab-shell min-w-[5.5rem] max-w-[14rem] flex-[1_1_0] overflow-hidden ${className} ${isDragging ? 'opacity-60' : ''}`.trim()}
+      className={`tower-main-tab-shell min-w-[4.5rem] max-w-[14rem] flex-[1_1_0] overflow-hidden ${className} ${isDragging ? 'opacity-60' : ''}`.trim()}
       {...attributes}
       {...listeners}
     >
@@ -263,10 +252,9 @@ function ChatTabItem({
   const turnState = useChatStore((s) => s.turnStateBySession[sessionId]);
   const phase = turnState?.phase ?? 'idle';
   const isSessionStreaming = useSessionStore((s) => s.streamingSessions.has(sessionId));
-  const isUnreadAttention = useSessionStore((s) => s.unreadSessions.has(sessionId));
+  const isUnreadAttention = session?.unreadAiResponse === true;
   const visibleChatSessionId = useSessionStore((s) => s.visibleChatSessionId);
   const queueCount = useChatStore((s) => (s.messageQueue[sessionId] ?? []).length);
-  const markSessionRead = useSessionStore((s) => s.markSessionRead);
   const markTurnRead = useChatStore((s) => s.markTurnRead);
   const activity = deriveSessionRowActivity({
     isStreaming: isSessionStreaming,
@@ -281,38 +269,35 @@ function ChatTabItem({
     if (!isActive || visibleChatSessionId !== sessionId || !isUnreadAttention) return;
     if (document.visibilityState !== 'visible' || (typeof document.hasFocus === 'function' && !document.hasFocus())) return;
     markTurnRead(sessionId);
-    markSessionRead(sessionId);
-  }, [isActive, isUnreadAttention, markSessionRead, markTurnRead, sessionId, visibleChatSessionId]);
+  }, [isActive, isUnreadAttention, markTurnRead, sessionId, visibleChatSessionId]);
+
+  const stateClassName = isActive
+    ? 'z-20 bg-surface-800 text-gray-100'
+    : rowState.indicator.kind === 'awaiting_user'
+      ? 'tone-warning z-0 tone-bg-soft tone-text hover:bg-[var(--tone-bg)]'
+      : rowState.indicator.kind === 'running'
+        ? 'z-0 bg-surface-900/35 text-gray-500 hover:text-gray-300 hover:bg-surface-900/65'
+        : rowState.indicator.kind === 'done'
+          ? 'z-0 bg-surface-900/60 text-gray-200 hover:text-gray-100 hover:bg-surface-900/85'
+          : 'z-0 bg-surface-900/35 text-gray-500 hover:text-gray-300 hover:bg-surface-900/65';
 
   return (
-    <div
-      role="tab"
-      aria-selected={isActive}
-      onClick={() => {
+    <MainTab
+      active={isActive}
+      isMobile={isMobile}
+      height="chat"
+      title={name ?? t('chatTabFallback')}
+      dataRunState={rowState.indicator.kind}
+      className={stateClassName}
+      onSelect={() => {
         markTurnRead(sessionId);
-        markSessionRead(sessionId);
         onSelect();
       }}
-      onAuxClick={(e) => {
-        if (e.button === 1) { e.preventDefault(); onClose(); }
-      }}
-      onDoubleClick={onPin}
+      onClose={onClose}
+      onPin={onPin}
       onContextMenu={onContextMenu}
-      data-run-state={rowState.indicator.kind}
-      className={`tower-main-tab group relative flex w-full min-w-0 max-w-none flex-1 items-center gap-1 px-2 ${isMobile ? 'h-12' : 'h-7'} rounded-t-xl rounded-b-none whitespace-nowrap cursor-pointer transition-[background-color,color,opacity,box-shadow,transform] ${
-        isActive
-          ? 'z-20 bg-surface-800 text-gray-100 opacity-100 shadow-[0_-1px_0_rgba(255,255,255,0.06)_inset]'
-          : rowState.indicator.kind === 'awaiting_user'
-            ? 'tone-warning z-0 tone-bg-soft tone-text opacity-100 hover:bg-[var(--tone-bg)]'
-            : rowState.indicator.kind === 'running'
-              ? 'z-0 bg-surface-900/35 text-gray-500 opacity-90 hover:opacity-100 hover:text-gray-300 hover:bg-surface-900/65'
-              : rowState.indicator.kind === 'done'
-                ? 'z-0 bg-surface-900/60 text-gray-200 opacity-100 hover:text-gray-100 hover:bg-surface-900/85'
-                : 'z-0 bg-surface-900/35 text-gray-500 opacity-75 hover:opacity-100 hover:text-gray-300 hover:bg-surface-900/65'
-      }`}
-      title={name ?? t('chatTabFallback')}
     >
-      {project ? <AgentIdentityAvatar project={project} className={`${isMobile?'h-7 w-7':'h-5 w-5'} shrink-0 rounded-md`} fallbackClassName={`${isMobile?'h-7 w-7':'h-5 w-5'} shrink-0 rounded-md`}/> : !showLeadingStatus && <span aria-hidden="true" className="inline-block h-1 w-1 shrink-0 rounded-full bg-current opacity-60" />}
+      {project ? <AgentIdentityAvatar project={project} className={`tower-main-tab-avatar ${isMobile?'h-7 w-7':'h-5 w-5'} shrink-0 rounded-md`} fallbackClassName={`tower-main-tab-avatar ${isMobile?'h-7 w-7':'h-5 w-5'} shrink-0 rounded-md`}/> : !showLeadingStatus && <span aria-hidden="true" className="tower-main-tab-leading inline-block h-1 w-1 shrink-0 rounded-full bg-current opacity-60" />}
       {rowState.indicator.kind === 'awaiting_user' && <AwaitingUserMark active={isActive} />}
       {rowState.indicator.kind === 'running' && (
         <RunIndicator
@@ -330,17 +315,12 @@ function ChatTabItem({
           ✓
         </span>
       )}
-      <span className={`min-w-0 flex-1 truncate ${pinned?'not-italic':'italic'} ${isActive ? 'font-semibold text-gray-100' : 'font-medium'}`}>{name ?? t('chatTabFallback')}</span>
-      <button
-        onClick={(e) => { e.stopPropagation(); onClose(); }}
-        aria-label={t('closeChatTab')}
-        className={`flex shrink-0 items-center justify-center rounded text-gray-500 hover:text-gray-100 hover:bg-surface-700 transition-opacity ${isMobile ? 'h-8 w-8 opacity-100' : 'h-4 w-4 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100'}`}
-      >
-        <svg className={isMobile ? 'w-4 h-4' : 'w-3 h-3'} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" />
-        </svg>
-      </button>
-    </div>
+      <span className={`tower-main-tab-title min-w-0 flex-1 overflow-hidden whitespace-nowrap ${isActive ? 'font-semibold text-gray-100' : 'font-medium'}`}>{name ?? t('chatTabFallback')}</span>
+      <div className="tower-main-tab-actions flex shrink-0 items-center">
+        <MainTabPinButton pinned={pinned} isMobile={isMobile} label={pinned ? t('unpinTab') : t('pinTab')} onToggle={onPin} />
+        <MainTabCloseButton isMobile={isMobile} label={t('closeChatTab')} onClose={onClose} />
+      </div>
+    </MainTab>
   );
 }
 
@@ -365,43 +345,25 @@ export function FileTabChip({
 }) {
   const { t } = useTranslation('layout');
   return (
-    <div
-      role="tab"
-      aria-selected={isActive}
-      onClick={onSelect}
-      onAuxClick={(e) => {
-        if (e.button === 1) { e.preventDefault(); onClose(); }
-      }}
-      onDoubleClick={(e) => { e.stopPropagation(); onPin(); }}
-      onContextMenu={onContextMenu}
-      className={`tower-main-tab group relative flex w-full min-w-0 max-w-none flex-1 items-center gap-1 px-2 ${isMobile ? 'h-10' : 'h-7'} rounded-t-xl rounded-b-none whitespace-nowrap cursor-pointer transition-[background-color,color,opacity] ${
-        isActive
-          ? 'z-10 bg-surface-800 text-gray-100 opacity-100'
-          : 'z-0 bg-surface-900/35 text-gray-500 opacity-75 hover:opacity-100 hover:text-gray-300 hover:bg-surface-900/65'
-      } ${className ?? ''}`}
+    <MainTab
+      active={isActive}
+      isMobile={isMobile}
       title={t('fileTabHint', { path: tab.path })}
+      className={`${isActive ? 'z-10 bg-surface-800 text-gray-100' : 'z-0 bg-surface-900/35 text-gray-500 hover:text-gray-300 hover:bg-surface-900/65'} ${className ?? ''}`}
+      onSelect={onSelect}
+      onClose={onClose}
+      onPin={onPin}
+      onContextMenu={onContextMenu}
     >
-      <span aria-hidden="true" className="shrink-0">{getFileIcon(tab.path)}</span>
-      <span className={`min-w-0 flex-1 truncate ${tab.pinned ? 'font-normal' : 'italic'} ${tab.modified ? 'tone-warning tone-text' : ''}`}>
+      <span aria-hidden="true" className="tower-main-tab-leading shrink-0">{getFileIcon(tab.path)}</span>
+      <span className={`tower-main-tab-title min-w-0 flex-1 overflow-hidden whitespace-nowrap font-normal ${tab.modified ? 'tone-warning tone-text' : ''}`}>
         {tab.name || basename(tab.path)}{tab.modified ? ' •' : ''}
       </span>
-      <div
-        className={`flex items-center gap-0.5 ${isMobile
-          ? 'shrink-0'
-          : 'pointer-events-none absolute inset-y-0 right-0 rounded-r-xl bg-gradient-to-l from-surface-800 via-surface-800 to-surface-800/70 pl-3 pr-1 opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100'
-        }`}
-      >
-        <button
-          onClick={(e) => { e.stopPropagation(); onClose(); }}
-          aria-label={t('closeTab')}
-          className={`${isMobile ? 'h-8 w-8' : 'h-5 w-5'} flex items-center justify-center rounded text-surface-300 hover:bg-surface-700 hover:text-surface-50 focus-visible:outline focus-visible:outline-1 focus-visible:outline-primary-400`}
-        >
-          <svg className={isMobile ? 'h-4 w-4' : 'h-3 w-3'} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" />
-          </svg>
-        </button>
+      <div className="tower-main-tab-actions flex shrink-0 items-center">
+        <MainTabPinButton pinned={tab.pinned} isMobile={isMobile} label={tab.pinned ? t('unpinTab') : t('pinTab')} onToggle={onPin} />
+        <MainTabCloseButton isMobile={isMobile} label={t('closeTab')} onClose={onClose} />
       </div>
-    </div>
+    </MainTab>
   );
 }
 
@@ -663,7 +625,7 @@ export function FileTabBar({ onSelectChatSession, onRenameSession, onReloadFile 
       }
       selector = `[data-sidebar-session-id="${cssEscape(target.sessionId)}"]`;
     } else if (target.kind === 'file') {
-      const project = findOwningProjectForPath(projects, target.path);
+      const project = findOwningProjectForPath(useProjectStore.getState().projects, target.path);
       if (!project?.rootPath) {
         toastQuiet(t('fileOwnerNotFound'));
         return;
@@ -677,7 +639,7 @@ export function FileTabBar({ onSelectChatSession, onRenameSession, onReloadFile 
         fileStore.addExpandedPath(ancestorPath);
       }
       fileStore.bumpRefreshTrigger();
-      selector = `[data-sidebar-file-path="${cssEscape(target.path)}"]`;
+      selector = `[data-sidebar-file-path="${cssEscape(normalizeSidebarFilePath(target.path))}"]`;
     }
 
     sessionStore.setSidebarOpen(true);
@@ -912,42 +874,37 @@ export function FileTabBar({ onSelectChatSession, onRenameSession, onReloadFile 
                 const isActive = activeMainKind === 'system' && activeSystemTabId === s.id;
                 return (
                   <SortableTabShell key={item.key} id={item.key}>
-                    <div
-                      role="tab"
-                      aria-selected={isActive}
-                      onClick={() => {
+                    <MainTab
+                      active={isActive}
+                      isMobile={isMobile}
+                      title={systemTabAccessibleTitle}
+                      className={isActive ? 'z-10 bg-surface-800 text-gray-100' : 'z-0 bg-surface-900/35 text-gray-500 hover:text-gray-300 hover:bg-surface-900/65'}
+                      onSelect={() => {
                         activateSystemTab(s.id);
                         revealTabInStrip(item.key);
                       }}
-                      onDoubleClick={() => {
+                      onClose={() => closeSystemTab(s.id)}
+                      onPin={() => {
                         pinSystemTab(s.id);
                         toastQuiet(s.pinned ? t('tabUnpinned') : t('tabPinned'));
                       }}
-                      onContextMenu={(e) => onTabContextMenu(e, 'system', s.id, s.pinned)}
-                      className={`tower-main-tab group relative flex w-full min-w-0 max-w-none flex-1 items-center gap-1 px-2 ${isMobile ? 'h-10' : 'h-7'} rounded-t-xl rounded-b-none whitespace-nowrap cursor-pointer transition-[background-color,color,opacity] ${
-                        isActive
-                          ? 'z-10 bg-surface-800 text-gray-100 opacity-100'
-                          : 'z-0 bg-surface-900/35 text-gray-500 opacity-75 hover:opacity-100 hover:text-gray-300 hover:bg-surface-900/65'
-                      }`}
-                      title={systemTabAccessibleTitle}
+                      onContextMenu={(event) => onTabContextMenu(event, 'system', s.id, s.pinned)}
                     >
                       {projectHome ? (
-                        <AgentIdentityAvatar project={projectHome} className={`${isMobile ? 'h-7 w-7' : 'h-5 w-5'} shrink-0 rounded-md`} fallbackClassName={`${isMobile ? 'h-7 w-7' : 'h-5 w-5'} shrink-0 rounded-md`} />
+                        <AgentIdentityAvatar project={projectHome} className={`tower-main-tab-avatar ${isMobile ? 'h-7 w-7' : 'h-5 w-5'} shrink-0 rounded-md`} fallbackClassName={`tower-main-tab-avatar ${isMobile ? 'h-7 w-7' : 'h-5 w-5'} shrink-0 rounded-md`} />
                       ) : (
-                        <span aria-hidden="true" className="shrink-0">{s.icon}</span>
+                        <span aria-hidden="true" className="tower-main-tab-leading shrink-0">{s.icon}</span>
                       )}
-                      <span className={`min-w-0 flex-1 truncate ${s.pinned ? 'font-normal' : 'italic'}`}>{systemTabTitle}</span>
+                      <span className="tower-main-tab-title min-w-0 flex-1 overflow-hidden whitespace-nowrap font-normal">{systemTabTitle}</span>
                       {projectHome && <span className="tower-main-tab-kind tone-accent tone-pill shrink-0 px-1.5 py-0.5 text-[9px] font-bold leading-none not-italic">{t('teammateHome')}</span>}
-                      <button
-                        onClick={(e) => { e.stopPropagation(); closeSystemTab(s.id); }}
-                        aria-label={t('closeSystemTab')}
-                        className={`ml-0.5 flex shrink-0 items-center justify-center rounded text-gray-500 hover:text-gray-100 hover:bg-surface-700 transition-opacity ${isMobile ? 'h-8 w-8 opacity-100' : 'h-4 w-4 opacity-0 group-hover:opacity-100'}`}
-                      >
-                        <svg className={isMobile ? 'w-4 h-4' : 'w-3 h-3'} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" />
-                        </svg>
-                      </button>
-                    </div>
+                      <div className="tower-main-tab-actions flex shrink-0 items-center">
+                        <MainTabPinButton pinned={s.pinned} isMobile={isMobile} label={s.pinned ? t('unpinTab') : t('pinTab')} onToggle={() => {
+                          pinSystemTab(s.id);
+                          toastQuiet(s.pinned ? t('tabUnpinned') : t('tabPinned'));
+                        }} />
+                        <MainTabCloseButton isMobile={isMobile} alwaysVisible={s.kind === 'projectFiles'} label={t('closeSystemTab')} onClose={() => closeSystemTab(s.id)} />
+                      </div>
+                    </MainTab>
                   </SortableTabShell>
                 );
               }
@@ -1166,7 +1123,7 @@ export function FileTabBar({ onSelectChatSession, onRenameSession, onReloadFile 
                   setCtxMenu(null);
                   if (!tab) return;
                   const token = localStorage.getItem('token');
-                  const url = `/api/files/serve?path=${encodeURIComponent(tab.path)}&download=1${token ? `&token=${encodeURIComponent(token)}` : ''}`;
+                  const url = towerHttpUrl(`/api/files/serve?path=${encodeURIComponent(tab.path)}&download=1${token ? `&token=${encodeURIComponent(token)}` : ''}`);
                   window.open(url, '_blank');
                 }}
                 className="w-full min-h-[44px] px-4 py-2 text-left hover:bg-surface-800"

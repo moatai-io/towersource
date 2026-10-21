@@ -1,3 +1,5 @@
+import { sessionAudienceSql } from '../pm/session-audience.js';
+import { canAccessSession } from '../pm/project-access.js';
 /**
  * session-backlinks.ts — Level 1 (공통 파일 기반) session backlinks.
  *
@@ -104,6 +106,9 @@ export async function getRelatedSessionsByFiles(
 ): Promise<RelatedSessionsResponse> {
   const started = Date.now();
   const n = Math.max(1, Math.min(50, Math.floor(limit) || 10));
+  if (!(await canAccessSession(towerSessionId, userId, role)).allowed) {
+    return { filesInSession: 0, candidatesConsidered: 0, queryMs: Date.now() - started, results: [] };
+  }
 
   // 1. Source files — single PG query, keyed directly by Tower sessions.id.
   const fileRows = await query<{ file_path: string }>(
@@ -126,10 +131,11 @@ export async function getRelatedSessionsByFiles(
   // 2. Candidate sessions that also touched those files. UNIQUE on
   //    (session_id, file_path) means one row per (session, file) pair.
   const sfeRows = await query<{ file_path: string; session_id: string }>(
-    `SELECT file_path, session_id FROM session_file_edits
-       WHERE file_path = ANY($1::text[])
-         AND session_id != $2`,
-    [files, towerSessionId],
+    `SELECT sfe.file_path, sfe.session_id FROM session_file_edits sfe
+       JOIN sessions s ON s.id = sfe.session_id
+       WHERE sfe.file_path = ANY($1::text[]) AND sfe.session_id != $2
+         AND ${sessionAudienceSql('s', '$3')}`,
+    role === 'admin' ? [files, towerSessionId] : [files, towerSessionId, userId],
   );
 
   const sessionsPerFile = new Map<string, Set<string>>(); // file → Set<sessions.id>
@@ -152,7 +158,10 @@ export async function getRelatedSessionsByFiles(
 
   // 3. IDF denominator — distinct sessions in session_file_edits.
   const totalRow = await queryOne<{ n: number }>(
-    `SELECT COUNT(DISTINCT session_id)::int AS n FROM session_file_edits`,
+    `SELECT COUNT(DISTINCT sfe.session_id)::int AS n FROM session_file_edits sfe
+       JOIN sessions s ON s.id = sfe.session_id
+       WHERE ${sessionAudienceSql('s', '$1')}`,
+    role === 'admin' ? [] : [userId],
   );
   const totalSessions = Math.max(1, totalRow?.n ?? 0);
 
@@ -236,32 +245,6 @@ export async function getRelatedSessionsByFiles(
   //    display_name + username), project_id, updated_at. Then we drop the
   //    ones the caller can't see per Tower's standard session ACL.
   const candidateIds = candidates.map((c) => c.sessionId);
-  const isPrivileged = role === 'admin' || role === 'operator';
-
-  // 5a. Fetch caller's project memberships once (skip when privileged — they
-  //     bypass the per-candidate check anyway).
-  let memberProjectIds: Set<string> = new Set();
-  let sharedInSessionIds: Set<string> = new Set();
-  if (!isPrivileged && candidateIds.length > 0) {
-    const memberRows = await query<{ project_id: string }>(
-      `SELECT project_id FROM project_members WHERE user_id = $1`,
-      [userId],
-    );
-    memberProjectIds = new Set(memberRows.map((r) => r.project_id));
-
-    // Internal shares granting caller access to specific candidate sessions
-    const shareRows = await query<{ session_id: string }>(
-      `SELECT session_id FROM session_shares
-         WHERE share_type = 'internal'
-           AND target_user_id = $1
-           AND session_id = ANY($2::text[])
-           AND (revoked IS NULL OR revoked = 0)
-           AND (expires_at IS NULL OR expires_at > NOW())`,
-      [userId, candidateIds],
-    );
-    sharedInSessionIds = new Set(shareRows.map((r) => r.session_id));
-  }
-
   // 5b. Pull candidate metadata + owner info in a single JOIN.
   const pgRows = await query<{
     id: string;
@@ -277,8 +260,9 @@ export async function getRelatedSessionsByFiles(
        FROM sessions s
        LEFT JOIN users u ON u.id = s.user_id
        WHERE s.id = ANY($1::text[])
-         AND (s.archived IS NULL OR s.archived = 0)`,
-    [candidateIds],
+         AND (s.archived IS NULL OR s.archived = 0)
+         AND ${sessionAudienceSql('s', '$2')}`,
+    role === 'admin' ? [candidateIds] : [candidateIds, userId],
   );
   const byId = new Map<string, (typeof pgRows)[number]>();
   for (const row of pgRows) byId.set(row.id, row);
@@ -292,19 +276,6 @@ export async function getRelatedSessionsByFiles(
     if (results.length >= n) break;
     const meta = byId.get(cand.sessionId);
     if (!meta) continue;
-
-    // Access decision — mirrors canAccessSession() in services/pm/project-access.ts.
-    let allowed = false;
-    if (isPrivileged) {
-      allowed = true;
-    } else if (meta.user_id === userId) {
-      allowed = true;
-    } else if (meta.project_id && memberProjectIds.has(meta.project_id)) {
-      allowed = true;
-    } else if (sharedInSessionIds.has(meta.id)) {
-      allowed = true;
-    }
-    if (!allowed) continue;
 
     results.push({
       sessionId: meta.id,

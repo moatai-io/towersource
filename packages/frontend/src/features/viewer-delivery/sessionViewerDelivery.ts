@@ -6,6 +6,7 @@ export interface SessionViewerDelivery {
   path: string;
   label?: string;
   focus: boolean;
+  reveal?: boolean;
 }
 
 const pendingBySession = new Map<string, SessionViewerDelivery>();

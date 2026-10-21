@@ -16,7 +16,7 @@ describe('Admin Project Workstation change UX', () => {
   });
 
   it('shows current and target Worker state without a free-form Worker id field', () => {
-    expect(source).toContain('agent.workstation.workerId');
+    expect(source).toContain('agent.workstation?.workerId');
     expect(source).toContain('workers.filter(worker => worker.deploymentId === \'production\'');
     expect(source).toContain("t('agentLifecycle.previewSummary'");
     expect(source).toContain("t('agentLifecycle.verificationPassed')");

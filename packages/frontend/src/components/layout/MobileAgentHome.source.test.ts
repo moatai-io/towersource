@@ -13,16 +13,17 @@ describe('mobile teammate workspace', () => {
     expect(sidebar).toContain('setSidebarOpen(false)');
   });
 
-  it('keeps Conversations, Work, and Agent-scoped documents as primary destinations', () => {
+  it('keeps Conversations, Agent-scoped documents, and Settings as primary destinations', () => {
     const agentFirstTabs = tabs.slice(tabs.indexOf('const tabs:'), tabs.indexOf('const visibleTabs = tabs;'));
     expect(agentFirstTabs).toContain("{ id: 'ai', label: t('conversationsNav')");
     expect(agentFirstTabs).toContain("{ id: 'files', label: t('files')");
     expect(agentFirstTabs).not.toContain("{ id: 'channel'");
-    expect(agentFirstTabs).toContain("{ id: 'work', label: t('workHubNav')");
+    expect(agentFirstTabs).not.toContain("{ id: 'work'");
     expect(tabs).not.toContain('tower-open-ai-navigation-root');
     expect(tabs).not.toContain("label: '내 업무'");
     expect(tabs).not.toContain("label: '자동화'");
-    expect(tabs).toContain("setActiveView('work')");
+    expect(tabs).not.toContain("setActiveView('work')");
+    expect(agentFirstTabs).toContain("{ id: 'settings', label: t('settings')");
     expect(tabs).not.toContain('pendingApprovalCount');
     expect(tabs).toContain("const selectedProjectId = activeSessionProjectId || capabilityProjectId");
     expect(tabs).toContain("projects.find((project) => project.rootPath && !project.archived)");
@@ -31,6 +32,13 @@ describe('mobile teammate workspace', () => {
     expect(tabs).not.toContain("setActiveView('chat')");
     expect(tabs).toContain('Commit the Files route atomically');
     expect(tabs).toContain('safe-area-inset-bottom');
+  });
+
+  it('returns from Agent Home to the active conversation when Conversations is tapped', () => {
+    const aiBranch = tabs.slice(tabs.indexOf("if (tab === 'ai')"), tabs.indexOf("} else if (tab === 'files')"));
+    expect(aiBranch).toContain('useFileStore.getState().activateChatSlot()');
+    expect(aiBranch).toContain('setAiNavigationSurface()');
+    expect(aiBranch).toContain('setSidebarOpen(true)');
   });
 
   it('keeps the AI Team mobile drawer for teammate selection and creation', () => {
@@ -43,9 +51,12 @@ describe('mobile teammate workspace', () => {
     expect(sidebar).toContain("useState<MobileAgentPane>(() => lastMobileAgentNavigation.pane)");
   });
 
-  it('uses compact mobile-first spacing and safe-area room', () => {
+  it('uses compact mobile-first spacing and one bounded Agent Home scroll surface', () => {
     expect(home).toContain('agent-home-profile-actions grid w-full grid-cols-1');
     expect(home).toContain('h-16 w-16');
     expect(project).toContain('safe-area-inset-bottom');
+    expect(project).toContain('flex h-full min-h-0 flex-col overflow-hidden');
+    expect(project).toContain('min-h-0 flex-1 overflow-y-auto overscroll-contain');
+    expect(project).not.toContain('h-[calc(100vh-58px)]');
   });
 });

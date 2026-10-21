@@ -1,28 +1,12 @@
-import os from 'node:os';
 import path from 'node:path';
-import type { WorkbenchExecutionRequest } from './workbench-execution-broker.js';
+import type { WorkbenchExecutionRequest } from '../execution/execution-broker.js';
 
 export interface OperatorExecutionResolution {
   request: WorkbenchExecutionRequest;
-  operatorPlane: boolean;
+  operatorPlane: false;
   hostCwd?: string;
   logicalCwd?: string;
-  credentialMode: 'none' | 'required-only';
-}
-
-interface OperatorRoot {
-  hostRoot: string;
-  logicalRoot: string;
-}
-
-function configuredRoots(env: NodeJS.ProcessEnv): OperatorRoot[] {
-  const home = path.resolve(env.HOME?.trim() || os.homedir());
-  const towerRoot = path.resolve(env.TOWER_OPERATOR_TOWER_SOURCE_ROOT?.trim() || path.join(home, 'tower'));
-  const workspaceRoot = path.resolve(env.TOWER_OPERATOR_WORKSPACE_ROOT?.trim() || path.join(home, 'workspace'));
-  return [
-    { hostRoot: towerRoot, logicalRoot: '/workspace/tower' },
-    { hostRoot: workspaceRoot, logicalRoot: '/workspace/workspace' },
-  ];
+  credentialMode: 'required-only';
 }
 
 function under(root: string, candidate: string): boolean {
@@ -30,8 +14,11 @@ function under(root: string, candidate: string): boolean {
 }
 
 /**
- * Convert an admin/operator host cwd into the stable Operator Workbench projection.
- * Ordinary Project commands remain unchanged and every non-operator host escape fails closed.
+ * Keep Project execution inside its Project root.
+ *
+ * Operator access is assembled separately as native host bash for an
+ * admin/operator using an Agent whose current policy enables it. Project
+ * Workers never project Tower source or the organization workspace.
  */
 export function resolveOperatorExecution(input: {
   request: WorkbenchExecutionRequest;
@@ -45,10 +32,7 @@ export function resolveOperatorExecution(input: {
     || requested === '/workspace/workspace'
     || requested?.startsWith('/workspace/workspace/');
   if (operatorLogicalCwd) {
-    if (!['admin', 'operator'].includes(input.actorRole ?? '')) {
-      throw new Error('OPERATOR_PLANE_ROLE_REQUIRED: Tower source and organization workspace projections require Admin or Operator authority');
-    }
-    return { request: input.request, operatorPlane: true, logicalCwd: requested, credentialMode: 'none' };
+    throw new Error('OPERATOR_ACCESS_REQUIRED: enable Operator access for this Agent to use the native Operator execution environment');
   }
   if (!requested || !path.isAbsolute(requested) || requested === '/workspace' || requested.startsWith('/workspace/')) {
     return { request: input.request, operatorPlane: false, credentialMode: 'required-only' };
@@ -67,21 +51,5 @@ export function resolveOperatorExecution(input: {
     };
   }
 
-  if (!['admin', 'operator'].includes(input.actorRole ?? '')) {
-    throw new Error('PROJECT_CWD_OUTSIDE_WORKSPACE: host paths outside the current Project require Organization Admin or Operator authority');
-  }
-
-  const match = configuredRoots(input.env ?? process.env).find(root => under(root.hostRoot, hostCwd));
-  if (!match) {
-    throw new Error('OPERATOR_CWD_NOT_ALLOWLISTED: admin host cwd must be inside Tower source or the organization workspace');
-  }
-  const relative = path.relative(match.hostRoot, hostCwd).split(path.sep).join('/');
-  const logicalCwd = relative ? `${match.logicalRoot}/${relative}` : match.logicalRoot;
-  return {
-    request: { ...input.request, cwd: logicalCwd, env: input.request.env ? { ...input.request.env } : undefined },
-    operatorPlane: true,
-    hostCwd,
-    logicalCwd,
-    credentialMode: 'none',
-  };
+  throw new Error('PROJECT_CWD_OUTSIDE_WORKSPACE: paths outside the current Project require Operator access on this Agent. An admin/operator can enable it in Agent settings; retry on the next turn. If already enabled, report the execution-authority mismatch instead of assuming the setting was not saved.');
 }

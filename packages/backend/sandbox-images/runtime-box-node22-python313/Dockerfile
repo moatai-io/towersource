@@ -40,7 +40,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     LC_ALL=C.UTF-8 \
     PUPPETEER_SKIP_DOWNLOAD=true \
     PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 \
-    NODE_PATH=/usr/lib/node_modules:/usr/local/lib/node_modules
+    NODE_PATH=/opt/tower-publishing/node_modules:/usr/lib/node_modules:/usr/local/lib/node_modules
 
 # ── Node.js 22 LTS (NodeSource 공식 패키지) ─────────────────────────────
 # python:3.13-slim은 Debian Bookworm 기반이라 apt에 Node가 없음 — nodesource 사용
@@ -74,6 +74,8 @@ RUN apt-get update \
       fonts-noto-cjk-extra \
       fonts-noto-color-emoji \
       fonts-inter \
+      fonts-dejavu-core \
+      fonts-liberation \
       ghostscript \
       git \
       imagemagick \
@@ -171,25 +173,24 @@ RUN pip install --no-cache-dir \
  && rm -rf /root/.cache/pip
 
 # ── npm 글로벌 도구 ───────────────────────────────────────────────────────
-# Marp/Mermaid CLI 는 브라우저 기반 렌더링 계열 스킬의 편의 경로다. Chromium 은
-# system package 를 우선 사용하도록 다운로드를 막아 이미지 drift 를 줄인다.
-# Mermaid와 transitive dependencies는 lockfile + npm integrity로 재현한다.
-# web-capture 는 playwright-core + /usr/bin/chromium 조합을 기본으로 쓴다.
-# Playwright browser bundle 은 다운로드하지 않는다 (용량/드리프트/중복 방지).
+# Marp/Mermaid/SVGO/Playwright CLI는 Worker와 공유하는 locked publishing bundle이다.
+# Chromium은 system package를 우선 사용하며 browser bundle 다운로드를 막아 drift와 중복을 줄인다.
 COPY publishing-package.json /opt/tower-publishing/package.json
 COPY publishing-package-lock.json /opt/tower-publishing/package-lock.json
 RUN cd /opt/tower-publishing \
  && npm ci --omit=dev --ignore-scripts --no-audit --no-fund --quiet \
  && ln -sf /opt/tower-publishing/node_modules/.bin/mmdc /usr/local/bin/mmdc \
+ && for command in mmdc marp svgo; do \
+      ln -sf "/opt/tower-publishing/node_modules/.bin/${command}" "/usr/local/bin/${command}"; \
+    done \
  && npm install -g \
       pnpm \
-      "playwright-core@${PLAYWRIGHT_CORE_VERSION}" \
-      "@marp-team/marp-cli@${MARP_CLI_VERSION}" \
-      "svgo@${SVGO_VERSION}" \
       "@googleworkspace/cli@${GWS_CLI_VERSION}" \
       --no-audit --no-fund --quiet \
  && npm cache clean --force \
  && test "$(mmdc --version)" = "11.16.0" \
+ && marp --version | grep -q "${MARP_CLI_VERSION}" \
+ && svgo --version | grep -q "${SVGO_VERSION}" \
  && gws --version | grep -q "${GWS_CLI_VERSION}"
 
 # ── Runtime readiness doctors / rendering wrappers ───────────────────────

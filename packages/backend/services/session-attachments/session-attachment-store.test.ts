@@ -12,10 +12,13 @@ const { queryOne, query, execute, configMock } = vi.hoisted(() => ({
 vi.mock('../../db/pg-repo.js', () => ({ queryOne, query, execute }));
 vi.mock('../../config.js', () => ({ config: configMock }));
 vi.mock('../pm/project-manager.js', () => ({ getProject: vi.fn() }));
-vi.mock('../pm/project-access.js', () => ({ isPathWritableByRole: vi.fn() }));
+vi.mock('../pm/project-access.js', () => ({ isPathWritableByRole: vi.fn(), canAccessSession: vi.fn(), canWriteSessionContent: vi.fn() }));
 vi.mock('../personal-space/personal-space-store.js', () => ({ createPersonalBinaryFile: vi.fn() }));
 
-import { createSessionAttachment, createSessionAttachmentFromPath, purgeExpiredSessionAttachments, resolveReadableSessionAttachment, resolveSessionAttachment, sessionAttachmentIdFromUri } from './session-attachment-store.js';
+vi.mock('../auth/auth.js', () => ({ getUserAuthState: vi.fn() }));
+import { getUserAuthState } from '../auth/auth.js';
+import { canAccessSession, canWriteSessionContent } from '../pm/project-access.js';
+import { promoteSessionAttachmentToProject, resolveAuthorizedSessionAttachment, createSessionAttachment, createSessionAttachmentFromPath, purgeExpiredSessionAttachments, resolveReadableSessionAttachment, resolveSessionAttachment, sessionAttachmentIdFromUri } from './session-attachment-store.js';
 
 let root = '';
 beforeEach(async () => {
@@ -51,6 +54,46 @@ describe('session attachment store', () => {
 
   it('rejects malformed session URIs', () => {
     expect(() => sessionAttachmentIdFromUri('personal://x')).toThrow('Invalid session attachment URI');
+  });
+
+  it('normalizes long NFD filenames by UTF-8 bytes and preserves extensions', async () => {
+    queryOne.mockImplementationOnce(async (_sql, params) => ({ id: params[0], original_name: params[4], storage_path: params[5], expires_at: new Date(Date.now()+10000).toISOString() }));
+    await createSessionAttachment({ userId: 7, sessionId: 's1', name: ('한글'.repeat(100)+'.docx').normalize('NFD'), content: Buffer.from('doc') });
+    const saved = queryOne.mock.calls[0][1][4];
+    expect(saved).toBe(saved.normalize('NFC'));
+    expect(Buffer.byteLength(saved)).toBeLessThanOrEqual(240);
+    expect(saved.endsWith('.docx')).toBe(true);
+  });
+
+  it('denies shared attachment inspection before storage lookup when session access is denied', async () => {
+    vi.mocked(getUserAuthState).mockResolvedValue({ role: 'member', approvalStatus: 'active', disabled: false } as any);
+    vi.mocked(canAccessSession).mockResolvedValue({ allowed: false, status: 403, message: 'denied' });
+    await expect(resolveAuthorizedSessionAttachment(8, 's1', '11111111-1111-4111-8111-111111111111')).rejects.toThrow('access denied');
+    expect(queryOne).not.toHaveBeenCalled();
+  });
+
+  it('allows a live authorized reader of a shared session without assuming uploader identity', async () => {
+    vi.mocked(getUserAuthState).mockResolvedValue({ role: 'member', approvalStatus: 'active', disabled: false } as any);
+    vi.mocked(canAccessSession).mockResolvedValue({ allowed: true });
+    const target = path.join(root, 'session-attachments', '7', 's1', '11111111-1111-4111-8111-111111111111', 'team.pdf');
+    await fs.mkdir(path.dirname(target), { recursive: true }); await fs.writeFile(target, '%PDF-1.4');
+    queryOne.mockResolvedValue({ id: '11111111-1111-4111-8111-111111111111', owner_user_id: 7, session_id: 's1', original_name: 'team.pdf', storage_path: target, status: 'temporary', expires_at: new Date(Date.now()+10000).toISOString(), created_at: new Date().toISOString() });
+    await expect(resolveAuthorizedSessionAttachment(8, 's1', '11111111-1111-4111-8111-111111111111')).resolves.toHaveProperty('path', target);
+    expect(queryOne.mock.calls[0][1]).toEqual(['11111111-1111-4111-8111-111111111111','s1']);
+  });
+
+  it('denies Project promotion for a readonly shared-session reader before lookup', async () => {
+    vi.mocked(getUserAuthState).mockResolvedValue({ role: 'viewer', approvalStatus: 'active', disabled: false } as any);
+    vi.mocked(canWriteSessionContent).mockResolvedValue({ allowed: false, status: 403, message: 'readonly' });
+    await expect(promoteSessionAttachmentToProject({ userId: 8, userRole: 'admin', sessionId: 's1', projectId: 'p', attachmentId: '11111111-1111-4111-8111-111111111111' })).rejects.toThrow('save denied');
+    expect(queryOne).not.toHaveBeenCalled();
+  });
+
+
+  it('rejects inactive readers before resolving their attachment', async () => {
+    vi.mocked(getUserAuthState).mockResolvedValue({ role: 'admin', approvalStatus: 'active', disabled: true } as any);
+    await expect(resolveAuthorizedSessionAttachment(8,'s1','11111111-1111-4111-8111-111111111111')).rejects.toThrow('access denied');
+    expect(queryOne).not.toHaveBeenCalled();
   });
 
   it('requires the same owner and session when resolving', async () => {

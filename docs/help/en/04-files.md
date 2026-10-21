@@ -1,142 +1,66 @@
 ---
-title: "Files"
+title: "Files — Artifacts and Delivery"
 icon: "📁"
 order: 4
 ---
 
-# Files
+# Files — artifacts and delivery
 
-> Navigate your project files in the File Tree, preview and edit in the Context Panel, and share with a link. All from the same screen.
+Showing source material to AI, keeping it in a Project, and delivering it to another place are separate actions. Specify the intended scope to avoid unnecessary copies or sharing.
 
----
+## Project files and Viewer
 
-## File Tree
+Browse files and folders through Files. Selecting a supported file opens a preview or editor in the right-side Viewer. Available actions depend on the file type and your permissions.
 
-Select the **Files** tab in the Sidebar to open the file tree.
+Use the relevant screen's menu for creating files or folders, renaming, copying paths, or downloading. Confirm targets before deletion, overwriting, or bulk changes. Read-only access does not permit editing.
 
-### Basic Navigation
+After AI creates an artifact, check its **filename and actual saved path**. Saving a file, requesting Viewer presentation, and delivering a copy are distinct operations.
 
-- **Click a folder** -- expand or collapse it
-- **Click a file** -- open it in the Context Panel
-- Nested folders can be explored freely
+## Storage locations
 
-### File Icon Colors
+Prefer the Project's existing structure. If it uses `sources/`, `work/`, `final/`, and `records/`, separate originals, drafts, final outputs, and evidence accordingly. Do not create a competing folder scheme for every task.
 
-File types are color-coded for quick recognition:
+| Location | Purpose and boundary |
+|---|---|
+| Conversation attachment | Temporary material for the conversation; permanent storage is a separate choice |
+| Project files | Source material and artifacts governed by the Project's access and write permissions |
+| Personal Space | A personal copy, separate from the Project |
+| Another AI teammate's Project | An explicitly delivered copy to an accessible destination |
+| Published site | A separate publishing and access policy, not ordinary Project file access |
 
-| Color | File type |
-|-------|-----------|
-| Blue | TypeScript (.ts, .tsx) |
-| Yellow | JavaScript (.js, .jsx) |
-| Green | Python (.py) |
-| Red | HTML (.html) |
-| Purple | CSS (.css, .scss) |
-| Gray | Config files (.json, .yaml, .toml) |
+## Attachments and originals
 
----
+Attach documents and images for analysis. PDF and Office support depends on installed tools and Skills.
 
-## Hidden Files
+“Read and summarize this” does not automatically authorize permanent storage of the original attachment. Ask explicitly to keep it in the Project. Saving a converted output and preserving its source are separate decisions.
 
-By default, files starting with `.` (like `.env`, `.gitignore`) are hidden.
+## Revise an existing file
 
-- Click the **hidden files toggle** at the top of the File Tree to show or hide them
-- Commonly hidden directories like `node_modules` and `.git` are also controlled by this toggle
+> Update only the conclusion in `final/report.md`. Preserve the other sections and revise the same file.
 
----
+Name the file and the content to preserve. Multiple Sessions and support AI in one Project can affect the same files. Assign editing ownership and check current content before applying changes.
 
-## Context Menu (Right-Click)
+## Deliver files
 
-Right-click a file or folder to open the context menu.
+Ask AI to attach an existing Project file to the current conversation, or copy it to Personal Space or another accessible AI teammate's Project. Specify and confirm the exact destination for another storage location.
 
-### File Menu Options
+> Attach the finished PDF to this conversation.
 
-| Option | Description |
-|--------|-------------|
-| **New File** | Create a new file at the current location |
-| **New Folder** | Create a new folder at the current location |
-| **Rename** | Rename the file or folder (Enter to confirm, Escape to cancel) |
-| **Delete** | Delete the file or folder (with confirmation) |
-| **Share** | Generate a shareable link |
-| **Download** | Download the file |
-| **Copy Path** | Copy the file path to clipboard |
+> Copy this one final report to the specified AI teammate's Project. Preserve the source and do not overwrite existing files.
 
-### Folder Menu
+Delivery normally copies rather than moves or deletes the source. Directory delivery may enforce file-count and symbolic-link limits and does not overwrite existing files. Unsupported source and destination combinations may be rejected.
 
-Right-clicking a folder shows the same options plus the ability to create new files and folders inside it.
+Where drag-and-drop or delivery menus are available, they use the supported transfer path. A rename or move inside a file tree is different from delivery between storage locations.
 
----
+## Sharing and publishing
 
-## File Upload
+A file path or link does not grant Project access. Publishing a web page is a separate action for a different audience.
 
-### Drag and Drop to Folders
+Before publishing, confirm the readers, content, and access level. An **unlisted link is not authenticated secret storage**. Anyone who receives a usable link may be able to view the content; exclude secrets, Credentials, and private material. See [Visual outputs](./06-visual-outputs.md).
 
-1. Select files in your file explorer (Finder, Explorer, etc.)
-2. Drag them over the target folder in the File Tree
-3. When the drop zone highlights, release
-4. Upload complete
+## Final checks
 
-You can drag multiple files at once for batch upload.
-
-### Drag to Input Box for Attachment
-
-Drag files onto the Session or Channel input box to attach them to your message. This is the fastest way to ask AI to analyze or modify a file.
-
-You can also drag files from the File Tree directly to the input box.
-
----
-
-## Context Panel
-
-Click a file to open it in the Context Panel on the right side of the screen.
-
-### File Type Behavior
-
-| File type | Context Panel behavior |
-|-----------|----------------------|
-| **Code files** (.ts, .py, .js, etc.) | Syntax-highlighted code editor |
-| **Markdown** (.md) | Rendered preview (including Mermaid diagrams) |
-| **PDF** (.pdf) | PDF viewer |
-| **Images** (.png, .jpg, .gif, etc.) | Image preview |
-| **Video** (.mp4, .webm, etc.) | Video player |
-| **Other** | Plain text display |
-
-### Code Editing
-
-You can edit and save files directly in the Context Panel's code editor. Changes are written to disk immediately.
-
----
-
-## File Sharing
-
-Share files with people outside Tower:
-
-1. Right-click a file -- select **Share**
-2. A shareable link is generated
-3. Copy the link and send it
-
-Anyone with the link can access the file without logging in.
-
----
-
-## Pin Feature
-
-Pin frequently accessed files for one-click access.
-
-### Adding a Pin
-
-- Right-click a file -- select **Pin**
-- Or click the Pin icon at the top of the Context Panel
-
-### Viewing Pins
-
-Click the **Pins** button at the bottom of the Sidebar to see all pinned files and sessions in one place.
-
----
-
-## Tips
-
-- **Copy Path for AI**: When asking AI to work on a file, right-click it, copy the path, and paste it into your message. Much more accurate than describing the file location.
-- **Markdown preview**: Write documentation and see the rendered result in real time.
-- **File Tree to input box**: Drag files from the tree to the input box -- it is the fastest way to ask AI about a specific file.
-- **Check hidden files**: When you cannot find a config file like `.env` or `.eslintrc`, toggle hidden files on.
-- **Pin your essentials**: Pin 5-6 core project files and your workflow speeds up significantly.
+- Verify the actual saved path.
+- Inspect tables, fonts, and pages in the final output.
+- Distinguish local validation from successful publishing or delivery.
+- Decide separately what to share and which original material to retain.

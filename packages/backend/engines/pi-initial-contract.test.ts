@@ -1,0 +1,3 @@
+import {it,expect} from 'vitest';import {PiEngine} from './pi-engine.js';import type {EngineCallbacks} from './types.js';
+const callbacks:EngineCallbacks={askUser:async()=>'',claimSessionId:async()=>{},saveMessage:async()=>{},updateMessageContent:async()=>{},attachToolResult:async()=>{},updateMessageMetrics:async()=>{}};
+it('actual Pi engine fails closed without durable root identity and releases busy state',async()=>{const e=new PiEngine();const events=[];for await(const m of e.run('isolated-initial-contract','x',{initialInterview:true,cwd:'.'},callbacks))events.push(m);expect(events.some(m=>m.type==='engine_error')).toBe(true);expect(e.isRunning('isolated-initial-contract')).toBe(false);});

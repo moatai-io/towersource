@@ -24,7 +24,7 @@ const MemorySearchParams = Type.Object({
     Type.Literal('current_project'),
     Type.Literal('all_accessible'),
   ], {
-    description: 'current_project searches only this project when available. all_accessible searches all sessions/projects visible to the current user. Default: current_project.',
+    description: 'current_project searches all visible sessions while boosting this project when available. all_accessible searches the same visible scope without that boost. Default: current_project.',
   })),
   limit: Type.Optional(Type.Integer({
     minimum: 1,
@@ -100,19 +100,23 @@ export function createMemorySearchTool(ctx: MemorySearchToolContext): ToolDefini
           includeArchived: params.include_archived === true,
           currentProjectId,
         });
+        const warning = hits.partial
+          ? `일부 검색에 실패했습니다 (${hits.failedSections?.join(', ')}). 결과가 불완전하므로 검색되지 않았다는 사실을 자료가 없다는 근거로 쓰지 마세요.
+`
+          : '';
         const memoryHits = hits.filter((h) => h.type === 'memory_card').slice(0, limit);
 
         if (memoryHits.length === 0) {
           return {
             content: [{
               type: 'text' as const,
-              text: `No continuity memory cards found for query "${query}" (${scope}). Next step: use /search (conversation-search) for broader sessions/messages, exact wording, or raw evidence.`,
+              text: warning + `No continuity memory cards found for query "${query}" (${scope}). Next step: use /search (conversation-search) for broader sessions/messages, exact wording, or raw evidence.`,
             }],
             details: undefined,
           };
         }
 
-        const lines: string[] = [];
+        const lines: string[] = warning ? [warning] : [];
         lines.push(`memory_search results for "${query}" (${scope}, ${memoryHits.length} card${memoryHits.length === 1 ? '' : 's'}):`);
         lines.push('These are prior-session summaries. Treat them as hints; verify against current files/instructions when acting.');
         lines.push('If you need exact wording, raw message evidence, or broader session hits, follow up with /search (conversation-search).');

@@ -1,7 +1,7 @@
 // Owns pure turn metrics/failure calculations for Pi run loop.
 // Public API: classifyPiRunEndFailure, chooseContextRiskEstimateTokens, normalizeIterationCount.
 
-import type { PiFailureClass } from '../pi-failure-classifier.js';
+import { classifyPiFailure, type PiFailureClass } from '../pi-failure-classifier.js';
 import type { StuckReason } from '../pi-stream-watchdog.js';
 
 export type PiRunEndTerminalizerReason =
@@ -26,8 +26,13 @@ export function classifyPiRunEndFailure(params: {
   errorStopReason?: 'error' | 'aborted';
 }): PiFailureClass | undefined {
   if (params.watchdogAborted) return 'watchdog_stuck';
+  if (params.providerErrorMessage && classifyPiFailure(params.providerErrorMessage).kind === 'provider_response_schema') return 'provider_response_schema';
   if (params.transientAbortVisibleSuppressed) return 'transient_transport';
-  if (params.providerErrorMessage && params.errorStopReason === 'error') return 'unknown_fatal';
+  if (params.providerErrorMessage && params.errorStopReason === 'error') {
+    return classifyPiFailure(params.providerErrorMessage).kind === 'provider_response_schema'
+      ? 'provider_response_schema'
+      : 'unknown_fatal';
+  }
   if (params.terminalizerReason === 'watchdog_stuck') return 'watchdog_stuck';
   if (params.terminalizerReason === 'transient_transport') return 'transient_transport';
   if (params.terminalizerReason === 'sdk_zombie') return 'sdk_zombie';

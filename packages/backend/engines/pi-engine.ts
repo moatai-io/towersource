@@ -1,3 +1,7 @@
+import { estimatePiCompactionPressure } from './pi/proactive-compaction.js';
+import { getRequestedWait, clearRequestedWait, invalidateWaitAlarm, validateWaitAlarmRoot } from '../services/agent-sleep/alarms.js';
+import { cancelSessionSleep } from '../services/agent-sleep/sleep.js';
+import { PdfTaskOutcome } from './pi/pdf-task-outcome.js';
 /**
  * Pi coding agent engine — wraps @earendil-works/pi-coding-agent SDK.
  *
@@ -8,8 +12,9 @@
  */
 
 import crypto from 'crypto';
+import { PdfObservationState, PDF_OBSERVATION_ENTRY } from './pi/pdf-observation-state.js';
 import path from 'path';
-import { config, loadModelsFile } from '../config.js';
+import { config, loadModelsFile, resolveLegacyPiModelId } from '../config.js';
 import type { Engine, RunOpts, EngineCallbacks, TowerMessage, TowerContentBlock, QuickReplyOpts, ChannelReplyOpts, ChannelReplyResult } from './types.js';
 import { clearCurrentRootTurn, getCurrentRootTurn, setCurrentRootTurn } from '../services/agent-turn/current-root-turn.js';
 import { completeAgentTurnRecovery, releaseAgentTurnRecovery, renewAgentTurnRecovery, tryClaimAgentTurnRecovery, tryClaimForegroundAgentTurn } from '../services/agent-turn/recovery-coordinator.js';
@@ -24,14 +29,17 @@ import { backupPiSessionFile, consumeInterruptedPiSessions, gracefulPiShutdown }
 import { createStreamWatchdog, type StuckReason } from './pi-stream-watchdog.js';
 import { recordFileEdit } from '../services/workspace/file-edit-log.js';
 import { beginFileCheckpointCapture, completeFileCheckpointCapture, markTurnCheckpointPartial, type PendingFileCheckpointCapture } from '../services/agent-turn/file-checkpoint-capture.js';
-import { classifyPiFailure, formatPiProviderErrorForOperatorLog, formatPiProviderErrorForUser, isPiAuthFailure, isPiContextOverflowFailure, isPiModelAccountStatusFailure, isPiUserAbortError } from './pi-failure-classifier.js';
+import { classifyPiFailure, formatPiProviderErrorForOperatorLog, formatPiProviderErrorForUser, isPiAuthFailure, isPiContextOverflowFailure, isPiModelAccountStatusFailure, isPiTowerRequestPreflight, isPiUserAbortError } from './pi-failure-classifier.js';
 import { classifyPiSafeStopRequest, shouldStopPiAtToolBoundary } from './pi/safe-stop.js';
 import { classifyPiSteer, markPiRunClosing, type PiRunPhase } from './pi-run-lifecycle.js';
 import { forgetPiContextTokenHint, getPiContextTokenHint, getPiResponsesRequestDebugInfo, installPiProviderSafeguards, piFetchCorrelation, rememberPiContextTokenHint } from './pi/provider-safeguards.js';
 import { ContentAccumulator, parseTextSignaturePhase } from './pi/message-adapter.js';
 import { PiModelRegistryManager } from './pi/model-registry.js';
+import { isAllowedTowerPiModel } from './pi/provider-boundary.js';
+import { isPiPresetMappingReady, resolvePiSessionChoice, sessionAlias } from '../services/model-policy/session-alias.js';
+import { resolveTurnReasoning } from './pi/reasoning-default.js';
 import { buildPiSessionResources } from './pi/session-resources.js';
-import { buildPiToolAssembly } from './pi/tool-assembly.js';
+import { buildPiToolAssembly, resolveOperatorHostAccess } from './pi/tool-assembly.js';
 import { createPiSettingsManager } from './pi/session-settings.js';
 import { quickReplyWithPiProviders } from './pi/quick-reply.js';
 import { openOrCreatePiSessionManager } from './pi/session-manager.js';
@@ -39,6 +47,9 @@ import { cleanupStalePiForkSessions } from './pi/stale-cleanup.js';
 import type { PiSessionEntry } from './pi/session-entry.js';
 import { rehydratePiSessionFromMessages } from './pi/rehydrate.js';
 import { channelReplyWithPiRun } from './pi/channel-reply.js';
+import { confirmedVoiceAnswerSnapshot } from './pi/voice-answer-stream.js';
+import { createVoiceSdkTimingObserver } from './pi/voice-timing-observer.js';
+import type { VoiceTimingSignal } from '../services/voice-runtime/voice-turn-telemetry.js';
 import {
   formatWatchdogReason,
   getTransientAbortRetryDelayMs,
@@ -46,17 +57,21 @@ import {
   isPiTransientAbortError,
   sleep,
   TRANSIENT_ABORT_RETRY_MAX,
+  TRANSIENT_CONTINUATION_RETRY_MAX,
 } from './pi/run-policy.js';
 import { AssistantStreamCoalescer } from './pi/stream-coalescer.js';
 import { handlePiQueueUpdate } from './pi/queue-update-handler.js';
 import { handlePiCompactionEnd, handlePiCompactionStart } from './pi/compaction-handler.js';
 import { isPiCompactionNoOpMessage } from './pi/compaction-outcome.js';
+import { releasePiOverflowSettleAfterAssistant, resetPiOverflowSettleAfterCompaction } from './pi/overflow-settle-ownership.js';
 import { handlePiToolExecutionEnd } from './pi/tool-execution-handler.js';
 import { handlePiMessageUpdate } from './pi/message-update-handler.js';
+import { createTextStreamTiming } from './pi/text-stream-timing.js';
 import { analyzePiMessageEndCore } from './pi/message-end-handler.js';
 import {
   analyzePiAgentEndError,
   getCodexFallbackModelSpecs,
+  getCompactionFallbackModelSpecs,
   isCodexAuthInvalidatedError,
   isCodexUsageLimitError,
 } from './pi/agent-end-policy.js';
@@ -69,12 +84,14 @@ import {
 import { PiRunContext } from './pi/run-context.js';
 import { PiRunTerminalizer } from './pi/run-terminalizer.js';
 import { PiLifecycleAdapter } from './pi/lifecycle-adapter.js';
-import { countPiCompactionEntries, createPiCompactRecoverySessionFile, createPiLocalFallbackCompaction, createPiOversizedRecoveryEpochFromFile, isPiContextLengthExceededMessage, parsePiPreflightContextMetrics, piRecoveryKeepBudgets, sanitizePiMessagesForRecovery, shouldCreatePiOversizedRecoveryEpoch } from './pi/compaction-recovery.js';
-import { createPiVisualContextTransform } from './pi/visual-context-lifecycle.js';
+import { countPiCompactionEntries, createPiCompactRecoverySessionFile, createPiLocalFallbackCompaction, createPiOversizedRecoveryEpochFromFile, isPiContextLengthExceededMessage, parsePiPreflightContextMetrics, piRecoveryKeepBudgets, recoverPiOverflowCompaction, refreshPiRecoveryContext, shouldCreatePiOversizedRecoveryEpoch, shouldReplayPiOverflowPrompt } from './pi/compaction-recovery.js';
+import { installPiAfterToolCallHook } from './pi/after-tool-call.js';
+import { installPiVisualContextTransform } from './pi/visual-context-lifecycle.js';
 import { shouldProactivelyCompactPiSession } from './pi/proactive-compaction.js';
 import { appendTowerFileLedgerCheckpoint } from './pi/compaction-file-ledger.js';
 import { shouldAutoContinueIncompleteTurn, summarizeAssistantContinuationIntent, type AssistantContinuationIntentSummary } from './pi/continuation-intent.js';
 import { runPiContinuationRecovery, settlePiRecoveryOutcome, type PiContinuationTrigger } from './pi/recovery/recovery-coordinator.js';
+import { ImmediateSteering } from './pi/immediate-steering.js';
 import { continuePiNativeLifecycle, isPiNativeContinuationUnavailable } from './pi/recovery/native-continuation-adapter.js';
 import { decidePiContinuationRecovery, decidePiRestartRecovery, decidePiRetryOwnership, inspectPiRecoveryState, isIncompleteToolBoundaryContinuationEnabled } from './pi/recovery/recovery-policy.js';
 import { getOrPinSessionHarnessSnapshot, getPinnedSessionHarnessSnapshot } from '../services/harness/harness-store.js';
@@ -158,6 +175,12 @@ export class PiEngine implements Engine {
     opts: RunOpts,
     callbacks: EngineCallbacks,
   ): AsyncGenerator<TowerMessage> {
+    const voiceTiming = (signal: VoiceTimingSignal) => {
+      if (!opts.rootTurnId || !callbacks.onVoiceTiming) return;
+      try { callbacks.onVoiceTiming({ ...signal, rootTurnId: opts.rootTurnId, sessionId }); } catch { /* telemetry only */ }
+    };
+    voiceTiming({ stage: 'engine_enter' });
+    const observeVoiceSdkTiming = callbacks.onVoiceTiming ? createVoiceSdkTimingObserver(voiceTiming) : undefined;
     // Reject re-entry. Without this, a second concurrent run() against the
     // same session would slip past the ws-handler SESSION_BUSY check during
     // the createSession/switchModel await window (entry.isRunning is set
@@ -183,6 +206,11 @@ export class PiEngine implements Engine {
       yield { type: 'engine_error', sessionId, message: 'Pi execution skipped because the durable root turn identity is missing.', recoverable: true };
       return;
     }
+    if (!await validateWaitAlarmRoot(sessionId, opts.rootTurnId!)) {
+      this.startingSessions.delete(sessionId);
+      yield { type: 'engine_done', sessionId, outcome: 'claim_denied' };
+      return;
+    }
     const initialClaim = opts.autoResume
       ? await tryClaimAgentTurnRecovery({
           rootTurnId: opts.rootTurnId,
@@ -190,7 +218,7 @@ export class PiEngine implements Engine {
           source: opts.autoResumeReason || 'server-restart',
           ownerBootId: config.serverEpoch,
           takeoverPreviousBoot: opts.autoResumeReason === 'server-restart',
-          maxAttempts: 4,
+          maxAttempts: 5,
         })
       : await tryClaimForegroundAgentTurn({
           rootTurnId: opts.rootTurnId,
@@ -203,27 +231,33 @@ export class PiEngine implements Engine {
       yield { type: 'engine_done', sessionId, editedFiles: [], outcome: 'claim_denied' };
       return;
     }
+    voiceTiming({ stage: 'engine_claimed' });
     initialRecoveryClaimToken = initialClaim.token;
     initialRecoveryClaimAttempt = initialClaim.attempt ?? 0;
 
     // 1. Get or create AgentSession (cached per Tower session, persisted to disk).
-    // Tool closures capture user/project authority and the effective Workbench
-    // rollout at assembly time. Rebuild when either changes so a DB rollout
-    // enable/disable takes effect on the next turn without a backend restart.
+    // Tool closures capture user/project authority, the effective Workbench
+    // rollout, and the current Operator access host-bash entitlement at assembly
+    // time. Rebuild when any of them changes so a DB rollout or an Agent
+    // Operator access enable/disable takes effect on the next turn without a
+    // backend restart—and without requiring a new Session.
     const workbenchRolloutEnabled = opts.projectId
       ? (await resolveWorkbenchRollout(opts.projectId)).enabled
       : false;
+    const operatorHostAccess = await resolveOperatorHostAccess({ projectId: opts.projectId, userRole: opts.userRole, channelSafeToolsOnly: opts.channelSafeToolsOnly });
     let entry = this.sessions.get(sessionId);
     if (entry && (
       entry.toolContext?.userId !== opts.userId
       || entry.toolContext?.userRole !== opts.userRole
       || entry.toolContext?.projectId !== opts.projectId
       || entry.toolContext?.workbenchRolloutEnabled !== workbenchRolloutEnabled
+      || (entry.toolContext?.operatorHostAccess ?? false) !== operatorHostAccess
     )) {
       console.warn(`[Pi] Rebuilding cached Session after tool context change: session=${sessionId.slice(0, 8)}`);
       this.dispose(sessionId);
       entry = undefined;
     }
+    const voiceSessionCacheHit = Boolean(entry);
     if (!entry) {
       try {
         entry = await this.createSession(sessionId, opts, callbacks);
@@ -247,28 +281,31 @@ export class PiEngine implements Engine {
       }
     }
 
-    // Switch model if user changed it mid-session. Direct emergency providers
-    // may need project-granted Vault key overrides before the SDK builds a client.
+    voiceTiming({ stage: 'engine_session_ready', cacheHit: voiceSessionCacheHit });
+    // Switch only to a supported Router/OpenRouter model when the user changes it.
     if (opts.model) {
       try {
         await this.modelRegistryManager.applyProjectVaultApiKeyOverrides({
           projectId: opts.projectId,
           userId: opts.userId,
-          model: opts.model,
+          model: this.resolveRuntimeModelChoice(opts.model, Boolean(entry.harness?.allowedModels)),
         });
         await this.switchModelIfNeeded(entry, opts.model);
       } catch (err: any) {
-        console.warn(`[Pi] Model switch failed: ${err.message}`);
+        // A failed requested switch must not run on the previous model unnoticed.
+        yield { type: 'engine_error', sessionId, message: `Pi model switch failed: ${err.message}` };
+        yield { type: 'engine_done', sessionId, editedFiles: [], outcome: 'retryable_failure', error: err?.message };
+        return;
       }
     }
-    const turnThinkingLevel = opts.effort === 'low' || opts.effort === 'medium' || opts.effort === 'high' || opts.effort === 'xhigh'
-      ? opts.effort
-      : opts.effort === 'max'
-        ? 'xhigh'
-        : entry.session.thinkingLevel || 'medium';
+    const turnThinkingLevel = resolveTurnReasoning(entry.session.model, opts.effort);
     if (entry.session.thinkingLevel !== turnThinkingLevel) {
       entry.session.setThinkingLevel(turnThinkingLevel);
     }
+
+    voiceTiming({ stage: 'engine_model_ready', model: `${entry.session.model?.provider || 'unknown'}/${entry.session.model?.id || 'unknown'}`, effort: turnThinkingLevel, contextWindow: entry.session.model?.contextWindow, messageCount: entry.session.state?.messages?.length });
+
+    const promptWithJevAdvice = prompt;
 
     // G3: Notify frontend if Pi resume failed (before starting the turn)
     if (entry.resumeFailedMessage) {
@@ -281,8 +318,15 @@ export class PiEngine implements Engine {
       entry.resumeFailedMessage = null;
     }
 
+    if (opts.rootTurnId && !await validateWaitAlarmRoot(sessionId, opts.rootTurnId)) {
+      if(initialRecoveryClaimToken) await completeAgentTurnRecovery({rootTurnId:opts.rootTurnId,token:initialRecoveryClaimToken,status:'failed',error:'Wait admission cancelled before execution'});
+      this.startingSessions.delete(sessionId);
+      yield { type: 'engine_done', sessionId, outcome: 'claim_denied' };
+      return;
+    }
     entry.isRunning = true;
     entry.runPhase = 'starting';
+    clearRequestedWait(sessionId);
     setCurrentRootTurn(sessionId, opts.rootTurnId, Boolean(opts.autoResume));
     entry.abortRequested = false;
     entry.safeStopRequested = false;
@@ -290,9 +334,12 @@ export class PiEngine implements Engine {
     // aborted before consumption) must not leak into this run's queue_update diff.
     entry.pendingSteers = [];
     entry.lastSteering = [];
+    entry.pdfObservationState?.resetCompletion();
     // promptActive flips true once prompt() begins (below); until then, steers
     // buffer. Reset here in case a prior run left it set after an error path.
     entry.promptActive = false;
+    const immediateSteering = new ImmediateSteering();
+    entry.immediateSteering = immediateSteering;
     // Hand off from the starting-window guard to the entry-level guard.
     this.startingSessions.delete(sessionId);
 
@@ -315,10 +362,24 @@ export class PiEngine implements Engine {
         sessionId,
         runId: runCorrelationId,
         rootTurnId: opts.rootTurnId,
+        projectId: opts.projectId,
+        executionKind: opts.autoResume ? 'recovery' : 'interactive',
         attempt: initialRecoveryClaimAttempt,
         promptCacheSessionId: providerCacheSessionId,
+        contextWindow: entry!.session.model?.contextWindow,
       },
-      () => entry!.session.prompt(text),
+      () => {
+        voiceTiming({ stage: 'sdk_prompt_start' });
+        return immediateSteering.run(
+          () => entry!.session.prompt(text),
+          async () => {
+            stopReason = undefined;
+            entry!.runPhase = 'running';
+            await continuePiNativeLifecycle(entry!.session, 'immediate-steering');
+          },
+          () => Boolean(entry!.abortRequested || entry!.safeStopRequested),
+        );
+      },
     );
     const SERVER_RESTART_RECOVERY_PROMPT = [
       'The previous run was interrupted by a server restart after an assistant message was persisted.',
@@ -334,7 +395,7 @@ export class PiEngine implements Engine {
     let resolveWait: (() => void) | null = null;
     let done = false;
     let stopReason: 'stop' | 'length' | 'toolUse' | 'error' | 'aborted' | undefined;
-    let durableOutcome: 'completed' | 'retryable_failure' | 'failed' = 'completed';
+    let durableOutcome: 'completed' | 'retryable_failure' | 'failed' | 'wait_requested' = 'completed';
     let durableError: string | undefined;
     const turnStartTime = Date.now();
 
@@ -368,20 +429,23 @@ export class PiEngine implements Engine {
     let codexUsageLimitFallbackRequested = false;
     let codexUsageLimitFallbackAttempted = false;
     let codexUsageLimitMessage = '';
+    let terminalProviderErrorMessage = '';
     let oversizedPreflightRecoveryRequested = false;
     let oversizedPreflightRecoveryAttempted = false;
     let oversizedPreflightMessage = '';
-    let compactionNoticeEmittedThisTurn = false;
     let visibleCompactionInProgress = false;
     let transientAbortRetryRequested = false;
     let transientAbortRetryMessage = '';
     let transientAbortRetryAttempts = 0;
+    let recoveryExhausted = false;
+    let transientContinuationRetriesExhausted = false;
     let sdkRetryObservedThisRun = false;
     // Transient transport drops (LiteLLM/upstream websocket closed, socket reset,
     // provider-side abort) are not actionable model errors. If they happen before
     // any assistant/tool side effects, Tower may retry the same prompt. If they
     // happen after work has started, replaying the whole prompt can duplicate side
-    // effects, so Tower should issue a one-shot continuation prompt instead.
+    // effects, so Tower uses bounded continuation attempts that re-check the durable
+    // leaf/queue safety gate before every attempt.
     let transientAbortVisibleSuppressed = false;
     let transientAbortFailureNoticeSaved = false;
     let compactionFailureNoticeSaved = false;
@@ -390,7 +454,7 @@ export class PiEngine implements Engine {
     let providerErrorVisibleSurfacedThisTurn = false;
     let lastAssistantTelemetry: AssistantContinuationIntentSummary | undefined;
     let overflowCompactionInProgress = false;
-    let overflowCompactionObservedThisTurn = false;
+    let pendingOverflowSettle = false;
     let compactRecoverySessionFile: string | null = null;
     let currentCompactMarkerId: string | undefined;
     const newCompactMarkerId = () => `compact-${sessionId}-${Date.now()}-${crypto.randomUUID().slice(0, 8)}`;
@@ -425,7 +489,7 @@ export class PiEngine implements Engine {
         source,
         ownerBootId: config.serverEpoch,
         takeoverPreviousBoot: false,
-        maxAttempts: 4,
+        maxAttempts: 5,
       });
       if (!claim.claimed || !claim.token) {
         console.warn(`[Pi] recovery claim denied: session=${sessionId.slice(0, 8)} rootTurn=${opts.rootTurnId.slice(0, 8)} source=${source} status=${claim.status || 'unknown'}`);
@@ -438,26 +502,35 @@ export class PiEngine implements Engine {
     };
     const completeRecoveryClaim = async (status: 'completed' | 'failed' | 'uncertain', error?: string) => {
       if (!opts.rootTurnId || !recoveryClaimToken) return;
+      // Recovery can settle before emitTurnDone flushes asynchronous message saves.
+      // Persist the assistant row before agent_turns references its foreign key.
+      if (status === 'completed') await flushDbWrites();
+      const artifact = opts.initialInterview ? await callbacks.initialArtifactOutcome?.() : undefined;
+      if (opts.initialInterview && !artifact?.savedMessageId) { status='failed'; error=artifact?.reason ?? 'INITIAL_EMPTY_RESPONSE'; }
       await completeAgentTurnRecovery({
         rootTurnId: opts.rootTurnId,
         token: recoveryClaimToken,
         status,
         error,
-        assistantMessageId: status === 'completed' ? lastSavedAssistantMsgId ?? undefined : undefined,
+        assistantMessageId: status === 'completed' ? (opts.initialInterview ? artifact?.savedMessageId : lastSavedAssistantMsgId ?? undefined) : undefined,
       });
       recoveryClaimToken = undefined;
     };
     const releaseRecoveryClaim = async (error?: string) => {
+      if(opts.initialInterview){await completeRecoveryClaim('failed',error);return;}
       if (!opts.rootTurnId || !recoveryClaimToken) return;
       const failureClass = classifyPiFailure(error).kind;
+      const retryDelaySeconds = failureClass === 'provider_capacity'
+        ? Math.round(getTransientAbortRetryDelayMs(error, recoveryClaimAttempt + 1) / 1000)
+        : Math.min(60, Math.max(5, recoveryClaimAttempt * 10));
       await releaseAgentTurnRecovery({
         rootTurnId: opts.rootTurnId,
         token: recoveryClaimToken,
         error,
         failureClass,
-        retryDelaySeconds: Math.min(60, Math.max(5, recoveryClaimAttempt * 10)),
+        retryDelaySeconds,
         attempt: recoveryClaimAttempt,
-        maxAttempts: 4,
+        maxAttempts: failureClass === 'provider_capacity' ? 5 : 4,
       });
       recoveryClaimToken = undefined;
     };
@@ -475,27 +548,34 @@ export class PiEngine implements Engine {
     // calls saveMessage() (creating a fresh row) instead of updateMessageContent
     // (which would overwrite the previous iteration's row).
     let assistantSaved = false;
+    const presentedFiles = new Set<string>();
+    const pdfTaskOutcome = new PdfTaskOutcome();
     // msgId is reset after each assistant iteration. Keep the latest persisted
     // assistant row so final turn metrics (including estimated live context)
     // land on a real DB row, not a freshly allocated empty msgId.
     let lastSavedAssistantMsgId: string | null = null;
     const rememberAssistantMsgId = (id: string) => runCtx.markAssistantSaved(id);
+    const getEffectiveTransientRetryMax = (message: string) => {
+      const workStarted = assistantSaved || iterationCount > 0 || toolCallsForTelemetry > 0;
+      if (workStarted && classifyPiFailure(message).kind === 'transient_transport') {
+        return Math.max(1, Math.min(TRANSIENT_CONTINUATION_RETRY_MAX, 4));
+      }
+      return getTransientAbortRetryMax(message);
+    };
     const canAutoRetryTransientAbort = () => {
       const ownership = decidePiRetryOwnership(sdkRetryObservedThisRun);
       return ownership.towerRetryAllowed &&
         !entry.abortRequested &&
         !watchdogAborted &&
-        transientAbortRetryAttempts < getTransientAbortRetryMax(transientAbortRetryMessage);
+        transientAbortRetryAttempts < getEffectiveTransientRetryMax(transientAbortRetryMessage);
     };
 
     const isOversizedPreflightError = isPiContextLengthExceededMessage;
 
     const emitRecoveryCompactStart = (reason: string) => {
-      if (compactionNoticeEmittedThisTurn) return;
-      compactionNoticeEmittedThisTurn = true;
+      if (visibleCompactionInProgress) return;
       visibleCompactionInProgress = true;
       overflowCompactionInProgress = true;
-      overflowCompactionObservedThisTurn = true;
       currentCompactMarkerId = currentCompactMarkerId || newCompactMarkerId();
       eventQueue.push(...handlePiCompactionStart({ event: { reason }, sessionId }));
       resolveWait?.();
@@ -577,10 +657,21 @@ export class PiEngine implements Engine {
           sessionId,
           runId: runCorrelationId,
           rootTurnId: opts.rootTurnId,
+          projectId: opts.projectId,
+          executionKind: opts.autoResume ? 'recovery' : 'interactive',
           attempt: recoveryClaimAttempt,
           promptCacheSessionId: providerCacheSessionId,
+          contextWindow: entry!.session.model?.contextWindow,
         },
-        () => continuePiNativeLifecycle(entry!.session, reason),
+        () => immediateSteering.run(
+          () => continuePiNativeLifecycle(entry!.session, reason),
+          async () => {
+            stopReason = undefined;
+            entry!.runPhase = 'running';
+            await continuePiNativeLifecycle(entry!.session, 'immediate-steering');
+          },
+          () => Boolean(entry!.abortRequested || entry!.safeStopRequested),
+        ),
       );
     };
 
@@ -592,6 +683,7 @@ export class PiEngine implements Engine {
       execute?: (reason: string) => Promise<void>;
       hasDurableAssistant?: () => boolean;
     }): Promise<boolean> => {
+      if (terminalizer.isTerminalForced) return false;
       console.warn(params.logStart);
       const result = await runPiContinuationRecovery({
         trigger: params.trigger,
@@ -648,6 +740,7 @@ export class PiEngine implements Engine {
         assistantSaved = true;
         lastSavedAssistantMsgId = msgId;
         rememberAssistantMsgId(msgId);
+        queueAssistantEvent([noticeBlock], true);
         return;
       }
 
@@ -666,7 +759,7 @@ export class PiEngine implements Engine {
     const persistCompactionFailureNotice = (reason: string) => {
       if (compactionFailureNoticeSaved) return;
       compactionFailureNoticeSaved = true;
-      const compactReason = String(reason || 'unknown compaction failure').slice(0, 240);
+      const compactReason = formatPiProviderErrorForUser(String(reason || 'unknown compaction failure'));
       persistCompactionNoticeBlock({
         type: 'text',
         text: `⚠️ 컨텍스트 자동 정리를 시도했지만 완료하지 못했습니다. 같은 세션에서 다시 보내면 재시도하거나, 필요하면 새 세션으로 이어가 주세요. 원인: ${compactReason}`,
@@ -677,7 +770,7 @@ export class PiEngine implements Engine {
     const persistCompactionRecoveryNotice = (reason: string) => {
       if (compactionRecoveryNoticeSaved) return;
       compactionRecoveryNoticeSaved = true;
-      const compactReason = String(reason || 'unknown compaction recovery').slice(0, 240);
+      const compactReason = formatPiProviderErrorForUser(String(reason || 'unknown compaction recovery'));
       persistCompactionNoticeBlock({
         type: 'text',
         text: `⚠️ 컨텍스트 자동 정리 중 요약 모델 응답이 끊겼지만, Tower가 로컬 복구 정리를 적용했습니다. 같은 세션에서 다시 보내면 이어서 진행할 수 있습니다. 원인: ${compactReason}`,
@@ -740,6 +833,7 @@ export class PiEngine implements Engine {
     // human-speed snapshots. Keep raw stream processing local, but coalesce
     // frontend broadcasts and DB content updates so one session cannot starve
     // the app shell. Decision: workspace/decisions/2026-05-31-realtime-performance-architecture.md
+    const textStreamTiming = createTextStreamTiming();
     const PI_DEBUG_RAW_EVENTS = process.env.PI_DEBUG_RAW_EVENTS === '1';
     const ASSISTANT_STREAM_FLUSH_MS = Math.max(25, Number(process.env.PI_ASSISTANT_STREAM_FLUSH_MS) || 150);
     const ASSISTANT_DB_FLUSH_MS = Math.max(50, Number(process.env.PI_ASSISTANT_DB_FLUSH_MS) || 300);
@@ -749,6 +843,7 @@ export class PiEngine implements Engine {
       streamFlushMs: ASSISTANT_STREAM_FLUSH_MS,
       dbFlushMs: ASSISTANT_DB_FLUSH_MS,
       pushAssistantEvent: (message) => {
+        if (message.content?.some((block) => block.type === 'text' && block.text)) textStreamTiming.visible();
         eventQueue.push(message);
         resolveWait?.();
       },
@@ -948,10 +1043,22 @@ export class PiEngine implements Engine {
     lifecycleShadow.startWaitForIdleProbe(sdkWaitForIdle);
     console.log(`[Pi] run() starting: session=${sessionId.slice(0, 8)} model=${entry.session.model?.provider}/${entry.session.model?.id} autoResume=${autoResumeRun}${autoResumeReason ? ` autoResumeReason=${autoResumeReason}` : ''} prompt=${prompt.slice(0, 80)} watchdog=idle${STREAM_IDLE_MS / 1000}s/block${BLOCK_TIMEOUT_MS / 1000}s`);
     const unsub = entry.session.subscribe((event: any) => {
+      // A forced terminal owns this Tower turn. Late SDK retry/compaction events
+      // may still arrive after abort; never persist or broadcast them as new work.
+      if (terminalizer.isTerminalForced) return;
+      observeVoiceSdkTiming?.(event);
       watchdog.observe(event);
       lifecycleShadow.observeSdkEvent(event, Boolean(entry.session.isIdle));
       if (PI_DEBUG_RAW_EVENTS) {
         console.log(`[Pi] event: session=${sessionId.slice(0, 8)} type=${event.type} subtype=${event.assistantMessageEvent?.type || event.message?.role || '-'}`);
+      }
+      if (callbacks.onVoiceAnswerSnapshot && opts.rootTurnId) {
+        const text = confirmedVoiceAnswerSnapshot(event);
+        if (text) {
+          // Consumer disconnect/backpressure must not break the SDK lifecycle or persistence.
+          try { callbacks.onVoiceAnswerSnapshot({ rootTurnId: opts.rootTurnId, sessionId, messageId: msgId, text, channel: 'final_answer' }); }
+          catch { /* voice transport owns cancellation/error reporting */ }
+        }
       }
       switch (event.type) {
         // Pi 0.82 lifecycle observations only. Keep Tower's existing watchdog,
@@ -993,6 +1100,7 @@ export class PiEngine implements Engine {
           break;
         }
         case 'message_update': {
+          textStreamTiming.observe(event);
           coalescer.incrementRawMessageUpdates();
           const subtype = event.assistantMessageEvent?.type;
           if (subtype === 'thinking_start') {
@@ -1008,6 +1116,11 @@ export class PiEngine implements Engine {
             }
           }
           const result = handlePiMessageUpdate({ event, accumulator });
+          // A final answer is not publishable until the delivered PDF batch has a receipt.
+          // Tool cards can stream; prose is released at the validated message_end boundary.
+          if (entry.pdfObservationState?.hasPending(entry.session.agent.state.messages)) {
+            result.content = result.content.filter(block => block.type !== 'text' && block.type !== 'commentary');
+          }
           if (result.stopReason) stopReason = result.stopReason || stopReason;
           if (result.editedFile) {
             editedFiles.add(result.editedFile.filePath);
@@ -1040,6 +1153,7 @@ export class PiEngine implements Engine {
         // running while the parent stream may be quiet". The actual assistant
         // tool_use block is still captured from message_update/toolcall_end above.
         case 'tool_execution_start': {
+          immediateSteering.toolStarted();
           toolCallsForTelemetry++;
           beginCheckpointForTool(event);
           enterToolRunningPhase(event);
@@ -1047,9 +1161,17 @@ export class PiEngine implements Engine {
         }
 
         case 'tool_execution_end': {
+          immediateSteering.toolEnded();
           leaveToolRunningPhase();
           completeCheckpointForTool(event);
           const result = handlePiToolExecutionEnd(event);
+          pdfTaskOutcome.observeToolResult(event.toolName, event.result);
+          if (event.toolName === 'present_file' && !event.result?.isError) {
+            try {
+              const receipt = JSON.parse(result.resultText);
+              if (receipt.ok === true && receipt.action === 'present_file' && typeof receipt.path === 'string') presentedFiles.add(receipt.path);
+            } catch { /* only explicit successful receipts qualify */ }
+          }
 
           if (result.toolCallId) {
             trackDbWrite(callbacks.attachToolResult(result.toolCallId, result.resultText));
@@ -1087,9 +1209,7 @@ export class PiEngine implements Engine {
         // See: workspace/decisions/2026-05-17-pi-claude-parity-roadmap.md (W7)
         case 'compaction_start': {
           overflowCompactionInProgress = true;
-          overflowCompactionObservedThisTurn = true;
-          if (!compactionNoticeEmittedThisTurn) {
-            compactionNoticeEmittedThisTurn = true;
+          if (!visibleCompactionInProgress) {
             visibleCompactionInProgress = true;
             currentCompactMarkerId = currentCompactMarkerId || newCompactMarkerId();
             eventQueue.push(...handlePiCompactionStart({ event, sessionId }));
@@ -1114,18 +1234,19 @@ export class PiEngine implements Engine {
             if (persistedCompactionCount > compactionEntriesAtRunStart + sdkCompactionSucceededEventsThisTurn) {
               forgetPiContextTokenHint(sessionId);
               try { forgetPiContextTokenHint((entry.session as any)?.sessionManager?.getSessionId?.()); } catch { /* best-effort */ }
-              runCtx.compactionSucceededThisTurn = true;
+              runCtx.recordCompactionSuccess(countPiCompactionEntries((entry.session as any)?.sessionManager));
               sdkCompactionSucceededEventsThisTurn++;
             } else {
               const fallback = createPiLocalFallbackCompaction({
                 session: manager,
                 agent: (entry.session as any)?.agent,
+                refreshContext: (entry.session as any)?.refreshContext?.bind(entry.session),
                 reason: `compaction_end result was not persisted (${(event as any).reason || 'unknown'})`,
               });
               if (fallback.succeeded) {
                 forgetPiContextTokenHint(sessionId);
                 try { forgetPiContextTokenHint((entry.session as any)?.sessionManager?.getSessionId?.()); } catch { /* best-effort */ }
-                runCtx.compactionSucceededThisTurn = true;
+                runCtx.recordCompactionSuccess(countPiCompactionEntries((entry.session as any)?.sessionManager));
                 sdkCompactionSucceededEventsThisTurn++;
                 const markerId = currentCompactMarkerId || newCompactMarkerId();
                 result = { outcome: 'compacted', succeeded: true, messages: [{ type: 'compact', sessionId, phase: 'done', markerId }] };
@@ -1144,12 +1265,13 @@ export class PiEngine implements Engine {
             const fallback = createPiLocalFallbackCompaction({
               session: (entry.session as any)?.sessionManager,
               agent: (entry.session as any)?.agent,
+              refreshContext: (entry.session as any)?.refreshContext?.bind(entry.session),
               reason: noResultReason,
             });
             if (fallback.succeeded) {
               forgetPiContextTokenHint(sessionId);
               try { forgetPiContextTokenHint((entry.session as any)?.sessionManager?.getSessionId?.()); } catch { /* best-effort */ }
-              runCtx.compactionSucceededThisTurn = true;
+              runCtx.recordCompactionSuccess(countPiCompactionEntries((entry.session as any)?.sessionManager));
               sdkCompactionSucceededEventsThisTurn++;
               void appendTowerFileLedgerAfterCompaction(`sdk-no-result-local-fallback:${String((event as any).reason || 'compaction_end')}`);
               if (autoResumeRun) {
@@ -1183,14 +1305,30 @@ export class PiEngine implements Engine {
                   : m
               ),
             };
-          } else if (result.outcome === 'failed' && !compactionRecoveryNoticeSaved) {
+          } else if (result.outcome === 'failed' && !compactionRecoveryNoticeSaved && !oversizedPreflightRecoveryRequested) {
             persistCompactionFailureNotice((event as any).errorMessage || `Pi compaction failed or produced no usable result (${(event as any).reason || 'unknown'})`);
           }
           if (visibleCompactionInProgress || !result.succeeded) {
-            eventQueue.push(...result.messages);
+            // Pi's overflow compaction can fail before Tower's bounded local
+            // fallback runs. Do not publish a terminal error for an attempt
+            // that may still recover when prompt() settles.
+            eventQueue.push(...(oversizedPreflightRecoveryRequested
+              ? result.messages.filter((message) => message.type !== 'engine_error')
+              : result.messages));
           } else {
             console.warn(`[Pi] duplicate compaction_end suppressed from UI: session=${sessionId.slice(0, 8)} reason=${(event as any).reason}`);
           }
+          // Compaction may consume almost the entire old 5-minute settle window.
+          // Give the resumed request its own bounded window starting now; its
+          // first valid assistant boundary will cancel this guard altogether.
+          resetPiOverflowSettleAfterCompaction({
+            pending: pendingOverflowSettle,
+            compactionSucceeded: result.succeeded,
+            terminalForced: terminalizer.isTerminalForced,
+            clearClosingTimer: clearClosingTerminalizer,
+            clearAgentEndTimer: clearAgentEndTerminalizer,
+            armPostCompactTimer: () => markClosing('post-overflow-compaction-settle', 'error', OVERFLOW_COMPACTION_SETTLE_MS),
+          });
           visibleCompactionInProgress = false;
           currentCompactMarkerId = undefined;
           resolveWait?.();
@@ -1203,7 +1341,13 @@ export class PiEngine implements Engine {
         // recognizes a mid-turn steer. Emit steer_delivered so the frontend
         // flips the bubble "전달 중" → "반영됨". See: GitHub issue #15.
         case 'queue_update': {
-          const delivered = handlePiQueueUpdate({ event, entry, sessionId });
+          const delivered = handlePiQueueUpdate({
+            event,
+            entry,
+            sessionId,
+            assistantMsgId: msgId || undefined,
+            assistantContent: accumulator.toTowerBlocks(),
+          });
           if (delivered.length > 0) eventQueue.push(...delivered);
           resolveWait?.();
           break;
@@ -1229,20 +1373,45 @@ export class PiEngine implements Engine {
           if (analysis.shouldApplyStopReason) {
             stopReason = msgStopReason;
           }
+          if (releasePiOverflowSettleAfterAssistant({
+            pending: pendingOverflowSettle,
+            compactionSucceeded: runCtx.compactionSucceededThisTurn,
+            role: msg?.role,
+            stopReason: msgStopReason,
+            clearClosingTimer: clearClosingTerminalizer,
+            clearAgentEndTimer: clearAgentEndTerminalizer,
+          })) {
+            // The timeout guarded the failed pre-compaction request. A fresh
+            // assistant boundary proves the SDK resumed; it must not terminate
+            // the new tool loop five minutes after the old agent_end.
+            pendingOverflowSettle = false;
+            entry.runPhase = 'running';
+            entry.promptActive = true;
+            oversizedPreflightRecoveryRequested = false;
+            oversizedPreflightMessage = '';
+            providerErrorMustRemainError = false;
+            terminalProviderErrorMessage = '';
+            console.warn(`[Pi] overflow settle ownership transferred to resumed assistant: session=${sessionId.slice(0, 8)} stop=${msgStopReason}`);
+          }
 
           // Surface Pi SDK / provider error messages to the user.
           // Without this, errors like Azure rate limits or context overflow appear
           // as silent "empty response" — user sees nothing actionable.
-          if (analysis.providerErrorText) {
+          if (analysis.providerErrorText && !immediateSteering.interrupting) {
             const fullErrText = analysis.providerErrorText;
+            terminalProviderErrorMessage = fullErrText;
             const errText = fullErrText.slice(0, 500);
             const userErrText = formatPiProviderErrorForUser(fullErrText);
             const isPreflightOversized = isOversizedPreflightError(fullErrText);
+            const isTowerPreflight = isPiTowerRequestPreflight(fullErrText);
             const isContextOverflow = isPiContextOverflowFailure(fullErrText);
             const isUpstreamRejectedInput = isPiUpstreamRejectedInputFailure(fullErrText);
             if (isPreflightOversized) {
               oversizedPreflightRecoveryRequested = true;
               oversizedPreflightMessage = fullErrText;
+              // A prior tool-use row is not a completed response. If bounded
+              // recovery fails, never downgrade this provider rejection to stop.
+              providerErrorMustRemainError = true;
             } else if (isContextOverflow || isUpstreamRejectedInput) {
               providerErrorMustRemainError = true;
             }
@@ -1340,7 +1509,7 @@ export class PiEngine implements Engine {
 
             if (!isCodexUsageLimit && !isCodexAuthInvalid) {
               if (isPreflightOversized) {
-                console.warn(`[Pi] oversized preflight blocked upstream; will attempt compaction recovery: session=${sessionId.slice(0, 8)} error=${errText}`);
+                console.warn(`[Pi] ${isTowerPreflight ? 'Tower request admission' : 'oversized request'} blocked upstream; will attempt compaction recovery: session=${sessionId.slice(0, 8)} error=${errText}`);
               } else {
                 const isTransientAbort = isPiTransientAbortError(fullErrText);
                 const shouldAutoRetryTransient = isTransientAbort && canAutoRetryTransientAbort();
@@ -1364,6 +1533,9 @@ export class PiEngine implements Engine {
             }
           }
 
+          if (entry.pdfObservationState?.suppressVisibleFinal(msg, entry.session.agent.state.messages)) {
+            analysis.assistantContent = undefined;
+          }
           if (analysis.assistantContent) {
             const { contentToSave } = analysis.assistantContent;
             // A transient error frame does not always terminate the SDK run. The
@@ -1421,6 +1593,15 @@ export class PiEngine implements Engine {
             // PiRunContext owns usage accumulation; keep local mirrors until the
             // remaining terminal state machine moves behind the context boundary.
             const usageDelta = runCtx.recordUsage(usage);
+            eventQueue.push({ type: 'context_usage', sessionId, msgId, measuredAt: Date.now(),
+              contextInputTokens: runCtx.actualContextInputTokens(), contextOutputTokens: usageDelta.output,
+              contextWindowSize: entry.session.model?.contextWindow || 0,
+              contextSnapshot: { windowTokens: entry.session.model?.contextWindow || 0,
+                actualTokens: runCtx.actualContextInputTokens(), actualSource: 'provider', requestSource: 'none',
+                capturedAt: new Date().toISOString(), terminal: false,
+                pressure: estimatePiCompactionPressure({ session: entry.session, towerSessionId: sessionId,
+                  promptStaticTokenEstimate: entry.promptStaticTokenEstimate }).displayPressure } });
+            resolveWait?.();
             const iterInput = usageDelta.input;
             const iterOutput = usageDelta.output;
             const iterCacheRead = usageDelta.cacheRead;
@@ -1473,6 +1654,9 @@ export class PiEngine implements Engine {
                 cacheReadTokens: lastIterationCacheRead,
                 cacheCreationTokens: lastIterationCacheWrite,
                 reasoningTokens: lastIterationReasoning,
+                contextInputTokens: runCtx.actualContextInputTokens(),
+                contextWindowSize: entry.session.model?.contextWindow || 400000,
+                contextCompacted: false,
                 costUsd: lastCostUsd,
               }));
             }
@@ -1497,6 +1681,8 @@ export class PiEngine implements Engine {
         //   agent_start → turn_start → message_start(user) → message_end(user) → agent_end
         // (notice no assistant message_start / message_end).
         case 'agent_end': {
+          // Steering interruption continues in the owning prompt loop.
+          if (immediateSteering.interrupting && !entry.abortRequested && !entry.safeStopRequested) break;
           let agentEndCarriedError = false;
           let agentEndIsCodexUsageLimit = false;
           let agentEndIsTransientAbort = false;
@@ -1517,12 +1703,15 @@ export class PiEngine implements Engine {
                 codexUsageLimitMessage = analysis.fullErrText;
                 agentEndIsCodexUsageLimit = true;
               }
+              terminalProviderErrorMessage = analysis.fullErrText;
               const isPreflightOversized = isOversizedPreflightError(analysis.fullErrText);
+              const isTowerPreflight = isPiTowerRequestPreflight(analysis.fullErrText);
               const isContextOverflow = isPiContextOverflowFailure(analysis.fullErrText);
               const isUpstreamRejectedInput = isPiUpstreamRejectedInputFailure(analysis.fullErrText);
               if (isPreflightOversized) {
                 oversizedPreflightRecoveryRequested = true;
                 oversizedPreflightMessage = analysis.fullErrText;
+                providerErrorMustRemainError = true;
               } else if (isContextOverflow || isUpstreamRejectedInput) {
                 providerErrorMustRemainError = true;
               }
@@ -1530,7 +1719,9 @@ export class PiEngine implements Engine {
               // Do not use the short agent_end error terminalizer here: it can fire
               // before compaction_end and surface a false "오류로 종료" while the SDK
               // is still doing the recovery work.
-              agentEndNeedsOverflowSettle = isPreflightOversized || isContextOverflow || isUpstreamRejectedInput || overflowCompactionInProgress || overflowCompactionObservedThisTurn;
+              // A successful compaction earlier in this turn is historical, not
+              // evidence that a later unrelated provider error needs 5 minutes.
+              agentEndNeedsOverflowSettle = isPreflightOversized || isContextOverflow || isUpstreamRejectedInput || overflowCompactionInProgress;
               const userErrText = formatPiProviderErrorForUser(analysis.fullErrText);
               const operatorHint = formatPiProviderErrorForOperatorLog(analysis.fullErrText);
               const accountStatusLog = isPiModelAccountStatusFailure(analysis.fullErrText)
@@ -1569,7 +1760,7 @@ export class PiEngine implements Engine {
               if (!analysis.isCodexUsageLimit && !analysis.isCodexAuthInvalid) {
                 agentEndIsTransientAbort = analysis.isTransientAbort;
                 if (isPreflightOversized) {
-                  console.warn(`[Pi] oversized preflight blocked upstream in agent_end; will attempt compaction recovery: session=${sessionId.slice(0, 8)} error=${analysis.errText}`);
+                  console.warn(`[Pi] ${isTowerPreflight ? 'Tower request admission' : 'oversized request'} blocked upstream in agent_end; will attempt compaction recovery: session=${sessionId.slice(0, 8)} error=${analysis.errText}`);
                 } else if (analysis.shouldAutoRetryTransient) {
                   transientAbortRetryRequested = true;
                   transientAbortRetryMessage = analysis.fullErrText;
@@ -1628,6 +1819,7 @@ export class PiEngine implements Engine {
               const settleMs = agentEndNeedsOverflowSettle ? OVERFLOW_COMPACTION_SETTLE_MS : AGENT_END_ERROR_TERMINALIZE_MS;
               const settleWhy = agentEndNeedsOverflowSettle ? 'agent_end-context-overflow-settle' : 'agent_end-carried-error';
               markClosing(settleWhy, 'error', settleMs);
+              if (agentEndNeedsOverflowSettle) pendingOverflowSettle = true;
               clearAgentEndTerminalizer();
               agentEndTerminalizerTimer = setTimeout(() => {
                 agentEndTerminalizerTimer = null;
@@ -1678,6 +1870,9 @@ export class PiEngine implements Engine {
 
     let promptSettled = false;
     const terminalizer = new PiRunTerminalizer({
+      contextPressure: () => estimatePiCompactionPressure({ session: entry.session, towerSessionId: sessionId,
+        promptStaticTokenEstimate: entry.promptStaticTokenEstimate }).displayPressure,
+      compactionSettings: () => entry.session.settingsManager?.getCompactionSettings?.(),
       sessionId,
       runCtx,
       acceptedAt: opts.acceptedAt,
@@ -1688,6 +1883,7 @@ export class PiEngine implements Engine {
       getState: () => ({
         stopReason,
         assistantSaved,
+        presentedFiles: [...presentedFiles],
         currentMsgId: msgId,
         lastSavedAssistantMsgId,
         iterationCount,
@@ -1706,7 +1902,9 @@ export class PiEngine implements Engine {
         oversizedPreflightRecoveryRequested,
         compactionSucceededThisTurn: runCtx.compactionSucceededThisTurn,
         lastAssistant: lastAssistantTelemetry,
+        providerErrorMessage: terminalProviderErrorMessage,
       }),
+      persistTerminalErrorNotice: persistTerminalTransientNotice,
       estimateLiveContextTokens,
       flushAssistantEvent,
       flushAssistantDbUpdate,
@@ -1766,7 +1964,7 @@ export class PiEngine implements Engine {
       }
     };
 
-    const surfaceTransientAbortFailure = async (retryMax = getTransientAbortRetryMax(transientAbortRetryMessage)) => {
+    const surfaceTransientAbortFailure = async (retryMax = getEffectiveTransientRetryMax(transientAbortRetryMessage)) => {
       const message = transientAbortRetryMessage || 'Request was aborted';
       transientAbortVisibleSuppressed = true;
       stopReason = 'aborted';
@@ -1779,6 +1977,14 @@ export class PiEngine implements Engine {
       }
       const failureKind = classifyPiFailure(message).kind;
       const isProviderCapacity = failureKind === 'provider_capacity';
+      recoveryExhausted = true;
+      // Exhaustion is terminal for this root turn, not a new durable retry budget.
+      stopReason = 'error';
+      providerErrorMustRemainError = true;
+      durableOutcome = 'failed';
+      durableError = message;
+      await completeRecoveryClaim('failed', message);
+
       const noticeText = isProviderCapacity ? PROVIDER_CAPACITY_EXHAUSTED_NOTICE_TEXT : TRANSIENT_ABORT_EXHAUSTED_NOTICE_TEXT;
       persistTerminalTransientNotice(noticeText);
       eventQueue.push({
@@ -1793,6 +1999,7 @@ export class PiEngine implements Engine {
     };
 
     const runTransientRetriesIfNeeded = async (): Promise<boolean> => {
+      if (terminalizer.isTerminalForced) return false;
       const ownership = decidePiRetryOwnership(sdkRetryObservedThisRun);
       if (!ownership.towerRetryAllowed) {
         if (transientAbortRetryRequested) {
@@ -1803,13 +2010,15 @@ export class PiEngine implements Engine {
         return true;
       }
       while (transientAbortRetryRequested && !entry.abortRequested && !watchdogAborted) {
-        const retryMax = getTransientAbortRetryMax(transientAbortRetryMessage);
+        const retryMax = getEffectiveTransientRetryMax(transientAbortRetryMessage);
         if (transientAbortRetryAttempts >= retryMax) {
           await surfaceTransientAbortFailure();
           return false;
         }
         const retryUsesOriginalPrompt = !assistantSaved && iterationCount === 0 && toolCallsForTelemetry === 0;
-        if (!retryUsesOriginalPrompt && transientAbortRetryAttempts > 0) {
+        const continuationRetryMax = Math.max(1, Math.min(TRANSIENT_CONTINUATION_RETRY_MAX, 4));
+        if (!retryUsesOriginalPrompt && transientAbortRetryAttempts >= continuationRetryMax) {
+          transientContinuationRetriesExhausted = true;
           await surfaceTransientAbortFailure();
           return false;
         }
@@ -1825,6 +2034,7 @@ export class PiEngine implements Engine {
         entry.runPhase = 'running';
         entry.promptActive = true;
         await sleep(delayMs);
+        if (terminalizer.isTerminalForced) return false;
         try {
           if (retryUsesOriginalPrompt) {
             await promptWithFetchCorrelation(prompt);
@@ -1875,7 +2085,7 @@ export class PiEngine implements Engine {
       let compactionFallbackSpec = '';
       try {
         if (originalModel?.provider === 'litellm-responses') {
-          for (const spec of getCodexFallbackModelSpecs()) {
+          for (const spec of getCompactionFallbackModelSpecs()) {
             const fallbackModel = this.modelRegistryManager.resolvePiModel(spec);
             if (!fallbackModel) continue;
             compactionFallbackSpec = spec;
@@ -1890,7 +2100,7 @@ export class PiEngine implements Engine {
         if (persistedCompactionCount > compactionEntriesAtRunStart) {
           forgetPiContextTokenHint(sessionId);
           try { forgetPiContextTokenHint((entry.session as any)?.sessionManager?.getSessionId?.()); } catch { /* best-effort */ }
-          runCtx.compactionSucceededThisTurn = true;
+          runCtx.recordCompactionSuccess(countPiCompactionEntries((entry.session as any)?.sessionManager));
           if (persistedCompactionCount > compactionEntriesAtRunStart + sdkCompactionSucceededEventsThisTurn) {
             sdkCompactionSucceededEventsThisTurn++;
           } else {
@@ -1904,6 +2114,7 @@ export class PiEngine implements Engine {
         const fallback = createPiLocalFallbackCompaction({
           session: manager,
           agent: (entry.session as any)?.agent,
+          refreshContext: (entry.session as any)?.refreshContext?.bind(entry.session),
           reason: 'proactive compact() returned without persisting a compaction entry',
         });
         if (!fallback.succeeded) {
@@ -1911,7 +2122,7 @@ export class PiEngine implements Engine {
         }
         forgetPiContextTokenHint(sessionId);
         try { forgetPiContextTokenHint((entry.session as any)?.sessionManager?.getSessionId?.()); } catch { /* best-effort */ }
-        runCtx.compactionSucceededThisTurn = true;
+        runCtx.recordCompactionSuccess(countPiCompactionEntries((entry.session as any)?.sessionManager));
         sdkCompactionSucceededEventsThisTurn++;
         emitRecoveryCompactDoneIfNeeded(`proactive-${source}-local-fallback`);
         await appendTowerFileLedgerAfterCompaction(`proactive-local-fallback:${source}`);
@@ -1924,6 +2135,7 @@ export class PiEngine implements Engine {
           console.log(`[Pi] proactive compaction skipped; continuing original prompt: session=${sessionId.slice(0, 8)} reason=${compactMessage.slice(0, 180)}`);
           return false;
         }
+        emitRecoveryCompactFailedIfNeeded('proactive-error');
         throw compactErr;
       } finally {
         if (compactionFallbackSpec && originalModel && !entry.abortRequested) {
@@ -1938,6 +2150,7 @@ export class PiEngine implements Engine {
     };
 
     const shouldAttemptPostCompactContinuation = (requireCompaction = true) =>
+      !terminalizer.isTerminalForced &&
       (!requireCompaction || runCtx.compactionSucceededThisTurn) &&
       !postCompactContinuationAttempted &&
       !entry.abortRequested &&
@@ -1984,6 +2197,7 @@ export class PiEngine implements Engine {
     };
 
     const shouldAttemptTransientContinuation = () =>
+      !terminalizer.isTerminalForced &&
       !transientContinuationAttempted &&
       !entry.abortRequested &&
       !watchdogAborted &&
@@ -2019,7 +2233,7 @@ export class PiEngine implements Engine {
         watchdogAborted: Boolean(watchdogAborted),
       });
       console.log(`[Pi] recovery decision: session=${sessionId.slice(0, 8)} trigger=incomplete_tool_boundary enabled=${incompleteToolBoundaryContinuationEnabled} projectionIncomplete=${projectionSuggestsIncomplete} leafRole=${recoveryState.leafRole} sdkIdle=${recoveryState.idle} queued=${recoveryState.queuedMessages} action=${recoveryState.leafRole === 'assistant' ? 'classify_incomplete' : incompleteToolBoundaryContinuationEnabled && projectionSuggestsIncomplete ? 'continue_native' : 'none'}`);
-      if (incompleteTurnContinuationAttempted || entry.abortRequested || Boolean(watchdogAborted)) return false;
+      if (terminalizer.isTerminalForced || incompleteTurnContinuationAttempted || entry.abortRequested || Boolean(watchdogAborted)) return false;
       if (!projectionSuggestsIncomplete) return false;
 
       incompleteTurnContinuationAttempted = true;
@@ -2054,7 +2268,7 @@ export class PiEngine implements Engine {
               throw new Error(`Pi restart recovery requires attention (${restartDecision.reason}).`);
             }
           } else {
-            await promptWithFetchCorrelation(prompt);
+            await promptWithFetchCorrelation(promptWithJevAdvice);
           }
         } catch (err: any) {
           const message = err?.message || 'Pi prompt failed';
@@ -2066,10 +2280,24 @@ export class PiEngine implements Engine {
           }
         }
 
+        if (terminalizer.isTerminalForced) return;
+        if (entry.pdfObservationState?.completionIncomplete && !providerErrorMustRemainError && stopReason !== 'error' && stopReason !== 'aborted' && !watchdogAborted) {
+          // Observation formatting exhaustion is not a provider or file-operation failure.
+          persistTerminalTransientNotice(pdfTaskOutcome.incompleteReviewNotice());
+          stopReason = 'stop';
+          console.log(`[Pi] PDF partial review outcome: session=${sessionId.slice(0, 8)} ${JSON.stringify(pdfTaskOutcome.snapshot(true))}`);
+          await emitTurnDone();
+          return;
+        }
+        console.log(`[Pi] text-stream-timing session=${sessionId.slice(0, 8)} ${JSON.stringify(textStreamTiming.snapshot())}`);
         console.log(`[Pi] prompt() resolved: session=${sessionId.slice(0, 8)} iterations=${iterationCount} tokens=${cumulativeInput}+${cumulativeOutput} stopReason=${stopReason}${watchdogAborted ? ` watchdog=${watchdogAborted}` : ''} streamPerf=raw:${streamPerf.rawMessageUpdates},ui:${streamPerf.assistantSnapshotsQueued}->${streamPerf.assistantSnapshotsFlushed},db:${streamPerf.assistantDbUpdatesQueued}->${streamPerf.assistantDbUpdatesFlushed}`);
 
         const transientRecovered = await runTransientRetriesIfNeeded();
         if (!transientRecovered) {
+          if (recoveryExhausted || transientContinuationRetriesExhausted) {
+            await emitTurnDone('error');
+            return;
+          }
           const transientContinued = await runTransientContinuationOnce('transient-retry-exhausted');
           if (transientContinued) {
             await emitTurnDone();
@@ -2084,22 +2312,26 @@ export class PiEngine implements Engine {
           oversizedPreflightRecoveryAttempted = true;
           const reason = oversizedPreflightMessage || 'oversized Responses request';
           const preflightMetrics = parsePiPreflightContextMetrics(reason);
-          const recoveryBudgets = piRecoveryKeepBudgets(preflightMetrics?.contextWindow || 0);
+          const recoveryBudgets = piRecoveryKeepBudgets(preflightMetrics?.contextWindow || entry.session.model?.contextWindow || 0);
           console.warn(`[Pi] oversized preflight recovery: compacting session=${sessionId.slice(0, 8)} reason=provider-overflow detail=${reason.slice(0, 180)} body=${preflightMetrics?.bodyTokens || 0} safeTarget=${preflightMetrics?.safeTargetTokens || 0} budgets=${recoveryBudgets.join(',')}`);
           const recoveryAgent = (entry.session as any)?.agent;
           if (Array.isArray(recoveryAgent?.state?.messages)) {
-            recoveryAgent.state.messages = sanitizePiMessagesForRecovery(recoveryAgent.state.messages);
+            refreshPiRecoveryContext((entry.session as any).sessionManager, recoveryAgent, (entry.session as any).refreshContext?.bind(entry.session));
           }
           try {
             const alreadyCompactedThisTurn = runCtx.compactionSucceededThisTurn && !overflowCompactionInProgress;
+            let overflowRecoveryReplayed = false;
             if (alreadyCompactedThisTurn) {
+              overflowRecoveryReplayed = shouldReplayPiOverflowPrompt({ assistantSaved, toolCallsExecuted: toolCallsForTelemetry, abortRequested: Boolean(entry.abortRequested) });
+              // The shared replay path below owns the single bounded retry. Do not
+              // send here as well: that would duplicate a request (and its tools).
               console.warn(`[Pi] oversized preflight recovery: reusing SDK compaction already completed this turn session=${sessionId.slice(0, 8)}`);
             } else {
               emitRecoveryCompactStart('oversized-preflight-recovery');
               const originalModel = entry.session.model;
               let compactionFallbackSpec = '';
               if (originalModel?.provider === 'litellm-responses') {
-                for (const spec of getCodexFallbackModelSpecs()) {
+                for (const spec of getCompactionFallbackModelSpecs()) {
                   const fallbackModel = this.modelRegistryManager.resolvePiModel(spec);
                   if (!fallbackModel) continue;
                   compactionFallbackSpec = spec;
@@ -2109,34 +2341,30 @@ export class PiEngine implements Engine {
                 }
               }
               try {
-                await entry.session.compact('The next request exceeded the model context window. Summarize prior work aggressively, preserve current task state, edited files, decisions, and exact next steps.');
                 const manager = (entry.session as any)?.sessionManager;
-                const persistedCompactionCount = countPiCompactionEntries(manager);
-                if (persistedCompactionCount > compactionEntriesAtRunStart + sdkCompactionSucceededEventsThisTurn) {
-                  forgetPiContextTokenHint(sessionId);
-                  try { forgetPiContextTokenHint((entry.session as any)?.sessionManager?.getSessionId?.()); } catch { /* best-effort */ }
-                  runCtx.compactionSucceededThisTurn = true;
-                  sdkCompactionSucceededEventsThisTurn++;
-                  emitRecoveryCompactDoneIfNeeded('oversized-preflight-recovery');
-                  await appendTowerFileLedgerAfterCompaction('oversized-preflight-recovery');
-                } else {
-                  const fallback = createPiLocalFallbackCompaction({
-                    session: manager,
-                    agent: (entry.session as any)?.agent,
-                    reason: 'manual oversized-preflight recovery compact() returned without persisting a compaction entry',
-                    keepRecentTokens: recoveryBudgets[0],
-                  });
-                  if (fallback.succeeded) {
-                    forgetPiContextTokenHint(sessionId);
-                    try { forgetPiContextTokenHint((entry.session as any)?.sessionManager?.getSessionId?.()); } catch { /* best-effort */ }
-                    runCtx.compactionSucceededThisTurn = true;
-                    sdkCompactionSucceededEventsThisTurn++;
-                    emitRecoveryCompactDoneIfNeeded('oversized-preflight-recovery-local-fallback');
-                    await appendTowerFileLedgerAfterCompaction('oversized-preflight-recovery-local-fallback');
-                    console.warn(`[Pi] local fallback compaction created after compact() no-persist: session=${sessionId.slice(0, 8)} compaction=${fallback.compactionId} before=${fallback.before} after=${fallback.after}`);
-                  } else {
-                    throw new Error(`Pi compact() returned without persisting a compaction entry; local fallback failed: ${fallback.reason || 'unknown'}`);
-                  }
+                const recovery = await recoverPiOverflowCompaction({
+                  session: manager,
+                  agent: (entry.session as any)?.agent,
+                  refreshContext: (entry.session as any)?.refreshContext?.bind(entry.session),
+                  compact: () => entry.session.compact('The next request exceeded the model context window. Summarize prior work aggressively, preserve current task state, edited files, decisions, and exact next steps.'),
+                  keepRecentTokens: recoveryBudgets[0],
+                  compactionCountBefore: compactionEntriesAtRunStart + sdkCompactionSucceededEventsThisTurn,
+                });
+                overflowRecoveryReplayed = shouldReplayPiOverflowPrompt({ assistantSaved, toolCallsExecuted: toolCallsForTelemetry, abortRequested: Boolean(entry.abortRequested) });
+                if (recovery.providerError) {
+                  console.warn(`[Pi] provider compaction was itself oversized; switched to local fallback: session=${sessionId.slice(0, 8)} error=${recovery.providerError.slice(0, 180)}`);
+                }
+                forgetPiContextTokenHint(sessionId);
+                try { forgetPiContextTokenHint((entry.session as any)?.sessionManager?.getSessionId?.()); } catch { /* best-effort */ }
+                runCtx.recordCompactionSuccess(countPiCompactionEntries((entry.session as any)?.sessionManager));
+                sdkCompactionSucceededEventsThisTurn++;
+                const recoveryReason = recovery.mode === 'local-fallback'
+                  ? 'oversized-preflight-recovery-local-fallback'
+                  : 'oversized-preflight-recovery';
+                emitRecoveryCompactDoneIfNeeded(recoveryReason);
+                await appendTowerFileLedgerAfterCompaction(recoveryReason);
+                if (recovery.localFallback) {
+                  console.warn(`[Pi] local fallback compaction created after provider compact failure/no-persist: session=${sessionId.slice(0, 8)} compaction=${recovery.localFallback.compactionId} before=${recovery.localFallback.before} after=${recovery.localFallback.after}`);
                 }
               } finally {
                 if (compactionFallbackSpec && originalModel && !entry.abortRequested) {
@@ -2152,9 +2380,9 @@ export class PiEngine implements Engine {
             oversizedPreflightRecoveryRequested = false;
             oversizedPreflightMessage = '';
             // Safe automatic replay only before any visible assistant/tool side effects.
-            // If the oversized block happened deep in a tool loop, compaction is still
-            // valuable, but replaying the original user prompt risks duplicate work.
-            if (!assistantSaved && toolCallsForTelemetry === 0 && !entry.abortRequested) {
+            // recoverPiOverflowTurn owns this invariant so the same production
+            // decision is executable in integration tests.
+            if (overflowRecoveryReplayed) {
               stopReason = undefined;
               providerErrorMustRemainError = false;
               console.warn(`[Pi] oversized preflight recovery: retrying prompt after compaction session=${sessionId.slice(0, 8)}`);
@@ -2170,6 +2398,7 @@ export class PiEngine implements Engine {
                 const aggressiveFallback = createPiLocalFallbackCompaction({
                   session: aggressiveManager,
                   agent: (entry.session as any)?.agent,
+                  refreshContext: (entry.session as any)?.refreshContext?.bind(entry.session),
                   reason: 'Responses payload remained oversized after first recovery; escalating retained history to 5 percent',
                   keepRecentTokens: recoveryBudgets[1],
                 });
@@ -2289,7 +2518,7 @@ export class PiEngine implements Engine {
                 ? '컨텍스트 자동 정리 후 자동 이어가기를 시도했지만 현재 transcript 형태에서는 안전하지 않아 중단했습니다. 같은 세션에서 계속 진행을 요청하면 기존 결과를 유지한 채 이어갈 수 있습니다.'
                 : isCapacity
                   ? `컨텍스트 자동 정리를 시작했지만 요약용 모델 슬롯이 일시적으로 가득 찼습니다. 세션을 버릴 필요는 없고, 잠시 후 이어서 보내면 다시 시도합니다. 원인: ${compactMessage.slice(0, 200)}`
-                  : `컨텍스트가 너무 커서 자동 정리를 시도했지만 실패했습니다. 새 세션으로 이어가 주세요. 원인: ${compactMessage.slice(0, 240)}`,
+                  : `컨텍스트 자동 정리를 시도했지만 실패했습니다. 원인: ${formatPiProviderErrorForUser(compactMessage)}`,
               recoverable: true,
               retryable: isCapacity || isNativeUnavailable,
             });
@@ -2300,11 +2529,8 @@ export class PiEngine implements Engine {
 
         if (codexUsageLimitFallbackRequested && !codexUsageLimitFallbackAttempted && !entry.abortRequested) {
           codexUsageLimitFallbackAttempted = true;
-          // Try each fallback spec in order. The default fallback is the full-VM
-          // Azure GPT-5.5 emergency route; legacy litellm/smart is retired.
-          // The triggering error was either a
-          // Codex usage-limit or an OAuth-token invalidation; both recover by
-          // moving off the ChatGPT-account-bound provider.
+          // Retired Codex sessions can only recover through the configured
+          // LiteLLM/OpenRouter boundary, never via direct Azure.
           const originalMessage = codexUsageLimitMessage;
           const fallbackSpecs = getCodexFallbackModelSpecs();
           let fallbackRecovered = false;
@@ -2384,7 +2610,8 @@ export class PiEngine implements Engine {
           console.log(`[Pi] Preserving stopReason=error without durable assistant output: session=${sessionId.slice(0, 8)} providerMustRemain=${providerErrorMustRemainError}`);
         }
 
-        const incompleteTurnContinued = await runIncompleteTurnContinuationOnce('prompt-resolved-incomplete');
+        const intentionalWait = Boolean(getRequestedWait(sessionId));
+        const incompleteTurnContinued = !intentionalWait && await runIncompleteTurnContinuationOnce('prompt-resolved-incomplete');
         if (incompleteTurnContinued) {
           console.warn(`[Pi] incomplete turn continuation completed: session=${sessionId.slice(0, 8)}`);
         }
@@ -2394,13 +2621,16 @@ export class PiEngine implements Engine {
           abortRequested: Boolean(entry.abortRequested),
           watchdogAborted: Boolean(watchdogAborted),
         });
-        if (incompleteAfterRecovery) {
+        if (incompleteAfterRecovery && !intentionalWait) {
           durableOutcome = 'retryable_failure';
           durableError = 'Pi turn ended after tool calls without a final assistant answer.';
           console.warn(`[Pi] refusing completed outcome for incomplete tool boundary: session=${sessionId.slice(0, 8)} leafRole=${inspectPiRecoveryState(entry.session).leafRole}`);
           if (!incompleteTurnContinued) emitContinuationFailure(durableError);
         }
-        if (recoveryClaimToken) {
+        if (intentionalWait && recoveryClaimToken) {
+          await flushDbWrites();
+          await completeRecoveryClaim('completed');
+        } else if (recoveryClaimToken) {
           const settlement = await settlePiRecoveryOutcome({
             aborted: false,
             durableAssistant: Boolean(lastSavedAssistantMsgId),
@@ -2415,8 +2645,10 @@ export class PiEngine implements Engine {
           durableOutcome = settlement.outcome;
           durableError = settlement.error;
         }
+        if (intentionalWait) { durableOutcome = 'completed'; durableError = undefined; }
         await emitTurnDone(durableOutcome === 'completed' ? undefined : 'error');
       } catch (err: any) {
+        if (terminalizer.isTerminalForced) return;
         markClosing('prompt-rejected');
         const message = err?.message || 'Pi prompt failed';
         console.error(`[Pi] prompt() rejected: session=${sessionId.slice(0, 8)} error=${message}${watchdogAborted ? ` watchdog=${watchdogAborted}` : ''}`);
@@ -2427,10 +2659,11 @@ export class PiEngine implements Engine {
           if (isPiTransientAbortError(message)) {
             suppressTransientAbortVisibleError('prompt-rejected', message);
           } else {
+            terminalProviderErrorMessage = message;
             eventQueue.push({
               type: 'engine_error',
               sessionId,
-              message,
+              message: formatPiProviderErrorForUser(message),
               retryable: false,
             });
           }
@@ -2445,6 +2678,7 @@ export class PiEngine implements Engine {
         const postCompactRecovered = !transientContinued && !isAbortError && !watchdogAborted
           ? await runPostCompactContinuationOnce('prompt-rejected')
           : false;
+        if (terminalizer.isTerminalForced) return;
         if (recoveryClaimToken && !transientContinued && !postCompactRecovered) {
           const settlement = await settlePiRecoveryOutcome({
             executionError: message,
@@ -2463,7 +2697,7 @@ export class PiEngine implements Engine {
         }
         // Still emit turn_done so the frontend clears streaming/turn-phase state.
         // Without this, errors + aborts leave the turn "in progress" on the client.
-        await emitTurnDone(transientContinued || postCompactRecovered ? undefined : (watchdogAborted ? 'error' : (isAbortError ? 'aborted' : undefined)));
+        await emitTurnDone(transientContinued || postCompactRecovered ? undefined : (isAbortError ? 'aborted' : 'error'));
       } finally {
         promptSettled = true;
         lifecycleShadow.observePromptSettled(Boolean(entry.session.isIdle));
@@ -2543,13 +2777,15 @@ export class PiEngine implements Engine {
       if (towerFileLedgerCheckpointPromises.length > 0) {
         await Promise.allSettled(towerFileLedgerCheckpointPromises);
       }
+      const finalArtifact = opts.initialInterview ? await callbacks.initialArtifactOutcome?.() : undefined;
+      if(opts.initialInterview && !finalArtifact?.savedMessageId){durableOutcome='failed';durableError=finalArtifact?.reason ?? 'INITIAL_EMPTY_RESPONSE';}
       yield {
         type: 'engine_done',
         sessionId,
         engineSessionId: piSessionFile,
         editedFiles: [...editedFiles],
         outcome: durableOutcome,
-        assistantMessageId: durableOutcome === 'completed' ? lastSavedAssistantMsgId ?? undefined : undefined,
+        assistantMessageId: durableOutcome === 'completed' ? (opts.initialInterview ? finalArtifact?.savedMessageId : lastSavedAssistantMsgId ?? undefined) : undefined,
         error: durableError,
       };
     } catch (runErr: any) {
@@ -2575,7 +2811,8 @@ export class PiEngine implements Engine {
       entry.isRunning = false;
       entry.promptActive = false;
       entry.runPhase = 'closed';
-      clearCurrentRootTurn(sessionId);
+      clearRequestedWait(sessionId);
+    clearCurrentRootTurn(sessionId);
       if (compactRecoverySessionFile || terminalizer.isTerminalForced) {
         try { entry.session.dispose(); } catch { /* best-effort */ }
         this.sessions.delete(sessionId);
@@ -2593,11 +2830,23 @@ export class PiEngine implements Engine {
   // Session lifecycle
   // ═══════════════════════════════════════════════════════════════
 
+  private resolveRuntimeModelChoice(modelStr: string, restricted: boolean): string {
+    if (sessionAlias(modelStr)) {
+      if (!isPiPresetMappingReady(modelStr)) throw new Error(`MODEL_PRESET_UNAVAILABLE: ${modelStr}`);
+      const physical = resolvePiSessionChoice(modelStr);
+      if (!restricted) return physical;
+      throw new Error('Pinned Harness requires a physical model ID; a preset cannot replace its snapshot');
+    }
+    return restricted ? modelStr : resolveLegacyPiModelId(modelStr);
+  }
+
   private async switchModelIfNeeded(entry: PiSessionEntry, modelStr: string) {
     if (entry.harness?.allowedModels && !entry.harness.allowedModels.includes(modelStr)) {
       throw new Error(`Pinned Harness ${entry.harness.id}@${entry.harness.version} does not allow model ${modelStr}`);
     }
-    const parts = modelStr.split('/');
+    const runtimeModel = this.resolveRuntimeModelChoice(modelStr, Boolean(entry.harness?.allowedModels));
+    if (!isAllowedTowerPiModel(runtimeModel)) throw new Error(`Direct Pi provider is retired: ${runtimeModel}`);
+    const parts = runtimeModel.split('/');
     if (parts.length < 2) return;
     const provider = parts[0];
     const modelId = parts.slice(1).join('/');
@@ -2607,13 +2856,12 @@ export class PiEngine implements Engine {
       return; // same model, no switch needed
     }
 
-    const registry = this.modelRegistryManager.getModelRegistry();
-    const newModel = registry.find(provider, modelId);
+    const newModel = this.modelRegistryManager.resolvePiModel(`${provider}/${modelId}`);
     if (newModel) {
       await entry.session.setModel(newModel);
       console.log(`[Pi] Model switched to ${provider}/${modelId}`);
     } else {
-      console.warn(`[Pi] Model switch skipped: ${provider}/${modelId} not found in registry (keeping current model ${entry.session.model?.provider ?? '?'}/${entry.session.model?.id ?? '?'})`);
+      throw new Error(`Requested Pi model ${provider}/${modelId} not found in registry`);
     }
   }
 
@@ -2640,13 +2888,18 @@ export class PiEngine implements Engine {
           requestedRuntimeProfileVersion: opts.runtimeProfileVersion,
           invocationKind: 'session',
         });
+    // Restricted snapshots pin physical model IDs. Do not silently widen their
+    // allow-list by translating a legacy router alias to another model.
     const effectiveModelId = opts.model || harness.defaultModel || undefined;
+    const runtimeModelId = effectiveModelId
+      ? this.resolveRuntimeModelChoice(effectiveModelId, Boolean(harness.allowedModels)) : undefined;
     await this.modelRegistryManager.applyProjectVaultApiKeyOverrides({
       projectId: opts.projectId,
       userId: opts.userId,
-      model: effectiveModelId,
+      model: runtimeModelId,
     });
-    const model = this.modelRegistryManager.resolveSessionModel(effectiveModelId);
+    const resolvedSessionModel = this.modelRegistryManager.resolveSessionModel(runtimeModelId);
+    const model = opts.initialInterview ? {...resolvedSessionModel, maxTokens:Math.min(resolvedSessionModel.maxTokens,1024)} : resolvedSessionModel;
 
     // ── Build Tower context for Pi ──
     const projectName = path.basename(opts.cwd || process.cwd());
@@ -2680,7 +2933,9 @@ export class PiEngine implements Engine {
     });
 
     const parentSessionFile = sessionMgr.getSessionFile();
+    const pdfObservationState = new PdfObservationState();
     const {
+      operatorHostAccess: assembledOperatorHostAccess,
       allToolNames,
       allCustomTools,
       towerMcpServers,
@@ -2693,6 +2948,7 @@ export class PiEngine implements Engine {
       callbacks,
       registry,
       parentSessionFile,
+      pdfObservationState,
       projectName,
       towerPrompt,
       memoryContext,
@@ -2734,9 +2990,7 @@ export class PiEngine implements Engine {
     const { session } = await createAgentSession({
       cwd: opts.cwd,
       model,
-      // Default thinking level. Azure/gpt-5.x family should not be forced "off"
-      // because Pi SDK's no-reasoning shim correlates with empty response.failed
-      // events. Use low for the default LiteLLM Smartest route to reduce latency
+      // Use low for the default LiteLLM Smartest route to reduce latency
       // and cost; keep medium for other reasoning models. An explicit Agent/Model
       // Policy may opt into high/xhigh; max maps to xhigh until Pi supports more.
       thinkingLevel: effectiveThinkingLevel,
@@ -2758,11 +3012,41 @@ export class PiEngine implements Engine {
     // exposes both as public read-write properties (agent.d.ts:41-42), and the
     // agent loop reads them at execution time (agent-loop.js:363, 419), so
     // direct assignment after construction works.
-    session.agent.beforeToolCall = piBeforeToolCall;
-    session.agent.afterToolCall = piAfterToolCall;
-    // Give only a bounded newest visual tool result one provider opportunity.
-    // Older or over-budget PDF/image pixels become provider-only references.
-    session.agent.transformContext = createPiVisualContextTransform({ contextWindow: session.model?.contextWindow });
+    pdfObservationState.bindPersistence(sessionMgr.getBranch()
+      .filter((item: any) => item.type === 'custom' && item.customType === PDF_OBSERVATION_ENTRY)
+      .map((item: any) => item.data), value => sessionMgr.appendCustomEntry(PDF_OBSERVATION_ENTRY, value));
+    session.agent.beforeToolCall = async (context, signal) => {
+      if (getRequestedWait(sessionId)) return { block: true, reason: 'This turn already scheduled a wait; remaining tools must wait for the alarm.' };
+      // Existing authority/tool policy runs before observation flow control.
+      const policy = await piBeforeToolCall(context, signal);
+      if (policy?.block) return policy;
+      return await pdfObservationState.beforeToolCall(context) || policy;
+    };
+    const nativeFinish = session.agent.finishTurn;
+    const nativeNext = session.agent.prepareNextTurn;
+    session.agent.finishTurn = async (turn, signal) => {
+      // finishTurn runs after tool results entered the SDK history: no Abort/Stop projection.
+      if (getRequestedWait(sessionId)) return { action: 'end' };
+      const native = await nativeFinish?.(turn, signal);
+      if (signal?.aborted || native?.action === 'end') return native || undefined;
+      return await pdfObservationState.finishTurn(turn) || native || undefined;
+    };
+    session.agent.prepareNextTurn = async (signal) => {
+      const native = await nativeNext?.(signal);
+      if (signal?.aborted) return native;
+      const pdf = await pdfObservationState.prepareNextTurn();
+      if (!pdf) return native;
+      return { ...native, messages: [...(native?.messages || []), ...pdf.messages] } as any;
+    };
+    installPiAfterToolCallHook(session.agent, piAfterToolCall);
+    // Preserve native normalization; project only observed pixels and bounded notes.
+    installPiVisualContextTransform(session.agent, pdfObservationState);
+    // Capture terminal observation text too, before a later turn or native compaction.
+    session.subscribe((event: any) => {
+      if (event.type === 'message_end' && event.message?.role === 'assistant') {
+        pdfObservationState.observe([...session.agent.state.messages, event.message]);
+      }
+    });
     // Do not inject service_tier=priority for Smartest by default. Router-side
     // priority/fast experiments showed capacity volatility; the stable default is
     // the normal LiteLLM/Codex-LB tier unless an explicit operator experiment opts in.
@@ -2779,6 +3063,7 @@ export class PiEngine implements Engine {
 
     const entry: PiSessionEntry = {
       session,
+      pdfObservationState,
       isRunning: false,
       harness,
       harnessFingerprint,
@@ -2789,6 +3074,7 @@ export class PiEngine implements Engine {
         workbenchRolloutEnabled: opts.projectId
           ? (await resolveWorkbenchRollout(opts.projectId)).enabled
           : false,
+        operatorHostAccess: assembledOperatorHostAccess,
       },
       abortRequested: false,
       activePrompt: null,
@@ -2853,6 +3139,26 @@ export class PiEngine implements Engine {
 
     this.startingSessions.add(sessionId);
     let entry = this.sessions.get(sessionId);
+    try {
+      const operatorHostAccess = await resolveOperatorHostAccess({ projectId: opts.projectId, userRole: opts.userRole, channelSafeToolsOnly: opts.channelSafeToolsOnly });
+      const workbenchRolloutEnabled = opts.projectId
+        ? (await resolveWorkbenchRollout(opts.projectId)).enabled
+        : false;
+      if (entry && (
+        entry.toolContext?.userId !== opts.userId
+        || entry.toolContext?.userRole !== opts.userRole
+        || entry.toolContext?.projectId !== opts.projectId
+        || entry.toolContext?.workbenchRolloutEnabled !== workbenchRolloutEnabled
+        || (entry.toolContext?.operatorHostAccess ?? false) !== operatorHostAccess
+      )) {
+        this.dispose(sessionId);
+        entry = undefined;
+      }
+    } catch (err: any) {
+      this.startingSessions.delete(sessionId);
+      yield { type: 'engine_error', sessionId, message: `Pi authority refresh failed: ${err.message}`, recoverable: true };
+      return;
+    }
     if (!entry) {
       try {
         entry = await this.createSession(sessionId, opts, callbacks);
@@ -2879,6 +3185,7 @@ export class PiEngine implements Engine {
         const fallback = createPiLocalFallbackCompaction({
           session: manager,
           agent: (entry.session as any)?.agent,
+          refreshContext: (entry.session as any)?.refreshContext?.bind(entry.session),
           reason: 'manual /compact returned without persisting a compaction entry',
         });
         if (!fallback.succeeded) {
@@ -2938,6 +3245,9 @@ export class PiEngine implements Engine {
     }
 
     entry.safeStopRequested = true;
+    // A timer has no partial external side effect: cancel it to reach the safe tool boundary promptly.
+    await invalidateWaitAlarm(sessionId, entry?.safeStopRequested || entry?.abortRequested ? 'cancelled' : 'superseded');
+    cancelSessionSleep(sessionId);
     if (disposition.waitingFor === 'engine_boundary') {
       entry.abortRequested = true;
       try { entry.session.abort(); } catch { /* best-effort at an idle engine boundary */ }
@@ -2996,6 +3306,13 @@ export class PiEngine implements Engine {
     }
     console.log(`[Pi] steer() queued: session=${sessionId.slice(0, 8)} chars=${message.length} msgId=${messageId?.slice(0, 8) || '-'}`);
     await entry.session.steer(message);
+    entry.immediateSteering?.request(
+      () => entry.session.abort(),
+      () => Boolean(entry.abortRequested || entry.safeStopRequested || !entry.promptActive),
+    );
+    // The new instruction is safely queued before releasing an intentional wait.
+    await invalidateWaitAlarm(sessionId, entry?.safeStopRequested || entry?.abortRequested ? 'cancelled' : 'superseded');
+    cancelSessionSleep(sessionId);
   }
 
   async cancelSteer(sessionId: string, messageId: string): Promise<{ ok: boolean; text?: string; reason?: string }> {
@@ -3057,6 +3374,8 @@ export class PiEngine implements Engine {
   }
 
   abort(sessionId: string): void {
+    void invalidateWaitAlarm(sessionId, 'cancelled').catch(err => console.error('[wait] cancellation failed',err?.message));
+    cancelSessionSleep(sessionId);
     const entry = this.sessions.get(sessionId);
     if (entry?.isRunning) {
       entry.abortRequested = true;

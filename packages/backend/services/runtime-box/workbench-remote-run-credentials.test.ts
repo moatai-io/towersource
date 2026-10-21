@@ -4,7 +4,7 @@ import {
   discardRemoteRunCredentialEnvelope,
   issueRemoteRunCredentialEnvelope,
   remoteRunCredentialEnvelopeCount,
-} from './workbench-remote-run-credentials.js';
+} from '../execution/credentials/remote-run-credentials.js';
 
 describe('Remote Worker run-scoped Credential envelope', () => {
   it('returns only safe metadata and permits one matching consumption', () => {

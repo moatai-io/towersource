@@ -16,6 +16,12 @@ export interface ProjectWorkerFirstActivationInput {
   actorUserId: number;
   rolloutCohort?: string | null;
   reason: string;
+  /** True only when the Worker has durable static Project scope for file APIs. */
+  fileAuthorityReady: boolean;
+  /** Automatic assignment must never replace an existing deployment binding. */
+  requireUnbound?: boolean;
+  /** Evidence marker set only after the caller's direct execution/file smoke passes. */
+  verificationEvidence: 'worker-file-roundtrip';
 }
 
 export interface ProjectWorkerFirstActivationResult {
@@ -32,6 +38,7 @@ function validate(input: ProjectWorkerFirstActivationInput): void {
   if (!/^[A-Za-z0-9._-]{1,120}$/.test(input.deploymentId)) throw new Error('PROJECT_COMPUTE_DEPLOYMENT_ID_INVALID');
   if (!input.workerId.trim()) throw new Error('WORKER_ID_REQUIRED');
   if (!input.reason.trim()) throw new Error('WORKER_FIRST_ACTIVATION_REASON_REQUIRED');
+  if (input.verificationEvidence !== 'worker-file-roundtrip') throw new Error('WORKER_FIRST_ACTIVATION_VERIFICATION_REQUIRED');
 }
 
 /** Use this inside a caller-owned transaction when assignment lease checks must commit atomically too. */
@@ -43,15 +50,25 @@ export async function activateProjectWorkerFirstWithClient(
   const authorityMode = input.authorityMode ?? 'project';
   const values = [input.projectId, input.workerId.trim(), authorityMode, input.actorUserId];
 
+  if (input.requireUnbound) {
+    const inserted = await client.query(
+      `INSERT INTO project_compute_deployment_bindings(project_id,deployment_id,default_worker_id,workstation_mode,authority_mode,updated_by_user_id)
+       VALUES($1,$2,$3,TRUE,$4,$5)
+       ON CONFLICT(project_id,deployment_id) DO NOTHING RETURNING project_id`,
+      [input.projectId, input.deploymentId, input.workerId.trim(), authorityMode, input.actorUserId],
+    );
+    if (inserted.rows.length !== 1) throw new Error('ASSIGNMENT_EXISTING_BINDING_REQUIRES_EXPLICIT_CHANGE');
+  }
+
   await client.query(
     `INSERT INTO project_compute_settings(project_id,default_worker_id,workstation_mode,authority_mode,updated_by_user_id)
-     VALUES($1,$2,TRUE,$3,$4)
+     VALUES($1,$2,$5,$3,$4)
      ON CONFLICT(project_id) DO UPDATE SET
-       default_worker_id=EXCLUDED.default_worker_id,workstation_mode=TRUE,
+       default_worker_id=EXCLUDED.default_worker_id,workstation_mode=EXCLUDED.workstation_mode,
        authority_mode=EXCLUDED.authority_mode,updated_by_user_id=EXCLUDED.updated_by_user_id,updated_at=NOW()`,
-    values,
+    [...values, input.fileAuthorityReady],
   );
-  await client.query(
+  if (!input.requireUnbound) await client.query(
     `INSERT INTO project_compute_deployment_bindings(project_id,deployment_id,default_worker_id,workstation_mode,authority_mode,updated_by_user_id)
      VALUES($1,$2,$3,TRUE,$4,$5)
      ON CONFLICT(project_id,deployment_id) DO UPDATE SET

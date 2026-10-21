@@ -1,4 +1,5 @@
 import React from 'react';
+import { useChatStore } from '../../stores/chat-store';
 import { useTranslation } from 'react-i18next';
 import type { Project, SessionMeta } from '@tower/shared';
 import { AgentIdentityAvatar } from '../../features/agent-profile/AgentIdentityAvatar';
@@ -28,6 +29,7 @@ export function AITeamQuickPanel({
   onOpenAll,
 }: Props) {
   const { t } = useTranslation('layout');
+  const turnStateBySession = useChatStore((s) => s.turnStateBySession);
   const [queryInput, setQueryInput] = React.useState('');
 
   React.useEffect(() => {
@@ -147,7 +149,12 @@ export function AITeamQuickPanel({
                       <button key={session.id} onClick={() => { onSelectSession(session); onClose(); }} className={`flex w-full gap-3 py-3 text-left ${session.id === activeSessionId ? 'text-primary-300' : ''}`}>
                         {project && <AgentIdentityAvatar project={project} className="h-10 w-10 shrink-0 rounded-xl" />}
                         <span className="min-w-0">
-                          <b className="block truncate text-sm text-surface-200">{session.name}</b>
+                          <span className="flex min-w-0 items-center gap-1.5">
+                            {turnStateBySession[session.id]?.phase === 'awaiting_user' && (
+                              <span className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full border border-amber-400/60 text-amber-400 text-[11px] font-bold" aria-label={t('awaitingAnswer')} title={t('aiQuestionNeedsAnswer')}>?</span>
+                            )}
+                            <b className="block truncate text-sm text-surface-200">{session.name}</b>
+                          </span>
                           <small className="block truncate text-surface-500">
                             {project?.agent?.displayName || project?.name || t('aiTeamQuickPanel.teammate')} · {formatRelativeTime(session.updatedAt || session.createdAt)}
                           </small>

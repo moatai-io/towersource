@@ -15,22 +15,24 @@ describe('AI teammate management workspace with Session-centered navigation', ()
     expect(store).toContain("mobileTab: 'ai'");
     expect(store).toContain("activeView: 'chat'");
     expect(header).toContain("{ key: 'ai', label: t('conversationsNav'), badge: 0 }");
-    expect(header).toContain("{ key: 'work', label: t('workHubNav'), badge: workAttentionCount }");
+    expect(header).not.toContain("{ key: 'work'");
     expect(header).toContain('store.setAiNavigationSurface()');
-    expect(header).toContain("case 'work':");
     expect(sidebar).toContain("t('recentConversationsNav')");
     expect(sidebar).toContain("t('aiTeammateManagement')");
     expect(store).toContain("'chat' | 'aiTeam'");
-    expect(app.match(/activeView === 'aiTeam'/g)?.length).toBe(2);
+    expect(app).toContain('activeView={activeView}');
+    expect(app).toContain('aiTeam={aiTeamSurfaceContent}');
   });
 
   it('renders the same AI Team directory on desktop and mobile when explicitly opened', () => {
-    expect(app.match(/<AITeamHome projects=\{projects\}/g)?.length).toBe(2);
+    expect(app.match(/<AITeamHome projects=\{projects\}/g)?.length).toBe(1);
     expect(app).toContain('max-w-6xl');
+    expect(app).toContain('onClose={closeAiTeamHome}');
   });
 
-  it('keeps Sidebar as teammate/session navigation rather than embedding the team home', () => {
+  it('keeps Sidebar as teammate/session navigation while allowing explicit team-home navigation', () => {
     expect(sidebar).not.toContain('<AITeamHome');
-    expect(sidebar).not.toContain('tower-open-ai-team-home');
+    expect(sidebar).toContain("new CustomEvent('tower-open-ai-team-home')");
+    expect(sidebar).toContain("setActiveView('aiTeam')");
   });
 });

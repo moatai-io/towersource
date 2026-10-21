@@ -29,8 +29,7 @@ describe('dispatchWsSyncEnvelope', () => {
     const handlers = {
       all: vi.fn(),
       session: vi.fn(),
-      room: vi.fn(),
-      user: vi.fn(),
+        user: vi.fn(),
     };
 
     const envelope: WsSyncEnvelope = {
@@ -47,18 +46,15 @@ describe('dispatchWsSyncEnvelope', () => {
     const handlers = {
       all: vi.fn(),
       session: vi.fn(),
-      room: vi.fn(),
-      user: vi.fn(),
+        user: vi.fn(),
     };
 
     dispatchWsSyncEnvelope({ origin: 'server-a', scope: 'all', data: { a: 1 } }, 'server-b', handlers);
     dispatchWsSyncEnvelope({ origin: 'server-a', scope: 'session', sessionId: 's1', data: { b: 2 } }, 'server-b', handlers);
-    dispatchWsSyncEnvelope({ origin: 'server-a', scope: 'room', roomId: 'r1', data: { c: 3 } }, 'server-b', handlers);
     dispatchWsSyncEnvelope({ origin: 'server-a', scope: 'user', userId: 7, data: { d: 4 } }, 'server-b', handlers);
 
     expect(handlers.all).toHaveBeenCalledWith({ a: 1 });
     expect(handlers.session).toHaveBeenCalledWith('s1', { b: 2 });
-    expect(handlers.room).toHaveBeenCalledWith('r1', { c: 3 });
     expect(handlers.user).toHaveBeenCalledWith(7, { d: 4 });
   });
 
@@ -66,16 +62,13 @@ describe('dispatchWsSyncEnvelope', () => {
     const handlers = {
       all: vi.fn(),
       session: vi.fn(),
-      room: vi.fn(),
-      user: vi.fn(),
+        user: vi.fn(),
     };
 
     dispatchWsSyncEnvelope({ origin: 'server-a', scope: 'session', data: { bad: true } } as any, 'server-b', handlers);
-    dispatchWsSyncEnvelope({ origin: 'server-a', scope: 'room', data: { bad: true } } as any, 'server-b', handlers);
     dispatchWsSyncEnvelope({ origin: 'server-a', scope: 'user', data: { bad: true } } as any, 'server-b', handlers);
 
     expect(handlers.session).not.toHaveBeenCalled();
-    expect(handlers.room).not.toHaveBeenCalled();
     expect(handlers.user).not.toHaveBeenCalled();
   });
 });

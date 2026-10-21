@@ -20,7 +20,7 @@ describe('Agent Harness core contract', () => {
       source: 'legacy-default',
     });
     expect(harness.prompt).toMatchObject({
-      includeAgentIdentity: false,
+      includeAgentIdentity: true,
       includeProjectInstructions: true,
       includeMemory: true,
       includeSkills: true,

@@ -3,6 +3,7 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const app = fs.readFileSync(path.resolve(__dirname, 'App.tsx'), 'utf8');
+const bootstrap = fs.readFileSync(path.resolve(__dirname, 'hooks/useAppBootstrap.ts'), 'utf8');
 const setup = fs.readFileSync(path.resolve(__dirname, 'components/onboarding/FirstRunInferenceSetup.tsx'), 'utf8');
 const aiTeam = fs.readFileSync(path.resolve(__dirname, 'components/agents/AITeamHome.tsx'), 'utf8');
 const onboardingEn = JSON.parse(fs.readFileSync(path.resolve(__dirname, 'locales/en/onboarding.json'), 'utf8'));
@@ -12,7 +13,15 @@ describe('OSS first-run inference setup', () => {
   it('routes only first-admin creation through the provider setup gate', () => {
     expect(app).toContain("localStorage.setItem('tower:firstRunInferenceSetup', 'pending')");
     expect(app).toContain('setFirstRunInferenceSetup(true)');
-    expect(app).toContain('if (firstRunInferenceSetup && token)');
+    expect(app).toContain('if (firstRunInferenceSetup && token && !firstRunInferenceSetupResolved)');
+    expect(bootstrap).toContain("data.inferenceReadiness?.status === 'ready'");
+    expect(app).toContain("localStorage.removeItem('tower:firstRunInferenceSetup')");
+  });
+
+  it('does not expose a server-provisioned LiteLLM key to the first admin', () => {
+    expect(bootstrap).toContain("data.inferenceReadiness?.status === 'ready'");
+    expect(bootstrap).not.toContain('data.inferenceReadiness.apiKey');
+    expect(setup).not.toContain('litellm');
   });
 
   it('uses the authenticated encrypted provider setup API and clears the browser secret', () => {
@@ -33,7 +42,7 @@ describe('OSS first-run inference setup', () => {
   it('creates and opens the first default teammate without a reload', () => {
     const gate = app.slice(app.indexOf('if (firstRunInferenceSetup && token)'), app.indexOf('\n\n  return (', app.indexOf('if (firstRunInferenceSetup && token)')));
     expect(setup).toContain("modelId: 'openrouter/auto'");
-    expect(setup).toContain("modelId: 'gpt-5.6-terra'");
+    expect(setup).not.toContain('openai-responses-compatible');
     expect(setup).toContain('/primary-agent-commands/bootstrap');
     expect(setup).toContain("face: 'character:core-talent'");
     expect(setup).not.toContain('onChange={(event) => setDraft({ ...draft, modelId: event.target.value })}');
@@ -46,7 +55,8 @@ describe('OSS first-run inference setup', () => {
     expect(onboardingKo.provider.next).toContain('첫 AI 동료를 만들고 바로 엽니다');
   });
 
-  it('does not count a file-only Project as an AI teammate', () => {
-    expect(aiTeam).toContain('project.agent?.explicit === true');
+  it('includes active non-system Projects in the Agent directory while excluding system workspaces', () => {
+    expect(aiTeam).toContain('const teammates = projects.filter((project) => !project.systemKey && !project.archived);');
+    expect(aiTeam).toContain("t('legacyTeammate')");
   });
 });

@@ -1,3 +1,5 @@
+import { deployErrorResponse } from '../services/deploy/deploy-error.js';
+import {publishedSiteUrl} from '../services/publishing/published-url.js';
 /**
  * pi-publish-tool.ts — first-class AI publishing bridge.
  *
@@ -6,6 +8,7 @@
  * Public API: createPublishSiteTool(ctx).
  */
 import path from 'path';
+import { assertSessionAllowsSharedArtifactWrite } from '../services/session/session-artifact-privacy.js';
 import { promises as fs } from 'fs';
 import { Type } from '@sinclair/typebox';
 import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
@@ -14,6 +17,7 @@ import { deploy, type Access } from '../services/deploy/deploy-engine.js';
 import { isPathAccessible, isPathWritableByRole } from '../services/pm/project-access.js';
 
 export interface PublishToolContext {
+  sessionId?: string;
   userId?: number;
   userRole?: string;
   cwd: string;
@@ -58,14 +62,7 @@ function resolveSourceDir(input: string, cwd: string): string {
 }
 
 function siteUrlForSlug(slug: string): string | null {
-  if (!config.publicUrl) return null;
-  const u = new URL(config.publicUrl);
-  const host = u.host;
-  const protocol = u.protocol || 'https:';
-  // Canonical Publishing URL is the wildcard subdomain form on every Tower VM.
-  // `/sites/<slug>/` is only a compatibility path and must not be emitted by AI
-  // tools because self-hosted VMs can route it to the Tower SPA.
-  return `${protocol}//${slug}.${host}/`;
+  return publishedSiteUrl(slug, config.publicUrl, config.publishingBaseUrl) ?? null;
 }
 
 async function verifyUrl(url: string | null): Promise<{ ok: boolean; status?: number; error?: string }> {
@@ -104,6 +101,7 @@ export function createPublishSiteTool(ctx: PublishToolContext): ToolDefinition {
       description?: string;
     }) {
       try {
+        await assertSessionAllowsSharedArtifactWrite(ctx.sessionId);
         if (!ctx.userId) return textResult('publish_site failed: authenticated user context is missing.', true);
         if (ctx.userRole === 'viewer' || ctx.userRole === 'guest') {
           return textResult('publish_site failed: publishing requires project member or above.', true);
@@ -150,7 +148,7 @@ export function createPublishSiteTool(ctx: PublishToolContext): ToolDefinition {
         const url = result.url || siteUrlForSlug(slug);
         const verification = await verifyUrl(url);
         const lines = [
-          'publish_site succeeded.',
+          verification.ok ? 'publish_site succeeded.' : 'publish_site published; URL verification failed. Do not automatically republish.',
           `name: ${name}`,
           `slug: ${slug}`,
           `access: ${access}`,
@@ -160,7 +158,8 @@ export function createPublishSiteTool(ctx: PublishToolContext): ToolDefinition {
         ];
         return textResult(lines.join('\n'), !verification.ok);
       } catch (err: any) {
-        return textResult(`publish_site failed: ${err?.message || String(err)}`, true);
+        const diagnostic = deployErrorResponse(err);
+        return textResult(`publish_site failed: ${JSON.stringify(diagnostic)}`, true);
       }
     },
   } as ToolDefinition;

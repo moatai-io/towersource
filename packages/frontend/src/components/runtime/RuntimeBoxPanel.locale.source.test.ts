@@ -8,6 +8,8 @@ describe('RuntimeBoxPanel locale contract', () => {
   it('routes capacity, stop, cleanup, and empty states through locale keys', () => {
     for (const key of [
       'runtimeBox.recoveredError',
+      'runtimeBox.legacyScope',
+      'runtimeBox.boxCount',
       'runtimeBox.capacity.exceedsTitle',
       'runtimeBox.capacity.serverLimit',
       'runtimeBox.stop.message',

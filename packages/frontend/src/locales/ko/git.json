@@ -6,5 +6,19 @@
   "auto": "자동",
   "manual": "수동",
   "files": "파일",
-  "snapshotMessagePlaceholder": "스냅샷 메시지..."
+  "snapshotMessagePlaceholder": "스냅샷 메시지...",
+  "justNow": "방금",
+  "minutesAgo": "{{count}}분 전",
+  "hoursAgo": "{{count}}시간 전",
+  "daysAgo": "{{count}}일 전",
+  "filesChanged": "{{count}}개 파일",
+  "rollbackComplete": "스냅샷으로 되돌렸습니다.",
+  "rollbackFailed": "롤백하지 못했습니다.",
+  "diffFailed": "변경 내용을 불러오지 못했습니다.",
+  "noChanges": "변경 사항이 없습니다.",
+  "noSnapshots": "아직 저장된 스냅샷이 없습니다.",
+  "loadMore": "더 보기",
+  "confirmRollbackTitle": "이 스냅샷으로 되돌릴까요?",
+  "confirmRollbackDescription": "이 시점의 파일 상태로 되돌립니다.",
+  "rollbackRecord": "복원된 파일 상태는 새 롤백 커밋으로 기록됩니다. 미저장 변경 내용은 잃을 수 있습니다."
 }

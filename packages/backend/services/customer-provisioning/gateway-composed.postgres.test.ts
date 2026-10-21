@@ -1,0 +1,57 @@
+import {readCustomerVaultDelivery} from './customer-vault-readback.js';
+import {spawn} from 'node:child_process';
+import {it,expect,vi} from 'vitest';import {Pool} from 'pg';import {readFile} from 'node:fs/promises';import net from 'node:net';import {createHash,randomBytes} from 'node:crypto';
+const state=vi.hoisted(()=>({pool:null as any}));vi.mock('../../db/pg.js',()=>({getPgPool:()=>state.pool}));vi.mock('../../db/pg-repo.js',()=>({queryOne:async(s:string,v:any[])=> (await state.pool.query(s,v)).rows[0]??null,query:async(s:string,v:any[])=>(await state.pool.query(s,v)).rows,execute:async(s:string,v:any[])=>{await state.pool.query(s,v);}}));
+vi.mock('../../config.js',async original=>{const actual=await original<any>();const {randomBytes}=await import('node:crypto');return {...actual,config:{...actual.config,sandbox:{...actual.config.sandbox,secretStoreMasterKey:randomBytes(32).toString('hex')}}};});
+import {upsertApiKeyCredential} from '../credential-vault/credential-vault-service.js';import {getSecretForProjectBinding} from '../secret/secret-store.js';
+import {customerVaultReceiver} from './customer-vault-receiver.js';import {consumeCustomerIntent} from './pg-intent-store.js';import {consumeCustomerDeliveryIntent} from './pg-delivery-intent.js';import {assertLockedCustomerAuthority} from './pg-locked-authority.js';import {applyCustomerGatewaySetup,preflightCustomerGatewaySetup,verifyCustomerGatewaySetup} from './customer-gateway-setup.js';import {customerDeliveryExpressAdapter} from './customer-delivery-route.js';import {startCustomerDeliveryListener} from './customer-delivery-listener.js';import {startCentralIssuerListener} from './central-issuer-listener.js';import {startCustomerEnrollmentListener} from './enrollment-listener.js';import {centralZuploRuntime} from './central-zuplo-runtime.js';import {customerRelayEnrollmentPorts} from './customer-relay-enrollment-ports.js';import {centralRelayContractHash} from './central-relay.js';
+const url=process.env.CUSTOMER_GATEWAY_TEST_DATABASE_URL;
+it.skipIf(!url)('real DB authority and three HTTP hops apply Gateway once; provider is a fixture, canonical Vault and AES-GCM encryption are real',async()=>{
+ const pool=new Pool({connectionString:url});state.pool=pool;const closers:Array<()=>Promise<void>>=[];
+ const free=async()=>{const s=net.createServer();await new Promise<void>(r=>s.listen(0,'127.0.0.1',r));const port=(s.address() as net.AddressInfo).port;await new Promise<void>(r=>s.close(()=>r()));return port;};
+ const policy={profileVersion:'1',enabledApiIds:['naver'],quotaMode:'observe' as const};const hash=createHash('sha256').update(JSON.stringify({enabledApiIds:['naver'],profileVersion:'1',quotaMode:'observe'})).digest('hex');
+ const d={intentId:'11111111-1111-4111-8111-111111111111',instanceId:'22222222-2222-4222-8222-222222222222',customerId:'fixture',approvalHash:'a'.repeat(64),policyHash:hash,providerKind:'zuplo' as const,credentialId:'gateway'};const b={customerId:d.customerId,instanceId:d.instanceId,projectId:'33333333-3333-4333-8333-333333333333',actorUserId:1};const setup={profileId:'tower-shared-api-v1',gatewayBaseUrl:'https://fixture.example/',policy};const token='fixture-'.repeat(8);let issued=0,stored=0;let secret='';
+ try{
+ await pool.query('CREATE TABLE users(id bigint PRIMARY KEY,role text,disabled integer,approval_status text);CREATE TABLE projects(id uuid PRIMARY KEY);CREATE TABLE project_members(project_id uuid,user_id bigint,role text);CREATE TABLE workspace_credentials(id text PRIMARY KEY,kind text,provider text,display_name text,secret_name text,default_env_name text,scope text,project_id uuid,enabled boolean DEFAULT true,metadata jsonb,rotated_at timestamptz,created_by bigint,updated_by bigint,updated_at timestamptz DEFAULT now())');
+ await pool.query(`CREATE TABLE credential_audit_events(id bigserial,credential_id text,project_id uuid,event_type text,actor_user_id bigint,provider text,target_type text,target_ref jsonb,status text,error_code text,message text);CREATE TABLE secret_store(id bigserial PRIMARY KEY,name text,value_encrypted bytea,scope text,owner_user_id bigint,owner_tool_id text,description text,created_by bigint,rotated_at timestamptz);`);
+ await pool.query(await readFile(new URL('./intent-schema.candidate.sql',import.meta.url),'utf8'));await pool.query(await readFile(new URL('./locked-approval.candidate.sql',import.meta.url),'utf8'));await pool.query(await readFile(new URL('../../db/migrations/211_gateway_profiles.sql',import.meta.url),'utf8'));
+ await pool.query("INSERT INTO users VALUES(1,'admin',0,'active');INSERT INTO projects VALUES('33333333-3333-4333-8333-333333333333')");
+ await pool.query("INSERT INTO customer_runtime_approvals VALUES($1,$2,$3,$4,1,ARRAY['enrollment-issue','enrollment-readback'],now()+interval '1 hour',false)",[d.approvalHash,d.customerId,d.instanceId,b.projectId]);
+ await pool.query("INSERT INTO customer_service_intents VALUES($1,$2,$3,$4,'enrollment-issue','zuplo',$5,1,now()+interval '1 hour',false,NULL)",[d.intentId,d.customerId,d.instanceId,d.approvalHash,b.projectId]);await pool.query('INSERT INTO customer_delivery_intents VALUES($1,$2,$3,NULL)',[d.intentId,hash,d.credentialId]);
+ const access=async()=>{const c=await pool.connect();try{await assertLockedCustomerAuthority(c,{...d,operation:'enrollment-issue',binding:b});}finally{c.release();}};
+ const readback=async()=>readCustomerVaultDelivery(d,b);
+ const receiver=customerVaultReceiver({resolve:async()=>b,assertDestinationAbsent:async()=>{if((await pool.query('SELECT id FROM workspace_credentials WHERE id=$1',[d.credentialId])).rowCount)throw Error('exists');},consume:(x,y)=>consumeCustomerDeliveryIntent(pool,x,y),readback}, {access,store:async(x:any)=>{stored++;secret=x.secretValue;return upsertApiKeyCredential(x);}},undefined,{preflight:x=>preflightCustomerGatewaySetup(x,setup),apply:(x,y,r)=>applyCustomerGatewaySetup(x,y,r,setup),verify:(x,y,r)=>verifyCustomerGatewaySetup(x,y,r,setup)});
+ const receiverPort=await free();const receiverServer=(await startCustomerDeliveryListener({TOWER_CUSTOMER_DELIVERY_POLICY:'/fixture',TOWER_CUSTOMER_DELIVERY_PORT:String(receiverPort),TOWER_CUSTOMER_DELIVERY_TOKEN:token,TOWER_INSTANCE_ID:d.instanceId},true,()=>customerDeliveryExpressAdapter({serviceToken:token,ports:receiver},()=>{})))!;closers.push(()=>new Promise<void>(r=>{receiverServer.close(()=>r());receiverServer.closeIdleConnections();}));
+ const {intentId,...fields}=d;const contract={...fields,authorityId:'fixture',revision:'c'.repeat(40),issuerRuntimeId:'central',receiverRuntimeId:'customer'};let consumed=false;
+ const central=centralZuploRuntime({serviceToken:token,management:{consumerExists:async()=>false,createConsumer:async()=>{issued++;return {id:'csmr_fixture',name:'vm-fixture',apiKeys:[{key:'synthetic-test-key'}]};}},authority:{contractFor:async()=>contract,authorizeContract:async()=>{},attest:async()=>{},consumeRelayIntent:async()=>{if(consumed)throw Error('replay');consumed=true;},verifyReceiver:async()=>{},approvedDelivery:async()=>({policy:{...d,account:'fixture',bucketId:'bucket',consumerName:'vm-fixture'},receiver:{baseUrl:`http://127.0.0.1:${receiverPort}`,serviceToken:token,allowLoopbackForTests:true}})}});
+ const cs=await startCentralIssuerListener(central,await free());closers.push(()=>cs.close());
+ const ports=customerRelayEnrollmentPorts({approved:async()=>({delivery:d,contract,transport:{endpoint:'https://fixture.example/internal',serviceToken:token,contractHash:centralRelayContractHash(contract)}}),readback},async(_u,init)=>fetch(`http://127.0.0.1:${cs.port}/internal/customer-provider-enrollment`,init));
+ const es=await startCustomerEnrollmentListener({serviceToken:token,ports,authority:{readRuntimeBinding:async()=>b,authorize:access,consumeIntent:x=>consumeCustomerIntent(pool,x,assertLockedCustomerAuthority)}},await free());closers.push(()=>new Promise<void>(r=>{es.close(()=>r());es.closeIdleConnections();}));
+ const endpoint=`http://127.0.0.1:${(es.address() as net.AddressInfo).port}/v1/enrollment`;const body={customerId:d.customerId,instanceId:d.instanceId,approvalHash:d.approvalHash,providerKind:'zuplo',intentId:d.intentId,operation:'enrollment-issue'};
+ const send=()=>fetch(endpoint,{method:'POST',headers:{authorization:'Bearer '+token,'content-type':'application/json'},body:JSON.stringify(body)});
+ const cp=process.env.CUSTOMER_GATEWAY_CP_SOURCE;
+ if(cp){
+  const proposal={schemaVersion:'1',customerId:d.customerId,instanceId:d.instanceId,vault:{targetInstanceId:d.instanceId,scope:'workspace',credentialId:d.credentialId},provider:{kind:'zuplo',account:'fixture',bucketId:'bucket',consumerName:'vm-fixture',policy}};
+  const result=await new Promise<string>((resolve,reject)=>{const child=spawn(process.execPath,['--import','tsx','scripts/customer-gateway-http-probe.ts'],{cwd:cp,stdio:['pipe','pipe','pipe']});let out='',err='';child.stdout.on('data',x=>out+=x);child.stderr.on('data',x=>err+=x);child.on('error',reject);child.on('exit',code=>code===0?resolve(out):reject(Error('CP probe failed: '+err)));child.stdin.end(JSON.stringify({proposal,intentId:d.intentId,config:{baseUrl:endpoint.replace('/v1/enrollment',''),serviceToken:token,customerId:d.customerId,instanceId:d.instanceId,approvalHash:d.approvalHash}}));});
+  expect(JSON.parse(result)).toEqual({stored:true,providerResourceId:'csmr_fixture',replayDenied:true});expect(result).not.toContain(secret);
+ }else{
+  const response=await send();expect(response.status).toBe(200);expect(await response.text()).not.toContain(secret);expect((await send()).status).not.toBe(200);
+ }
+ expect(issued).toBe(1);expect(stored).toBe(1);
+ const vault=await pool.query('SELECT secret_name FROM workspace_credentials WHERE id=$1',[d.credentialId]);expect(vault.rows[0].secret_name).toMatch(/^VAULT_[A-F0-9]{56}$/);
+ expect(await getSecretForProjectBinding(vault.rows[0].secret_name)).toBe(secret);
+ const encrypted=await pool.query('SELECT value_encrypted FROM secret_store');expect(encrypted.rows).toHaveLength(1);expect(JSON.stringify(encrypted.rows)).not.toContain(secret);
+ expect((await pool.query("SELECT count(*)::int n FROM credential_audit_events WHERE event_type='credential_created'")).rows[0].n).toBe(1);
+
+ const p=await pool.query('SELECT status,credential_id,consumer_ref,applied_state_hash=desired_state_hash AS matched FROM gateway_profiles WHERE id=$1',[setup.profileId]);expect(p.rows[0]).toEqual({status:'pending',credential_id:'gateway',consumer_ref:'csmr_fixture',matched:true});
+ expect((await pool.query('SELECT api_id FROM gateway_profile_catalog_entries WHERE enabled')).rows).toEqual([{api_id:'naver'}]);
+ // Canonical readback must really decrypt: corrupt ciphertext cannot pass from metadata alone.
+ const before=await pool.query('SELECT value_encrypted FROM secret_store');
+ await pool.query("UPDATE secret_store SET value_encrypted=decode('00','hex')");await expect(readback()).rejects.toThrow();
+ await pool.query('UPDATE secret_store SET value_encrypted=$1',[before.rows[0].value_encrypted]);expect((await readback()).stored).toBe(true);
+ await pool.query('UPDATE users SET disabled=1 WHERE id=1');await expect(readback()).rejects.toThrow();
+ await pool.query('UPDATE users SET disabled=0 WHERE id=1');
+ await pool.query('UPDATE customer_runtime_approvals SET revoked=true');expect((await send()).status).not.toBe(200);expect(issued).toBe(1);expect(stored).toBe(1);
+
+ }finally{for(const close of closers.reverse())await close();await pool.end();}
+},30000);

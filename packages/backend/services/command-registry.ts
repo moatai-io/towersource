@@ -313,6 +313,9 @@ function isWorkflowCommandManifestFile(fileName: string): boolean {
 export function loadWorkflowCommandEntries(rootDir?: string, scope: SkillScope | 'system' = 'project'): CommandEntry[] {
   if (!rootDir) return [];
   const commandRoots = [
+    // Project-authored commands belong beside `skills/` in the visible project tree.
+    path.join(rootDir, 'commands'),
+    // Compatibility locations remain readable, but never outrank the canonical root.
     path.join(rootDir, '.project', 'commands'),
     path.join(rootDir, '.tower', 'commands'),
   ];
@@ -336,7 +339,11 @@ export function loadWorkflowCommandEntries(rootDir?: string, scope: SkillScope |
           scope,
           sourcePath: filePath,
         });
-        if (seen.has(entry.canonical)) continue;
+        const collidingAlias = entry.aliases.find((alias) => seen.has(alias));
+        if (seen.has(entry.canonical) || collidingAlias) {
+          console.warn(`[commands] skipping conflicting workflow command ${filePath}: ${collidingAlias || entry.canonical} is already registered`);
+          continue;
+        }
         seen.add(entry.canonical);
         for (const alias of entry.aliases) seen.add(alias);
         entries.push(entry);

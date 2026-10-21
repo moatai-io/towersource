@@ -1,4 +1,6 @@
 import React, { useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import type { TFunction } from 'i18next';
 import { parseLooseJson, safeStr } from '../shared/parse-loose-json';
 import { BlockFallback } from '../shared/RichContent';
 import { splitFilePathsInText as splitTowerFilePathsInText } from '../../utils/file-path-links';
@@ -20,7 +22,7 @@ interface Props {
   onFileClick?: (path: string) => void;
 }
 
-function renderOutputText(text: string, onFileClick?: (path: string) => void) {
+function renderOutputText(text: string, t: TFunction<'chat'>, onFileClick?: (path: string) => void) {
   if (!onFileClick) return text;
   const parts = splitTowerFilePathsInText(text, onFileClick, (filePath, key) => (
     <button
@@ -31,7 +33,7 @@ function renderOutputText(text: string, onFileClick?: (path: string) => void) {
         color: 'var(--th-prose-link)',
         textDecorationColor: 'color-mix(in srgb, var(--th-prose-link) 40%, transparent)',
       }}
-      title={`Open ${filePath}`}
+      title={t('openFile', { path: filePath })}
       onClick={(e) => {
         e.stopPropagation();
         onFileClick(filePath);
@@ -44,6 +46,7 @@ function renderOutputText(text: string, onFileClick?: (path: string) => void) {
 }
 
 export default function TerminalBlock({ raw, fallbackCode, onFileClick }: Props) {
+  const { t } = useTranslation('chat');
   const [copied, setCopied] = useState<number | null>(null);
   const [collapsed, setCollapsed] = useState<Set<number>>(new Set());
 
@@ -88,7 +91,7 @@ export default function TerminalBlock({ raw, fallbackCode, onFileClick }: Props)
           <div className="w-2.5 h-2.5 rounded-full tone-warning tone-bg" />
           <div className="w-2.5 h-2.5 rounded-full tone-success tone-bg" />
         </div>
-        <span className="text-[12px] text-gray-600 ml-2">{spec.title || 'Terminal'}</span>
+        <span className="text-[12px] text-gray-600 ml-2">{spec.title || t('terminal.title', { defaultValue: '터미널' })}</span>
       </div>
 
       <div className="p-2 space-y-1">
@@ -102,7 +105,7 @@ export default function TerminalBlock({ raw, fallbackCode, onFileClick }: Props)
                 <span
                   className="text-gray-200 cursor-pointer hover:text-white flex-1"
                   onClick={() => copyCmd(entry.cmd, i)}
-                  title="Click to copy"
+                  title={t('terminal.copyCommand', { defaultValue: '클릭하여 명령 복사' })}
                 >
                   {safeStr(entry.cmd)}
                 </span>
@@ -112,7 +115,7 @@ export default function TerminalBlock({ raw, fallbackCode, onFileClick }: Props)
                   </span>
                 )}
                 {copied === i && (
-                  <span className="ml-1 text-[11px] tone-success tone-text">copied</span>
+                  <span className="ml-1 text-[11px] tone-success tone-text">{t('copied')}</span>
                 )}
               </div>
               {/* Output */}
@@ -122,13 +125,13 @@ export default function TerminalBlock({ raw, fallbackCode, onFileClick }: Props)
                     onClick={() => toggleCollapse(i)}
                     className="text-[11px] text-gray-600 hover:text-gray-400 select-none mb-0.5"
                   >
-                    {isCollapsed ? '▸ show output' : '▾ hide output'}
+                    {isCollapsed ? `▸ ${t('terminal.showOutput', { defaultValue: '출력 보기' })}` : `▾ ${t('terminal.hideOutput', { defaultValue: '출력 숨기기' })}`}
                   </button>
                   {!isCollapsed && (
                     <pre className={`whitespace-pre-wrap pl-4 ${
                       entry.status === 'error' ? 'text-red-300/80' : 'text-gray-500'
                     }`}>
-                      {renderOutputText(safeStr(entry.output), onFileClick)}
+                      {renderOutputText(safeStr(entry.output), t, onFileClick)}
                     </pre>
                   )}
                 </div>

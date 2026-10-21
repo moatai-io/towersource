@@ -1,4 +1,6 @@
 import fs from 'node:fs';
+import vm from 'node:vm';
+import ts from 'typescript';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
@@ -50,7 +52,20 @@ describe('spawn-rpc runner start acknowledgement contract', () => {
   });
 });
 
+describe('spawn-rpc session-send authority contract', () => {
+  it('delegates target authorization to the shared send-access policy with diagnostics', () => {
+    expect(SRC).toContain("import { canSendSessionMessage, getUserAccessiblePaths, resolveSessionProjectRoot } from '../pm/project-access.js'");
+    expect(SRC).toContain('const access = await canSendSessionMessage(req.targetSessionId, req.callerUserId, req.callerRole)');
+    expect(SRC).toContain('SEND_PERMISSION_DENIED (${access.reason}): ${access.message}');
+    expect(SRC).toContain('reason: access.reason');
+    expect(SRC).not.toContain("const isAdmin = req.callerRole === 'admin'");
+  });
+});
+
 describe('spawn-rpc authority inheritance contract', () => {
+  it('inherits private visibility into a child instead of the shared project default', () => {
+    expect(SRC).toContain("{ visibility: parent.visibility === 'private' ? 'private' : 'project' }");
+  });
   it('runs spawned children with the parent role and scoped paths', () => {
     expect(SRC).toContain('parentRole: string');
     expect(SRC).toContain('getUserAccessiblePaths(req.parentUserId, req.parentRole)');
@@ -96,7 +111,7 @@ describe('spawn-rpc durable completion shadow contract', () => {
     expect(done.indexOf('await recordCompletionReportShadow')).toBeLessThan(done.indexOf('await claimDeliveryById'));
     expect(done.indexOf('await recordCompletionReportShadow')).toBeLessThan(done.indexOf('await injectIntoCallerDirect'));
     expect(done.indexOf('await recordCompletionReportShadow')).toBeLessThan(done.indexOf('await injectAndWake'));
-    expect(done.indexOf('await recordCompletionReportShadow')).toBeLessThan(done.indexOf('pending.delete(childSessionId)'));
+    expect(done.indexOf('await recordCompletionReportShadow')).toBeLessThan(done.indexOf('pending.delete(childSessionId)', done.indexOf('await recordCompletionReportShadow')));
   });
 });
 
@@ -211,5 +226,56 @@ describe('spawn-rpc agent report steering contract', () => {
     expect(SRC).toContain('detailArtifacts');
     expect(SRC).toContain('detailArtifactPaths');
     expect(SRC).toContain('readIfNeeded');
+  });
+});
+
+// Execute the small production budget block without importing DB/engine services.
+describe('auto-wake chain budget', () => {
+  function budget() {
+    const start = SRC.indexOf('const MAX_AUTO_WAKE_CHAIN =');
+    const end = SRC.indexOf('// ── Pending wake queue', start);
+    expect(start).toBeGreaterThan(0);
+    expect(end).toBeGreaterThan(start);
+    const code = ts.transpile(SRC.slice(start, end).replace('export function', 'function'));
+    return vm.runInNewContext(code + '\n({ consumeAutoWakeBudget, resetAutoWakeCount, max: MAX_AUTO_WAKE_CHAIN })') as {
+      consumeAutoWakeBudget(id: string): boolean; resetAutoWakeCount(id: string): void; max: number;
+    };
+  }
+  it('permits 10 automatic resumes and blocks the 11th', () => {
+    const b = budget(); expect(b.max).toBe(10);
+    for (let i = 0; i < 10; i++) expect(b.consumeAutoWakeBudget('parent')).toBe(true);
+    expect(b.consumeAutoWakeBudget('parent')).toBe(false);
+    expect(b.consumeAutoWakeBudget('parent')).toBe(false);
+  });
+  it('isolates parents and restores the full budget on user reset', () => {
+    const b = budget();
+    for (let i = 0; i < 10; i++) b.consumeAutoWakeBudget('a');
+    expect(b.consumeAutoWakeBudget('b')).toBe(true);
+    b.resetAutoWakeCount('a');
+    for (let i = 0; i < 10; i++) expect(b.consumeAutoWakeBudget('a')).toBe(true);
+    expect(b.consumeAutoWakeBudget('a')).toBe(false);
+  });
+});
+
+describe('persistent completion delivery convergence', () => {
+  it('routes run-bearing callbacks through the same delivery helper as recovery', () => {
+    const source = fs.readFileSync(path.resolve(import.meta.dirname, 'spawn-rpc.ts'), 'utf8');
+    const start = source.indexOf('if (agentReport?.runId &&');
+    expect(start).toBeGreaterThan(0);
+    const branch = source.slice(start, source.indexOf("const child = await getSession", start));
+    expect(branch).toContain('await ensureAgentRunReportDelivered(');
+    expect(branch).toContain('await markCallbackFired(cb.spawnId)');
+    expect(branch).toContain('return;');
+  });
+});
+
+describe('durable report startup order', () => {
+  it('does not wait for a runner-owned acknowledgement before starting the runner', () => {
+    const start = SRC.indexOf('async function runWakeInBackground');
+    const wake = SRC.slice(start);
+    const runner = wake.indexOf('await runSessionTurnStream(');
+    expect(runner).toBeGreaterThan(0);
+    expect(wake.slice(0, runner)).not.toContain('await startAck.started');
+    expect(wake.slice(runner)).toContain('await markClaimedDeliveryStarted(');
   });
 });

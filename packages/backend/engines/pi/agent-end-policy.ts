@@ -1,4 +1,6 @@
 // Owns pure classification of Pi agent_end catch-path errors.
+import { isAllowedTowerPiModel } from './provider-boundary.js';
+import { getModelDefaults } from '../../config.js';
 // Public API: analyzePiAgentEndError.
 
 export interface PiAgentEndAnalysis {
@@ -22,11 +24,18 @@ export function isCodexAuthInvalidatedError(message: unknown): boolean {
   return /invalidated oauth token|authentication token has been invalidated|please try signing in again/i.test(text);
 }
 
+// Legacy Codex errors must never cross to a direct Azure/OpenAI provider.
 export function getCodexFallbackModelSpecs(envValue = process.env.PI_CODEX_FALLBACK_MODELS): string[] {
-  if (envValue && envValue.trim()) {
-    return envValue.split(',').map(s => s.trim()).filter(Boolean);
-  }
-  return ['azure-openai-responses-eastus2/gpt-5.5'];
+  const specs = envValue?.trim() ? envValue.split(',').map(s => s.trim()).filter(Boolean) : [getModelDefaults().session];
+  return specs.filter(isAllowedTowerPiModel);
+}
+
+// Tower proactive and overflow compaction use the session's current model by
+// default. Only an explicit Router/OpenRouter override switches those paths;
+// the Codex recovery setting is deliberately independent. SDK automatic and
+// manual compaction continue to use the session's model.
+export function getCompactionFallbackModelSpecs(envValue = process.env.PI_COMPACTION_FALLBACK_MODELS): string[] {
+  return envValue?.trim() ? envValue.split(',').map(s => s.trim()).filter(isAllowedTowerPiModel) : [];
 }
 
 export function analyzePiAgentEndError(params: {

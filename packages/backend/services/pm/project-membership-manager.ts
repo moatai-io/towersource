@@ -62,9 +62,13 @@ export async function isProjectOwner(projectId: string, userId: number): Promise
   return !!row;
 }
 
-export async function isProjectMember(projectId: string, userId: number): Promise<boolean> {
+export async function isProjectMember(projectId: string, userId: number, operation: 'read' | 'write' = 'read'): Promise<boolean> {
+  if (!Number.isSafeInteger(userId) || userId <= 0) return false;
   const row = await queryOne(
-    'SELECT 1 FROM project_members WHERE project_id = $1 AND user_id = $2',
+    `SELECT 1 FROM project_members pm JOIN users u ON u.id = pm.user_id
+     WHERE pm.project_id = $1 AND pm.user_id = $2 AND u.disabled = 0
+       AND u.role IN ('admin', 'operator', 'member', 'viewer', 'guest')
+       ${operation === 'write' ? "AND pm.role IN ('owner', 'member') AND u.role IN ('admin', 'operator', 'member')" : ''}`,
     [projectId, userId]
   );
   return !!row;
@@ -82,23 +86,29 @@ export async function autoSeedProjectMembers(projectId: string): Promise<number>
     INSERT INTO project_members (project_id, user_id, role)
     SELECT $1, u.id, 'member'
     FROM users u
-    WHERE u.disabled = 0 AND u.role NOT IN ('viewer', 'guest')
+    WHERE u.disabled = 0 AND u.role IN ('admin', 'operator', 'member')
+      AND EXISTS (SELECT 1 FROM projects p WHERE p.id = $1 AND p.user_id IS NULL
+        AND p.system_key IN ('general', 'introduction')
+        AND COALESCE(p.archived, 0) = 0 AND COALESCE(p.lifecycle_status, 'active') = 'active')
     ON CONFLICT DO NOTHING
   `, [projectId]);
   return result.changes;
 }
 
 /**
- * Auto-seed a newly-created user as member of every active project.
+ * Auto-seed a newly-created user only into explicit public system projects.
  * viewer/guest are explicit-invite only.
  */
 export async function autoSeedUserMemberships(userId: number, role: string): Promise<number> {
-  if (role === 'viewer' || role === 'guest') return 0;
+  if (!['admin', 'operator', 'member'].includes(role)) return 0;
   const result = await execute(`
     INSERT INTO project_members (project_id, user_id, role)
     SELECT p.id, $1, 'member'
     FROM projects p
-    WHERE (p.archived IS NULL OR p.archived = 0)
+    WHERE p.user_id IS NULL AND p.system_key IN ('general', 'introduction')
+      AND COALESCE(p.archived, 0) = 0 AND COALESCE(p.lifecycle_status, 'active') = 'active'
+      AND EXISTS (SELECT 1 FROM users u WHERE u.id = $1 AND u.disabled = 0
+        AND u.role IN ('admin', 'operator', 'member'))
     ON CONFLICT DO NOTHING
   `, [userId]);
   try { const { invalidatePathCache } = await import('./project-access.js'); invalidatePathCache(userId); } catch {}
@@ -106,28 +116,22 @@ export async function autoSeedUserMemberships(userId: number, role: string): Pro
 }
 
 /**
- * Return project IDs visible to a user, or null for elevated roles with no
- * project filter. Project visibility is based only on project_members and
- * project creator ownership; legacy organization groups are intentionally not
- * considered.
+ * Return active project IDs granted by current explicit membership. Neither
+ * operational role nor legacy creator metadata may recreate a revoked invite.
  */
 export async function getProjectMembershipIds(userId: number): Promise<string[]> {
+  if (!Number.isSafeInteger(userId) || userId <= 0) return [];
   const rows = await query<{ id: string }>(`
-    SELECT DISTINCT p.id FROM projects p
-    WHERE (p.archived IS NULL OR p.archived = 0)
-      AND (
-        EXISTS (
-          SELECT 1 FROM project_members pm
-          WHERE pm.project_id = p.id AND pm.user_id = $1
-        )
-        OR p.user_id = $2
-      )
-  `, [userId, userId]);
-
+    SELECT p.id FROM projects p
+    JOIN project_members pm ON pm.project_id = p.id AND pm.user_id = $1
+    JOIN users u ON u.id = pm.user_id
+    WHERE COALESCE(p.archived, 0) = 0 AND COALESCE(p.lifecycle_status, 'active') = 'active'
+      AND u.disabled = 0 AND u.role IN ('admin', 'operator', 'member', 'viewer', 'guest')
+  `, [userId]);
   return rows.map(r => r.id);
 }
 
-export async function getAccessibleProjectIds(userId: number, role: string): Promise<string[] | null> {
-  if (role === 'admin' || role === 'operator') return null;
+/** Operational roles do not grant content access; only current membership does. */
+export async function getAccessibleProjectIds(userId: number, _role: string): Promise<string[]> {
   return getProjectMembershipIds(userId);
 }

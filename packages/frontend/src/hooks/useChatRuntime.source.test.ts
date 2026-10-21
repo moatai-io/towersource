@@ -57,16 +57,17 @@ describe('useChatRuntime source contracts', () => {
     expect(src).toMatch(/towerMsg\.type === 'turn_terminal'[\s\S]*towerMsg\.outcome === 'completed'[\s\S]*flushPendingLastTurnText\(data\.sessionId\)/);
   });
 
-  it('creates unread completion attention before filtering background session transcripts', () => {
+  it('requests authoritative Session refresh before filtering background session transcripts', () => {
     const src = fs.readFileSync(HOOK_PATH, 'utf-8');
     const terminalIndex = src.indexOf("if (towerMsg?.type === 'turn_terminal' && data.sessionId)");
     const dropIndex = src.indexOf('if (shouldDropSessionMessage(currentSid, data.sessionId');
     expect(terminalIndex).toBeGreaterThan(-1);
     expect(dropIndex).toBeGreaterThan(terminalIndex);
-    expect(src.slice(terminalIndex, dropIndex)).toContain('markSessionCompleted(data.sessionId)');
+    expect(src.slice(terminalIndex, dropIndex)).toContain("tower:session-ai-response-completed");
+    expect(src.slice(terminalIndex, dropIndex)).not.toContain('markSessionCompleted(data.sessionId)');
   });
 
-  it('creates background completion attention from the global terminal event, not session status', () => {
+  it('requests server unread refresh from the global terminal event, not session status', () => {
     const src = fs.readFileSync(HOOK_PATH, 'utf-8');
     const terminalStart = src.indexOf("case 'turn_terminal': {");
     const messageStart = src.indexOf("case 'tower_message': {", terminalStart);
@@ -74,7 +75,8 @@ describe('useChatRuntime source contracts', () => {
     expect(messageStart).toBeGreaterThan(terminalStart);
     const terminalBlock = src.slice(terminalStart, messageStart);
     expect(terminalBlock).toContain('setTurnTerminal(data.sessionId, data)');
-    expect(terminalBlock).toContain('markSessionCompleted(data.sessionId)');
+    expect(terminalBlock).toContain("tower:session-ai-response-completed");
+    expect(terminalBlock).not.toContain('markSessionCompleted(data.sessionId)');
 
     const statusStart = src.indexOf("case 'session_status': {");
     const statusEnd = src.indexOf("case 'session_status_check': {", statusStart);
@@ -149,7 +151,16 @@ describe('useChatRuntime source contracts', () => {
   it('keeps background AUQ attention visible in Latest and open chat tabs', () => {
     const src = fs.readFileSync(HOOK_PATH, 'utf-8');
     expect(src).toMatch(/case 'session_awaiting_user':[\s\S]*if \(data\.awaiting\)[\s\S]*markSessionRunAwaitingUser\(data\.sessionId, data\.questionId\)/);
-    expect(src).toMatch(/current\?\.phase === 'awaiting_user'[\s\S]*markSessionRunActive\(data\.sessionId, 'preparing', \{ pendingQuestionId: undefined \}\)/);
+    expect(src).toContain('resolveSessionQuestion(data.sessionId, data.questionId)');
+  });
+
+  it('keeps approval questions pending until an answer ACK and restores failed submissions', () => {
+    const src = fs.readFileSync(HOOK_PATH, 'utf-8');
+    expect(src).toContain("case 'answer_question_ack':");
+    expect(src).toContain("case 'answer_question_error':");
+    expect(src).toContain("submissionStatus: 'submitting'");
+    expect(src).toContain("submissionStatus: 'send_failed'");
+    expect(src).toMatch(/const sendResult = send\(\{ type: 'answer_question'[\s\S]*if \(!sendResult\)/);
   });
 
   it('does not let generic streaming or idle status erase a newer AUQ phase', () => {
@@ -192,5 +203,24 @@ describe('useChatRuntime source contracts', () => {
     expect(src).not.toMatch(/setSessionStreaming\(/);
     expect(src.match(/setTurnPhase\(/g)).toHaveLength(2);
     expect(src).toMatch(/case 'turn_stop_state':[\s\S]*setTurnPhase\([\s\S]*setTurnPhase\(/);
+  });
+});
+
+ describe('native compaction visibility', () => {
+  it('keeps explicit Tower compaction visible across assistant thinking frames', () => {
+    const src = fs.readFileSync(HOOK_PATH, 'utf-8');
+    expect(src).toContain('nativeCompactingSessionRef.current = sid');
+    expect(src).toContain('nativeCompactingSessionRef.current !== data.sessionId');
+    for (const phase of ['done', 'skipped', 'failed']) {
+      const start = src.indexOf(`towerMsg.phase === '${phase}') {`);
+      expect(start).toBeGreaterThan(-1);
+      const next = src.indexOf('} else if (towerMsg.phase', start + 1);
+      const branch = src.slice(start, next < 0 ? src.indexOf('break;', start) : next);
+      expect(branch).toContain('nativeCompactingSessionRef.current = null;');
+      expect(branch).toContain('useChatStore.getState().setCompacting(null);');
+      expect(branch.indexOf('nativeCompactingSessionRef.current = null;'))
+        .toBeLessThan(branch.indexOf('useChatStore.getState().setCompacting(null);'));
+      if (phase === 'done') expect(branch).toContain('setCost({ contextSnapshot:');
+    }
   });
 });

@@ -1,0 +1,6 @@
+import {it,expect,vi} from 'vitest';
+const f=vi.hoisted(()=>({old:{snapshot:vi.fn(async()=>({spendMicrousd:1,requests:1}))},scoped:{snapshot:vi.fn(async()=>({spendMicrousd:2,requests:2}))}}));
+vi.mock('./pg-smoke-ledger.js',()=>({pgCustomerSmokeLedger:()=>f.old}));vi.mock('./pg-approval-smoke-ledger.js',()=>({pgApprovalSmokeLedger:()=>f.scoped}));
+import {installedSmokeLedger} from './installed-smoke-ledger.js';
+it('selects only exact operator-published approval and retains legacy when schema is absent',async()=>{for(const [present,rows,want] of [[false,0,1],[true,0,1],[true,1,2]] as const){const queries:any[]=[];let releases=0;const p={async connect(){return {async query(sql:string,args:any){queries.push(args);return sql.includes('to_regclass')?{rows:[{present}],rowCount:1}:{rows:[],rowCount:rows};},release(){releases++;}};}};const l=installedSmokeLedger(p as any,{instanceId:'i',approvalHash:'a',estimatedMicrousd:1});expect((await l.snapshot()).spendMicrousd).toBe(want);if(present)expect(queries[1]).toEqual(['i','a']);expect(releases).toBe(1);}});
+it('database failure never silently falls back',async()=>{const p={async connect(){return {async query(){throw Error('offline');},release(){}};}};await expect(installedSmokeLedger(p as any,{instanceId:'i',approvalHash:'a',estimatedMicrousd:1}).snapshot()).rejects.toThrow('offline');});

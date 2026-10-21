@@ -12,14 +12,14 @@ describe('connection_status tool', () => {
   it('closes user and Project identity and returns complete secret-free Agent inventory diagnostics', async () => {
     vi.mocked(diagnoseProjectConnectionStatus).mockResolvedValue({
       inventoryComplete: true,
-      coverage: 'known-and-agent-bound',
+      coverage: 'team-shared-and-agent-dedicated',
       connections: [{ connectionId: 'neon-api-key', displayName: 'Neon API Key', capability: 'neon', status: 'unverified', stoppedAt: 'provider_health', reasonCode: 'ProviderAuthUnverified', summary: '저장·연결·Runtime 주입 확인', nextAction: 'test', stages: [] }],
     });
     const tool: any = createConnectionStatusTool({ userId: 7, projectId: 'project-a' });
     const output = await tool.execute('call', {});
     expect(diagnoseProjectConnectionStatus).toHaveBeenCalledWith({ userId: 7, projectId: 'project-a' });
     expect(text(output)).toContain('"inventoryComplete": true');
-    expect(text(output)).toContain('known-and-agent-bound');
+    expect(text(output)).toContain('team-shared-and-agent-dedicated');
     expect(text(output)).toContain('provider_health');
     expect(text(output)).not.toMatch(/secret|token|envName|value/i);
   });

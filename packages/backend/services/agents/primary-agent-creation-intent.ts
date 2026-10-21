@@ -1,3 +1,4 @@
+import { assertOrdinaryAgentCreationAuthority } from '../authority/agent-authority-policy-update.js';
 /**
  * Owns: server-issued approval intents for complete Primary Agent staffing packages.
  * Public API: createPrimaryAgentCreationIntent, consumePrimaryAgentCreationIntent, primaryAgentStaffingHash.
@@ -51,6 +52,7 @@ export async function createPrimaryAgentCreationIntent(input: {
   sourceProjectId: string;
   payload: PrimaryAgentStaffingPayload;
 }) {
+  assertOrdinaryAgentCreationAuthority(input.payload.authorityPolicy);
   if (input.actorRole === 'guest' || input.actorRole === 'viewer') throw new Error(`Role '${input.actorRole}' cannot create Primary Agents`);
   const source = await queryOne<{ system_key: string | null }>(
     `SELECT p.system_key
@@ -84,6 +86,7 @@ export async function consumePrimaryAgentCreationIntent(input: {
   payload: PrimaryAgentStaffingPayload;
   db?: { queryOne<T = any>(sql: string, params?: any[]): Promise<T | undefined> };
 }): Promise<void> {
+  assertOrdinaryAgentCreationAuthority(input.payload.authorityPolicy);
   const expectedHash = primaryAgentStaffingHash(input.payload);
   if (input.approvedCardHash !== expectedHash) throw new Error('Approved Staffing Package hash does not match the creation payload');
   const consumed = await (input.db?.queryOne || queryOne)<{ id: string }>(

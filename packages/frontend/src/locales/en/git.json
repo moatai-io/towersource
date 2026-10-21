@@ -6,5 +6,19 @@
   "auto": "auto",
   "manual": "manual",
   "files": "files",
-  "snapshotMessagePlaceholder": "Snapshot message..."
+  "snapshotMessagePlaceholder": "Snapshot message...",
+  "justNow": "Just now",
+  "minutesAgo": "{{count}} min ago",
+  "hoursAgo": "{{count}} hr ago",
+  "daysAgo": "{{count}} d ago",
+  "filesChanged": "{{count}} files",
+  "rollbackComplete": "Restored the snapshot",
+  "rollbackFailed": "Rollback failed",
+  "diffFailed": "Failed to load changes",
+  "noChanges": "No changes",
+  "noSnapshots": "No snapshots yet",
+  "loadMore": "Load more",
+  "confirmRollbackTitle": "Roll back to this snapshot?",
+  "confirmRollbackDescription": "Restore files to this point.",
+  "rollbackRecord": "The restored files will be recorded in a new rollback commit. Unsaved changes may be lost."
 }

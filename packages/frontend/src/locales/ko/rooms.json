@@ -72,7 +72,7 @@
   "agentInviteNoPermissionHint": "에이전트 초대는 이 채널에서 호출 가능하게만 합니다. 프로젝트나 파일 권한은 새로 부여하지 않습니다.",
   "noInvitableAgents": "초대할 수 있는 에이전트가 없습니다",
   "noChannelAgents": "아직 초대된 에이전트가 없습니다",
-  "primaryAgent": "Primary Agent",
+  "primaryAgent": "주 담당 에이전트",
   "sharedResources": "공유 자료",
   "sharedResourcesNotice": "이곳에 올리거나 연결한 자료는 현재와 향후 채널 참여자 및 초대된 에이전트에게 공유됩니다.",
   "uploadedFiles": "업로드된 파일",
@@ -152,17 +152,32 @@
   "retiredChannel": {
     "eyebrow": "보존된 링크",
     "title": "내부 채널 기능이 종료되었습니다",
-    "description": "기존 채널 기록은 삭제하지 않고 보존하고 있습니다. 새 실행 결과와 중요한 안내는 알림 센터에서 확인하고, 상세 작업 기록은 Work와 실행 세션에서 확인해 주세요.",
-    "openWork": "Work 열기",
+    "description": "기존 채널 기록은 삭제하지 않고 보존하고 있습니다. 새 실행 결과와 중요한 안내는 알림 센터에서 확인하고, 상세 작업 기록은 업무와 실행 세션에서 확인해 주세요.",
+    "openWork": "업무 열기",
     "openAiTeam": "AI 팀으로 이동"
   },
   "thread": {
     "noConversationYet": "아직 대화 없음",
-    "cadWorkbenchPrefix": "CAD Workbench: ",
-    "automationPrefix": "Automation: ",
+    "automationPrefix": "자동화: ",
     "currentFilePrefix": "현재 파일: ",
-    "currentCadSelection": "현재 CAD 선택",
-    "selectionArea": "선택 영역",
     "answerQuestionPlaceholder": "질문에 답변을 입력하세요…"
+  },
+  "aiPanelCopy": {
+    "justNow": "방금",
+    "minutesAgo": "{{count}}분 전",
+    "hoursAgo": "{{count}}시간 전",
+    "daysAgo": "{{count}}일 전",
+    "newSharedThread": "새 프로젝트 공유 대화",
+    "sharedProject": "프로젝트 공유",
+    "confirmDeleteThread": "{{name}} 대화 삭제 확인",
+    "delete": "삭제",
+    "cancel": "취소",
+    "deleteThread": "대화 삭제",
+    "deleteNamedThread": "{{name}} 대화 삭제",
+    "backToThreads": "대화 목록으로",
+    "stopResponse": "AI 패널 응답 중지",
+    "stop": "중지",
+    "projectThread": "프로젝트 대화",
+    "subagent": "지원 AI"
   }
 }

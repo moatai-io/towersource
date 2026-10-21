@@ -1,3 +1,5 @@
+import { utcUsageWindow } from '../ai-usage/usage-period.js';
+import { resolveLiteLLMCredentials } from './litellm-credentials.js';
 /**
  * Owns: AI token budget snapshots for admin dashboards.
  * Public API: listAiTokenBudgetSnapshots(). See decisions/2026-05-31-pi-utility-model-and-customer-litellm-keys.md.
@@ -37,6 +39,7 @@ export interface AiTokenUsageSummary {
   daily: AiTokenUsageDay[];
   totals: Omit<AiTokenUsageDay, 'date'>;
   source: 'litellm-spend-logs' | 'tower-db-metadata' | 'unavailable';
+  accuracy: 'key-window-unverified' | 'key-window-local' | 'unavailable';
   note?: string;
 }
 
@@ -44,6 +47,8 @@ interface CurrentVmBudgetReadResult {
   snapshot: AiTokenBudgetSnapshot;
   apiKeyHash?: string;
   teamId?: string | null;
+  usageSince?: string | null;
+  managementBaseUrl?: string;
 }
 
 export interface AiTokenBudgetListResult {
@@ -83,6 +88,29 @@ export function resolveCurrentBudgetCustomer(env: NodeJS.ProcessEnv = process.en
     env.CUSTOMER_NAME ||
     deriveCustomerNameFromPublicUrl(publicUrl)
   )?.trim() || null;
+}
+
+/**
+ * Inference and safe self-service key metadata can be exposed on different
+ * listeners. Prefer an explicit management URL. For the managed-fleet legacy
+ * topology only, inference port 14003 maps to the same host's key-info port
+ * 4000. Other URLs are never rewritten implicitly.
+ */
+export function resolveLiteLlmManagementBaseUrl(inferenceBaseUrl: string, env: NodeJS.ProcessEnv = process.env): string {
+  const explicit = env.LITELLM_MANAGEMENT_BASE_URL?.trim();
+  if (explicit) return explicit.replace(/\/$/, '').replace(/\/v1$/, '');
+
+  const normalized = inferenceBaseUrl.replace(/\/$/, '').replace(/\/v1$/, '');
+  try {
+    const url = new URL(normalized);
+    if (url.port === '14003') {
+      url.port = '4000';
+      return url.toString().replace(/\/$/, '');
+    }
+  } catch {
+    // Let the caller report the malformed configured URL.
+  }
+  return normalized;
 }
 
 function snapshotFromLiteLlmInfo(customer: string, info: Record<string, any>): AiTokenBudgetSnapshot {
@@ -130,6 +158,7 @@ function emptyUsageSummary(days = 30, source: AiTokenUsageSummary['source'] = 'u
       turns: 0,
     },
     source,
+    accuracy: source === 'litellm-spend-logs' ? 'key-window-unverified' : source === 'tower-db-metadata' ? 'key-window-local' : 'unavailable',
     note,
   };
 }
@@ -146,7 +175,14 @@ function usageSummaryFromDaily(days: number, daily: AiTokenUsageDay[], source: A
     return acc;
   }, emptyUsageSummary(days).totals);
 
-  return { days, daily, totals, source, note };
+  return {
+    days,
+    daily,
+    totals,
+    source,
+    accuracy: source === 'litellm-spend-logs' ? 'key-window-unverified' : source === 'tower-db-metadata' ? 'key-window-local' : 'unavailable',
+    note,
+  };
 }
 
 function toNumber(value: unknown): number {
@@ -168,19 +204,19 @@ function errorSnapshot(customer: string, error: string): AiTokenBudgetSnapshot {
  * safe /key/info fields. The key is read from process env but is never returned,
  * logged, or written to stdout.
  */
-async function readCurrentVmTokenBudgetSnapshot(customer: string): Promise<CurrentVmBudgetReadResult> {
-  const baseUrl = (process.env.LITELLM_BASE_URL || '').replace(/\/$/, '');
-  // Runtime model calls use /v1 endpoints, while LiteLLM admin endpoints live at root.
-  const adminBaseUrl = baseUrl.replace(/\/v1$/, '');
-  const apiKey = process.env.LITELLM_API_KEY || '';
-  if (!baseUrl || !apiKey) {
-    return { snapshot: errorSnapshot(customer, 'LITELLM_BASE_URL or LITELLM_API_KEY is not configured') };
-  }
+async function readCurrentVmTokenBudgetSnapshot(customer: string, deadline: number): Promise<CurrentVmBudgetReadResult> {
+  let connection: { baseUrl: string; apiKey: string };
+  try { connection = await resolveLiteLLMCredentials(); }
+  catch { return { snapshot: errorSnapshot(customer, 'LiteLLM VM credential is unavailable') }; }
+  const { baseUrl, apiKey } = connection;
+  const managementBaseUrl = resolveLiteLlmManagementBaseUrl(baseUrl);
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 20_000);
+  const remaining = deadline - Date.now();
+  if (remaining <= 0) return { snapshot: errorSnapshot(customer, 'Usage lookup deadline exceeded') };
+  const timeout = setTimeout(() => controller.abort(), remaining);
   try {
-    const resp = await fetch(`${adminBaseUrl}/key/info`, {
+    const resp = await fetch(`${managementBaseUrl}/key/info`, {
       method: 'GET',
       signal: controller.signal,
       headers: { Authorization: `Bearer ${apiKey}` },
@@ -196,8 +232,15 @@ async function readCurrentVmTokenBudgetSnapshot(customer: string): Promise<Curre
     }
     return {
       snapshot: snapshotFromLiteLlmInfo(customer, info),
+      managementBaseUrl,
       apiKeyHash: typeof payload.key === 'string' ? payload.key : undefined,
       teamId: typeof info.team_id === 'string' ? info.team_id : null,
+      // A self-hosted instance may have used another virtual key before installation was
+      // corrected. Local DB fallback must not attribute those historical turns
+      // to the newly connected key. The key creation timestamp is the earliest
+      // defensible boundary available without router-admin credentials.
+      usageSince: process.env.LITELLM_USAGE_SINCE
+        || (typeof info.created_at === 'string' ? info.created_at : null),
     };
   } catch (err: any) {
     return { snapshot: errorSnapshot(customer, err?.name === 'AbortError' ? 'LiteLLM /key/info timed out' : (err?.message || 'failed to read current VM token budget')) };
@@ -215,15 +258,17 @@ function extractCacheReadTokensFromSpendLog(row: Record<string, any>): number {
   return toNumber(details?.cached_tokens ?? details?.cache_read_tokens ?? row.metadata?.cache_read_input_tokens);
 }
 
-async function readLiteLlmSpendLogsUsageSummary(days = 30, apiKeyHash?: string): Promise<AiTokenUsageSummary | null> {
+async function readLiteLlmSpendLogsUsageSummary(days = 30, apiKeyHash?: string, managementBaseUrl?: string, deadline = Date.now() + 8_000): Promise<AiTokenUsageSummary | null> {
   const safeDays = Math.max(1, Math.min(days, 180));
-  const baseUrl = (process.env.LITELLM_BASE_URL || '').replace(/\/$/, '');
-  const adminBaseUrl = baseUrl.replace(/\/v1$/, '');
+  // Keep usage on the same resolved VM binding as /key/info, never legacy env.
+  const adminBaseUrl = managementBaseUrl;
   const adminKey = liteLlmAdminKey();
   if (!adminBaseUrl || !adminKey || !apiKeyHash) return null;
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 30_000);
+  const remaining = deadline - Date.now();
+  if (remaining <= 0) return null;
+  const timeout = setTimeout(() => controller.abort(), remaining);
   try {
     const url = new URL(`${adminBaseUrl}/spend/logs`);
     url.searchParams.set('api_key', apiKeyHash);
@@ -241,14 +286,17 @@ async function readLiteLlmSpendLogsUsageSummary(days = 30, apiKeyHash?: string):
       throw new Error('LiteLLM /spend/logs returned non-array payload');
     }
 
-    const cutoff = Date.now() - safeDays * 24 * 60 * 60 * 1000;
+    const now = new Date();
+    const window = utcUsageWindow(safeDays, now);
+    const cutoff = Date.parse(window.start);
+    const until = Date.parse(window.end);
     const byDate: Record<string, AiTokenUsageDay> = {};
     for (const row of payload) {
       if (!row || typeof row !== 'object') continue;
       if (row.api_key !== apiKeyHash) continue;
       if (row.status && row.status !== 'success') continue;
       const start = new Date(row.startTime || row.start_time || row.date || 0);
-      if (!Number.isFinite(start.getTime()) || start.getTime() < cutoff) continue;
+      if (!Number.isFinite(start.getTime()) || start.getTime() < cutoff || start.getTime() >= until) continue;
       const date = start.toISOString().slice(0, 10);
       const inputTokens = toNumber(row.prompt_tokens);
       const outputTokens = toNumber(row.completion_tokens);
@@ -272,19 +320,18 @@ async function readLiteLlmSpendLogsUsageSummary(days = 30, apiKeyHash?: string):
       byDate[date] = bucket;
     }
 
-    const daily = fillDailyUsageBuckets(safeDays, byDate);
-    return usageSummaryFromDaily(safeDays, daily, 'litellm-spend-logs', 'Tower API ledger filtered by this VM virtual key');
+    const daily = fillDailyUsageBuckets(safeDays, byDate, now);
+    return usageSummaryFromDaily(safeDays, daily, 'litellm-spend-logs', 'Tower API ledger filtered by this VM virtual key; legacy endpoint completeness is unverified');
   } finally {
     clearTimeout(timeout);
   }
 }
 
-function fillDailyUsageBuckets(days: number, byDate: Record<string, AiTokenUsageDay>): AiTokenUsageDay[] {
+function fillDailyUsageBuckets(days: number, byDate: Record<string, AiTokenUsageDay>, now = new Date()): AiTokenUsageDay[] {
   const daily: AiTokenUsageDay[] = [];
-  const now = new Date();
   for (let i = days - 1; i >= 0; i--) {
     const d = new Date(now);
-    d.setDate(d.getDate() - i);
+    d.setUTCDate(d.getUTCDate() - i);
     const key = d.toISOString().slice(0, 10);
     daily.push(byDate[key] || {
       date: key,
@@ -300,8 +347,14 @@ function fillDailyUsageBuckets(days: number, byDate: Record<string, AiTokenUsage
   return daily;
 }
 
-async function readLocalPiTokenUsageSummary(days = 30): Promise<AiTokenUsageSummary> {
+async function readLocalPiTokenUsageSummary(days = 30, usageSince?: string | null): Promise<AiTokenUsageSummary> {
   const safeDays = Math.max(1, Math.min(days, 180));
+  const parsedUsageSince = usageSince ? new Date(usageSince) : null;
+  const validUsageSince = parsedUsageSince && Number.isFinite(parsedUsageSince.getTime())
+    ? parsedUsageSince.toISOString()
+    : null;
+  const now = new Date();
+  const window = utcUsageWindow(safeDays, now);
   const rows = await query<{
     d: string;
     input_tokens: string | number | null;
@@ -311,7 +364,7 @@ async function readLocalPiTokenUsageSummary(days = 30): Promise<AiTokenUsageSumm
     cost_usd: string | number | null;
     turns: string | number | null;
   }>(`
-    SELECT to_char(DATE(created_at), 'YYYY-MM-DD') AS d,
+    SELECT to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS d,
            COALESCE(SUM(input_tokens), 0) AS input_tokens,
            COALESCE(SUM(output_tokens), 0) AS output_tokens,
            COALESCE(SUM((metadata->'usage'->>'cache_read_tokens')::numeric), 0) AS cache_read_tokens,
@@ -319,7 +372,7 @@ async function readLocalPiTokenUsageSummary(days = 30): Promise<AiTokenUsageSumm
            COALESCE(SUM((metadata->'usage'->>'cost_usd')::numeric), 0) AS cost_usd,
            COUNT(*) AS turns
       FROM messages
-     WHERE created_at >= NOW() - ($1 || ' days')::interval
+     WHERE created_at >= $1::timestamptz AND created_at < $3::timestamptz
        AND role = 'assistant'
        -- Only count Tower API usage that Tower can currently attribute to a
        -- provider cost. Claude SDK turns also write input/output tokens, and
@@ -327,9 +380,12 @@ async function readLocalPiTokenUsageSummary(days = 30): Promise<AiTokenUsageSumm
        -- present. Require a non-null cost_usd value so those rows do not mix
        -- with API spend.
        AND NULLIF(metadata->'usage'->>'cost_usd', '') IS NOT NULL
-     GROUP BY DATE(created_at)
-     ORDER BY DATE(created_at)
-  `, [String(safeDays)]);
+       -- When SpendLogs are unavailable, do not merge turns from the previous
+       -- VM key into the usage shown for the current key.
+       AND ($2::timestamptz IS NULL OR created_at >= $2::timestamptz)
+     GROUP BY to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD')
+     ORDER BY d
+  `, [window.start, validUsageSince, window.end]);
 
   const byDate: Record<string, AiTokenUsageDay> = {};
   for (const row of rows) {
@@ -349,8 +405,15 @@ async function readLocalPiTokenUsageSummary(days = 30): Promise<AiTokenUsageSumm
     };
   }
 
-  const daily = fillDailyUsageBuckets(safeDays, byDate);
-  return usageSummaryFromDaily(safeDays, daily, 'tower-db-metadata', 'Fallback: Tower DB message usage metadata');
+  const daily = fillDailyUsageBuckets(safeDays, byDate, now);
+  return usageSummaryFromDaily(
+    safeDays,
+    daily,
+    'tower-db-metadata',
+    validUsageSince
+      ? `Fallback: Tower DB message usage metadata since current LiteLLM key creation (${validUsageSince})`
+      : 'Fallback: Tower DB message usage metadata; current key start is unknown',
+  );
 }
 
 /**
@@ -362,10 +425,26 @@ async function readLocalPiTokenUsageSummary(days = 30): Promise<AiTokenUsageSumm
 export async function listAiTokenBudgetSnapshots(days = 30): Promise<AiTokenBudgetListResult> {
   const currentCustomer = resolveCurrentBudgetCustomer();
   const customer = currentCustomer || 'current-vm';
-  const budgetRead = await readCurrentVmTokenBudgetSnapshot(customer);
-  const usage = await readLiteLlmSpendLogsUsageSummary(days, budgetRead.apiKeyHash)
-    .catch((err: any) => emptyUsageSummary(days, 'unavailable', err?.message || 'failed to read LiteLLM SpendLogs'))
-    || await readLocalPiTokenUsageSummary(days).catch(() => emptyUsageSummary(days));
+  const started = Date.now();
+  const deadline = started + 8_000;
+  const budgetRead = await readCurrentVmTokenBudgetSnapshot(customer, deadline);
+  const budgetFinished = Date.now();
+  const remoteUsage = await readLiteLlmSpendLogsUsageSummary(days, budgetRead.apiKeyHash, budgetRead.managementBaseUrl, deadline)
+    .catch(() => null);
+  const remoteFinished = Date.now();
+  const usage = remoteUsage
+    || await readLocalPiTokenUsageSummary(days, budgetRead.usageSince).catch(() => emptyUsageSummary(days));
+  const finished = Date.now();
+  if (finished - started >= 2_000) {
+    // Fixed stage names and numeric durations only: no credentials, URLs or provider errors.
+    console.warn('[usage-fallback] slow lookup', {
+      budgetMs: budgetFinished - started,
+      spendLogsMs: remoteFinished - budgetFinished,
+      localMs: finished - remoteFinished,
+      totalMs: finished - started,
+      usedLocalFallback: !remoteUsage,
+    });
+  }
   return {
     scope: 'current-vm',
     currentCustomer: currentCustomer || undefined,

@@ -6,6 +6,7 @@ const updateTaskCalls: any[] = [];
 const buildSystemPromptCalls: any[] = [];
 const markAgentTurnCheckpoint = vi.fn(async () => undefined);
 let engineMessages: any[] = [];
+let engineGate: Promise<void> | undefined;
 let sessionRow: any;
 let resumeEngineSessionId: string | undefined;
 const createSessionMock = vi.fn(async (_name: string, cwd: string, userId?: number, projectId?: string | null) => ({
@@ -59,6 +60,7 @@ vi.mock('../message-store.js', () => ({
 
 vi.mock('../auth/auth.js', () => ({
   getUserRole: vi.fn(async (userId: number) => userId === 1 ? 'admin' : 'member'),
+  getUserAllowedPath: vi.fn(async () => '/workspace/projects'),
 }));
 
 vi.mock('../pm/project-access.js', () => ({
@@ -82,7 +84,8 @@ vi.mock('../system-prompt.js', () => ({
 vi.mock('../../engines/index.js', () => ({
   getEngine: vi.fn(async () => ({
     run: async function* (_sessionId: string, _prompt: string, opts: any) {
-      runCalls.push(opts);
+      runCalls.push({ ...opts, prompt: _prompt });
+      await engineGate;
       for (const message of engineMessages) {
         yield message;
       }
@@ -92,7 +95,7 @@ vi.mock('../../engines/index.js', () => ({
 }));
 
 vi.mock('../workflow-prompts.js', () => ({
-  buildWorkflowPrompt: vi.fn(() => 'Do the task'),
+  buildUnattendedPrompt: vi.fn(() => 'Do the task'),
 }));
 
 vi.mock('../git/worktree-manager.js', () => ({
@@ -115,6 +118,7 @@ describe('task-runner authority context', () => {
     buildSystemPromptCalls.length = 0;
     markAgentTurnCheckpoint.mockClear();
     engineMessages = [];
+    engineGate = undefined;
     resumeEngineSessionId = undefined;
     createSessionMock.mockClear();
     sessionRow = { id: 'session-1', configDir: null, engineSessionId: null, claudeSessionId: null, engine: 'pi' };
@@ -149,13 +153,62 @@ describe('task-runner authority context', () => {
     };
   });
 
+  it('passes request-selected guidance to both the shared prompt and engine without developer-only rules', async () => {
+    task.title = '고객 보고서 PDF';
+    task.description = 'PDF 보고서를 만들어줘';
+    const { selectSystemPromptFragmentsForMessage } = await import('../system-prompt-fragments.js');
+    const { spawnTask } = await import('./task-runner.js');
+    await spawnTask('task-1', () => {}, 1, undefined, undefined, { waitForCompletion: true });
+    const expected = selectSystemPromptFragmentsForMessage(`${task.title}\n${task.description}`);
+    expect(expected.length).toBeGreaterThan(0);
+    expect(buildSystemPromptCalls[0].optionalFragments).toEqual(expected);
+    expect(runCalls[0].systemPromptFragments).toEqual(expected);
+    expect(runCalls[0].prompt).not.toContain('## 3. Git commit');
+    expect(runCalls[0].prompt).not.toContain('Architecture pre-check');
+    expect(runCalls[0].prompt).not.toContain('Do not ask questions');
+    expect(runCalls[0].prompt).toContain('Unattended execution does not grant additional authority');
+  });
+
+  it('passes the run-as username and path scope to the engine', async () => {
+    const { queryOne } = await import('../../db/pg-repo.js');
+    vi.mocked(queryOne).mockImplementation(async (sql: string) =>
+      sql.includes('SELECT username') ? { username: 'scheduled-user' } as any : null);
+    try {
+      const { spawnTask } = await import('./task-runner.js');
+      await spawnTask('task-1', () => {}, 1, 'admin', '/workspace', { waitForCompletion: true });
+      expect(runCalls[0]).toMatchObject({ username: 'scheduled-user', allowedPath: '/workspace' });
+      expect(buildSystemPromptCalls[0]).toMatchObject({ username: 'scheduled-user' });
+    } finally {
+      vi.mocked(queryOne).mockImplementation(async () => null);
+    }
+  });
+
+  it.each([true, false])('waitForCompletion=%s preserves the requested completion boundary', async waitForCompletion => {
+    let release!: () => void;
+    engineGate = new Promise<void>(resolve => { release = resolve; });
+    engineMessages = [{ type: 'assistant', content: [{ type: 'text', text: '[TASK COMPLETE]' }] }];
+    const { spawnTask } = await import('./task-runner.js');
+    let settled = false;
+    const pending = spawnTask('task-1', () => {}, 1, undefined, undefined, { waitForCompletion })
+      .then(() => { settled = true; });
+    try {
+      await vi.waitFor(() => expect(runCalls.length).toBe(1));
+      expect(task.status).toBe('in_progress');
+      expect(settled).toBe(!waitForCompletion);
+    } finally {
+      release();
+      await pending;
+      await vi.waitFor(() => expect(task.status).toBe('done'));
+    }
+  });
+
   it('derives scheduled task role from persisted run-as user when caller omitted userRole', async () => {
     const { spawnTask } = await import('./task-runner.js');
     await spawnTask('task-1', () => {}, 1);
     await vi.waitFor(() => expect(runCalls.length).toBe(1));
 
     expect(buildSystemPromptCalls[0]).toMatchObject({ username: 'task-agent', role: 'admin' });
-    expect(runCalls[0]).toMatchObject({ userId: 1, userRole: 'admin', accessiblePaths: null });
+    expect(runCalls[0]).toMatchObject({ userId: 1, userRole: 'admin', accessiblePaths: null, allowedPath: '/workspace/projects' });
   });
 
   it('registers the Pi task root turn before engine.run claims it', async () => {
@@ -194,6 +247,14 @@ describe('task-runner authority context', () => {
       sessionId: 'failed-session',
     }));
     expect(runCalls[0]).toMatchObject({ engineSessionId: resumeEngineSessionId });
+  });
+
+  it('accepts an explicit no-work marker as a normal completed check', async () => {
+    engineMessages = [{ type: 'assistant', sessionId: 'session-1', content: [{ type: 'text', text: '[TASK NONE]' }] }];
+    const { spawnTask } = await import('./task-runner.js');
+    await spawnTask('task-1', () => {}, 1);
+    await vi.waitFor(() => expect(finalStatusUpdates().at(-1)?.status).toBe('done'));
+    expect(finalStatusUpdates().at(-1)?.progressSummary).toContain('[TASK NONE]');
   });
 
   it('marks localized TASK FAILED markers as failed instead of done', async () => {

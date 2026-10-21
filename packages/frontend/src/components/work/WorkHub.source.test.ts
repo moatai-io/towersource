@@ -13,7 +13,7 @@ describe('Session-centered Work hub', () => {
     expect(hub).toContain('data-testid="work-hub"');
     expect(hub).toContain("t('workHub.title')");
     expect(hub).toContain('overflow-y-auto overscroll-y-contain');
-    expect(hub).toContain('lg:grid-cols-[minmax(0,1fr)_minmax(320px,380px)]');
+    expect(hub).toContain('@min-[64rem]/work:grid-cols-[minmax(0,1fr)_minmax(320px,380px)]');
   });
 
   it('shows unread Session results as semantic opening lines linked to the source conversation', () => {

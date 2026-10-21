@@ -1,35 +1,57 @@
+import { invalidateWaitAlarm, admitWaitAlarm, assertWaitPrincipal, validateWaitAlarmRoot } from '../services/agent-sleep/alarms.js';
+import { cancelSessionSleep, isSessionSleeping } from '../services/agent-sleep/sleep.js';
+import { cancelInterviewForHuman, commitInterviewArtifact } from '../services/agents/durable-interview.js';
+import { voiceAdmissionFailure } from '../services/voice-runtime/voice-admission-state.js';
+import { readVoiceFastContinuity } from '../services/voice-runtime/voice-fast-context.js';
+import { acquireSessionAdmissionLock as acquireSessionChatLock } from '../services/agent-turn/session-admission-lock.js';
 import { WebSocketServer, WebSocket } from 'ws';
 import type { Server } from 'http';
 import { v4 as uuidv4 } from 'uuid';
 import crypto from 'crypto';
 import fs from 'fs';
+import lockfile from 'proper-lockfile';
 import os from 'os';
+import path from 'node:path';
 import { getEngine, getTotalActiveCount, getAllRunningSessionIds } from '../engines/index.js';
 import type { EngineCallbacks, TowerMessage } from '../engines/types.js';
 // Legacy: still needed for handleSetActiveSession idle cleanup until full engine migration
 import { getSession as getSDKSession, cleanupSession } from '../services/ai/claude-sdk.js';
 import { getFileTree, readFile, writeFile, setupFileWatcher, type FileChangeEvent } from '../services/workspace/file-system.js';
-import { verifyWsToken, getUserAllowedPath } from '../services/auth/auth.js';
+import { verifyWsToken, getUserAllowedPath, getUserAuthState } from '../services/auth/auth.js';
 import { isPathSafe, expandHome } from '../services/workspace/file-system.js';
-import { saveMessage, updateMessageContent, attachToolResultInDb, updateMessageMetrics, markCompactBoundary, getMessages, touchMessages, deleteMessage, findRecoverableAgentTurnForSession, markAgentTurnCheckpoint } from '../services/message-store.js';
+import { saveMessage, updateMessageContent, attachToolResultInDb, updateMessageMetrics, markCompactBoundary, mergeMessageMetadata, getMessages, touchMessages, deleteMessage, findRecoverableAgentTurnForSession, markAgentTurnCheckpoint } from '../services/message-store.js';
 import { recordAiRunTraceEvent } from '../services/ai-run-trace-events.js';
+import { recordPiUsageEvent } from '../services/ai-usage/usage-ledger.js';
+import { recoverLegacySessionChoice } from '../services/model-policy/legacy-session-recovery.js';
+import { choiceAfterPiTurn, isPiPresetMappingReady, presetForPiTurn, presetMappingRevision, resolvePiSessionChoice } from '../services/model-policy/session-alias.js';
 import { rejectAgentTurnStopRequest, requestAgentTurnStop, settleAgentTurnStop } from '../services/agent-turn/turn-supervisor.js';
 import { wakeAgentTurnDispatcher, type AgentTurnDispatchCandidate } from '../services/agent-turn/turn-dispatcher.js';
 import { decideTurnTerminal, toTurnTerminalMessage } from '../services/agent-turn/turn-terminal.js';
 import { claimEngineSessionId, getEngineSessionId, getSession, recordEngineSwitch, updateSession, setLastAutoResumeAt } from '../services/session/session-manager.js';
 import { humanChatMetadata } from '../services/session/agent-session/classification.js';
-import { generateSessionName } from '../services/auto-namer.js';
+import { recordCompletedAiTurn } from '../services/session/session-user-state.js';
+import { autoNameSession } from '../services/session/auto-name-session.js';
 import { extractTextFromContent } from '../utils/text.js';
 import { execute, queryOne } from '../db/pg-repo.js';
-import { config, DEFAULT_PI_MODEL_ID, getModelDefaults, normalizePiSessionModelId, shouldAutoMigrateClaudeSessionToPi } from '../config.js';
+import { config, normalizePiSessionModelId, isSelectablePiModelId, shouldAutoMigrateClaudeSessionToPi } from '../config.js';
 import { findSessionClient, abortCleanup, addSessionClient, removeSessionClient } from './session-guards.js';
 import { spawnTask, abortTask, settleRecoveredTaskSession } from '../services/task/task-runner.js';
 // damage-control moved to engines/claude-engine.ts
 import { getTasks } from '../services/task/task-manager.js';
 import { isPgEnabled } from '../db/pg.js';
-import { canAccessRoom, canAccessSession, isPathAccessible, isPrivilegedRole, isDotfileDenied, resolveSessionProjectRoot } from '../services/pm/project-access.js';
+import { canAccessRoom, canAccessSession, canSendSessionMessage, findProjectByPath, isPathAccessible, isPathWritableByRole, isPrivilegedRole, isDotfileDenied, resolveSessionProjectRoot } from '../services/pm/project-access.js';
+import { getProject } from '../services/pm/project-manager.js';
 import { accessiblePathsFallbackForRole } from './ws-access-policy.js';
 import { initWsSync, publishWsSyncEvent, type WsSyncHandlers } from '../services/ws-sync.js';
+import {
+  backgroundTimeoutMessage,
+  cancelPendingQuestionsForSession,
+  createSessionAskUser,
+  getLocalPendingQuestion,
+  listPendingQuestionsForUser,
+  resolvePendingQuestionLocally,
+  wirePendingQuestionBroadcasts,
+} from '../services/session/pending-questions.js';
 import { switchEngine } from '../services/session/engine-switch.js';
 import { getCommandsForUser } from '../services/skill/skill-registry.js';
 import { appendProcessEvent } from '../services/process/process-map-manager.js';
@@ -41,6 +63,32 @@ import { selectSystemPromptFragmentsForMessage, type SystemPromptFragmentKey } f
 import { findProjectAgentDefinition, loadProjectAgentDefinitions } from '../services/agent-definitions.js';
 import { notify } from '../services/notification-hub.js';
 import { getActiveAgentTurnTiming, setAgentTurnWaitingUser } from '../services/agent-turn/turn-supervisor.js';
+import { applyApprovedRanges, createMultiFileEditProposal, discoverStaticHtmlCssEditPlan, generateApprovedRangeReplacements, remapHtmlElementByUniqueId, ScopedEditError } from '../services/inline-edit/index.js';
+import {
+  compareAndSwapProjectWorkspaceText,
+  listProjectWorkspaceDirectory,
+  readProjectWorkspaceFileBytes,
+  resolveProjectWorkspaceFile,
+  writeProjectWorkspaceText,
+  type ProjectWorkspaceFileReference,
+} from '../services/project-environment/project-workspace-files.js';
+import { MAX_CANONICAL_WORKSPACE_TEXT_BYTES } from '../services/project-environment/adapters/canonical-host-file-adapter.js';
+
+async function resolveProjectFileReferenceForHostPath(filePath: string, allowProjectRoot = false): Promise<ProjectWorkspaceFileReference | undefined> {
+  const projectId = await findProjectByPath(filePath);
+  if (!projectId) return undefined;
+  const project = await getProject(projectId);
+  if (!project?.rootPath) throw new Error('PROJECT_WORKSPACE_NOT_FOUND');
+  const relativePath = path.relative(path.resolve(project.rootPath), path.resolve(filePath)).split(path.sep).join('/');
+  return resolveProjectWorkspaceFile({ projectId, projectRoot: project.rootPath, relativePath: relativePath || '.', allowProjectRoot });
+}
+
+async function readProjectWorkspaceTextForActor(filePath: string, actorUserId: number): Promise<{ content: string; reference?: ProjectWorkspaceFileReference }> {
+  const reference = await resolveProjectFileReferenceForHostPath(filePath);
+  if (!reference) return { content: readFile(filePath).content };
+  const result = await readProjectWorkspaceFileBytes({ reference, actorUserId, maxBytes: MAX_CANONICAL_WORKSPACE_TEXT_BYTES });
+  return { content: result.bytes.toString('utf8'), reference };
+}
 
 interface WsClient {
   id: string;
@@ -53,23 +101,15 @@ interface WsClient {
   activeQueryEpoch: number; // incremented on each new query / session switch
   allowedPath?: string;     // per-user workspace path restriction
   joinedRooms: Set<string>;  // rooms this client is subscribed to (for room-guards)
-}
-
-interface PendingQuestion {
-  questionId: string;
-  sessionId: string;
-  questions: any[];
-  resolve: (answer: string) => void;
-  reject: (error: Error) => void;
-  timer: ReturnType<typeof setTimeout>;
+  /** Server-created voice client only; never accepted from ChatPayload/HTTP user JSON. */
+  onVoiceAnswerSnapshot?: EngineCallbacks['onVoiceAnswerSnapshot'];
+  onVoiceTiming?: EngineCallbacks['onVoiceTiming'];
 }
 
 const SDK_HANG_TIMEOUT = 60 * 60 * 1000; // 60 minutes
-const ASK_USER_TIMEOUT = 60 * 60 * 1000; // 60 minutes — product UI treats AskUserQuestion as awaiting_user, not a short-lived prompt.
 
 const clients = new Map<string, WsClient>();
 const sessionClients = new Map<string, Set<string>>(); // sessionId → Set<clientId> (1:many)
-const pendingQuestions = new Map<string, PendingQuestion>(); // questionId → PendingQuestion
 const REMOTE_STREAMING_TTL_MS = 5 * 60 * 1000;
 
 type ActiveTurnTiming = {
@@ -84,7 +124,7 @@ type ActiveTurnTiming = {
 const activeTurnTimings = new Map<string, ActiveTurnTiming>();
 const rootTurnStopModes = new Map<string, 'safe' | 'force'>();
 const remoteStreamingSessions = new Map<string, { markedAt: number; timing?: ActiveTurnTiming }>();
-const remotePendingQuestionsBySession = new Map<string, { questionId: string; questions: any[] }>();
+const remotePendingQuestionsBySession = new Map<string, { questionId: string; questions: any[]; recipientUserId?: number }>();
 
 function markRemoteStreamingSession(sessionId: string, timing?: ActiveTurnTiming): void {
   remoteStreamingSessions.set(sessionId, { markedAt: Date.now(), timing });
@@ -130,8 +170,10 @@ function getRemoteStreamingSessionIds(): string[] {
 }
 type SessionRecoverySnapshot = {
   isStreaming: boolean;
-  pendingQuestion: { questionId: string; questions: any[] } | null;
+  pendingQuestion: { questionId: string; questions: any[]; recipientUserId?: number } | null;
   turnTiming: ActiveTurnTiming | null;
+  durableTurnRequiresAttention?: boolean;
+  durableTurnRecoveryDisposition?: 'superseded' | null;
   durableTurnState?: 'running' | 'stop_requested' | 'waiting_retry' | 'completed' | 'stopped_clean' | 'stopped_forced' | 'failed' | 'needs_attention' | null;
   durableTurnError?: string | null;
   serverNow: string;
@@ -151,6 +193,8 @@ let wsSyncInitStarted = false;
 type ChatPayload = {
   message: string;
   messageId?: string;
+  waitAlarmId?: string;
+  waitAlarmVersion?: number;
   sessionId?: string;
   engineSessionId?: string;
   claudeSessionId?: string;
@@ -158,10 +202,28 @@ type ChatPayload = {
   model?: string;
   commandTrigger?: 'slash' | 'picker' | 'natural-language';
   suppressUserEcho?: boolean;
+  /** Structured source chip supplied by Tower UI; validated server-side before any scoped action. */
+  sourceReference?: {
+    version?: number;
+    id?: string;
+    path?: string;
+    language?: string;
+    kind?: string;
+    tagName?: string;
+    start?: number;
+    end?: number;
+    lineStart?: number;
+    lineEnd?: number;
+    source?: string;
+    confidence?: string;
+    mappingProvider?: string;
+  };
   effort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max';
   panelChat?: boolean;
   /** Internal callers run the durable turn without registering a fake UI viewer. */
   headless?: boolean;
+  initialInterview?: boolean;
+  initialInterviewToken?: string;
   /** Ask the durable Agent to shape this answer for spoken Korean without changing facts. */
   voiceMode?: boolean;
   /** Internal server-side carry-over for a queued turn's original acceptance time. */
@@ -174,13 +236,6 @@ type ChatPayload = {
     language?: string;
     harness?: string;
     capabilities?: string[];
-    cadSelection?: {
-      path?: string;
-      cadModelArtifactPath?: string;
-      view?: any;
-      viewport?: any;
-      selection?: any;
-    };
   };
 };
 
@@ -188,6 +243,35 @@ type PendingChatItem = {
   client: WsClient;
   data: ChatPayload;
 };
+
+type TrustedSourceReference = Required<NonNullable<ChatPayload['sourceReference']>>;
+
+function validateTrustedSourceReference(value: ChatPayload['sourceReference']): TrustedSourceReference | null {
+  if (!value || value.version !== 1 || value.language !== 'html' || value.kind !== 'element'
+    || value.confidence !== 'exact' || value.mappingProvider !== 'html-parser'
+    || typeof value.id !== 'string' || value.id.length < 1 || value.id.length > 1_000
+    || typeof value.path !== 'string' || typeof value.tagName !== 'string' || typeof value.source !== 'string'
+    || !Number.isInteger(value.start) || !Number.isInteger(value.end)
+    || !Number.isInteger(value.lineStart) || !Number.isInteger(value.lineEnd)
+    || value.source.length < 1 || value.source.length > 4_000) return null;
+  return value as TrustedSourceReference;
+}
+
+function buildSourceReferenceContext(reference: TrustedSourceReference): string {
+  return [
+    'Current screen reference selected by the user:',
+    `- file: ${reference.path}`,
+    `- element: <${reference.tagName}>`,
+    `- lines at selection time: ${reference.lineStart}-${reference.lineEnd}`,
+    '- selected source at selection time:',
+    '```html',
+    reference.source,
+    '```',
+    'Treat this as a precise visual pointer and useful context, not as a required edit target or a write boundary.',
+    'Follow the user\'s natural-language intent. You may inspect the surrounding section or full current file, compare other elements, and use the normal authorized tools to edit any relevant project files when needed.',
+    'The selection may be mistaken or stale. Re-read current files before writing when correctness depends on current content.',
+  ].join('\n');
+}
 const pendingUserMessages = new Map<string, PendingChatItem[]>();
 const pendingRedispatchPayloads = new WeakSet<ChatPayload>();
 const pendingUserAbortCooldownUntil = new Map<string, number>();
@@ -290,26 +374,6 @@ function clearPendingUserMessages(sessionId: string, reason: string): number {
 // #17). This mutex serializes the *decision + steer/run-start* critical section
 // per session in arrival order. handleChat releases the lock right before the
 // long-running turn loop, so mid-turn steering is never blocked.
-const sessionChatLocks = new Map<string, Promise<void>>();
-
-/** Acquire the per-session chat lock; resolves with a one-shot release fn. */
-async function acquireSessionChatLock(sessionId: string): Promise<() => void> {
-  const prev = sessionChatLocks.get(sessionId) ?? Promise.resolve();
-  let release!: () => void;
-  const held = new Promise<void>((r) => { release = r; });
-  // The next acquirer waits for THIS holder to release (arrival order preserved).
-  const tail = prev.then(() => held);
-  sessionChatLocks.set(sessionId, tail);
-  await prev; // wait our turn
-  let released = false;
-  return () => {
-    if (released) return;
-    released = true;
-    release();
-    // GC: if we're still the tail (no later waiter chained on), drop the entry.
-    if (sessionChatLocks.get(sessionId) === tail) sessionChatLocks.delete(sessionId);
-  };
-}
 
 function enqueuePendingUserMessage(sessionId: string, item: PendingChatItem): void {
   const now = Date.now();
@@ -402,78 +466,11 @@ export async function flushPendingUserMessages(sessionId: string): Promise<boole
   return true;
 }
 
-function getLocalPendingQuestion(sessionId: string): { questionId: string; questions: any[] } | null {
-  for (const pq of pendingQuestions.values()) {
-    if (pq.sessionId === sessionId) {
-      return { questionId: pq.questionId, questions: pq.questions };
-    }
-  }
-  return null;
-}
-
 function attachedToolResultForBroadcast(result: unknown): string {
   const text = typeof result === 'string' ? result : String(result);
   // Completed AUQ cards need the full structured answer envelope immediately;
   // generic tool results stay capped because they may contain large command output.
   return text.includes('"kind":"tower.ask_user_question_result"') ? text : text.slice(0, 500);
-}
-
-function normalizeAskUserQuestionText(q: any): string {
-  if (typeof q === 'string') return q.trim();
-  if (!q || typeof q !== 'object') return '';
-  for (const key of ['question', 'title', 'prompt', 'label']) {
-    const value = q[key];
-    if (typeof value === 'string' && value.trim().length > 0) return value.trim();
-  }
-  return '';
-}
-
-function sanitizeAskUserQuestions(questions: any[]): any[] {
-  if (!Array.isArray(questions)) return [];
-  return questions
-    .map((q) => {
-      const question = normalizeAskUserQuestionText(q);
-      if (!question) return null;
-      const raw = q && typeof q === 'object' ? q : {};
-      const options = Array.isArray(raw.options)
-        ? raw.options
-            .map((opt: any) => {
-              if (typeof opt === 'string') {
-                const label = opt.trim();
-                return label ? { label } : null;
-              }
-              if (!opt || typeof opt !== 'object') return null;
-              const label = typeof opt.label === 'string' && opt.label.trim().length > 0
-                ? opt.label.trim()
-                : (typeof opt.value === 'string' && opt.value.trim().length > 0 ? opt.value.trim() : '');
-              if (!label) return null;
-              return {
-                ...opt,
-                label,
-                description: typeof opt.description === 'string' ? opt.description : undefined,
-              };
-            })
-            .filter(Boolean)
-        : [];
-      return {
-        ...raw,
-        question,
-        options,
-      };
-    })
-    .filter(Boolean) as any[];
-}
-
-function cancelPendingQuestionsForSession(sessionId: string, reason: string): boolean {
-  let cancelled = false;
-  for (const [questionId, pq] of pendingQuestions.entries()) {
-    if (pq.sessionId !== sessionId) continue;
-    clearTimeout(pq.timer);
-    pendingQuestions.delete(questionId);
-    pq.reject(new Error(reason));
-    cancelled = true;
-  }
-  return cancelled;
 }
 
 function getCachedRemoteSnapshot(sessionId: string): SessionRecoverySnapshot | null {
@@ -545,6 +542,8 @@ async function getSessionRecoverySnapshot(sessionId: string): Promise<SessionRec
       pendingQuestion: localPendingQuestion,
       turnTiming: activeTurnTimings.get(sessionId) || durableTiming || null,
       durableTurnState: durableTiming?.state || null,
+      durableTurnRequiresAttention: durableTiming?.requiresAttention,
+      durableTurnRecoveryDisposition: durableTiming?.recoveryDisposition || null,
       durableTurnError: durableTiming?.lastError || null,
       serverNow: new Date().toISOString(),
     };
@@ -557,33 +556,15 @@ async function getSessionRecoverySnapshot(sessionId: string): Promise<SessionRec
     pendingQuestion: null,
     turnTiming: durableTiming,
     durableTurnState: durableTiming.state,
+    durableTurnRequiresAttention: durableTiming?.requiresAttention,
+    durableTurnRecoveryDisposition: durableTiming?.recoveryDisposition || null,
     durableTurnError: durableTiming.lastError,
     serverNow: new Date().toISOString(),
   } : null;
 }
 
-function resolvePendingQuestionLocally(questionId: string | undefined, answer: string, sessionId?: string): boolean {
-  if (questionId) {
-    const exact = pendingQuestions.get(questionId);
-    if (exact) {
-      exact.resolve(answer);
-      return true;
-    }
-  }
-
-  if (sessionId) {
-    for (const [, entry] of pendingQuestions) {
-      if (entry.sessionId === sessionId) {
-        entry.resolve(answer);
-        return true;
-      }
-    }
-  }
-
-  return false;
-}
-
 async function abortSessionEverywhere(sessionId: string): Promise<void> {
+  await invalidateWaitAlarm(sessionId, 'cancelled');
   let dbSession: Awaited<ReturnType<typeof getSession>> | undefined;
   try { dbSession = await getSession(sessionId); } catch {}
   const engineName = (dbSession as any)?.engine || config.defaultEngine || 'claude';
@@ -593,7 +574,7 @@ async function abortSessionEverywhere(sessionId: string): Promise<void> {
   } catch {}
 }
 
-function isSessionScopedAllEvent(data: any): data is { sessionId: string } {
+function isSessionScopedAllEvent(data: any): data is { sessionId: string; type: string; updates?: { visibility?: string } } {
   return typeof data?.sessionId === 'string' && [
     'session_created',
     'session_meta_update',
@@ -614,10 +595,20 @@ async function localBroadcastToAll(data: any) {
     // Session-related "all" events can contain or imply private metadata
     // (title changes, owner-visible lifecycle, session id timing). Filter them
     // per connected client instead of relying on frontend stores to ignore rows.
-    if (sessionScoped && client.userId && !isPrivilegedRole(client.userRole)) {
+    if (sessionScoped) {
+      if (!client.userId) continue;
       try {
-        const access = await canAccessSession(data.sessionId, client.userId, client.userRole || 'member');
-        if (!access.allowed) continue;
+        const state = await getUserAuthState(client.userId);
+        if (!state || state.disabled || state.approvalStatus !== 'active') continue;
+        client.userRole = state.role;
+        const access = await canAccessSession(data.sessionId, client.userId, state.role);
+        if (!access.allowed) {
+          if (data.type === 'session_meta_update' && data.updates?.visibility === 'private' && sessionClients.get(data.sessionId)?.has(client.id)) {
+            sessionClients.get(data.sessionId)?.delete(client.id);
+            client.ws.send(JSON.stringify({ type: 'session_access_revoked', sessionId: data.sessionId }));
+          }
+          continue;
+        }
       } catch {
         continue;
       }
@@ -647,10 +638,6 @@ async function localBroadcastFileChange(data: { type: 'file_changed'; event: Fil
       client.ws.send(payload);
       continue;
     }
-    if (isPrivilegedRole(client.userRole)) {
-      client.ws.send(payload);
-      continue;
-    }
     try {
       const ok = await isPathAccessible(data.path, client.userId, client.userRole || 'member');
       if (ok) client.ws.send(payload);
@@ -660,6 +647,7 @@ async function localBroadcastFileChange(data: { type: 'file_changed'; event: Fil
   }
 }
 
+const sessionDeliveryQueues = new Map<string, Promise<void>>();
 function localBroadcastToSession(sessionId: string, data: any, excludeClientId?: string) {
   const clientIds = sessionClients.get(sessionId);
   if (!clientIds) return;
@@ -667,15 +655,25 @@ function localBroadcastToSession(sessionId: string, data: any, excludeClientId?:
   for (const clientId of clientIds) {
     if (clientId === excludeClientId) continue;
     const client = clients.get(clientId);
-    if (client?.ws.readyState === WebSocket.OPEN) {
-      client.ws.send(payload);
-    }
+    if (!client || client.ws.readyState !== WebSocket.OPEN) continue;
+    // Serialize per recipient/session so async audience checks cannot reorder
+    // streaming frames. Subscription possession is not a permanent read grant.
+    const key = `${clientId}:${sessionId}`;
+    const delivery = (sessionDeliveryQueues.get(key) ?? Promise.resolve()).catch(() => {}).then(async () => {
+      if (client.ws.readyState !== WebSocket.OPEN || !sessionClients.get(sessionId)?.has(clientId)) return;
+      if (!client.userId) return;
+      const recipientUserId = client.userId;
+      const state = await getUserAuthState(recipientUserId);
+      if (!state || state.disabled || state.approvalStatus !== 'active') return;
+      client.userRole = state.role;
+      const access = await canAccessSession(sessionId, recipientUserId, state.role);
+      if (!access.allowed) return;
+      if (client.ws.readyState === WebSocket.OPEN && clients.get(clientId) === client
+        && client.userId === recipientUserId && sessionClients.get(sessionId)?.has(clientId)) client.ws.send(payload);
+    }).catch(() => {});
+    sessionDeliveryQueues.set(key, delivery);
+    void delivery.finally(() => { if (sessionDeliveryQueues.get(key) === delivery) sessionDeliveryQueues.delete(key); });
   }
-}
-
-function localBroadcastToRoom(_roomId: string, _data: any, _excludeClientId?: string) {
-  // Internal channel subscriptions are retired. Keep the sync callback as a
-  // temporary no-op until P6-B removes room scope from the shared WS bus.
 }
 
 function localBroadcastToUser(userId: number, data: any) {
@@ -758,11 +756,12 @@ function handleRemoteSessionEvent(sessionId: string, data: any) {
         turnTiming: data.turnTiming || null,
         serverNow: data.serverNow || new Date().toISOString(),
       });
-      return;
+      return; // Recovery snapshots are server-internal and may contain private questions.
     }
     case 'answer_question_sync': {
-      remotePendingQuestionsBySession.delete(sessionId);
-      resolvePendingQuestionLocally(data.questionId, data.answer, sessionId);
+      if (resolvePendingQuestionLocally(data.questionId, data.answer, sessionId, data.recipientUserId)) {
+        remotePendingQuestionsBySession.delete(sessionId);
+      }
       return;
     }
     case 'abort_session_sync': {
@@ -772,10 +771,7 @@ function handleRemoteSessionEvent(sessionId: string, data: any) {
       return;
     }
     case 'ask_user':
-      if (data.questionId && Array.isArray(data.questions)) {
-        remotePendingQuestionsBySession.set(sessionId, { questionId: data.questionId, questions: data.questions });
-      }
-      break;
+      return; // Interactive questions must use recipient-scoped user delivery.
     case 'ask_user_timeout':
     case 'sdk_done':
       remotePendingQuestionsBySession.delete(sessionId);
@@ -797,10 +793,12 @@ const wsSyncHandlers: WsSyncHandlers = {
   session(sessionId, data) {
     handleRemoteSessionEvent(sessionId, data);
   },
-  room(roomId, data) {
-    localBroadcastToRoom(roomId, data);
-  },
   user(userId, data) {
+    if (data?.type === 'ask_user' && data.sessionId) {
+      remotePendingQuestionsBySession.set(data.sessionId, { questionId: data.questionId, questions: data.questions, recipientUserId: userId });
+    } else if (data?.type === 'session_awaiting_user' && !data.awaiting && data.sessionId) {
+      remotePendingQuestionsBySession.delete(data.sessionId);
+    }
     localBroadcastToUser(userId, data);
   },
 };
@@ -873,23 +871,11 @@ async function markAgentSessionHumanTouched(sessionId: string, username?: string
 
 async function tryAutoNameSession(sessionId: string): Promise<void> {
   try {
-    const currentSession = await getSession(sessionId);
-    if (!currentSession) return;
-    const hasDefaultName =
-      currentSession.name?.startsWith('Session ') ||
-      currentSession.name === 'New thread';
-    if (!hasDefaultName || currentSession.autoNamed === 0) return;
-    const msgs = await getMessages(sessionId);
-    const userMsg = msgs.find((m: any) => m.role === 'user');
-    const assistantMsg = msgs.find((m: any) => m.role === 'assistant');
-    if (!userMsg || !assistantMsg) return;
-    const userText = extractTextFromContent(userMsg.content);
-    const assistantText = extractTextFromContent(assistantMsg.content);
-    const name = await generateSessionName(userText, assistantText);
-    await updateSession(sessionId, { name, autoNamed: 1 } as any);
-    // Notify all clients so sidebar updates immediately
+    const result = await autoNameSession(sessionId);
+    if (result.status !== 'generated') return;
+    const { name } = result;
     broadcastToAll({ type: 'session_meta_update', sessionId, updates: { name } });
-    console.log(`[auto-name] server-side named session=${sessionId.slice(0, 8)} → "${name}"`);
+    console.log(`[auto-name] server-side named session=${sessionId.slice(0, 8)}`);
   } catch (err: any) {
     console.warn(`[auto-name] server-side failed for session=${sessionId.slice(0, 8)}:`, err?.message);
   }
@@ -1021,11 +1007,6 @@ function broadcastToSession(sessionId: string, data: any, excludeClientId?: stri
   publishWsSyncEvent(config.serverEpoch, { scope: 'session', sessionId, data });
 }
 
-/** Retired internal-channel broadcast compatibility no-op. */
-function broadcastToRoom(_roomId: string, _data: any, _excludeClientId?: string) {
-  // Existing archive reads do not subscribe to live room events.
-}
-
 /**
  * Send directly to a specific client.
  * Falls back to any session viewer when the originating WS is dead (reconnection).
@@ -1053,6 +1034,10 @@ export function broadcast(data: any) {
 }
 
 export function setupWebSocket(server: Server) {
+  wirePendingQuestionBroadcasts({
+    toUser: (userId, data) => broadcastToUser(userId, data),
+  });
+
   if (!wsSyncInitStarted) {
     wsSyncInitStarted = true;
     initWsSync(config.serverEpoch, wsSyncHandlers).catch((err) => {
@@ -1112,6 +1097,11 @@ export function setupWebSocket(server: Server) {
     send(ws, {
       type: 'connected',
       clientId,
+      pendingQuestions: [
+        ...listPendingQuestionsForUser(client.userId),
+        ...[...remotePendingQuestionsBySession.entries()].filter(([, snapshot]) => client.userId !== undefined && snapshot.recipientUserId === client.userId)
+          .map(([sessionId, snapshot]) => ({ sessionId, questionId: snapshot.questionId })),
+      ],
       serverEpoch: config.serverEpoch,
       serverNow: new Date().toISOString(),
       streamingSessions: runningSessionIds,
@@ -1162,9 +1152,17 @@ export function setupWebSocket(server: Server) {
 }
 
 async function handleMessage(client: WsClient, data: any) {
+  if (client.userId) {
+    const state = await getUserAuthState(client.userId).catch(() => null);
+    if (!state || state.disabled || state.approvalStatus !== 'active') {
+      client.ws.close(4003, 'account_inactive');
+      return;
+    }
+    client.userRole = state.role;
+  }
   switch (data.type) {
     case 'chat':
-      await handleChat(client, data);
+      await handleChat(client, { ...data, initialInterview: undefined, initialInterviewToken: undefined, waitAlarmId: undefined, waitAlarmVersion: undefined });
       break;
     case 'abort':
       handleAbort(client, data);
@@ -1256,6 +1254,8 @@ async function handleMessage(client: WsClient, data: any) {
           status: actualStatus,
           turnTiming,
           durableTurnState: durableTiming?.state || null,
+          durableTurnRequiresAttention: durableTiming?.requiresAttention,
+          durableTurnRecoveryDisposition: durableTiming?.recoveryDisposition || null,
           durableTurnError: durableTiming?.lastError || null,
           serverNow: new Date().toISOString(),
         });
@@ -1292,9 +1292,11 @@ async function handleReconnect(client: WsClient, data: { sessionId?: string; eng
       type: 'reconnect_result',
       status: 'streaming',
       sessionId,
-      pendingQuestion: snapshot?.pendingQuestion || null,
+      pendingQuestion: snapshot?.pendingQuestion && snapshot.pendingQuestion.recipientUserId === client.userId && client.userId !== undefined ? snapshot.pendingQuestion : null,
       turnTiming: snapshot?.turnTiming || null,
       durableTurnState: snapshot?.durableTurnState || null,
+      durableTurnRequiresAttention: snapshot?.durableTurnRequiresAttention,
+      durableTurnRecoveryDisposition: snapshot?.durableTurnRecoveryDisposition || null,
       durableTurnError: snapshot?.durableTurnError || null,
       serverNow: snapshot?.serverNow || new Date().toISOString(),
     });
@@ -1311,6 +1313,8 @@ async function handleReconnect(client: WsClient, data: { sessionId?: string; eng
     sessionId,
     turnTiming: snapshot?.turnTiming || null,
     durableTurnState: snapshot?.durableTurnState || null,
+    durableTurnRequiresAttention: snapshot?.durableTurnRequiresAttention,
+    durableTurnRecoveryDisposition: snapshot?.durableTurnRecoveryDisposition || null,
     durableTurnError: snapshot?.durableTurnError || null,
     serverNow: snapshot?.serverNow || new Date().toISOString(),
   });
@@ -1360,9 +1364,11 @@ async function handleSetActiveSession(client: WsClient, data: { sessionId: strin
     type: 'set_active_session_ack',
     sessionId: newSessionId,
     isStreaming: !!snapshot?.isStreaming || !!snapshot?.pendingQuestion,
-    pendingQuestion: snapshot?.pendingQuestion || null,
+    pendingQuestion: snapshot?.pendingQuestion && snapshot.pendingQuestion.recipientUserId === client.userId && client.userId !== undefined ? snapshot.pendingQuestion : null,
     turnTiming: snapshot?.turnTiming || null,
     durableTurnState: snapshot?.durableTurnState || null,
+    durableTurnRequiresAttention: snapshot?.durableTurnRequiresAttention,
+    durableTurnRecoveryDisposition: snapshot?.durableTurnRecoveryDisposition || null,
     durableTurnError: snapshot?.durableTurnError || null,
     serverNow: snapshot?.serverNow || new Date().toISOString(),
   });
@@ -1456,7 +1462,218 @@ async function handleCancelSteer(client: WsClient, data: { sessionId?: string; m
   }
 }
 
+function buildScopedEditConversationContext(messages: Awaited<ReturnType<typeof getMessages>>, currentUserMessageId?: string): string {
+  const MAX_MESSAGES = 24;
+  const MAX_CHARS = 12_000;
+  const lines = messages
+    .filter(message => message.id !== currentUserMessageId && (message.role === 'user' || message.role === 'assistant'))
+    .map((message) => {
+      const text = extractTextFromContent(message.content).trim();
+      if (!text) return '';
+      const role = message.role === 'user' ? 'User' : 'Assistant';
+      return `${role}: ${text.slice(0, 2_000)}`;
+    })
+    .filter(Boolean)
+    .slice(-MAX_MESSAGES);
+  const joined = lines.join('\n\n');
+  return joined.length <= MAX_CHARS ? joined : joined.slice(joined.length - MAX_CHARS);
+}
+
+function buildRecentScopedEditResultContext(messages: Awaited<ReturnType<typeof getMessages>>): string {
+  const results = messages.flatMap((message) => {
+    if (message.role !== 'assistant') return [];
+    const rawMetadata = message.metadata;
+    let metadata: Record<string, any> | null = rawMetadata && typeof rawMetadata === 'object' ? rawMetadata : null;
+    if (!metadata && typeof rawMetadata === 'string') {
+      try { metadata = JSON.parse(rawMetadata); } catch { metadata = null; }
+    }
+    const result = metadata?.scopedEditResult;
+    if (!result || typeof result !== 'object') return [];
+    const files = Array.isArray(result.files) ? result.files.filter((item: unknown) => typeof item === 'string').slice(0, 4) : [];
+    const summary = typeof result.summary === 'string' ? result.summary.trim().slice(0, 500) : '';
+    if (!summary) return [];
+    return [`- ${result.status || 'unknown'}${files.length ? ` · ${files.join(', ')}` : ''}: ${summary}`];
+  }).slice(-6);
+  if (!results.length) return '';
+  return `Recent bounded source edits from this same conversation:\n${results.join('\n')}\nThis is conversation continuity only. Re-read current files before making further changes, and do not treat these records as fresh write authority.`;
+}
+
+export async function handleStructuredSourceEdit(client: WsClient, data: ChatPayload, sessionId: string, sourceReference: TrustedSourceReference): Promise<boolean> {
+  const filePath = expandHome(sourceReference.path);
+  // This path is authorized below by project ACL + role write policy. Do not pass
+  // it through the generic workspace-root helper afterward: the current Project
+  // may itself live outside $HOME/workspace (for example the Tower source repo).
+  const readAuthorizedProjectText = (authorizedPath: string) => fs.readFileSync(authorizedPath, 'utf8');
+  const writeAuthorizedProjectText = (authorizedPath: string, content: string) => fs.writeFileSync(authorizedPath, content, 'utf8');
+  const role = client.userRole || 'member';
+  const assistantMsgId = uuidv4();
+  const sendAssistant = async (text: string, metadata: Record<string, any>) => {
+    const scopedMetadata = { ...metadata, sourceReferenceId: sourceReference.id };
+    const message = { id: assistantMsgId, role: 'assistant' as const, content: [{ type: 'text' as const, text }], metadata: scopedMetadata };
+    await saveMessage(sessionId, message).catch(() => {});
+    broadcastTowerMessage(sessionId, { type: 'assistant', sessionId, msgId: assistantMsgId, content: message.content, metadata: scopedMetadata });
+    broadcastTowerMessage(sessionId, { type: 'turn_done', sessionId, msgId: assistantMsgId, assistantMsgIds: [assistantMsgId], usage: { inputTokens: 0, outputTokens: 0, durationMs: 0 } });
+    broadcastTowerMessage(sessionId, { type: 'engine_done', sessionId, outcome: 'completed', assistantMessageId: assistantMsgId });
+    broadcastTowerMessage(sessionId, { type: 'turn_terminal', sessionId, rootTurnId: data.messageId || assistantMsgId, outcome: 'completed', reason: 'scoped_source_edit', terminalAt: new Date().toISOString(), assistantMessageId: assistantMsgId });
+  };
+  try {
+    if (!config.inlineEditEnabled) {
+      throw new ScopedEditError('scoped_edit_feature_disabled', 404);
+    }
+    if (!client.userId) {
+      throw new ScopedEditError('scoped_edit_auth_required', 401);
+    }
+    if (!/\.html?$/i.test(filePath) || isDotfileDenied(filePath)
+      || !(await isPathAccessible(filePath, client.userId, role))
+      || !(await isPathWritableByRole(filePath, client.userId, role))) {
+      throw new ScopedEditError('scoped_edit_access_denied', 403);
+    }
+    const htmlRead = await readProjectWorkspaceTextForActor(filePath, client.userId);
+    const htmlContent = htmlRead.content;
+    const currentSelectionMatches = htmlContent.slice(sourceReference.start, sourceReference.end) === sourceReference.source;
+    const remappedSelection = currentSelectionMatches ? null : remapHtmlElementByUniqueId({
+      htmlContent,
+      tagName: sourceReference.tagName,
+      expectedSource: sourceReference.source,
+    });
+    if (!currentSelectionMatches && !remappedSelection) {
+      throw new ScopedEditError('scoped_edit_selection_stale', 409);
+    }
+    const activeSelection = remappedSelection ?? {
+      start: sourceReference.start,
+      end: sourceReference.end,
+      lineStart: sourceReference.lineStart,
+      lineEnd: sourceReference.lineEnd,
+      source: sourceReference.source,
+    };
+    const plan = await discoverStaticHtmlCssEditPlan({
+      htmlPath: filePath,
+      htmlContent,
+      elementStart: activeSelection.start,
+      elementEnd: activeSelection.end,
+      expectedSource: activeSelection.source,
+      readLocalFile: async (relatedPath) => {
+        try {
+          if (isDotfileDenied(relatedPath)
+            || !(await isPathAccessible(relatedPath, client.userId!, role))
+            || !(await isPathWritableByRole(relatedPath, client.userId!, role))) return null;
+          return (await readProjectWorkspaceTextForActor(relatedPath, client.userId!)).content;
+        } catch { return null; }
+      },
+    });
+    const allTargets = [...plan.exactTargets, ...plan.relatedTargets];
+    const conversationContext = buildScopedEditConversationContext(
+      await getMessages(sessionId).catch(() => []),
+      data.messageId,
+    );
+    const generated = await generateApprovedRangeReplacements({
+      instruction: data.message,
+      targets: allTargets,
+      model: data.model,
+      conversationContext,
+    });
+    const changed = generated.replacements.filter(item => item.replacement !== item.target.source);
+    const changedPaths = [...new Set(changed.map(item => item.target.path))];
+    const changedWarnings = plan.warnings.filter((warning) => {
+      if (warning.code === 'too_many_targets') return changed.some(item => item.target.kind !== 'html-element');
+      if (!warning.path) return false;
+      return changed.some(item => item.target.path === warning.path && (!warning.selector || item.target.selector === warning.selector));
+    });
+    if (changedWarnings.length > 0) {
+      const targetList = changed.map(item => `- ${item.target.path}:L${item.target.lineStart}–L${item.target.lineEnd}${item.target.selector ? ` · ${item.target.selector}` : ''}`).join('\n');
+      const warningList = changedWarnings.map(warning => `- ${warning.message}${warning.selector ? ` (${warning.selector})` : ''}`).join('\n');
+      await sendAssistant(`요청을 분석했지만 실제 변경안에 선택 요소 밖의 확인이 필요한 범위가 포함되어 자동 적용하지 않았습니다.\n\n**실제 변경 예정 범위**\n${targetList}${warningList ? `\n\n**확인 사항**\n${warningList}` : ''}\n\n범위를 확인한 뒤 다시 적용할 수 있습니다.`, {
+        sourceType: 'scoped_edit_plan', scopedEditPlan: plan, applied: false, proposedChangedRanges: changed.map(item => item.target),
+      });
+      return true;
+    }
+    if (changedPaths.length > 1) {
+      const currentContents = new Map<string, string>();
+      for (const changedPath of changedPaths) currentContents.set(changedPath, readAuthorizedProjectText(changedPath));
+      const proposal = createMultiFileEditProposal({ userId: client.userId, instruction: data.message, model: generated.model, replacements: changed, currentContents });
+      const targetList = changed.map(item => `- ${item.target.path}:L${item.target.lineStart}–L${item.target.lineEnd}${item.target.selector ? ` · ${item.target.selector}` : ''}`).join('\n');
+      await sendAssistant(`요청을 처리하려면 여러 파일을 함께 수정해야 합니다. 아직 파일은 변경하지 않았습니다.\n\n**변경 예정 범위**\n${targetList}\n\n아래 확인 카드에서 정확한 범위를 승인하면 모든 파일을 잠그고 stale 검증 후 함께 적용합니다.`, {
+        sourceType: 'scoped_edit_plan', scopedEditPlan: plan, applied: false, proposedChangedRanges: changed.map(item => item.target), multiFileProposal: proposal,
+      });
+      return true;
+    }
+    if (changed.length > 0) {
+      const writePath = changedPaths[0];
+      const writeReference = await resolveProjectFileReferenceForHostPath(writePath);
+      if (writeReference) {
+        const expectedContent = writePath === filePath
+          ? htmlContent
+          : (await readProjectWorkspaceTextForActor(writePath, client.userId)).content;
+        const next = applyApprovedRanges(expectedContent, changed);
+        await compareAndSwapProjectWorkspaceText({ reference: writeReference, actorUserId: client.userId, expectedContent, content: next });
+      } else {
+        const release = await lockfile.lock(writePath, { realpath: true, retries: { retries: 3, minTimeout: 25, maxTimeout: 100 } });
+        try {
+          const lockedContent = readAuthorizedProjectText(writePath);
+          const next = applyApprovedRanges(lockedContent, changed);
+          writeAuthorizedProjectText(writePath, next);
+        } finally { await release(); }
+      }
+      const fileChanged = { type: 'file_changed' as const, event: 'change' as const, path: writePath };
+      await localBroadcastFileChange(fileChanged);
+      if (isPgEnabled()) publishWsSyncEvent(config.serverEpoch, { scope: 'all', data: fileChanged });
+    }
+    const summary = changed.map(item => `- ${item.target.path}:L${item.target.lineStart}–L${item.target.lineEnd}${item.target.selector ? ` · ${item.target.selector}` : ''}`).join('\n');
+    await sendAssistant(changed.length
+      ? `${generated.message}\n\n선택한 source 범위${changed.length > 1 ? `와 관련 범위 ${changed.length - 1}곳` : ''}만 수정했습니다.\n\n${summary}`
+      : generated.message, {
+      sourceType: 'scoped_edit_result',
+      applied: changed.length > 0,
+      changedRanges: changed.map(item => item.target),
+      model: generated.model,
+      scopedEditResult: {
+        status: changed.length > 0 ? 'applied' : 'no-change',
+        instruction: data.message,
+        summary: generated.message,
+        files: changedPaths,
+        targets: changed.map(item => ({
+          path: item.target.path,
+          kind: item.target.kind,
+          selector: item.target.selector,
+          lineStart: item.target.lineStart,
+          lineEnd: item.target.lineEnd,
+        })),
+      },
+    });
+    return true;
+  } catch (error: any) {
+    const code = error?.code || error?.message || 'scoped_edit_failed';
+    const message = code === 'scoped_edit_selection_stale' || code === 'SCOPED_EDIT_STALE_SOURCE'
+      ? '선택한 요소가 화면을 연 뒤 변경되어 같은 요소를 안전하게 다시 찾지 못했습니다. Viewer를 최신 내용으로 갱신했으니 수정할 요소를 다시 선택해 주세요.'
+      : code === 'scoped_edit_feature_disabled'
+        ? '이 환경에서는 아직 화면에서 선택한 source 수정 기능이 켜져 있지 않습니다.'
+        : code === 'scoped_edit_access_denied'
+          ? '현재 권한으로는 선택한 파일을 수정할 수 없습니다.'
+          : '선택한 부분을 안전하게 수정할 수 없었습니다. Viewer에서 요소를 다시 선택하거나 원하는 변경을 조금 더 구체적으로 알려주세요.';
+    await sendAssistant(message, {
+      sourceType: 'scoped_edit_result',
+      applied: false,
+      error: code,
+      scopedEditResult: {
+        status: 'failed',
+        instruction: data.message,
+        summary: message,
+        files: [],
+        targets: [],
+        error: code,
+      },
+    });
+    return true;
+  }
+}
+
+const automaticInterviewSessions = new Set<string>();
 export async function handleChat(client: WsClient, data: ChatPayload) {
+  if (data.initialInterview && data.initialInterviewToken && data.sessionId) {
+    const { executeInitialInterviewTurn } = await import('../services/agents/initial-interview-turn.js');
+    await executeInitialInterviewTurn(data.sessionId, data.initialInterviewToken, client.userId!);
+    return;
+  }
   const sessionId = data.sessionId || client.sessionId;
   if (!sessionId) {
     console.error(`[ws] handleChat REJECTED: no sessionId from client=${client.id.slice(0, 8)} — frontend must create session first`);
@@ -1467,6 +1684,24 @@ export async function handleChat(client: WsClient, data: ChatPayload) {
       sessionId: '',
     });
     return;
+  }
+
+  if (client.userId) {
+    const access = await canSendSessionMessage(sessionId, client.userId, client.userRole || 'guest');
+    if (!access.allowed) {
+      send(client.ws, { type: 'error', sessionId, errorCode: 'ACCESS_DENIED', message: access.message });
+      return;
+    }
+  }
+
+  // Reading archived history does not restore it. Only the owner's explicit
+  // human message does; worker lifecycle and headless automation stay separate.
+  if (client.userId && !data.headless && !data.panelChat && !data.initialInterview) {
+    const { restoreOnHumanMessage } = await import('../services/session/restore-on-human-message.js');
+    if (await restoreOnHumanMessage(sessionId, client.userId)) {
+      const restored = await getSession(sessionId, client.userId);
+      if (restored) broadcastToUser(client.userId, { type: 'session_created', session: restored });
+    }
   }
 
   const acceptedAt = data.acceptedAt && Number.isFinite(Date.parse(data.acceptedAt))
@@ -1495,12 +1730,23 @@ export async function handleChat(client: WsClient, data: ChatPayload) {
   // quick successive messages can't reach engine.steer() out of order (issue
   // #17). Released right before the long turn loop so mid-turn steering isn't
   // blocked. `releaseLock` is idempotent and MUST be called on every exit path.
+  if (!data.initialInterview) await cancelInterviewForHuman(sessionId).catch(()=>{});
+  if (!data.initialInterview && automaticInterviewSessions.has(sessionId)) {
+    automaticInterviewSessions.delete(sessionId);
+    await abortSessionEverywhere(sessionId);
+  }
+  if (data.voiceMode && data.messageId) client.onVoiceTiming?.({ rootTurnId: data.messageId, sessionId, stage: 'chat_lock_wait' });
   const rawRelease = await acquireSessionChatLock(sessionId);
+  if (data.voiceMode && data.messageId) client.onVoiceTiming?.({ rootTurnId: data.messageId, sessionId, stage: 'chat_lock_acquired' });
   let lockReleased = false;
   const releaseLock = () => { if (!lockReleased) { lockReleased = true; rawRelease(); } };
 
+  if (data.initialInterview) {
+    const human = await queryOne<{n:string}>('SELECT count(*)::text n FROM messages WHERE session_id=$1 AND role=\'user\'', [sessionId]);
+    if (human && Number(human.n)>0) { releaseLock(); return; }
+  }
   // Resolve engine for this session. Existing Claude sessions are lazily
-  // rehydrated into Pi/Smartest at the first real chat turn when either:
+  // rehydrated into Pi/Core at the first real chat turn when either:
   //   - Claude is disabled on this VM, or
   //   - the sticky Claude model is retired (notably claude-opus-4-8).
   // This avoids a bulk migration job touching archived/idle history while still
@@ -1515,8 +1761,8 @@ export async function handleChat(client: WsClient, data: ChatPayload) {
     claudeEnabled: config.claudeEnabled,
     piEnabled: config.piEnabled,
   })) {
-    const targetModel = DEFAULT_PI_MODEL_ID;
-    const reason = !config.claudeEnabled ? 'auto_claude_disabled_smartest' : 'auto_retired_claude_model_smartest';
+    const targetModel = 'preset/core';
+    const reason = !config.claudeEnabled ? 'auto_claude_disabled_core' : 'auto_retired_claude_model_core';
     const switched = await switchEngine({
       sessionId,
       toEngine: 'pi',
@@ -1587,6 +1833,27 @@ export async function handleChat(client: WsClient, data: ChatPayload) {
     throw err;
   }
 
+  // Voice must own an independent root. This check is INSIDE the Session admission
+  // lock and BEFORE dedupe/message persistence; a racing normal chat cannot receive
+  // the voice transcript as steering or a queued follow-up.
+  if (data.voiceMode) {
+    let durableActive;
+    try { durableActive = await getActiveAgentTurnTiming(sessionId); }
+    catch (error) { releaseLock(); throw error; }
+    if (engine.isRunning(sessionId) || activeTurnTimings.has(sessionId)
+      || (durableActive && ['running', 'waiting_retry', 'stop_requested'].includes(durableActive.state))) {
+      let errorCode = 'VOICE_BUSY';
+      try {
+        if (durableActive && ['running', 'waiting_retry', 'stop_requested'].includes(durableActive.state)) {
+          errorCode = durableActive.state === 'waiting_retry' ? 'VOICE_RECOVERY_REQUIRED' : await voiceAdmissionFailure(sessionId, durableActive.rootTurnId);
+        }
+      } catch (error) { releaseLock(); throw error; }
+      sendToClient(client, sessionId, { type: 'error', sessionId, errorCode, message: errorCode === 'VOICE_BUSY' ? 'Tower Session is busy' : 'Previous turn requires recovery or user attention' });
+      releaseLock();
+      return;
+    }
+  }
+
   // Guard: drop model if it doesn't match the session's engine.
   // When we drop the frontend-sent model, fall back to the session's stored
   // model_used (if it matches the engine) before letting the engine use its
@@ -1602,12 +1869,27 @@ export async function handleChat(client: WsClient, data: ChatPayload) {
   };
 
   const requestedModel: string | undefined = data.model;
+  let requestedMatchesEngineModel: string | undefined;
   let resolvedModel: string | undefined;
+  let recoveredLegacyModel: string | undefined;
   if (engineName === 'pi') {
     const requestedMatches = matchesEngine(requestedModel, engineName);
     const storedModel = (dbSession as any)?.modelUsed as string | undefined;
-    const sourceModel = requestedMatches ? requestedModel : storedModel;
-    resolvedModel = normalizePiSessionModelId(sourceModel);
+    const recoveredChoice = recoverLegacySessionChoice(requestedModel, storedModel);
+    requestedMatchesEngineModel = recoveredChoice ?? (requestedMatches ? requestedModel : undefined);
+    if (!recoveredChoice && requestedMatches && requestedModel && !isSelectablePiModelId(requestedModel)) {
+      sendToClient(client, sessionId, { type: 'error', sessionId, message: 'This model is not selectable. Choose an available model.', errorCode: 'MODEL_NOT_SELECTABLE' });
+      releaseLock();
+      return;
+    }
+    const sourceModel = recoveredChoice ?? (requestedMatches ? requestedModel : storedModel);
+    if (!isPiPresetMappingReady(sourceModel)) {
+      sendToClient(client, sessionId, { type: 'error', sessionId, message: 'Core/Lite mapping is unavailable on this VM. Ask an administrator to select an available model.', errorCode: 'MODEL_PRESET_UNAVAILABLE' });
+      releaseLock();
+      return;
+    }
+    resolvedModel = resolvePiSessionChoice(sourceModel);
+    recoveredLegacyModel = recoveredChoice ? storedModel?.replace(/^pi:/, '') : undefined;
     if (requestedModel && !requestedMatches) {
       console.log(`[ws] model mismatch: dropping "${requestedModel}" for engine="${engineName}", using Pi default/model migration target "${resolvedModel}"`);
     } else if (sourceModel && sourceModel !== resolvedModel) {
@@ -1627,6 +1909,7 @@ export async function handleChat(client: WsClient, data: ChatPayload) {
     }
   }
 
+  if (data.voiceMode && data.messageId) client.onVoiceTiming?.({ rootTurnId: data.messageId, sessionId, stage: 'chat_admitted' });
   let reservedTextDedupeKey: string | null = null;
   const fromPendingQueue = pendingRedispatchPayloads.has(data);
   if (fromPendingQueue) pendingRedispatchPayloads.delete(data);
@@ -1655,29 +1938,48 @@ export async function handleChat(client: WsClient, data: ChatPayload) {
 
   console.log(`[ws] handleChat START session=${sessionId.slice(0, 8)} client=${client.id.slice(0, 8)} engine=${engineName} model=${resolvedModel || 'default'} active=${getTotalActiveCount()}`);
 
-  if (!fromPendingQueue) {
+  const structuredSourceReference = validateTrustedSourceReference(data.sourceReference);
+  if (data.sourceReference && !structuredSourceReference) {
+    sendToClient(client, sessionId, { type: 'error', sessionId, message: 'Invalid or stale source reference. Select the element again.', errorCode: 'SCOPED_EDIT_REFERENCE_INVALID' });
+    releaseLock();
+    return;
+  }
+  if (!fromPendingQueue && !data.waitAlarmId) {
     await markAgentSessionHumanTouched(sessionId, client.username || null);
   }
 
+  if (!data.initialInterview && !data.waitAlarmId) await invalidateWaitAlarm(sessionId);
+  if (data.waitAlarmId && engine.isRunning(sessionId)) { releaseLock(); return; }
   // Engine busy: Pi can accept a mid-turn steering message. For other engines
   // (or Pi's tiny starting window before a session entry exists), enqueue until
   // engine_done and re-dispatch via flushPendingUserMessages.
   // 결정: workspace/decisions/2026-05-10-mid-turn-event-c-pattern-and-user-chat-queue.md
   if (engine.isRunning(sessionId)) {
+    if (data.voiceMode) {
+      releaseUserInputDedupe(sessionId, data.messageId, data.message);
+      sendToClient(client, sessionId, { type: 'error', sessionId, errorCode: 'VOICE_BUSY', message: 'Tower Session is busy' });
+      releaseLock();
+      return;
+    }
     if (engineName === 'pi' && typeof engine.steer === 'function') {
       try {
         // Generate the msgId first and hand it to steer() so the engine can tag
         // the steer in its pending queue and later emit steer_delivered with
         // this id (frontend flips "전달 중" → "반영됨"). See GitHub issue #15.
         const steeredMsgId = data.messageId || uuidv4();
-        await engine.steer(sessionId, data.message, steeredMsgId, client.username || null);
+        const steeredMessage = structuredSourceReference
+          ? `${buildSourceReferenceContext(structuredSourceReference)}\n\n---\n${data.message}`
+          : data.message;
+        await engine.steer(sessionId, steeredMessage, steeredMsgId, client.username || null);
         try {
           await saveMessage(sessionId, {
             id: steeredMsgId,
             role: 'user',
             content: [{ type: 'text', text: data.message }],
             username: client.username || null,
-            metadata: humanChatMetadata(),
+            metadata: structuredSourceReference
+              ? { ...humanChatMetadata(), sourceReference: structuredSourceReference }
+              : humanChatMetadata(),
           });
         } catch (err) {
           console.error('[ws] saveMessage (steered user) failed:', err);
@@ -1721,7 +2023,9 @@ export async function handleChat(client: WsClient, data: ChatPayload) {
         role: 'user',
         content: [{ type: 'text', text: data.message }],
         username: client.username || null,
-        metadata: humanChatMetadata(),
+        metadata: structuredSourceReference
+          ? { ...humanChatMetadata(), sourceReference: structuredSourceReference }
+          : humanChatMetadata(),
       });
     } catch (err) {
       console.error('[ws] saveMessage (queued user) failed:', err);
@@ -1734,6 +2038,7 @@ export async function handleChat(client: WsClient, data: ChatPayload) {
         role: 'user',
         content: [{ type: 'text', text: data.message }],
         username: client.username || null,
+        metadata: structuredSourceReference ? { sourceReference: structuredSourceReference } : undefined,
       },
     });
     // Reset auto-wake budget — user took control back even if the turn hasn't started yet
@@ -1744,6 +2049,8 @@ export async function handleChat(client: WsClient, data: ChatPayload) {
       // non-critical
     }
     enqueuePendingUserMessage(sessionId, { client, data: dataWithId });
+    // Accepted human input must not wait behind an intentional 30-minute sleep.
+    cancelSessionSleep(sessionId);
     sendToClient(client, sessionId, {
       type: 'user_message_queued',
       sessionId,
@@ -1791,14 +2098,33 @@ export async function handleChat(client: WsClient, data: ChatPayload) {
       })
     : null;
 
+  if (data.waitAlarmId) {
+    try {
+      const actor = await assertWaitPrincipal(sessionId, client.userId!);
+      const sendAccess = await canSendSessionMessage(sessionId, client.userId!, actor.role);
+      if (!sendAccess.allowed) { releaseLock(); return; }
+      const admission = await admitWaitAlarm(sessionId, data.waitAlarmId, data.waitAlarmVersion);
+      if (!admission) { releaseLock(); return; }
+      data = { ...data, message: admission.prompt, messageId: admission.messageId };
+    } catch (error) { releaseLock(); throw error; }
+  }
+
   // Save user message to DB unless this is an internal/bootstrap send. Hidden
   // sends still drive the engine, but should not look like a user typed a slash command.
   const userMsgId = data.messageId || uuidv4();
   const suppressUserEcho = data.suppressUserEcho === true;
+  const baseUserMessageMetadata = suppressUserEcho
+    ? { ...humanChatMetadata(), hidden: 'system-trigger', ...(data.waitAlarmId ? { origin: 'system-agent-wait', waitAlarmId: data.waitAlarmId } : {}) }
+    : structuredSourceReference
+      ? { ...humanChatMetadata(), sourceReference: structuredSourceReference }
+      : humanChatMetadata();
   const userMessageMetadata = mergeSkillInvocationMetadata(
-    suppressUserEcho ? { ...humanChatMetadata(), hidden: 'system-trigger' } : humanChatMetadata(),
+    baseUserMessageMetadata,
     activeSkillInvocation,
   );
+  if (data.initialInterview) {
+    await saveMessage(sessionId, { id: userMsgId, role: 'system', content: [{type:'text',text:data.message}], metadata: {origin:'agent-initial-interview'} });
+  }
   if (!suppressUserEcho) {
     try {
       await saveMessage(sessionId, {
@@ -1808,6 +2134,8 @@ export async function handleChat(client: WsClient, data: ChatPayload) {
         username: client.username || null,
         metadata: userMessageMetadata,
       });
+      const {recordInterviewUtterance}=await import('../services/agents/durable-interview.js');
+      await recordInterviewUtterance(sessionId,userMsgId,data.message);
     } catch (err) { console.error('[ws] saveMessage (user) failed:', err); }
   }
 
@@ -1870,62 +2198,17 @@ export async function handleChat(client: WsClient, data: ChatPayload) {
 
   // Engine callbacks — ws-handler owns WS routing and DB access
   const callbacks: EngineCallbacks = {
-    askUser: (questionId: string, questions: any[]) => {
-      const sanitizedQuestions = sanitizeAskUserQuestions(questions);
-      if (sanitizedQuestions.length === 0) {
-        console.warn(`[ws] ask_user dropped empty payload for session=${sessionId.slice(0, 8)}`);
-        return Promise.resolve('No user question payload was provided. Continue without waiting for user input.');
-      }
-
-      return new Promise<string>((resolve, reject) => {
-        const timer = setTimeout(() => {
-          const pq = pendingQuestions.get(questionId);
-          if (pq) {
-            pendingQuestions.delete(questionId);
-            void setAgentTurnWaitingUser(userMsgId, false).catch(() => {});
-            broadcastToAll({ type: 'session_awaiting_user', sessionId, awaiting: false });
-            broadcastToSession(sessionId, { type: 'ask_user_timeout', sessionId, questionId });
-            // Tell AI the user didn't respond — ask again via regular chat message instead
-            const questionSummary = sanitizedQuestions.map((q: any) => q.question).join(', ');
-            resolve(
-              `[System] The user did not respond to the interactive prompt within 60 minutes. They may have switched to another session or missed it. ` +
-              `Your question was: "${questionSummary}". ` +
-              `Do NOT proceed silently. Instead, ask the same question again as a regular chat message so the user can see it when they return. ` +
-              `Keep your message concise and clear.`
-            );
-          }
-        }, ASK_USER_TIMEOUT);
-
-        void setAgentTurnWaitingUser(userMsgId, true).catch(() => {});
-        pendingQuestions.set(questionId, {
-          questionId,
-          sessionId,
-          questions: sanitizedQuestions,
-          resolve: (answer: string) => {
-            clearTimeout(timer);
-            pendingQuestions.delete(questionId);
-            resolve(answer);
-          },
-          reject: (error: Error) => {
-            clearTimeout(timer);
-            pendingQuestions.delete(questionId);
-            reject(error);
-          },
-          timer,
-        });
-
-        // The full question stays scoped to tabs viewing this session. A content-free
-        // attention edge goes to every connected client so Latest and any open main
-        // tab can show `?` even when the user navigated elsewhere before AUQ arrived.
-        broadcastToAll({ type: 'session_awaiting_user', sessionId, awaiting: true, questionId });
-        broadcastToSession(sessionId, {
-          type: 'ask_user',
-          sessionId,
-          questionId,
-          questions: sanitizedQuestions,
-        });
-      });
-    },
+    ...(data.voiceMode && client.onVoiceTiming ? {
+      onVoiceTiming: (event: Parameters<NonNullable<EngineCallbacks['onVoiceTiming']>>[0]) => {
+        if (event.sessionId === sessionId && event.rootTurnId === userMsgId) client.onVoiceTiming?.(event);
+      },
+    } : {}),
+    ...(data.voiceMode && client.onVoiceAnswerSnapshot ? {
+      onVoiceAnswerSnapshot: (event: Parameters<NonNullable<EngineCallbacks['onVoiceAnswerSnapshot']>>[0]) => {
+        if (event.sessionId === sessionId && event.rootTurnId === userMsgId) client.onVoiceAnswerSnapshot?.(event);
+      },
+    } : {}),
+    askUser: createSessionAskUser({ sessionId, recipientUserId: client.userId, userMessageId: userMsgId, logTag: 'ws' }),
     claimSessionId: async (esid: string) => {
       try { await claimActiveEngineSessionId(sessionId, engineName, esid); } catch {}
     },
@@ -1933,9 +2216,15 @@ export async function handleChat(client: WsClient, data: ChatPayload) {
       const enrichedMsg = msg.role === 'assistant' && activeSkillInvocation
         ? { ...msg, metadata: mergeSkillInvocationMetadata(msg.metadata || {}, activeSkillInvocation) }
         : msg;
+      if(data.initialInterview && msg.role==='assistant'){
+        const text=extractTextFromContent(JSON.stringify(msg.content));
+        try{const committed=await commitInterviewArtifact(sessionId,text,msg.id,data.initialInterviewToken);if(committed)broadcastToSession(sessionId,{type:'session_updated',sessionId});}catch{}
+        return;
+      }
       try { await saveMessage(sessionId, enrichedMsg); } catch {}
     },
     updateMessageContent: async (msgId, content) => {
+      if(data.initialInterview)return;
       try { await updateMessageContent(msgId, content); } catch {}
     },
     attachToolResult: async (toolUseId, result) => {
@@ -1965,6 +2254,7 @@ export async function handleChat(client: WsClient, data: ChatPayload) {
           context_input_tokens: metrics.contextInputTokens,
           context_window_size: metrics.contextWindowSize,
           context_estimated_tokens: metrics.contextEstimatedTokens,
+          context_compacted: metrics.contextCompacted,
           next_request_estimated_tokens: metrics.nextRequestEstimatedTokens,
           compact_threshold_tokens: metrics.compactThresholdTokens,
           context_snapshot: metrics.contextSnapshot,
@@ -2003,6 +2293,7 @@ export async function handleChat(client: WsClient, data: ChatPayload) {
   const resetHangTimer = () => {
     if (hangTimer) clearTimeout(hangTimer);
     hangTimer = setTimeout(() => {
+      if (isSessionSleeping(sessionId)) { resetHangTimer(); return; }
       engine.abort(sessionId);
       broadcastToSession(sessionId, {
         type: 'error',
@@ -2010,10 +2301,21 @@ export async function handleChat(client: WsClient, data: ChatPayload) {
         errorCode: 'SDK_HANG',
         sessionId,
       });
-    }, SDK_HANG_TIMEOUT);
+    }, data.initialInterview ? 60000 : SDK_HANG_TIMEOUT);
   };
 
   let finalMessage = resolveSlashCommandAliasForDispatch(data.message, slashCommands);
+  const voiceFastContinuity = await readVoiceFastContinuity(sessionId).catch(() => '');
+  if (voiceFastContinuity) finalMessage = `${voiceFastContinuity}\n\n---\n${finalMessage}`;
+  if (structuredSourceReference) {
+    finalMessage = `${buildSourceReferenceContext(structuredSourceReference)}\n\n---\n${finalMessage}`;
+  }
+  const recentScopedEditContext = buildRecentScopedEditResultContext(
+    await getMessages(sessionId).catch(() => []),
+  );
+  if (recentScopedEditContext) {
+    finalMessage = `${recentScopedEditContext}\n\n---\n${finalMessage}`;
+  }
 
   const appendCommandProcessEvent = async (phase: 'started' | 'completed' | 'failed', error?: string) => {
     if (!activeCommandInvocation) return;
@@ -2097,41 +2399,16 @@ export async function handleChat(client: WsClient, data: ChatPayload) {
       data.surfaceHint.language ? `- file type: ${data.surfaceHint.language}` : null,
       data.surfaceHint.harness ? `- file-scoped harness: ${data.surfaceHint.harness}` : null,
       data.surfaceHint.capabilities?.length ? `- available harness capabilities: ${data.surfaceHint.capabilities.join(', ')}` : null,
-      data.surfaceHint.cadSelection?.selection ? [
-        'Current CAD viewer selection:',
-        `- file: ${data.surfaceHint.cadSelection.path || data.surfaceHint.path}`,
-        data.surfaceHint.cadSelection.cadModelArtifactPath ? `- cad model: ${data.surfaceHint.cadSelection.cadModelArtifactPath}` : null,
-        data.surfaceHint.cadSelection.selection?.cadModelArtifactPath ? `- selection cad model: ${data.surfaceHint.cadSelection.selection.cadModelArtifactPath}` : null,
-        data.surfaceHint.cadSelection.view?.label ? `- view: ${data.surfaceHint.cadSelection.view.label}` : null,
-        data.surfaceHint.cadSelection.view?.candidateId ? `- view candidate id: ${data.surfaceHint.cadSelection.view.candidateId}` : null,
-        data.surfaceHint.cadSelection.view?.viewId ? `- view id: ${data.surfaceHint.cadSelection.view.viewId}` : null,
-        data.surfaceHint.cadSelection.view?.kind ? `- view kind: ${data.surfaceHint.cadSelection.view.kind}` : null,
-        data.surfaceHint.cadSelection.selection?.type ? `- selection type: ${data.surfaceHint.cadSelection.selection.type}` : null,
-        data.surfaceHint.cadSelection.selection?.label ? `- label: ${data.surfaceHint.cadSelection.selection.label}` : null,
-        data.surfaceHint.cadSelection.selection?.semanticObjectId ? `- semanticObjectId: ${data.surfaceHint.cadSelection.selection.semanticObjectId}` : null,
-        data.surfaceHint.cadSelection.selection?.entityId ? `- entityId: ${data.surfaceHint.cadSelection.selection.entityId}` : null,
-        data.surfaceHint.cadSelection.selection?.textId ? `- textId: ${data.surfaceHint.cadSelection.selection.textId}` : null,
-        data.surfaceHint.cadSelection.selection?.blockInstanceId ? `- blockInstanceId: ${data.surfaceHint.cadSelection.selection.blockInstanceId}` : null,
-        data.surfaceHint.cadSelection.selection?.handle ? `- handle: ${data.surfaceHint.cadSelection.selection.handle}` : null,
-        data.surfaceHint.cadSelection.selection?.block ? `- block: ${data.surfaceHint.cadSelection.selection.block}` : null,
-        data.surfaceHint.cadSelection.selection?.layer ? `- layer: ${data.surfaceHint.cadSelection.selection.layer}` : null,
-        data.surfaceHint.cadSelection.selection?.text ? `- text: ${data.surfaceHint.cadSelection.selection.text}` : null,
-        data.surfaceHint.cadSelection.selection?.bounds ? `- selection bounds: ${JSON.stringify(data.surfaceHint.cadSelection.selection.bounds)}` : null,
-        data.surfaceHint.cadSelection.view?.bbox ? `- view bounds: ${JSON.stringify(data.surfaceHint.cadSelection.view.bbox)}` : null,
-        data.surfaceHint.cadSelection.selection?.lookup ? `- lookup: ${data.surfaceHint.cadSelection.selection.lookup}` : null,
-        '- Use this as the user\'s currently focused drawing object/region. Do not assume it is the whole drawing.',
-      ].filter(Boolean).join('\n') : null,
       '',
       isCadHarness ? [
         'CAD file-scoped harness instructions:',
         '- Treat "this", "this file", "this drawing", and "the current CAD" as the CAD file above unless the user says otherwise.',
         '- Prefer thin UI / deep workflow behavior: answer in the user\'s work language (RFQ, estimate review, openings/equipment list, title/revision check, change request), not internal tool names.',
         '- Use read-only inspection first. Do not modify the original drawing. For changes, propose copy/dry-run/highlight/change-report first and ask for approval before applying edits.',
-        '- When useful, call CAD-specific tools such as cad_view or project CAD Workbench artifacts/CLI to inspect, render, QA, extract text/layers/blocks, or create reports.',
+        '- When useful, call cad_view to inspect or render the drawing. Use project files only for artifacts explicitly created during the task.',
         '- Ground important claims with evidence when possible: handle, layer, block/attribute, text value, coordinates/bounds, page/preview region, or artifact path.',
         '- When returning a substantive CAD result, prefer this lightweight response contract in markdown: (1) 업무 결론, (2) 근거 / 도면에서 보기 with handle/layer/coordinates when known, (3) 생성/참조 파일 as plain absolute workspace paths, (4) 다음 작업, (5) 확인 필요/한계.',
-        '- To make evidence clickable in the UI, you may include a fenced `cad-evidence` JSON block with `{ "title": string, "items": [{ "label": string, "handle"?: string, "layer"?: string, "block"?: string, "text"?: string, "insert"?: number[], "bounds"?: number[], "confidence"?: "read"|"inferred"|"needs_review", "note"?: string }] }`. Only include evidence you can ground from CAD artifacts/tools.',
-        '- If you create or reference CAD Workbench artifacts, print each important artifact path on its own line so the Tower file viewer can open it.',
+        '- If you create a CAD-related artifact, print its path on its own line so the Tower file viewer can open it.',
         '- Be explicit about limits: preview-grade rendering is not engineering, safety, legal, or construction sign-off.',
         '- For large drawings, prefer progressive results: first summarize what is known, then continue deeper analysis/tooling as needed.',
         '',
@@ -2226,6 +2503,27 @@ export async function handleChat(client: WsClient, data: ChatPayload) {
     }
   }
 
+  if (recoveredLegacyModel) {
+    try {
+      // Persist the choice before the notice so a retry cannot repeat the migration.
+      await updateSession(sessionId, { modelUsed: 'preset/core' });
+      const noticeId = uuidv4();
+      const content = [{ type: 'text' as const, text: `이전에 선택한 모델 ${recoveredLegacyModel}을(를) 더 이상 사용할 수 없어 Core로 전환했습니다. 기존 대화를 이어서 진행합니다.` }];
+      const metadata = { modelRecovery: { from: recoveredLegacyModel, to: 'preset/core' } };
+      try {
+        await saveMessage(sessionId, { id: noticeId, role: 'assistant', content, metadata });
+        broadcastTowerMessage(sessionId, { type: 'assistant', sessionId, msgId: noticeId, content, metadata });
+      } catch (error) {
+        console.warn('[ws] Model recovery notice could not be saved:', error);
+        // The updated session choice still lets the user's turn proceed.
+      }
+      broadcastToAll({ type: 'session_meta_update', sessionId, updates: { modelUsed: 'preset/core' } });
+    } catch (error) {
+      releaseLock();
+      throw error;
+    }
+  }
+
   // Race guard: the `engine.isRunning` gate at the top of handleChat passed
   // (engine idle), but several awaits happened since (saveMessage, accessible
   // paths, context injection). A near-simultaneous message — common now that the
@@ -2238,6 +2536,13 @@ export async function handleChat(client: WsClient, data: ChatPayload) {
   // try/finally so the early return does not trigger the finally's idle
   // broadcast (the active turn is still streaming).
   if (engine.isRunning(sessionId)) {
+    if (data.voiceMode) {
+      // Background recovery can bypass this lock. Input is already persisted here:
+      // never steer/queue it and do not advertise retryable BUSY after persistence.
+      sendToClient(client, sessionId, { type: 'error', sessionId, errorCode: 'VOICE_TURN_NOT_STARTED', message: 'Voice root admission was superseded' });
+      releaseLock();
+      return;
+    }
     if (engineName === 'pi' && typeof engine.steer === 'function') {
       try {
         await engine.steer(sessionId, finalMessage, userMsgId, client.username || null);
@@ -2269,10 +2574,17 @@ export async function handleChat(client: WsClient, data: ChatPayload) {
     turnSystemPromptFragments.push('voice-spoken-korean');
   }
 
+  const selectedPreset = engineName === 'pi' ? presetForPiTurn(requestedMatchesEngineModel, storedSessionModel) : undefined;
+  const presetMappingRevisionAtStart = selectedPreset ? presetMappingRevision() : undefined;
+  const requestedEffort = typeof data.effort === 'string' ? data.effort : (dbSession as any)?.reasoningEffort;
   const runOpts = {
+    initialInterview: data.initialInterview,
     cwd: runCwd,
     model: resolvedModel,
-    effort: data.effort,
+    // A model preset is not a reasoning/workload policy.
+    modelPolicyId: undefined as string | undefined,
+    modelPolicyRevision: undefined as number | undefined,
+    effort: requestedEffort,
     userId: client.userId,
     username: client.username,
     userRole: client.userRole,
@@ -2464,6 +2776,12 @@ export async function handleChat(client: WsClient, data: ChatPayload) {
   try {
     resetHangTimer();
 
+    if (data.voiceMode) client.onVoiceTiming?.({ rootTurnId: userMsgId, sessionId, stage: 'chat_prepared' });
+    const {dedicatedInterviewPrompt}=await import('../services/agents/durable-interview.js');
+    const interviewHint=await dedicatedInterviewPrompt(sessionId);
+    if(interviewHint)finalMessage=interviewHint+'\n\n'+finalMessage;
+    if (data.waitAlarmId) {const actor=await assertWaitPrincipal(sessionId,client.userId!);runOpts.userRole=actor.role;}
+    if (!(await validateWaitAlarmRoot(sessionId,userMsgId))) return;
     for await (const towerMsg of engine.run(sessionId, finalMessage, runOpts, callbacks)) {
       resetHangTimer();
 
@@ -2475,7 +2793,21 @@ export async function handleChat(client: WsClient, data: ChatPayload) {
             metadata: mergeSkillInvocationMetadata(((towerMsg as any).metadata || {}), activeSkillInvocation),
           }
         : towerMsg;
-      broadcastTowerMessage(sessionId, outboundTowerMsg);
+      if (towerMsg.type === 'steer_delivered' && towerMsg.msgId && towerMsg.assistantMsgId) {
+        try {
+          await mergeMessageMetadata(towerMsg.msgId, {
+            kind: 'pi-steer-group',
+            sessionId,
+            steerDelivery: {
+              assistantMsgId: towerMsg.assistantMsgId,
+              assistantContent: towerMsg.assistantContent || [],
+            },
+          });
+        } catch (err: any) {
+          console.warn(`[ws] steer delivery metadata persist failed: session=${sessionId.slice(0, 8)} msgId=${towerMsg.msgId.slice(0, 8)} error=${err?.message || err}`);
+        }
+      }
+      if (!data.initialInterview || ['result','error'].includes(towerMsg.type)) broadcastTowerMessage(sessionId, outboundTowerMsg);
 
       // Terminal legacy frames (sdk_done / error / resume_failed) still
       // flow as before — the frontend has richer handlers for those
@@ -2485,8 +2817,29 @@ export async function handleChat(client: WsClient, data: ChatPayload) {
         broadcastToSession(sessionId, terminalMsg);
       }
 
-      if (towerMsg.type === 'turn_done' && Array.isArray((towerMsg as any).assistantMsgIds)) {
-        try { await touchMessages((towerMsg as any).assistantMsgIds); } catch {}
+      if (towerMsg.type === 'turn_done') {
+        if (Array.isArray((towerMsg as any).assistantMsgIds)) {
+          try { await touchMessages((towerMsg as any).assistantMsgIds); } catch {}
+        }
+        // Usage accounting is Pi/LiteLLM-only. Claude subscription/account paths
+        // are retired and intentionally excluded from this ledger.
+        if (engineName === 'pi') {
+          try {
+            await recordPiUsageEvent({
+              sessionId,
+              rootTurnId: userMsgId,
+              messageId: towerMsg.msgId,
+              usage: towerMsg.usage,
+              requestedModel: resolvedModel,
+              modelPolicyId: runOpts.modelPolicyId,
+              modelPolicyRevision: runOpts.modelPolicyRevision,
+              selectedPreset,
+              presetMappingRevision: presetMappingRevisionAtStart,
+            });
+          } catch (err: any) {
+            console.warn(`[ws] AI usage ledger write failed: session=${sessionId.slice(0, 8)} error=${err?.message || err}`);
+          }
+        }
       }
 
       // Update session metadata on engine_done
@@ -2510,6 +2863,18 @@ export async function handleChat(client: WsClient, data: ChatPayload) {
           stopMode,
           error: towerMsg.error,
         });
+        if (terminalDecision.outcome === 'completed' && terminalDecision.assistantMessageId) {
+          try {
+            await recordCompletedAiTurn({
+              sessionId,
+              rootTurnId: terminalDecision.rootTurnId,
+              assistantMessageId: terminalDecision.assistantMessageId,
+              completedAt: terminalDecision.terminalAt,
+            });
+          } catch (err) {
+            console.warn(`[ws] AI completion sequence deferred for ${sessionId.slice(0, 8)}:`, err);
+          }
+        }
         // Root-turn terminal facts affect sidebar attention across sessions, tabs,
         // and backend processes. Broadcast once through the ACL-filtered global
         // channel; session_status remains activity-only.
@@ -2582,7 +2947,11 @@ export async function handleChat(client: WsClient, data: ChatPayload) {
               filesEdited: mergedFiles,
             };
             if (isModelCompatibleWithEngine) {
-              updates.modelUsed = candidateModel;
+              // A Tower policy alias is session intent, not the physical model
+              // reported by Pi. Preserve it across turns and reconnects.
+              updates.modelUsed = engineName === 'pi'
+                ? choiceAfterPiTurn(requestedMatchesEngineModel, storedSessionModel, candidateModel)
+                : candidateModel;
             } else if (candidateModel) {
               console.log(`[ws] engine_done: skipping modelUsed update — "${candidateModel}" does not match engine="${engineName}"`);
             }
@@ -2720,30 +3089,43 @@ export async function handleChat(client: WsClient, data: ChatPayload) {
 
 function handleAnswerQuestion(client: WsClient, data: { questionId: string; answer: string; sessionId?: string }) {
   const sessionId = data.sessionId || client.sessionId;
-  const activeRootTurnId = sessionId ? activeTurnTimings.get(sessionId)?.rootTurnId : undefined;
-  if (activeRootTurnId) void setAgentTurnWaitingUser(activeRootTurnId, false).catch(() => {});
-  if (sessionId) {
-    broadcastToAll({ type: 'session_awaiting_user', sessionId, awaiting: false });
+  if (!sessionId || !data.questionId || typeof data.answer !== 'string') {
+    send(client.ws, { type: 'answer_question_error', sessionId: sessionId || null, questionId: data.questionId || null, reason: 'invalid_payload' });
+    return;
   }
-  if (resolvePendingQuestionLocally(data.questionId, data.answer, sessionId)) {
-    if (sessionId) {
-      remotePendingQuestionsBySession.delete(sessionId);
-    }
+  const pending = getLocalPendingQuestion(sessionId) || remotePendingQuestionsBySession.get(sessionId);
+  if (!client.userId || !pending || pending.questionId !== data.questionId || pending.recipientUserId !== client.userId) {
+    send(client.ws, { type: 'answer_question_error', sessionId, questionId: data.questionId, reason: 'not_question_recipient' });
+    return;
+  }
+  if (resolvePendingQuestionLocally(data.questionId, data.answer, sessionId, client.userId)) {
+    broadcastToUser(client.userId!, { type: 'session_awaiting_user', sessionId, awaiting: false, questionId: data.questionId });
+    remotePendingQuestionsBySession.delete(sessionId);
+    send(client.ws, { type: 'answer_question_ack', sessionId, questionId: data.questionId, route: 'local' });
+    console.info(`[ws] ask_user answered session=${sessionId.slice(0, 8)} question=${data.questionId.slice(0, 12)} route=local`);
     return;
   }
 
-  if (!sessionId || !isPgEnabled()) return;
+  if (!isPgEnabled()) {
+    send(client.ws, { type: 'answer_question_error', sessionId, questionId: data.questionId, reason: 'question_not_pending' });
+    console.warn(`[ws] ask_user answer rejected session=${sessionId.slice(0, 8)} question=${data.questionId.slice(0, 12)} reason=question_not_pending`);
+    return;
+  }
 
+  broadcastToUser(client.userId!, { type: 'session_awaiting_user', sessionId, awaiting: false, questionId: data.questionId });
   remotePendingQuestionsBySession.delete(sessionId);
   publishWsSyncEvent(config.serverEpoch, {
     scope: 'session',
     sessionId,
     data: {
       type: 'answer_question_sync',
+      recipientUserId: client.userId,
       questionId: data.questionId,
       answer: data.answer,
     },
   });
+  send(client.ws, { type: 'answer_question_ack', sessionId, questionId: data.questionId, route: 'remote' });
+  console.info(`[ws] ask_user answered session=${sessionId.slice(0, 8)} question=${data.questionId.slice(0, 12)} route=remote`);
 }
 
 async function handleTurnStopRequest(client: WsClient, data: { sessionId?: string; mode?: 'safe' | 'force' }) {
@@ -2767,7 +3149,37 @@ async function handleTurnStopRequest(client: WsClient, data: { sessionId?: strin
   }
   const engine = await getEngine('pi');
   const rootTurnId = activeTurnTimings.get(sessionId)?.rootTurnId;
+  await invalidateWaitAlarm(sessionId, 'cancelled');
   const mode = data.mode === 'force' ? 'force' : 'safe';
+
+  // Force stop is an unconditional runtime control. Do not make it depend on
+  // the optional durable turn row: reconnects, rolling restarts, and DB-less
+  // development can all leave a genuinely running engine without a local
+  // activeTurnTimings entry or an updatable agent_turns row.
+  if (mode === 'force') {
+    cancelPendingQuestionsForSession(sessionId, 'Session aborted');
+    clearPendingUserMessages(sessionId, 'abort');
+    if (rootTurnId) {
+      rootTurnStopModes.set(rootTurnId, mode);
+      await requestAgentTurnStop({ rootTurnId, mode }).catch(() => false);
+    }
+    await abortSessionEverywhere(sessionId);
+    if (isPgEnabled()) {
+      publishWsSyncEvent(config.serverEpoch, {
+        scope: 'session',
+        sessionId,
+        data: { type: 'abort_session_sync' },
+      });
+    }
+    clearRemoteStreamingSession(sessionId);
+    if (rootTurnId) {
+      await settleAgentTurnStop({ rootTurnId, mode: 'force' }).catch(() => {});
+      rootTurnStopModes.delete(rootTurnId);
+    }
+    broadcastToSession(sessionId, { type: 'turn_stop_state', sessionId, rootTurnId, state: 'stopped_forced', mode: 'force' });
+    return;
+  }
+
   if (!rootTurnId) {
     sendToClient(client, sessionId, { type: 'turn_stop_state', sessionId, state: 'rejected', reason: 'no_active_turn' });
     return;
@@ -2778,14 +3190,6 @@ async function handleTurnStopRequest(client: WsClient, data: { sessionId?: strin
   if (!persisted) {
     rootTurnStopModes.delete(rootTurnId);
     sendToClient(client, sessionId, { type: 'turn_stop_state', sessionId, rootTurnId, state: 'rejected', reason: 'turn_not_stoppable' });
-    return;
-  }
-
-  if (mode === 'force') {
-    await abortSessionEverywhere(sessionId);
-    await settleAgentTurnStop({ rootTurnId, mode: 'force' }).catch(() => {});
-    rootTurnStopModes.delete(rootTurnId);
-    broadcastToSession(sessionId, { type: 'turn_stop_state', sessionId, rootTurnId, state: 'stopped_forced', mode: 'force' });
     return;
   }
 
@@ -2870,12 +3274,13 @@ async function handleFileRead(client: WsClient, data: { path: string }) {
       });
       return;
     }
-    const result = readFile(filePath);
+    const projectRead = client.userId ? await readProjectWorkspaceTextForActor(filePath, client.userId) : undefined;
+    const fallback = projectRead ? undefined : readFile(filePath);
     send(client.ws, {
       type: 'file_content',
       path: filePath,
-      content: result.content,
-      language: result.language,
+      content: projectRead?.content ?? fallback!.content,
+      language: fallback?.language || ({ ts: 'typescript', tsx: 'typescript', js: 'javascript', jsx: 'javascript', py: 'python', md: 'markdown', markdown: 'markdown', json: 'json', yaml: 'yaml', yml: 'yaml', html: 'html', htm: 'html', css: 'css', sh: 'shell', bash: 'shell', sql: 'sql', csv: 'csv', txt: 'text' } as Record<string, string>)[ext] || 'text',
     });
   } catch (error: any) {
     send(client.ws, { type: 'error', message: error.message });
@@ -2908,10 +3313,14 @@ async function handleFileWrite(client: WsClient, data: { path: string; content: 
         return;
       }
     }
-    writeFile(data.path, data.content);
+    const reference = client.userId ? await resolveProjectFileReferenceForHostPath(data.path) : undefined;
+    const storageAuthority = reference
+      ? await writeProjectWorkspaceText({ reference, actorUserId: client.userId!, content: data.content })
+      : (writeFile(data.path, data.content), 'host' as const);
     send(client.ws, {
       type: 'file_saved',
       path: data.path,
+      storageAuthority,
     });
   } catch (error: any) {
     send(client.ws, { type: 'error', message: error.message });
@@ -2960,11 +3369,15 @@ async function handleFileTree(client: WsClient, data: { path?: string; showHidde
     // isDotfileDenied, so project members can inspect project-local dotfiles
     // without exposing credentials/runtime state.
     const showHidden = !!data.showHidden;
-    const entries = getFileTree(targetPath, 2, { showHidden });
+    const reference = client.userId ? await resolveProjectFileReferenceForHostPath(targetPath, true) : undefined;
+    const projectListing = reference
+      ? await listProjectWorkspaceDirectory({ reference, actorUserId: client.userId!, showHidden })
+      : undefined;
     send(client.ws, {
       type: 'file_tree',
       path: targetPath,
-      entries,
+      entries: projectListing?.entries ?? getFileTree(targetPath, 2, { showHidden }),
+      ...(projectListing ? { storageAuthority: projectListing.storageAuthority } : {}),
     });
   } catch (error: any) {
     send(client.ws, { type: 'error', message: error.message });
@@ -2998,13 +3411,14 @@ function broadcastPresentFileIntent(userId: number | undefined, sessionId: strin
       path: parsed.path,
       label: typeof parsed.label === 'string' ? parsed.label : undefined,
       focus: parsed.focus !== false,
+      reveal: parsed.reveal === true,
     });
   } catch {
     // Non-JSON and error tool results are not presentation intents.
   }
 }
 
-export { broadcastToRoom, broadcastToSession };
+export { broadcastToSession };
 
 /**
  * Server-side auto-resume for interrupted sessions.
@@ -3027,7 +3441,7 @@ function modelMatchesEngineForAutoResume(model: string | undefined, engineName: 
 
 function resolveAutoResumeModel(dbSession: Awaited<ReturnType<typeof getSession>>, engineName: string): string | undefined {
   const storedModel = ((dbSession as any)?.modelUsed || (dbSession as any)?.model_used) as string | undefined;
-  if (engineName === 'pi') return normalizePiSessionModelId(storedModel);
+  if (engineName === 'pi') return resolvePiSessionChoice(storedModel);
   if (modelMatchesEngineForAutoResume(storedModel, engineName)) return storedModel;
   return undefined;
 }
@@ -3111,6 +3525,7 @@ async function resumeInterruptedDetails(rawDetails: InterruptedTurnDetail[]) {
         console.warn(`[auto-resume] root turn lookup failed for ${sessionId.slice(0, 8)}:`, err);
       }
     }
+    if(userMessageId && !(await validateWaitAlarmRoot(sessionId,userMessageId))) return;
     if (autoResumeSessionsInFlight.has(sessionId)) {
       console.warn(`[auto-resume] session=${sessionId.slice(0, 8)} duplicate in-flight — skipping`);
       continue;
@@ -3170,6 +3585,10 @@ async function resumeInterruptedDetails(rawDetails: InterruptedTurnDetail[]) {
             });
           }
           return;
+        }
+        if (userMessageId) {
+          const parkedSource = await queryOne<{wait:boolean}>(`SELECT EXISTS(SELECT 1 FROM session_wait_alarms WHERE source_root_turn_id=$1) AS wait`, [userMessageId]);
+          if (parkedSource?.wait) return;
         }
         if (userMessageId && await rootTurnAlreadyHasTerminalAssistantText(sessionId, userMessageId)) {
           console.log(`[auto-resume] skip reason=terminal_assistant_exists session=${sessionId.slice(0, 8)} root=${userMessageId.slice(0, 8)}`);
@@ -3263,57 +3682,13 @@ async function resumeInterruptedDetails(rawDetails: InterruptedTurnDetail[]) {
         // session: store it in the same pendingQuestions map and broadcast to
         // any currently open tabs, rather than auto-answering immediately.
         const callbacks: EngineCallbacks = {
-          askUser: (questionId: string, questions: any[]) => {
-            const sanitizedQuestions = sanitizeAskUserQuestions(questions);
-            if (sanitizedQuestions.length === 0) {
-              console.warn(`[auto-resume] ask_user dropped empty payload for session=${sessionId.slice(0, 8)}`);
-              return Promise.resolve('No user question payload was provided. Continue without waiting for user input.');
-            }
-
-            return new Promise<string>((resolve, reject) => {
-              const timer = setTimeout(() => {
-                const pq = pendingQuestions.get(questionId);
-                if (pq) {
-                  pendingQuestions.delete(questionId);
-                  if (userMessageId) void setAgentTurnWaitingUser(userMessageId, false).catch(() => {});
-                  broadcastToAll({ type: 'session_awaiting_user', sessionId, awaiting: false });
-                  broadcastToSession(sessionId, { type: 'ask_user_timeout', sessionId, questionId });
-                  const questionSummary = sanitizedQuestions.map((q: any) => q.question).join(', ');
-                  resolve(
-                    `[System] The user did not respond to the interactive prompt within 60 minutes. ` +
-                    `Your question was: "${questionSummary}". ` +
-                    `Ask the same question again as a regular chat message if it is still needed.`
-                  );
-                }
-              }, ASK_USER_TIMEOUT);
-
-              if (userMessageId) void setAgentTurnWaitingUser(userMessageId, true).catch(() => {});
-              pendingQuestions.set(questionId, {
-                questionId,
-                sessionId,
-                questions: sanitizedQuestions,
-                resolve: (answer: string) => {
-                  clearTimeout(timer);
-                  pendingQuestions.delete(questionId);
-                  resolve(answer);
-                },
-                reject: (error: Error) => {
-                  clearTimeout(timer);
-                  pendingQuestions.delete(questionId);
-                  reject(error);
-                },
-                timer,
-              });
-
-              broadcastToAll({ type: 'session_awaiting_user', sessionId, awaiting: true, questionId });
-              broadcastToSession(sessionId, {
-                type: 'ask_user',
-                sessionId,
-                questionId,
-                questions: sanitizedQuestions,
-              });
-            });
-          },
+          askUser: createSessionAskUser({
+            sessionId,
+            recipientUserId: userId,
+            userMessageId,
+            logTag: 'auto-resume',
+            timeoutMessage: backgroundTimeoutMessage,
+          }),
           claimSessionId: async (esid: string) => {
             try { await claimActiveEngineSessionId(sessionId, engineName, esid); } catch {}
           },
@@ -3350,6 +3725,7 @@ async function resumeInterruptedDetails(rawDetails: InterruptedTurnDetail[]) {
                 context_input_tokens: metrics.contextInputTokens,
                 context_window_size: metrics.contextWindowSize,
                 context_estimated_tokens: metrics.contextEstimatedTokens,
+          context_compacted: metrics.contextCompacted,
                 next_request_estimated_tokens: metrics.nextRequestEstimatedTokens,
                 compact_threshold_tokens: metrics.compactThresholdTokens,
           context_snapshot: metrics.contextSnapshot,
@@ -3388,6 +3764,7 @@ async function resumeInterruptedDetails(rawDetails: InterruptedTurnDetail[]) {
         const resetHangTimer = () => {
           if (hangTimer) clearTimeout(hangTimer);
           hangTimer = setTimeout(() => {
+            if (isSessionSleeping(sessionId)) { resetHangTimer(); return; }
             console.warn(`[auto-resume] session=${sessionId.slice(0, 8)} abort reason=sdk_hang ${summarizeAutoResumeMessageCounts(counts)}`);
             engine.abort(sessionId);
             broadcastToSession(sessionId, {
@@ -3402,6 +3779,9 @@ async function resumeInterruptedDetails(rawDetails: InterruptedTurnDetail[]) {
         try {
           resetHangTimer();
 
+          const resumedActor = userId ? await queryOne<{role:string}>(`SELECT role FROM users WHERE id=$1 AND COALESCE(disabled,0)=0 AND approval_status='active'`,[userId]) : null;
+          if(!resumedActor && userId) return;
+          if(userMessageId && !(await validateWaitAlarmRoot(sessionId,userMessageId))) return;
           for await (const towerMsg of engine.run(sessionId, AUTO_RESUME_NATIVE_PROMPT, {
             cwd: dbSession.cwd || config.defaultCwd,
             engineSessionId,
@@ -3409,11 +3789,11 @@ async function resumeInterruptedDetails(rawDetails: InterruptedTurnDetail[]) {
             model: autoResumeModel,
             userId,
             username,
-            userRole,
+            userRole: resumedActor?.role || userRole,
             rootTurnId: userMessageId,
             acceptedAt: turnTiming.acceptedAt,
             autoResume: true,
-            autoResumeReason: 'server-restart',
+            autoResumeReason: recoverySource === 'shutdown-file' ? 'server-restart' : 'durable-retry',
             // Recovery turns resume an already-assembled engine context. Keep the
             // compact core rather than guessing fragments from the synthetic prompt.
             systemPromptFragments: [],
@@ -3442,8 +3822,11 @@ async function resumeInterruptedDetails(rawDetails: InterruptedTurnDetail[]) {
             if (towerMsg.type === 'engine_done') {
               const esid = towerMsg.engineSessionId;
               const recoveryOutcome = towerMsg.outcome ?? (engineName === 'pi' ? 'failed' : 'completed');
-              const durableAssistantMessageId = towerMsg.assistantMessageId
-                || (counts.assistant > 0 && counts.saved > 0 ? `recovered:${userMessageId || sessionId}` : undefined);
+              // Only persist a real messages.id emitted by the engine. A previous
+              // fallback synthesized `recovered:<root>` from callback counters;
+              // that value can never satisfy agent_turns.assistant_message_id's
+              // FK and turned a recoverable run into a retry loop.
+              const durableAssistantMessageId = towerMsg.assistantMessageId;
               const terminalDecision = decideTurnTerminal({
                 sessionId,
                 rootTurnId: userMessageId || `recovery:${sessionId}`,
@@ -3451,6 +3834,18 @@ async function resumeInterruptedDetails(rawDetails: InterruptedTurnDetail[]) {
                 assistantMessageId: durableAssistantMessageId,
                 error: towerMsg.error,
               });
+              if (terminalDecision.outcome === 'completed' && terminalDecision.assistantMessageId) {
+                try {
+                  await recordCompletedAiTurn({
+                    sessionId,
+                    rootTurnId: terminalDecision.rootTurnId,
+                    assistantMessageId: terminalDecision.assistantMessageId,
+                    completedAt: terminalDecision.terminalAt,
+                  });
+                } catch (err) {
+                  console.warn(`[ws] Recovery AI completion sequence deferred for ${sessionId.slice(0, 8)}:`, err);
+                }
+              }
               broadcastToAll(toTurnTerminalMessage(terminalDecision));
               const completed = terminalDecision.outcome === 'completed';
               if (userMessageId) {
@@ -3495,7 +3890,9 @@ async function resumeInterruptedDetails(rawDetails: InterruptedTurnDetail[]) {
                   };
                   const candidateModel = towerMsg.model || autoResumeModel;
                   if (modelMatchesEngineForAutoResume(candidateModel, engineName)) {
-                    updates.modelUsed = engineName === 'pi' ? normalizePiSessionModelId(candidateModel) : candidateModel;
+                    updates.modelUsed = engineName === 'pi'
+                      ? choiceAfterPiTurn(undefined, currentSession.modelUsed, candidateModel!)
+                      : candidateModel;
                   } else if (candidateModel) {
                     console.log(`[auto-resume] engine_done: skipping modelUsed update — "${candidateModel}" does not match engine="${engineName}"`);
                   }
@@ -3602,4 +3999,16 @@ function send(ws: WebSocket, data: any) {
   if (ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify(data));
   }
+}
+
+/** Trusted creation callback only; never accept this flag from a WebSocket client. */
+export async function startInitialInterview(sessionId:string, userId:number, token?:string):Promise<void> {
+  const session=await getSession(sessionId);
+  if(session?.engine !== 'pi') throw new Error('Automatic interview requires tool-isolated Pi runtime');
+  const actor=await queryOne<{role:string;username:string}>('SELECT role,username FROM users WHERE id=$1',[userId]);
+  if(!actor)throw new Error('Creation actor unavailable');
+  const sink={readyState:1,send(){}} as unknown as WebSocket;
+  automaticInterviewSessions.add(sessionId);
+  try { await handleChat({id:`initial-${sessionId}`,ws:sink,userId,userRole:actor.role,username:actor.username,activeQueryEpoch:0,joinedRooms:new Set()},
+    {sessionId,message:'시스템 기원 생성 초기 안내입니다. 생성 입력을 이해해 짧은 첫 안내를 표시하세요. 아직 확인되지 않은 가장 중요한 빈칸 하나만 질문하세요. 충분하면 첫 실행안을 제시하세요. 도구 사용과 외부 조회는 금지합니다. 업무를 실제 실행하지 마세요. 가설은 가설로 표시하고 역할·권한을 변경하지 마세요. 출력은 코드펜스 없이 JSON 객체만: {"greeting":"짧은 안내","question":"질문 하나 또는 null","plan":"충분하면 실행안 아니면 null"}.',headless:true,suppressUserEcho:true,initialInterview:true,initialInterviewToken:token}); } finally { automaticInterviewSessions.delete(sessionId); }
 }

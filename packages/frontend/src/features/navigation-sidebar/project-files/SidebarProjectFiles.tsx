@@ -1,8 +1,10 @@
+import { FileOperationFeedback } from '../../../features/file-operation-feedback/FileOperationFeedback';
+import { uploadScope, reportUploadUnknown } from '../../../features/file-operation-feedback/feedback';
 /**
  * Owns: Project file tree navigation inside the Sidebar.
  * Public API: SidebarProjectFiles. See ../README.md.
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { FileTree } from '../../../components/files/FileTree';
 import { useConfirm } from '../../../hooks/useDialog';
@@ -44,6 +46,7 @@ export function SidebarProjectFiles({ project, onFileClick, onPinFile, onNewSess
     }
   }, [project.id]);
   const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState('');
   // `loaded` is also in the store so the initial-load skip survives remounts
   const loaded = useRef(useFileStore.getState().projectLoaded[project.id] || false);
   const prevTrigger = useRef(refreshTrigger);
@@ -67,18 +70,16 @@ export function SidebarProjectFiles({ project, onFileClick, onPinFile, onNewSess
   }, []);
 
   const fetchDir = useCallback(async (dirPath: string): Promise<FileEntry[]> => {
-    try {
-      const tk = localStorage.getItem('token');
-      const hdrs: Record<string, string> = {};
-      if (tk) hdrs['Authorization'] = `Bearer ${tk}`;
-      const url = `/api/files/tree?path=${encodeURIComponent(dirPath)}${showHidden ? '&showHidden=true' : ''}`;
-      const res = await fetch(url, { headers: hdrs });
-      if (res.ok) {
-        const data = await res.json();
-        return data.entries || [];
-      }
-    } catch {}
-    return [];
+    const tk = localStorage.getItem('token');
+    const hdrs: Record<string, string> = {};
+    if (tk) hdrs['Authorization'] = `Bearer ${tk}`;
+    const url = `/api/files/tree?path=${encodeURIComponent(dirPath)}${showHidden ? '&showHidden=true' : ''}`;
+    const res = await fetch(url, { headers: hdrs });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(data.error || `Could not load files (${res.status})`);
+    }
+    return Array.isArray(data.entries) ? data.entries : [];
   }, [showHidden]);
 
   /**
@@ -113,27 +114,32 @@ export function SidebarProjectFiles({ project, onFileClick, onPinFile, onNewSess
     if (!rootPath || (loaded.current && !force)) return;
     const generation = ++treeLoadGeneration.current;
     setLoading(true);
-    const expandedPaths = useFileStore.getState().expandedPaths;
-    const rootEntries = await fetchDir(rootPath);
-    const filled = await fillExpanded(rootEntries, expandedPaths, !!force);
-    // Uploads and file_changed events can schedule overlapping refreshes. Only
-    // the newest result may replace the visible tree; otherwise a slower stale
-    // request can make the folder the user is working in disappear again.
-    if (generation !== treeLoadGeneration.current) return;
-    setEntries(filled);
-    loaded.current = true;
-    useFileStore.getState().markProjectLoaded(project.id, true);
-    setLoading(false);
+    setLoadError('');
+    try {
+      const expandedPaths = useFileStore.getState().expandedPaths;
+      const rootEntries = await fetchDir(rootPath);
+      // Only the first load may show a root-only tree. During refresh, removing
+      // descendants temporarily shrinks the scroll container and loses position.
+      if (generation !== treeLoadGeneration.current) return;
+      if (!loaded.current) setEntries(rootEntries);
+      loaded.current = true;
+      useFileStore.getState().markProjectLoaded(project.id, true);
+
+      const filled = await fillExpanded(rootEntries, expandedPaths, !!force);
+      // Uploads and file_changed events can schedule overlapping refreshes. Only
+      // the newest result may replace the visible tree; otherwise a slower stale
+      // request can make the folder the user is working in disappear again.
+      if (generation !== treeLoadGeneration.current) return;
+      setEntries(filled);
+    } catch (error) {
+      if (generation !== treeLoadGeneration.current) return;
+      setLoadError(error instanceof Error ? error.message : 'Could not load files');
+    } finally {
+      if (generation === treeLoadGeneration.current) setLoading(false);
+    }
   }, [rootPath, fetchDir, fillExpanded, setEntries, project.id]);
 
-  // Stable stagger delay per project (based on project id hash)
-  const staggerDelay = useMemo(() => {
-    let hash = 0;
-    for (let i = 0; i < project.id.length; i++) hash = ((hash << 5) - hash + project.id.charCodeAt(i)) | 0;
-    return Math.abs(hash) % 400; // 0-400ms spread
-  }, [project.id]);
-
-  // Auto-load on mount if project was previously expanded (staggered).
+  // Auto-load on mount if project was previously expanded.
   //
   // Stale-while-revalidate: when the cache from a prior mount is already in
   // the store (loaded.current === true), still kick off a force refresh so
@@ -142,11 +148,8 @@ export function SidebarProjectFiles({ project, onFileClick, onPinFile, onNewSess
   // without requiring a manual page reload.  Without this, b8fb594c's
   // store-backed cache would silently show stale entries forever.
   useEffect(() => {
-    if (isExpanded) {
-      const timer = setTimeout(() => loadTree(loaded.current), staggerDelay);
-      return () => clearTimeout(timer);
-    }
-  }, [isExpanded, loadTree, staggerDelay]);
+    if (isExpanded) void loadTree(loaded.current);
+  }, [isExpanded, loadTree]);
 
   const refreshTreeSoon = useCallback((retry = false) => {
     void loadTree(true);
@@ -170,7 +173,11 @@ export function SidebarProjectFiles({ project, onFileClick, onPinFile, onNewSess
       refreshTreeSoon();
       return;
     }
-    const children = await fetchDir(targetDir);
+    const generation = treeLoadGeneration.current;
+    const children = await fillExpanded(
+      await fetchDir(targetDir), useFileStore.getState().expandedPaths, true,
+    );
+    if (generation !== treeLoadGeneration.current) return;
     const replaceChildren = (items: FileEntry[]): FileEntry[] => items.map((entry) => {
       if (entry.path === targetDir) {
         return { ...entry, children, isLoading: false };
@@ -180,7 +187,7 @@ export function SidebarProjectFiles({ project, onFileClick, onPinFile, onNewSess
         : entry;
     });
     setEntries((current) => replaceChildren(current));
-  }, [fetchDir, refreshTreeSoon, rootPath, setEntries]);
+  }, [fetchDir, fillExpanded, refreshTreeSoon, rootPath, setEntries]);
 
   useEffect(() => () => {
     treeLoadGeneration.current += 1;
@@ -200,11 +207,11 @@ export function SidebarProjectFiles({ project, onFileClick, onPinFile, onNewSess
       if (isExpanded && rootPath) {
         const timer = window.setTimeout(() => {
           refreshTreeSoon(true);
-        }, 75 + Math.min(staggerDelay, 100));
+        }, 75);
         return () => window.clearTimeout(timer);
       }
     }
-  }, [refreshTrigger, isExpanded, rootPath, refreshTreeSoon, staggerDelay]);
+  }, [refreshTrigger, isExpanded, rootPath, refreshTreeSoon]);
 
   // Toggle or expand a directory within the local tree
   const handleDirectoryClick = useCallback(async (dirPath: string) => {
@@ -296,13 +303,13 @@ export function SidebarProjectFiles({ project, onFileClick, onPinFile, onNewSess
     if (!files || files.length === 0 || !rootPath) return;
     const items = Array.from(files).map((f) => ({ file: f, relativePath: f.name }));
     try {
-      const { ok, fail } = await uploadDroppedFiles(rootPath, items);
-      notifyUploadResult({ ok, fail }, project.name);
+      const result = await uploadDroppedFiles(rootPath, items);
+      notifyUploadResult(result, project.name, uploadScope('project', String(project.id)));
       bumpRefreshTrigger();
       if (!isExpanded) toggleProjectExpanded(project.id);
       refreshTreeSoon(true);
     } catch (err) {
-      emitProductNotice({ code: 'sidebar.upload.failed', technicalDetail: err });
+      reportUploadUnknown(uploadScope('project', String(project.id)));
     }
     e.target.value = '';
   };
@@ -372,13 +379,13 @@ export function SidebarProjectFiles({ project, onFileClick, onPinFile, onNewSess
     if (items.length === 0) return;
 
     try {
-      const { ok, fail } = await uploadDroppedFiles(rootPath, items);
-      notifyUploadResult({ ok, fail }, project.name);
+      const result = await uploadDroppedFiles(rootPath, items);
+      notifyUploadResult(result, project.name, uploadScope('project', String(project.id)));
       bumpRefreshTrigger();
       if (!isExpanded) toggleProjectExpanded(project.id);
       refreshTreeSoon(true);
     } catch (err) {
-      emitProductNotice({ code: 'sidebar.upload.failed', technicalDetail: err });
+      reportUploadUnknown(uploadScope('project', String(project.id)));
     }
   };
 
@@ -448,6 +455,7 @@ export function SidebarProjectFiles({ project, onFileClick, onPinFile, onNewSess
         <input ref={headerUploadRef} type="file" multiple hidden onChange={handleHeaderUpload} />
       </div>
 
+      <FileOperationFeedback scope={uploadScope('project', String(project.id))} />
       {/* Inline input for header new file/folder action */}
       {headerAction && (
         <div className="flex items-center gap-1.5 px-2 py-1 ml-5 bg-surface-850 rounded-md mt-0.5">
@@ -481,7 +489,13 @@ export function SidebarProjectFiles({ project, onFileClick, onPinFile, onNewSess
           {loading && entries.length === 0 && (
             <p className="text-[14px] text-gray-500 py-2">Loading...</p>
           )}
-          {entries.length > 0 && (
+          {loadError && (
+            <div className="py-2 pr-2 text-[12px] text-red-300" role="alert">
+              <p>{loadError}</p>
+              <button type="button" onClick={() => { void loadTree(true); }} className="mt-1 font-semibold text-surface-200 hover:text-surface-50">{t('retry')}</button>
+            </div>
+          )}
+          {!loadError && entries.length > 0 && (
             <FileTree
               entries={entries}
               onFileClick={onFileClick}
@@ -491,7 +505,7 @@ export function SidebarProjectFiles({ project, onFileClick, onPinFile, onNewSess
               onRefreshTree={refreshUploadedDirectory}
             />
           )}
-          {!loading && loaded.current && entries.length === 0 && (
+          {!loading && !loadError && loaded.current && entries.length === 0 && (
             <p className="text-[14px] text-surface-600 py-2">Empty</p>
           )}
         </div>

@@ -123,7 +123,7 @@ run('Workbench managed store read-only projection disposable PostgreSQL + Docker
     if (modules && boxId) await modules.manager.stopBox(boxId).catch(() => undefined);
     await modules?.closePg?.().catch(() => undefined);
     await docker('rm', '-f', `tower-box-${boxId}`).catch(() => undefined);
-    await docker('rm', '-f', pgName).catch(() => undefined);
+    await docker('rm', '-f', '-v', pgName).catch(() => undefined);
     if (root) {
       await docker('run', '--rm', '-v', `${root}:/cleanup`, 'alpine:3.20', 'sh', '-c', 'chmod -R 777 /cleanup').catch(() => undefined);
       await fs.rm(root, { recursive: true, force: true });

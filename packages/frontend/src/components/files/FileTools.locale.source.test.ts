@@ -7,11 +7,11 @@ const tts = fs.readFileSync(path.resolve(__dirname, 'MarkdownTtsControls.tsx'), 
 const editor = fs.readFileSync(path.resolve(__dirname, 'markdown-editor/MarkdownEditor.tsx'), 'utf8');
 
 describe('file tool locale contracts', () => {
-  it('routes CAD render, analysis, search, and artifact UI through files locale keys', () => {
-    for (const key of ['cad.render.preparing', 'cad.tabs.analysis', 'cad.textSearch', 'cad.analysisReadiness', 'cad.artifactDescription']) {
+  it('routes the retained basic CAD preview through files locale keys', () => {
+    for (const key of ['cad.render.preparing', 'cad.fileSize', 'cad.bounds', 'cad.layers', 'cad.views', 'cad.entityTypes']) {
       expect(cad).toContain(key);
     }
-    expect(cad).toContain("requestAiForCurrentSelection('선택한 CAD 객체/영역을 설명해줘')");
+    expect(cad).not.toContain('requestAiForCurrentSelection');
   });
 
   it('keeps Korean speech normalization while localizing TTS controls', () => {

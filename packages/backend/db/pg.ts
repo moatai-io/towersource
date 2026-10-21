@@ -9,6 +9,7 @@
  */
 
 import { Pool } from 'pg';
+import { resolvePgPoolConfig } from './pg-pool-config.js';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -17,6 +18,20 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 let pool: Pool | null = null;
+let poolConfig: ReturnType<typeof resolvePgPoolConfig> | null = null;
+
+/** Snapshot of this process only; never creates a pool or returns connection credentials. */
+export function getPgPoolDiagnostics() {
+  return {
+    initialized: pool !== null,
+    processId: process.pid,
+    max: poolConfig?.max ?? null,
+    applicationName: poolConfig?.application_name ?? null,
+    total: pool?.totalCount ?? 0,
+    idle: pool?.idleCount ?? 0,
+    waiting: pool?.waitingCount ?? 0,
+  };
+}
 
 export function getPgPool(): Pool {
   if (!pool) {
@@ -30,13 +45,15 @@ export function getPgPool(): Pool {
     // to member queries + notification inserts. At max=50 the connection queue still
     // saturated under admin sidebar loads (listRooms N+1) + simultaneous message writes.
     // idleTimeout and connectionTimeout raised to absorb burst latency.
+    const config = resolvePgPoolConfig();
     pool = new Pool({
       connectionString,
-      max: 80,                        // connection pool size (100-user target)
+      ...config,                       // default 80; explicit per-process budget
       idleTimeoutMillis: 45000,       // keep warm connections longer under burst load
       connectionTimeoutMillis: 8000,  // allow slower acquires before erroring out
     });
 
+    poolConfig = config;
     pool.on('error', (err) => {
       console.error('[pg] Unexpected pool error:', err.message);
     });
@@ -49,6 +66,7 @@ export async function closePgPool(): Promise<void> {
   if (pool) {
     await pool.end();
     pool = null;
+    poolConfig = null;
     console.log('[pg] Pool closed.');
   }
 }

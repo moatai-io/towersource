@@ -17,10 +17,9 @@ export const TOWER_DEFAULT_HARNESS: Readonly<ResolvedHarness> = Object.freeze({
   allowedModels: null,
   prompt: Object.freeze({
     includePlatformKernel: true as const,
-    // Keep AGENTS.md as the canonical project instruction layer, but do not
-    // inject Primary Agent profile or Session Identity by default. Identity is
-    // available through explicit lookup/snapshots when a workflow needs it.
-    includeAgentIdentity: false,
+    // Primary Agent identity includes the career operating policy. Keep it
+    // session-pinned so promotions affect new/repinned Sessions predictably.
+    includeAgentIdentity: true,
     includeProjectInstructions: true,
     includeMemory: true,
     includeSkills: true,

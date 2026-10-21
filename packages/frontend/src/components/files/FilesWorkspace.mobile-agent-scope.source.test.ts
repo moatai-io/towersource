@@ -20,7 +20,12 @@ describe('FilesWorkspace mobile Agent scope', () => {
     expect(source).toContain('hidden text-[12px] text-surface-500 sm:block');
   });
 
-  it('resets folder and selection state when switching Agent workspaces', () => {
+  it('keeps the capability project aligned with initial and explicit workspace selection', () => {
+    const initialSelectionStart = source.indexOf('const preferred =');
+    const initialSelection = source.slice(initialSelectionStart, source.indexOf('useEffect(() => {', initialSelectionStart));
+    expect(initialSelection).toContain('setSelectedProjectId(preferred.id)');
+    expect(initialSelection).toContain('setCapabilityProjectId(preferred.id)');
+
     const switchProject = source.slice(source.indexOf('const switchProject ='), source.indexOf('const openProjectInstructions'));
     expect(switchProject).toContain('setCapabilityProjectId(project.id)');
     expect(switchProject).toContain('setLibraryView("all")');

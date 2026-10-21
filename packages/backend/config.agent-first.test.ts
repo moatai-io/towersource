@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isAgentFirstEnabledForVm, isAIServiceEnabledForVm, isWorkspaceAppsEnabledForVm, resolveWorkspaceAppsMode } from './config.js';
+import { isAgentFirstEnabledForVm, isAIServiceEnabledForVm } from './config.js';
 
 describe('Agent-first VM gate', () => {
   it('enables every full VM by default with an explicit rollback escape hatch', () => {
@@ -20,29 +20,6 @@ describe('Agent-first VM gate', () => {
     expect(isAgentFirstEnabledForVm('standalone', undefined)).toBe(false);
     expect(isAgentFirstEnabledForVm('standalone', 'true')).toBe(true);
     expect(isAgentFirstEnabledForVm(undefined, 'true')).toBe(false);
-  });
-});
-
-describe('Workspace Apps VM gate', () => {
-  it('keeps the DIY ERP Connector beta on the operator full VM only by default', () => {
-    expect(isWorkspaceAppsEnabledForVm('full', undefined)).toBe(true);
-    expect(isWorkspaceAppsEnabledForVm('full', '')).toBe(true);
-    expect(isWorkspaceAppsEnabledForVm('full', 'false')).toBe(false);
-    expect(isWorkspaceAppsEnabledForVm('managed', undefined)).toBe(false);
-    expect(isWorkspaceAppsEnabledForVm('standalone', undefined)).toBe(false);
-    expect(isWorkspaceAppsEnabledForVm(undefined, undefined)).toBe(false);
-  });
-
-  it('allows explicit opt-in outside the full operator VM for controlled local experiments only', () => {
-    expect(isWorkspaceAppsEnabledForVm('managed', 'true')).toBe(true);
-    expect(isWorkspaceAppsEnabledForVm('standalone', 'true')).toBe(true);
-  });
-
-  it('keeps local metadata as the safe default and allows the Frappe connector pilot mode', () => {
-    expect(resolveWorkspaceAppsMode(undefined)).toBe('local-metadata');
-    expect(resolveWorkspaceAppsMode('local-metadata')).toBe('local-metadata');
-    expect(resolveWorkspaceAppsMode('frappe-connector-pilot')).toBe('frappe-connector-pilot');
-    expect(resolveWorkspaceAppsMode('unknown')).toBe('local-metadata');
   });
 });
 

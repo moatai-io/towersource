@@ -9,6 +9,7 @@ function makeTerminalizer(overrides: Partial<{
   acceptedAt: string;
   workLedgerTurnStartedAt: string;
   finalizeWorkLedger: ReturnType<typeof vi.fn>;
+  persistTerminalErrorNotice: ReturnType<typeof vi.fn>;
 }> = {}) {
   const runCtx = new PiRunContext({
     modelContextWindow: 1000,
@@ -57,6 +58,7 @@ function makeTerminalizer(overrides: Partial<{
     acceptedAt: overrides.acceptedAt,
     workLedgerTurnStartedAt: overrides.workLedgerTurnStartedAt,
     finalizeWorkLedger,
+    persistTerminalErrorNotice: overrides.persistTerminalErrorNotice,
     callbacks: { updateMessageMetrics },
     eventQueue,
     modelLabel: () => 'litellm/smart',
@@ -83,6 +85,31 @@ function makeTerminalizer(overrides: Partial<{
 }
 
 describe('PiRunTerminalizer', () => {
+  it('persists and emits the last valid measurement after a zero-usage failure', async () => {
+    const t = makeTerminalizer({ estimateLiveContextTokens: () => 900 });
+    t.runCtx.recordUsage({ input: 0, output: 0 });
+    await t.terminalizer.emitTurnDone('error');
+    expect(t.updateMessageMetrics).toHaveBeenCalledWith('msg-1', expect.objectContaining({
+      contextInputTokens: 107, contextEstimatedTokens: 900, contextCompacted: false,
+    }));
+    expect(t.eventQueue.find(m => m.type === 'turn_done')).toMatchObject({ usage: {
+      contextInputTokens: 107, contextEstimatedTokens: 900, contextCompacted: false,
+    } });
+  });
+
+  it('clears the estimate-precedence flag once post-compaction usage arrives', async () => {
+    const t = makeTerminalizer({ estimateLiveContextTokens: () => 900 });
+    t.runCtx.recordCompactionSuccess(1);
+    t.runCtx.recordUsage({ input: 30 });
+    t.runCtx.recordUsage({ input: 0 });
+    await t.terminalizer.emitTurnDone();
+    expect(t.updateMessageMetrics).toHaveBeenCalledWith('msg-1', expect.objectContaining({
+      contextInputTokens: 30, contextCompacted: false,
+    }));
+    expect(t.eventQueue.find(m => m.type === 'turn_done')).toMatchObject({ usage: {
+      contextInputTokens: 30, contextCompacted: false,
+    } });
+  });
   it('uses acceptedAt as the total wall-clock duration boundary', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-07-20T12:00:10.000Z'));
@@ -321,6 +348,84 @@ describe('PiRunTerminalizer', () => {
     expect(t.eventQueue[1]).toMatchObject({ type: 'turn_done', usage: { stopReason: 'error' } });
   });
 
+  it('keeps Tower preflight internal after Pi overflow recovery succeeds', async () => {
+    const persistTerminalErrorNotice = vi.fn();
+    const t = makeTerminalizer({
+      persistTerminalErrorNotice,
+      state: {
+        stopReason: 'stop', compactionSucceededThisTurn: true, oversizedPreflightRecoveryRequested: false,
+        providerErrorMessage: '',
+        lastAssistant: { stopReason: 'stop', blockTypes: ['text'], hasToolCall: false,
+          textTail: 'Recovered answer', textAfterLastToolCall: 'Recovered answer', continuationIntent: false },
+      },
+    });
+    await t.terminalizer.emitTurnDone();
+    expect(persistTerminalErrorNotice).not.toHaveBeenCalled();
+    expect(t.eventQueue.find((m) => m.type === 'engine_error')).toBeUndefined();
+    expect(t.eventQueue.find((m) => m.type === 'turn_done')).toMatchObject({ usage: { stopReason: 'stop' } });
+  });
+
+  it('surfaces a concise notice only if Tower preflight recovery ultimately fails', async () => {
+    const persistTerminalErrorNotice = vi.fn();
+    const t = makeTerminalizer({
+      persistTerminalErrorNotice,
+      state: {
+        stopReason: 'error', oversizedPreflightRecoveryRequested: true,
+        providerErrorMessage: 'litellm-responses API error (400): context_length_exceeded: Pi Responses preflight rejected near-context request before upstream send (bodyEstimatedPromptTokens=363505 >= preflightFloor=360000)',
+      },
+    });
+    await t.terminalizer.emitTurnDone('error');
+    expect(t.eventQueue.find((m) => m.type === 'engine_error')).toMatchObject({
+      message: expect.stringContaining('추정치'), retryable: false,
+    });
+    expect(persistTerminalErrorNotice).toHaveBeenCalledWith(expect.stringContaining('추정치'));
+    expect(JSON.stringify(t.eventQueue)).not.toContain('363505');
+  });
+
+  it('does not attribute a later unrelated provider failure to a historical compaction', async () => {
+    const t = makeTerminalizer({ state: {
+      stopReason: 'error', compactionSucceededThisTurn: true,
+      oversizedPreflightRecoveryRequested: false, providerErrorMessage: 'Service temporarily unavailable',
+      lastAssistant: undefined,
+    } });
+    await t.terminalizer.emitTurnDone('error');
+    const notice = t.eventQueue.find((m) => m.type === 'engine_error');
+    expect(notice).toMatchObject({ message: expect.stringContaining('AI 제공자 오류'), retryable: true });
+    expect(JSON.stringify(notice)).not.toContain('컨텍스트');
+  });
+
+  it('distinguishes interrupted tool boundaries from request-size failures', async () => {
+    const persistTerminalErrorNotice = vi.fn();
+    const t = makeTerminalizer({ persistTerminalErrorNotice, state: {
+      stopReason: 'error',
+      lastAssistant: { stopReason: 'toolUse', blockTypes: ['tool_use'], textTail: 'Checking state', hasToolCall: true, textAfterLastToolCall: '', continuationIntent: false },
+    } });
+    await t.terminalizer.emitTurnDone('error');
+    expect(t.eventQueue.find((m) => m.type === 'engine_error')).toMatchObject({
+      message: expect.stringContaining('저장된 작업 상태'), retryable: true,
+    });
+    expect(JSON.stringify(t.eventQueue)).not.toContain('요청 크기 또는 제공자 오류');
+    expect(persistTerminalErrorNotice).toHaveBeenCalled();
+  });
+
+  it('persists a safe 413 notice when a provider error follows tool-use commentary', async () => {
+    const persistTerminalErrorNotice = vi.fn();
+    const t = makeTerminalizer({
+      persistTerminalErrorNotice,
+      state: {
+        stopReason: 'error', providerErrorMessage: 'API error (413): 413 Request Entity Too Large',
+        lastAssistant: {
+          stopReason: 'toolUse', blockTypes: ['text', 'tool_use'], hasToolCall: true,
+          textTail: 'I will check the files', textAfterLastToolCall: '', continuationIntent: false,
+        },
+      },
+    });
+    await t.terminalizer.emitTurnDone();
+    expect(persistTerminalErrorNotice).toHaveBeenCalledWith(expect.stringContaining('요청 본문'));
+    expect(t.eventQueue.find((m) => m.type === 'engine_error')).toMatchObject({ message: expect.stringContaining('요청 본문') });
+    expect(t.eventQueue.find((m) => m.type === 'turn_done')).toMatchObject({ usage: { stopReason: 'error' } });
+  });
+
   it('forceTerminalizeRun marks forced state, aborts, emits aborted turn_done, and wakes the loop', async () => {
     const runCtx = new PiRunContext({ modelContextWindow: 100, initialMsgId: 'm' });
     const eventQueue: TowerMessage[] = [];
@@ -375,5 +480,20 @@ describe('PiRunTerminalizer', () => {
     expect(eventQueue).toHaveLength(1);
     expect(eventQueue[0]).toMatchObject({ type: 'turn_done', usage: { stopReason: 'aborted' } });
     expect(terminalizer.isTerminalForced).toBe(true);
+  });
+});
+
+
+describe('successful file presentation survives terminal response errors', () => {
+  it('distinguishes successful presentation from failed final response without treating the run as success', async () => {
+    const persistTerminalErrorNotice = vi.fn();
+    const { terminalizer, eventQueue } = makeTerminalizer({
+      persistTerminalErrorNotice,
+      state: { stopReason: 'toolUse', assistantSaved: false, presentedFiles: ['/project/final/report.pdf'], providerErrorObservedThisTurn: true, providerErrorVisibleSurfacedThisTurn: false },
+    });
+    await terminalizer.emitTurnDone('error');
+    expect(persistTerminalErrorNotice).toHaveBeenCalledWith(expect.stringContaining('파일 표시 요청은 완료'));
+    expect(persistTerminalErrorNotice).toHaveBeenCalledWith(expect.stringContaining('마지막 AI 답변'));
+    expect(eventQueue.find(event => event.type === 'turn_done')).toMatchObject({ usage: { stopReason: 'error' } });
   });
 });

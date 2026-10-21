@@ -8,17 +8,24 @@
  */
 
 import { Type } from '@sinclair/typebox';
+import { assertSessionAllowsSharedArtifactWrite } from '../services/session/session-artifact-privacy.js';
 import { execFileSync } from 'child_process';
 import crypto from 'crypto';
 import * as fs from 'fs';
 import * as os from 'os';
 import path from 'path';
 import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
-import { SMART_READER_PY, type ExcelToolContext, prepareFinanceInput, resolveExcelInputPath, resolveFinanceInputPath } from './pi-finance-tools.js';
-import { requireDetectedMime } from '../services/content-safety/file-representation-gateway.js';
+import { SMART_READER_PY, type ExcelToolContext, prepareFinanceInput, resolveExcelInputPath } from './pi-finance-tools.js';
+import { requireDetectedMime, withPreparedLocalFile, type PreparedFileRepresentation } from '../services/content-safety/file-representation-gateway.js';
 import { applyModelOutputBudget } from '../services/content-safety/model-output-budget-gateway.js';
 
 type FinanceExtraToolContext = ExcelToolContext;
+
+async function withFinanceInputFiles<T>(files: PreparedFileRepresentation[], use: (paths: string[]) => Promise<T>, paths: string[] = []): Promise<T> {
+  if (!files.length) return use(paths);
+  return withPreparedLocalFile(files[0], undefined, 100 * 1024 * 1024,
+    local => withFinanceInputFiles(files.slice(1), use, [...paths, local]));
+}
 
 function makePythonTempDir(ctx: FinanceExtraToolContext): string {
   const sessionPart = (ctx.sessionId || 'sessionless')
@@ -89,7 +96,7 @@ export function createPdfReadTool(ctx: FinanceExtraToolContext): ToolDefinition 
 
       try {
         const prepared = requireDetectedMime(await prepareFinanceInput(rawFilePath, ctx), ['application/pdf'], 'pdf_read');
-        const filePath = prepared.path;
+        return await withPreparedLocalFile(prepared, undefined, 100 * 1024 * 1024, async filePath => {
         const result = withFinancePythonEnv(ctx, ({ tempDir }) => {
           const pyScript = `
 import pdfplumber, json, sys, os, re, warnings
@@ -190,6 +197,7 @@ except Exception as e:
 
         const budgeted = applyModelOutputBudget([{ type: 'text' as const, text: lines.join('\n') }]);
         return { content: budgeted.content, details: { outputBudget: budgeted } };
+        });
       } catch (err: any) {
         return { content: [{ type: 'text' as const, text: `pdf_read failed: ${err.message}` }], details: undefined };
       }
@@ -236,6 +244,7 @@ export function createExcelWriteTool(ctx: FinanceExtraToolContext): ToolDefiniti
       const { path: rawFilePath, data, sheet = 'Sheet1', number_format = '#,##0', title } = params;
 
       try {
+        await assertSessionAllowsSharedArtifactWrite(ctx.sessionId);
         const result = withFinancePythonEnv(ctx, ({ tempDir }) => {
           const filePath = resolveExcelInputPath(rawFilePath, ctx);
           const pyScript = `
@@ -311,7 +320,7 @@ print(json.dumps({"file": os.path.basename(path), "path": os.path.abspath(path),
           details: undefined,
         };
       } catch (err: any) {
-        return { content: [{ type: 'text' as const, text: `excel_write failed: ${err.message}` }], details: undefined };
+        return { content: [{ type: 'text' as const, text: `excel_write failed: ${err.message}` }], details: undefined, isError: true };
       }
     },
   } as ToolDefinition;
@@ -362,7 +371,8 @@ export function createExcelDiffTool(ctx: FinanceExtraToolContext): ToolDefinitio
       const valCols = value_columns ? JSON.stringify(value_columns) : 'None';
 
       try {
-        const resolvedFiles = await Promise.all(files.map(file => resolveFinanceInputPath(file, ctx)));
+        const preparedFiles = await Promise.all(files.map(file => prepareFinanceInput(file, ctx)));
+        return await withFinanceInputFiles(preparedFiles, async resolvedFiles => {
         const result = withFinancePythonEnv(ctx, ({ tempDir, readerDir }) => {
           const pyScript = `
 import pandas as pd, json, sys, os, numpy as np
@@ -482,6 +492,7 @@ except Exception as e:
         }
 
         return { content: [{ type: 'text' as const, text: lines.join('\n') }], details: undefined };
+        });
       } catch (err: any) {
         return { content: [{ type: 'text' as const, text: `excel_diff failed: ${err.message}` }], details: undefined };
       }

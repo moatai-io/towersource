@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 const summary = fs.readFileSync(path.resolve(import.meta.dirname, './PersonalUsageSummary.tsx'), 'utf8');
 const timeline = fs.readFileSync(path.resolve(import.meta.dirname, './ChallengeTimelinePanel.tsx'), 'utf8');
 const api = fs.readFileSync(path.resolve(import.meta.dirname, '../../../../backend/routes/api.ts'), 'utf8');
+const personalUsageApi = api.slice(api.indexOf("router.get('/metrics/my-ai-usage'"), api.indexOf("router.get('/metrics/usage-heatmap'"));
 
 describe('personal AI usage summary', () => {
   it('keeps usage metrics available without placing them above actual work progress', () => {
@@ -26,13 +27,18 @@ describe('personal AI usage summary', () => {
   });
 
   it('scopes the backend query to the authenticated session owner', () => {
-    expect(api).toContain("router.get('/metrics/my-ai-usage'");
-    expect(api).toContain("const userId = (req as any).user?.userId");
-    expect(api).toContain('WHERE user_id = $1');
-    expect(api).toContain('WHERE s.user_id = $1');
-    expect(api).not.toContain("router.get('/metrics/my-ai-usage', operatorOrAboveMiddleware");
-    expect(api).toContain("m.metadata->'usage'->>'cost_usd'");
-    expect(api).toContain("costBasis: dailyCost > 0 ? 'message-provider-metadata' : 'session-estimate'");
-    expect(api).toContain('costAvailable: dailyCost > 0 || sessionCost > 0');
+    expect(personalUsageApi).toContain("router.get('/metrics/my-ai-usage'");
+    expect(personalUsageApi).toContain("const userId = (req as any).user?.userId");
+    expect(personalUsageApi).toContain('WHERE s.user_id = $1');
+    expect(personalUsageApi).not.toContain("router.get('/metrics/my-ai-usage', operatorOrAboveMiddleware");
+    expect(personalUsageApi).toContain("m.metadata->'usage'->>'cost_usd'");
+    expect(personalUsageApi).toContain("costBasis: 'message-provider-metadata'");
+    expect(personalUsageApi).toContain('costAvailable: daily.some((row) => Number(row.cost_samples) > 0)');
+    expect(personalUsageApi).toContain('const window = utcUsageWindow(days)');
+    expect(personalUsageApi).toContain('m.created_at >= $2::timestamptz');
+    expect(personalUsageApi).toContain('m.created_at < $3::timestamptz');
+    expect(personalUsageApi).not.toContain('session-estimate');
+    expect(personalUsageApi).not.toContain('sessionCost');
+    expect(personalUsageApi).not.toContain('updated_at');
   });
 });

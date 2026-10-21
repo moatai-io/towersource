@@ -3,10 +3,10 @@
  * Public API: diagnoseWorkbenchWorker and summarizeWorkbenchWorkerDiagnosis.
  * Does not resolve or expose secret values and never mutates Worker state.
  */
-import { listWorkbenchJobs } from './workbench-job-registry.js';
+import { listWorkbenchJobs } from '../execution/jobs/job-registry.js';
 import { listWorkbenchWorkerIdentities } from './workbench-worker-identity-repository.js';
-import { getPersistedWorkbenchWorker } from './workbench-worker-repository.js';
-import { getWorkbenchWorkerTransportCredentialBinding } from './workbench-worker-transport-credentials.js';
+import { getPersistedWorkbenchWorker } from '../execution/worker/worker-repository.js';
+import { getWorkbenchWorkerTransportCredentialBinding } from '../execution/worker/worker-transport-credentials.js';
 
 export type WorkerDoctorOverall='HEALTHY'|'DEGRADED'|'OFFLINE';
 export interface WorkerDoctorCheck { name:string; ok:boolean; detail:string; fix?:string }

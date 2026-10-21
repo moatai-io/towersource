@@ -32,6 +32,8 @@ export interface ConfirmOptions {
   message: string;
   confirmLabel?: string;
   cancelLabel?: string;
+  /** Hide the cancel action for informational alerts. */
+  hideCancel?: boolean;
   /** 'danger' = red confirm button for destructive actions. */
   variant?: ConfirmVariant;
   /** Convenience alias for variant: 'danger'. */
@@ -61,6 +63,7 @@ interface QueuedDialog {
   message: string;
   confirmLabel?: string;
   cancelLabel?: string;
+  hideCancel?: boolean;
   variant?: ConfirmVariant;
   placeholder?: string;
   initialValue?: string;
@@ -102,6 +105,7 @@ export function DialogProvider({ children }: { children: ReactNode }) {
           message: options.message,
           confirmLabel: options.confirmLabel,
           cancelLabel: options.cancelLabel,
+          hideCancel: options.hideCancel,
           variant: options.danger ? 'danger' : options.variant ?? 'default',
           resolveConfirm: resolve,
         });
@@ -159,6 +163,7 @@ export function DialogProvider({ children }: { children: ReactNode }) {
           message={current.message}
           confirmLabel={current.confirmLabel}
           cancelLabel={current.cancelLabel}
+          hideCancel={current.hideCancel}
           variant={current.variant}
           promptPlaceholder={current.kind === 'prompt' ? current.placeholder ?? '' : null}
           promptInitialValue={current.initialValue ?? ''}

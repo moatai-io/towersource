@@ -12,11 +12,12 @@ describe('Sidebar project session lazy-load contract', () => {
     expect(source).not.toContain('fetch(`/api/sessions?${params.toString()}`');
   });
 
-  it('shows teammate conversation counts from the same filtered session set used by the visible list', () => {
+  it('uses the server aggregate before project hydration and the filtered full list after hydration', () => {
     expect(source).toContain('const filteredSessionCountByProject = useMemo(() => {');
     expect(source).toContain('for (const session of filteredSessions)');
-    expect(source).toContain('const visibleCount = filteredSessionCountByProject.get(project.id) || 0;');
+    expect(source).toContain('const hydratedProjectSessionIds = useSessionStore((s) => s.hydratedProjectSessionIds);');
+    expect(source).toContain('const visibleCount = hydratedProjectSessionIds.has(project.id)');
+    expect(source).toContain('(project.sessionCount ?? filteredSessionCountByProject.get(project.id) ?? 0)');
     expect(source).toContain("{t('conversationCount', { count: visibleCount })}");
-    expect(source).toContain('const conversationCount = [...filteredSessionCountByProject.values()].reduce((sum, count) => sum + count, 0);');
   });
 });

@@ -58,8 +58,9 @@ describe('automationYamlDraft', () => {
 });
 
 describe('evaluateAutomationConditionV1', () => {
-  it('matches simple ai_when output conditions', () => {
-    const yaml = automationYamlDraft(baseAutomation);
+  it('evaluates a legacy condition sample without representing it as a scheduled step', () => {
+    const yaml = `${automationYamlDraft(baseAutomation)}\ncondition:\n  ai_when:\n    - output.ai_needed == true\n`;
+    expect(validateAutomationYamlV1(yaml).ok).toBe(false);
     const result = evaluateAutomationConditionV1(yaml, JSON.stringify({ ai_needed: true, status: 'ok' }));
     expect(result.aiNeeded).toBe(true);
     expect(result.matched).toContain('output.ai_needed == true');

@@ -43,6 +43,18 @@ describe('AI teammate operating profile', () => {
     expect(home).not.toContain('{blocker.label}이 다음 직급 기준');
   });
 
+  it('keeps recent conversations stable at narrow mobile widths', () => {
+    expect(home).toContain('<section className="min-w-0"><h2');
+    expect(home).toContain('grid min-w-0 gap-3 md:grid-cols-2');
+    expect(home).toContain('min-w-0 rounded-2xl');
+    expect(home).toContain('grid min-h-12 w-full min-w-0 grid-cols-[minmax(0,1fr)_auto]');
+    expect(home).toContain('className="block truncate text-xs font-semibold');
+    expect(home).toContain('title={s.name}');
+    expect(home).toContain('className="mt-1 block truncate text-[11px]');
+    expect(home).toContain('className="shrink-0 whitespace-nowrap text-[11px] tabular-nums');
+    expect(home).not.toContain('{s.userName} · {relative(s.updatedAt||s.createdAt,t)}');
+  });
+
   it('keeps direct actions wired from ProjectHome', () => {
     expect(project).toContain('onNewConversation={startNewConversation}');
     expect(project).toContain('onEditTeammate={editTeammate}');

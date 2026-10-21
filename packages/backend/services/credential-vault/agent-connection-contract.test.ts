@@ -38,6 +38,7 @@ describe('agent Connection contract', () => {
         connectedProjectCount: 1,
         blockedProjectCount: 0,
         attentionProjectCount: 0,
+        lastMaterializedAt: '2026-01-01T00:00:00.000Z',
         providerHealth: { status: 'ready' },
       }),
     });
@@ -80,6 +81,7 @@ describe('agent Connection contract', () => {
         connectedProjectCount: 1,
         blockedProjectCount: 0,
         attentionProjectCount: 0,
+        lastMaterializedAt: '2026-01-01T00:00:00.000Z',
         providerHealth: { status: 'ready' },
       }),
     });

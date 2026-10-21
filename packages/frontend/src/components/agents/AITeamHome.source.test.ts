@@ -24,18 +24,36 @@ describe('existing-user AI Team home', () => {
 
   it('separates the Tower helper from teammates and opens creation directly', () => {
     expect(home).toContain("project.systemKey === 'ai-talent-team'");
-    expect(home).toContain("project.systemKey !== 'ai-talent-team'");
+    expect(home).toContain('!project.systemKey');
     expect(home).toContain("new CustomEvent('tower-start-agent-academy')");
     expect(home).toContain("t('aiTeamHelper')");
     expect(home).toContain('onNewSession(helper.id)');
     expect(home).not.toContain('AI 인재팀');
     expect(home).toContain("t('newAiTeammate')");
-    expect(home).toContain("<dt className=\"text-surface-600\">{t('workspace')}</dt>");
+    expect(home).toContain("{t('workspace')}</dt>");
     expect(header).not.toContain('label={t(\'newProject\')}');
     expect(header).not.toContain('label="새 에이전트"');
   });
 
-  it('uses visible sessions only for availability and offers management and conversation actions', () => {
+  it('includes every active non-system Project in the default Agent directory', () => {
+    expect(home).toContain('const teammates = projects.filter((project) => !project.systemKey && !project.archived);');
+    expect(home).not.toContain('project.agent?.explicit === true');
+    expect(home).toContain("t('legacyTeammate')");
+  });
+
+  it('searches legacy and archived Agents outside the default directory', () => {
+    expect(home).toContain("const [query, setQuery] = React.useState('')");
+    expect(home).toContain("placeholder={t('searchAiTeammates')}");
+    expect(home).toContain('/api/projects/search?q=');
+    expect(home).toContain('[...projects, ...remoteMatches]');
+    expect(home).toContain('.filter((project) => !project.systemKey');
+    expect(home).toContain('project.agent?.displayName');
+    expect(home).toContain('project.name');
+    expect(home).toContain("t('archivedTeammate')");
+    expect(home).toContain("t('aiTeammateSearchSummary'");
+  });
+
+  it('uses visible sessions for availability and compact counts while offering management and conversation actions', () => {
     expect(home).not.toContain('/api/sessions');
     expect(home).toContain("t('manageTeammate')");
     expect(home).toContain("t('startConversation')");
@@ -52,9 +70,11 @@ describe('existing-user AI Team home', () => {
     expect(home).not.toContain('ai-team-people-ops');
   });
 
-  it('keeps narrow layouts usable without fixed card widths', () => {
+  it('keeps narrow layouts usable without fixed card widths or undersized teammate columns', () => {
     expect(home).toContain('min-w-0');
     expect(home).toContain('w-full');
+    expect(home).toContain('grid-cols-[repeat(auto-fit,minmax(min(100%,16rem),1fr))]');
+    expect(home).not.toContain('2xl:grid-cols-5');
     expect(home).not.toMatch(/w-\[(?:[3-9]\d\d|\d{4,})px\]/);
   });
 });

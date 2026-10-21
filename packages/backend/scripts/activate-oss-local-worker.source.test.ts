@@ -13,6 +13,8 @@ describe('Tower OSS local Worker bootstrap contract', () => {
     expect(source).not.toContain('SELECT status,project_ids');
     expect(source).toContain('activateProjectWorkerFirst');
     expect(source).toContain("rolloutCohort: 'oss-single-host'");
+    expect(source).toContain('fileAuthorityReady: true');
+    expect(source).toContain("verificationEvidence: 'worker-file-roundtrip'");
   });
 
   it('waits for the first admin, protects credentials, and runs a direct execution smoke', () => {
@@ -21,9 +23,9 @@ describe('Tower OSS local Worker bootstrap contract', () => {
     expect(bootstrap).toContain('chmod 750 /etc/tower-workers');
     expect(bootstrap).toContain('install -o root -g "$EXECUTION_USER" -m 640');
     expect(bootstrap).toContain('/v1/runs');
-    expect(bootstrap).toContain('pwd; printf oss-worker-smoke-ok');
+    expect(bootstrap).toContain('oss-worker-roundtrip');
     expect(bootstrap).toContain('grep -Fq "$PROJECT_ROOT"');
-    expect(bootstrap).toContain('oss-worker-smoke-ok');
+    expect(bootstrap).toContain('oss-worker-file-roundtrip-ok');
     expect(bootstrap).toContain('materialize-managed-skills.js');
     expect(bootstrap).not.toContain('echo "$transport"');
   });

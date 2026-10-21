@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { cancelWorkbenchJob, getWorkbenchJob, listWorkbenchJobs } from './workbench-job-registry.js';
+import { cancelWorkbenchJob, getWorkbenchJob, listWorkbenchJobs } from '../execution/jobs/job-registry.js';
 import { requestLocalWorkbenchJobCancel } from './workbench-job-runner.js';
-import { requestRemoteWorkbenchJobCancel } from './workbench-remote-job-runner.js';
+import { requestRemoteWorkbenchJobCancel } from '../execution/remote-job-runner.js';
 import { listServices, readServiceLogs, stopService } from './service-registry.js';
 import {
   inspectWorkbenchProcess,
@@ -12,11 +12,11 @@ import {
   WorkbenchProcessError,
 } from './workbench-process-control.js';
 
-vi.mock('./workbench-job-registry.js', () => ({
+vi.mock('../execution/jobs/job-registry.js', () => ({
   getWorkbenchJob: vi.fn(), listWorkbenchJobs: vi.fn(), cancelWorkbenchJob: vi.fn(),
 }));
 vi.mock('./workbench-job-runner.js', () => ({ requestLocalWorkbenchJobCancel: vi.fn() }));
-vi.mock('./workbench-remote-job-runner.js', () => ({ requestRemoteWorkbenchJobCancel: vi.fn() }));
+vi.mock('../execution/remote-job-runner.js', () => ({ requestRemoteWorkbenchJobCancel: vi.fn() }));
 vi.mock('./service-registry.js', () => ({
   listServices: vi.fn(), readServiceLogs: vi.fn(), stopService: vi.fn(),
 }));
@@ -92,4 +92,20 @@ describe('Project Shell common process control', () => {
     await expect(stopWorkbenchProcess('p', 'service:88')).resolves.toMatchObject({ process: { handle: 'service:88', state: 'stopped' } });
     expect(stopService).toHaveBeenCalledWith(88);
   });
+});
+
+describe('download process evidence', () => {
+ it('does not confuse process heartbeat with transfer evidence', async () => {
+  const { buildDownloadCommand } = await import('../execution/downloads/download-contract.js');
+  const { projectWorkbenchJob } = await import('./workbench-process-control.js');
+  const job={id:1,project_id:'p',status:'running',command:buildDownloadCommand({url:'https://dataset.example/data',destination:'data'}),stdout_text:null} as any;
+  expect(projectWorkbenchJob(job).download?.observation).toBe('unverified');
+  job.stdout_text='TOWER_DOWNLOAD_PROGRESS '+JSON.stringify({phase:'transferring',bytesWritten:10,bytesReceived:10,observedAt:Date.now()/1000-200,lastDiskGrowthAt:Date.now()/1000-200,attempt:1});
+  expect(projectWorkbenchJob(job).download?.observation).toBe('stale');
+  job.stdout_text='TOWER_DOWNLOAD_PROGRESS '+JSON.stringify({phase:'transferring',bytesWritten:10,bytesReceived:10,observedAt:Date.now()/1000,lastDiskGrowthAt:Date.now()/1000,attempt:1});
+  expect(projectWorkbenchJob(job).download?.observation).toBe('receiving_bytes');
+  job.status='failed';expect(projectWorkbenchJob(job).download?.observation).toBe('interrupted');
+  job.stdout_text='TOWER_DOWNLOAD_PROGRESS '+JSON.stringify({phase:'blocked',bytesWritten:10,observedAt:Date.now()/1000,attempt:1,errorCode:'RANGE_MISMATCH',nextAction:'Inspect remote metadata'});
+  expect(projectWorkbenchJob(job).download).toMatchObject({observation:'blocked',nextAction:'Inspect remote metadata'});
+ });
 });

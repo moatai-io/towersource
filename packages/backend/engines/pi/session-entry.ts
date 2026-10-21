@@ -1,3 +1,4 @@
+import type { ImmediateSteering } from './immediate-steering.js';
 // Owns Tower-side state shape for a live Pi SDK session.
 // Public API: PiSessionEntry.
 
@@ -9,6 +10,7 @@ type AgentSession = Awaited<ReturnType<typeof createAgentSession>>['session'];
 
 export interface PiSessionEntry {
   session: AgentSession;
+  pdfObservationState?: import('./pdf-observation-state.js').PdfObservationState;
   isRunning: boolean;
   /** Immutable Harness contract used to assemble this in-memory SDK Session. */
   harness?: ResolvedHarness;
@@ -24,6 +26,12 @@ export interface PiSessionEntry {
     projectId?: string;
     /** Effective DB/env rollout used to choose Worker bash vs compatibility Runtime Box bash. */
     workbenchRolloutEnabled?: boolean;
+    /**
+     * Current Operator access host-bash entitlement resolved at assembly time.
+     * Revocable, so re-resolved from the Project policy on every turn; a flip
+     * must rebuild the cached Session in both directions (grant and revoke).
+     */
+    operatorHostAccess?: boolean;
   };
   /** Secret-free fingerprint of the effective tool surface assembled for this Session. */
   harnessFingerprint?: HarnessRuntimeFingerprint;
@@ -79,4 +87,5 @@ export interface PiSessionEntry {
    * (startupSteerBuffer) rather than sent to the SDK. See GitHub issue #17.
    */
   promptActive?: boolean;
+  immediateSteering?: ImmediateSteering;
 }

@@ -4,7 +4,7 @@
  * See README.md.
  */
 
-import { getModelDefaults, isPiModelEntryEnabledForThisVm, loadModelsFile } from '../../config.js';
+import { getModelDefaults, isPiModelEntryEnabledForThisVm, loadModelsFile, resolveLegacyPiModelId } from '../../config.js';
 import type { EffortLevel } from '../../engines/types.js';
 
 export const MODEL_POLICY_IDS = [
@@ -59,7 +59,7 @@ function builtInPolicies(): Record<ModelPolicyId, ModelPolicyDefinition> {
     ultra: { model: defaults.session, effort: 'max', enabled: false, description: 'Reserved for future multi-agent orchestration.' },
     title: { model: defaults.ai_reply, effort: 'low' },
     summary: { model: defaults.ai_reply, effort: 'low' },
-    background: { model: defaults.ai_task, effort: 'medium' },
+    background: { model: defaults.session, effort: 'medium' },
   };
 }
 
@@ -73,7 +73,13 @@ function configuredPolicies(): { revision: number; policies: Partial<Record<Mode
   for (const id of MODEL_POLICY_IDS) {
     const value = configured.policies?.[id];
     if (!value || typeof value !== 'object') continue;
-    const model = typeof value.model === 'string' ? value.model.trim() : '';
+    // Background work follows the current Core slot, including legacy configs
+    // that still stored the Lite model here. Keep effort/enabled overrides.
+    const rawModel = id === 'background' ? getModelDefaults().session
+      : typeof value.model === 'string' ? value.model.trim() : '';
+    // Preserve the VM's router-facing model ID. A provider ID can be unavailable
+    // to this Team even when the underlying provider serves that model.
+    const model = resolveLegacyPiModelId(rawModel);
     if (!model) continue;
     if (model.includes('/') && !enabledPiModels.has(model)) {
       throw new Error(`MODEL_POLICY_MODEL_UNAVAILABLE: ${id} -> ${model}`);

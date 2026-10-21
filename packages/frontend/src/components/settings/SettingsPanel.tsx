@@ -4,6 +4,7 @@ import { useSettingsStore, type LangId, type FontSize } from '../../stores/setti
 import { useSessionStore } from '../../stores/session-store';
 import { MyProfileModal, ChangePasswordModal } from '../auth/UserSelfModals';
 import { NotificationSettingsPanel } from '../notifications/NotificationSettingsPanel';
+import { ShortcutSettings } from './ShortcutSettings';
 
 export function SettingsPanel() {
   const { t, i18n } = useTranslation('settings');
@@ -134,9 +135,9 @@ export function SettingsPanel() {
                   AI
                 </button>
                 <button
-                  onClick={() => setActiveView('kanban')}
+                  onClick={() => setActiveView('schedules')}
                   className={`flex-1 py-2 text-sm font-medium rounded-lg border transition-all ${
-                    activeView === 'kanban'
+                    activeView === 'schedules'
                       ? 'bg-surface-800 border-primary-500 text-primary-400'
                       : 'bg-surface-900 border-surface-700 text-surface-500 hover:border-surface-600'
                   }`}
@@ -163,6 +164,7 @@ export function SettingsPanel() {
 
           <div className="p-5 lg:p-6 bg-surface-900">
             <NotificationSettingsPanel />
+            <ShortcutSettings />
           </div>
         </div>
       </div>

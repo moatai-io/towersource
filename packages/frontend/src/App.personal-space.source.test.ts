@@ -1,18 +1,23 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
-const source = readFileSync(new URL('./App.tsx', import.meta.url), 'utf8');
+const source = [
+  readFileSync(new URL('./App.tsx', import.meta.url), 'utf8'),
+  readFileSync(new URL('./components/layout/ViewerPane.tsx', import.meta.url), 'utf8'),
+  readFileSync(new URL('./hooks/usePersonalViewerActions.ts', import.meta.url), 'utf8'),
+].join('\n');
 
 describe('App Personal Space Viewer integration', () => {
   it('creates and opens a personal note from the Viewer plus button', () => {
     expect(source).toContain("fetch(`${API_BASE}/personal-space/files/create-note`");
     expect(source).toContain("body: JSON.stringify({ content: '' })");
-    expect(source).toContain('onClick={() => { void handleCreatePersonalNote(); }}');
-    expect(source).toContain("aria-label={t('layout:createBlankPersonalNote')}");
+    expect(source).toContain('onClick={() => { void onCreatePersonalNote(); }}');
+    expect(source).toContain('onCreatePersonalNote={handleCreatePersonalNote}');
+    expect(source).toContain("aria-label={t('createBlankPersonalNote')}");
     expect(source).toContain("setContextPanelTab('write')");
     expect(source).not.toContain('<PersonalNotePicker');
     expect(source).not.toContain('>\n                        노트\n');
-    expect(source).toContain("aria-label={splitTabId ? t('layout:reopenViewer') : t('layout:createBlankPersonalNote')}");
+    expect(source).toContain("aria-label={splitTabId ? t('reopenViewer') : t('createBlankPersonalNote')}");
     expect(source).toContain("split: 'right'");
     expect(source).toContain('/personal-space/files/rename');
     expect(source).toContain('renameOpenTabPath(uri, nextUri');

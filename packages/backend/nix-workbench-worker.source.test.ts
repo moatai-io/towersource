@@ -24,14 +24,37 @@ describe('Nix-packaged production Workbench Worker', () => {
     }
     expect(worker).toContain('remote-workbench-worker-entrypoint.js');
     expect(heartbeat).toContain('local-workbench-worker-heartbeat.js');
+    expect(flake).toContain('pkgs.bubblewrap');
+    expect(flake).toContain('TOWER_WORKER_BWRAP_BIN');
+    expect(systemInstaller).toContain('UMask=0002');
+    expect(systemInstaller).toContain('repair_project_permissions="${TOWER_REPAIR_PROJECT_PERMISSIONS:-false}"');
+    expect(systemInstaller).toContain('if [[ "$repair_project_permissions" == "true" ]]');
+    expect(systemInstaller).toContain('recursive permission repair is retired');
+    expect(systemInstaller).not.toContain('"$permission_gate"');
+    expect(systemInstaller).not.toContain('inspect --roots-only');
+    expect(systemInstaller).toContain('runuser -u "$execution_user" -- test -x "$project_root"');
+    expect(systemInstaller).not.toContain('chmod g+');
+    expect(systemInstaller).not.toContain('setfacl -m');
+    expect(flake).toContain('test -x "$out/bin/tower-worker-permission-preflight"');
+    expect(systemInstaller).not.toContain('chown -R');
     expect(assignmentLauncher).toContain('reconcile-primary-worker-assignment.js');
   });
 
-  it('installs a disabled-by-default one-shot assignment timer', () => {
+  it('packages the Python preflight with an executable patched entrypoint and runtime dependency', () => {
+    expect(flake).toContain('nativeBuildInputs = [ npm10Node22 pkgs.nodejs_22 pkgs.makeWrapper pkgs.python3 ]');
+    expect(flake).toContain('cp ${./scripts/nix-app/tower-worker-permission-preflight} "$out/bin/tower-worker-permission-preflight"');
+    expect(flake).toContain('chmod +x "$out/bin/tower-worker-permission-preflight"');
+    expect(flake).toContain('patchShebangs "$out/bin/tower-worker-permission-preflight"');
+    expect(flake).toMatch(/wrapProgram "\$out\/bin\/tower-worker-permission-preflight"\s*\\\s*--prefix PATH : \$\{lib\.makeBinPath \[ pkgs\.python3 \]\}/);
+  });
+
+  it('installs a disabled-by-default one-shot assignment timer for user or system Workers', () => {
     expect(assignmentInstaller).toContain('OnUnitActiveSec=30s');
     expect(assignmentInstaller).toContain('Type=oneshot');
-    expect(assignmentInstaller).toContain('systemctl --user enable tower-workbench-assignment-reconciler.timer');
-    expect(assignmentInstaller).not.toContain('systemctl --user start');
+    expect(assignmentInstaller).toContain('systemctl_prefix=(systemctl --user)');
+    expect(assignmentInstaller).toContain('systemctl_prefix=(systemctl)');
+    expect(assignmentInstaller).toContain('"${systemctl_prefix[@]}" enable tower-workbench-assignment-reconciler.timer');
+    expect(assignmentInstaller).not.toContain('"${systemctl_prefix[@]}" start');
   });
 
   it('keeps Project binding activation after Worker preparation and smoke', () => {
@@ -60,14 +83,12 @@ describe('Nix-packaged production Workbench Worker', () => {
     expect(installer).toContain('"started":false');
   });
 
-  it('installs an operator-plane Worker with production registration and bounded projections', () => {
-    expect(installer).toContain('TOWER_LOCAL_WORKER_AUTHORITY_MODE');
-    expect(installer).toContain("worker_capabilities='job,service,shell,operator-plane'");
-    expect(installer).toContain("unit_prefix=\"tower-operator-workbench-worker\"");
-    expect(installer).toContain("Operator Worker must register in the production deployment");
-    expect(installer).toContain("'/workspace/tower': towerSource");
-    expect(installer).toContain("'/workspace/workspace': workspaceRoot");
-    expect(installer).toContain('Operator projection mountpoint must not be a symlink');
+  it('rejects retired operator-plane Workers in favor of native Operator access', () => {
+    expect(installer).toContain('Worker authority must be project; Operator access uses the native Operator execution environment');
+    expect(installer).not.toContain("worker_capabilities='job,service,shell,operator-plane'");
+    expect(installer).not.toContain('tower-operator-workbench-worker');
+    expect(installer).not.toContain("'/workspace/tower': towerSource");
+    expect(installer).not.toContain("'/workspace/workspace': workspaceRoot");
     expect(installer).not.toContain('Environment=TOWER_WORKER_BWRAP_BIN=');
     expect(flake).toContain('pkgs.nodejs_22 pkgs.coreutils pkgs.systemd');
   });
@@ -79,21 +100,26 @@ describe('Nix-packaged production Workbench Worker', () => {
     expect(systemInstaller).toContain('Group=$execution_group');
     expect(systemInstaller).toContain('Slice=tower-execution.slice');
     expect(systemInstaller).toContain('runuser -u "$execution_user" -- test -w "$project_root"');
+    expect(systemInstaller).toContain('runuser -u "$execution_user" -- test -r "$managed_skills_root"');
+    expect(systemInstaller).toContain('permissionRepair');
     expect(systemInstaller).toContain('systemctl enable "$worker_unit_name" "$heartbeat_unit_name"');
     expect(systemInstaller).not.toContain('systemctl start');
     expect(systemInstaller).not.toMatch(/chown\s+-R/);
     expect(flake).toContain('pkgs.shadow');
   });
 
-  it('bootstraps a system-user Tower development Workstation with bounded operator context', () => {
-    expect(systemInstaller).toContain('TOWER_LOCAL_WORKER_AUTHORITY_MODE');
-    expect(systemInstaller).toContain('Operator Worker capabilities must include operator-plane');
-    expect(systemInstaller).toContain("'/workspace/tower', '/workspace/workspace'");
-    expect(systemInstaller).toContain('execution user cannot write Operator projection');
-    expect(systemBootstrap).toContain("...(authorityMode === 'operator-plane' ? ['operator-plane'] : [])");
-    expect(systemBootstrap).toContain("'/workspace/tower': path.resolve(operatorTowerSource!)");
-    expect(systemBootstrap).toContain('operatorGitIdentity');
-    expect(systemBootstrap).not.toContain('process.env.GIT_AUTHOR_NAME');
+  it('keeps system-user Workstations project-scoped', () => {
+    expect(systemInstaller).toContain('Worker authority must be project; Operator access uses the native Operator execution environment');
+    expect(systemInstaller).not.toContain('Operator Worker capabilities must include operator-plane');
+    expect(systemInstaller).not.toContain("'/workspace/tower', '/workspace/workspace'");
+    expect(systemBootstrap).not.toContain("...(authorityMode === 'operator-plane' ? ['operator-plane'] : [])");
+    expect(systemBootstrap).not.toContain("'/workspace/tower': path.resolve(operatorTowerSource!)");
+    expect(systemBootstrap).not.toContain('operatorGitIdentity');
+    expect(systemBootstrap).toContain('managedSkillsRoot');
+    expect(systemBootstrap).toContain('runtimeProvenance');
+    expect(systemBootstrap).toContain('TOWER_SOURCE_REV');
+    expect(systemBootstrap).toContain('TOWER_APP_ROOT');
+    expect(systemBootstrap).toContain("path.join(path.dirname(projectRoot), 'teamskills')");
   });
 
   it('keeps all Local Workers inside one host-protecting resource slice', () => {
@@ -106,22 +132,22 @@ describe('Nix-packaged production Workbench Worker', () => {
     expect(installer).toContain('MemoryMax=$worker_memory_max');
   });
 
-  it('defaults Worker capacity above the heaviest single-request weight', () => {
-    expect(installer).toContain('worker_max_runs="${TOWER_LOCAL_WORKER_MAX_RUNS:-4}"');
+  it('defaults every installed Worker to twenty capacity units while preserving explicit overrides', () => {
+    expect(installer).toContain('worker_max_runs="${TOWER_LOCAL_WORKER_MAX_RUNS:-20}"');
     expect(installer).toContain('TOWER_LOCAL_WORKER_MAX_RUNS must be at least 3 capacity units');
-    expect(systemInstaller).toContain('worker_max_runs="${TOWER_LOCAL_WORKER_MAX_RUNS:-4}"');
-    expect(systemBootstrap).toContain("TOWER_BOOTSTRAP_MAX_RUNS?.trim() || '4'");
+    expect(systemInstaller).toContain('worker_max_runs="${TOWER_LOCAL_WORKER_MAX_RUNS:-20}"');
+    expect(systemBootstrap).toContain("TOWER_BOOTSTRAP_MAX_RUNS?.trim() || '20'");
     expect(systemBootstrap).toContain('maxRuns < 3');
     expect(installer).toContain('Environment=TOWER_LOCAL_WORKER_MAX_RUNS=$worker_max_runs');
-    expect(heartbeatSource).toContain('TOWER_LOCAL_WORKER_MAX_RUNS ?? 4');
+    expect(heartbeatSource).toContain('TOWER_LOCAL_WORKER_MAX_RUNS ?? 20');
     expect(heartbeatSource).toContain('maxRuns }');
-    expect(heartbeatSource).not.toContain('maxRuns: 4');
+    expect(heartbeatSource).not.toContain('maxRuns: 20');
   });
 
   it('ships one manifest-driven authoritative Worker compute baseline', () => {
     expect(flake).toContain('workerBaseline = [');
-    expect(flake).not.toContain('pkgs.bubblewrap');
-    expect(flake).not.toContain('TOWER_WORKER_BWRAP_BIN');
+    expect(flake).toContain('pkgs.bubblewrap');
+    expect(flake).toContain('TOWER_WORKER_BWRAP_BIN');
     expect(flake).toContain('pkgs.python313.withPackages');
     expect(flake).toContain('pkgs.libreoffice-fresh');
     expect(flake).toContain('pkgs.typst');
@@ -131,6 +157,11 @@ describe('Nix-packaged production Workbench Worker', () => {
     expect(flake).toContain('pkgs.chromium');
     expect(flake).toContain('pkgs.util-linux');
     expect(flake).toContain('pkgs.uv');
+    expect(flake).toContain('workerPublishingTools');
+    expect(flake).toContain('tower-html-render');
+    for (const fontPackage of ['pkgs.noto-fonts-cjk-serif', 'pkgs.nanum-gothic-coding', 'pkgs.dejavu_fonts', 'pkgs.liberation_ttf']) {
+      expect(flake).toContain(fontPackage);
+    }
     expect(flake).toContain('compute-baseline.json');
     expect(flake).toContain('runtime-compute-doctor');
     expect(flake).toContain('wrapProgram "$out/bin/tower-workbench-worker"');
@@ -140,6 +171,17 @@ describe('Nix-packaged production Workbench Worker', () => {
     expect(baselineManifest.commands.documents).toContain('libreoffice');
     expect(baselineManifest.pythonImports).toContain('openpyxl');
     expect(baselineManifest.ocrLanguages).toEqual(['eng', 'kor']);
+    expect(baselineManifest.commands.publishing).toEqual(['mmdc', 'marp', 'svgo', 'tower-html-render']);
+    expect(baselineManifest.nodeImports).toEqual(['playwright-core']);
+    expect(flake).toContain('--set NODE_PATH');
+    expect(baselineManifest.fontFamilies).toContain('Noto Serif CJK KR');
+    expect(baselineManifest.genericFontFamilies).toMatchObject({
+      'sans-serif': expect.any(String),
+      serif: expect.any(String),
+      monospace: expect.any(String),
+    });
+    expect(nixDoctor).toContain("fc-match -f '%{family}\\n'");
+    expect(nixDoctor).toContain('.genericFontFamilies');
   });
 
   it('keeps the heartbeat event loop referenced instead of relying on unsettled top-level await', () => {

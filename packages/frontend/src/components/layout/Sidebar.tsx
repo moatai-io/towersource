@@ -1,38 +1,52 @@
+import { useSessionShortcuts } from '../../hooks/useSessionShortcuts';
+import { FileOperationFeedback } from '../../features/file-operation-feedback/FileOperationFeedback';
+import { reportUploadUnknown } from '../../features/file-operation-feedback/feedback';
 import React, { useMemo, useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react';
 import { useSessionStore, type SessionMeta } from '../../stores/session-store';
-import { useFileStore, type FileEntrySortMode, type FileProjectSortMode } from '../../stores/file-store';
+import { useChatStore } from '../../stores/chat-store';
+import { useFileStore, type FileEntry, type FileEntrySortMode } from '../../stores/file-store';
 import { type Pin } from '../../stores/pin-store';
 import { usePromptStore, type PromptItem } from '../../stores/prompt-store';
 import { useProjectStore, type Project } from '../../stores/project-store';
 import { useSpaceStore } from '../../stores/space-store';
 import { SpaceFilter } from './SpaceFilter';
+import { AgentNavigationRail } from './AgentNavigationRail';
 import { SessionItem } from '../sessions/SessionItem';
-import { SelectionToolbar } from '../files/SelectionToolbar';
-import { PinList } from '../pinboard/PinList';
-import { PromptItem as PromptItemComponent } from '../prompts/PromptItem';
+const LazyPinList = React.lazy(() => import('../pinboard/PinList').then((module) => ({ default: module.PinList })));
+const LazyPromptItem = React.lazy(() => import('../prompts/PromptItem').then((module) => ({ default: module.PromptItem })));
+const LazySidebarFilesSurface = React.lazy(() => import('./SidebarFilesSurface').then((module) => ({ default: module.SidebarFilesSurface })));
+import { renameAgentDisplayName } from '../../features/navigation-sidebar/rename-agent';
 import { toastError, toastSuccess } from '../../utils/toast';
 import { useConfirm } from '../../hooks/useDialog';
-import { AgentCredentialsModal } from './AgentCredentialsModal';
+import { useResizablePane } from '../../hooks/useResizablePane';
 import { readDroppedItems, uploadDroppedFiles } from '../../utils/folder-drop';
 import { notifyUploadResult } from '../../utils/upload-notice';
 import { emitProductNotice } from '../../utils/product-notice';
 import { getCurrentRole, getCurrentUserId, isOperatorOrAdmin } from '../../utils/auth';
 import { useRoomStore } from '../../stores/room-store';
-import { HistoryPanel } from '../history/HistoryPanel';
-import { SessionFilesMenuSection } from './SessionFilesMenuSection';
+
 import { useTranslation } from 'react-i18next';
+
+function DeferredSidebarSurface({ children }: { children: React.ReactNode }) {
+  return <React.Suspense fallback={null}>{children}</React.Suspense>;
+}
+
+const AgentCredentialsModal = React.lazy(() => import('./AgentCredentialsModal').then(module => ({ default: module.AgentCredentialsModal })));
 import { useSettingsStore } from '../../stores/settings-store';
 import { getSessionPresentationKind, isPureAgentSession } from '../../features/agent-sessions/classification';
 import { RunIndicator } from '../common/RunIndicator';
+import { FadeOverflowText } from '../common/FadeOverflowText';
 import { deriveProjectSlugFromName, isValidProjectSlug, normalizeProjectSlugInput } from '../../utils/project-slug';
-import { getLatestSessionDismissKey, isLatestSessionDismissed, loadDismissedLatestSessionKeys, saveDismissedLatestSessionKeys } from '../../utils/latest-session-persistence';
-import { saveSessionListFilter, type SessionKindFilter } from '../../utils/session-list-filters';
+import { getLatestSessionDismissKey, loadDismissedLatestSessionKeys, saveDismissedLatestSessionKeys } from '../../utils/latest-session-persistence';
+import { matchesSessionListFilters, saveSessionListFilter, type SessionKindFilter } from '../../utils/session-list-filters';
 import { rememberAgentWorkspaceLocation } from '../../features/agent-workspace/navigation-state';
 import { AgentIdentityAvatar } from '../../features/agent-profile/AgentIdentityAvatar';
 import { MOBILE_DOCUMENT_RECENTS_CHANGED, readMobileDocumentRecents, type MobileDocumentRecent } from '../files/mobileDocumentRecents';
-import { SidebarProjectFiles } from '../../features/navigation-sidebar/project-files/SidebarProjectFiles';
+
+import { SidebarSearchNotice } from '../../features/navigation-sidebar/sessions/SidebarSearchNotice';
 import { SidebarSessionsToolbar } from '../../features/navigation-sidebar/sessions/SidebarSessionsToolbar';
-import { buildSidebarSessionListModel } from '../../features/navigation-sidebar/sessions/sidebar-session-list-model';
+import { buildSidebarLatestQuickSessions, buildSidebarSessionListModel } from '../../features/navigation-sidebar/sessions/sidebar-session-list-model';
+import { combineSidebarSessions, useSidebarArchivedSessions } from '../../features/navigation-sidebar/sessions/use-sidebar-archived-sessions';
 import { buildSidebarSessionTimelineModel } from '../../features/navigation-sidebar/sessions/sidebar-session-timeline-model';
 import { SidebarSessionTimeline } from '../../features/navigation-sidebar/sessions/SidebarSessionTimeline';
 import { buildSidebarAgentRailModel } from '../../features/navigation-sidebar/sessions/sidebar-agent-rail-model';
@@ -54,26 +68,10 @@ const SESSION_SHOW_ALL_STORAGE_KEY = 'sidebar-session-show-all:v1';
 const SESSION_VISIBLE_COUNT_STORAGE_KEY = 'sidebar-session-visible-count:v1';
 const SIDEBAR_SCROLL_STORAGE_KEY = 'sidebar-scroll:v1';
 const LATEST_SESSIONS_VISIBLE_COUNT_STORAGE_KEY = 'sidebar-latest-sessions-visible-count:v1';
-const SESSION_INITIAL_EXPANDED_LIMIT = 20;
+const SESSION_INITIAL_EXPANDED_LIMIT = 50;
 const SESSION_LOAD_BATCH = 50;
-const AGENT_SESSION_PREVIEW_LIMIT_STORAGE_KEY = 'sidebar-agent-session-preview-limit:v1';
 const LATEST_SESSIONS_DEFAULT_LIMIT = 50;
 const LATEST_SESSIONS_LOAD_BATCH = 50;
-
-function getAgentSessionPreviewLimit(): 20 | 50 {
-  try {
-    return localStorage.getItem(AGENT_SESSION_PREVIEW_LIMIT_STORAGE_KEY) === '50' ? 50 : 20;
-  } catch {
-    return 20;
-  }
-}
-
-function saveAgentSessionPreviewLimit(limit: 20 | 50): void {
-  try {
-    localStorage.setItem(AGENT_SESSION_PREVIEW_LIMIT_STORAGE_KEY, String(limit));
-    window.dispatchEvent(new CustomEvent('tower:agent-session-preview-limit-updated', { detail: { limit } }));
-  } catch {}
-}
 
 function loadSessionShowAllKeys(): Set<string> {
   try {
@@ -357,6 +355,7 @@ function AgentTeamFormationTicket({ projects }: { projects: Project[] }) {
         type="button"
         onClick={() => {
           const sessionStore = useSessionStore.getState();
+          window.dispatchEvent(new CustomEvent('tower-open-ai-team-home'));
           sessionStore.setActiveView('aiTeam');
           if (sessionStore.isMobile) sessionStore.setSidebarOpen(false);
           window.requestAnimationFrame(() => document.querySelector<HTMLElement>('[data-ai-team-scroll]')?.scrollTo({ top: 0 }));
@@ -440,12 +439,17 @@ export function Sidebar({
   const agentFirstEnabled = useSettingsStore((s) => s.serverConfig?.agentFirstEnabled === true);
   const capabilityProjectId = useSettingsStore((s) => s.capabilityProjectId);
   const sessions = useSessionStore((s) => s.sessions);
+  const hydratedProjectSessionIds = useSessionStore((s) => s.hydratedProjectSessionIds);
   const hydrateProjectSessions = useSessionStore((s) => s.hydrateProjectSessions);
   const activeSessionId = useSessionStore((s) => s.activeSessionId);
   const isMobile = useSessionStore((s) => s.isMobile);
   const activeSessionCwd = useSessionStore((s) => {
     const id = s.activeSessionId;
     return id ? s.sessions.find((ss) => ss.id === id)?.cwd ?? '' : '';
+  });
+  const activeSessionProjectId = useSessionStore((s) => {
+    const id = s.activeSessionId;
+    return id ? s.sessions.find((ss) => ss.id === id)?.projectId ?? null : null;
   });
   const sidebarTab = useSessionStore((s) => s.sidebarTab);
   const setSidebarTab = useSessionStore((s) => s.setSidebarTab);
@@ -456,29 +460,43 @@ export function Sidebar({
   const [filterMy, setFilterMy] = useState(() => localStorage.getItem('sidebar-filter-my') === 'true');
   const [filterFav, setFilterFav] = useState(() => localStorage.getItem('sidebar-filter-fav') === 'true');
   const [filterDone, setFilterDone] = useState(() => localStorage.getItem('sidebar-filter-done') === 'true');
+  const [filterRunning, setFilterRunning] = useState(() => localStorage.getItem('sidebar-filter-running') === 'true');
+  const [filterAwaiting, setFilterAwaiting] = useState(() => localStorage.getItem('sidebar-filter-awaiting') === 'true');
   const [sessionKindFilter, setSessionKindFilter] = useState<SessionKindFilter>(() => {
     const stored = localStorage.getItem('sidebar-session-kind-filter');
     return stored === 'all' || stored === 'agents' || stored === 'runs' || stored === 'external' ? stored : 'chats';
   });
   const [filterOpen, setFilterOpen] = useState(false);
-  // Archived toggle — when true, search also matches sessions that live in
-  // History (soft-deleted / archived). Persisted to localStorage so the user's
-  // choice survives a reload. Default false — history is a low-signal corner.
-  const [includeArchived, setIncludeArchived] = useState(() => localStorage.getItem('sidebar-search-archived') === 'true');
+  // Archive inclusion applies to both normal lists and search. Mobile defaults
+  // to OFF and never persists the toggle — the drawer reopens on active sessions
+  // only; desktop keeps the remembered setting. The toggle stays available per visit.
+  const [includeArchived, setIncludeArchived] = useState(() => !isMobile && localStorage.getItem('sidebar-search-archived') === 'true');
+  const liveSessionIds = useMemo(() => sessions.map(session => session.id).sort().join(','), [sessions]);
+  const archivedSessions = useSidebarArchivedSessions(includeArchived, liveSessionIds);
+  const toggleIncludeArchived = () => {
+    const next = !includeArchived;
+    setIncludeArchived(next);
+    if (!isMobile) localStorage.setItem('sidebar-search-archived', String(next));
+  };
   const unreadSessions = useSessionStore((s) => s.unreadSessions);
   const streamingSessions = useSessionStore((s) => s.streamingSessions);
+  const turnStateBySession = useChatStore((s) => s.turnStateBySession);
+  const awaitingSessionIds = useMemo(() => new Set(Object.entries(turnStateBySession).filter(([, state]) => state.phase === 'awaiting_user').map(([sessionId]) => sessionId)), [turnStateBySession]);
   const activeFilterLabels = useMemo(() => {
     const labels: string[] = [];
     if (filterMy) labels.push(t('mySessions'));
     if (filterFav) labels.push(t('favorites'));
-    if (filterDone) labels.push(t('done'));
-    if (filterLabels) labels.push(t('decks'));
+    if (filterRunning) labels.push(t('filterRunning'));
+    if (filterAwaiting) labels.push(t('filterAwaiting'));
+    if (filterDone) labels.push(t('filterNeedsReview'));
+    if (filterLabels) labels.push(t('groupByDeck'));
+    if (includeArchived) labels.push(t('includeArchivedSessions'));
     if (sessionKindFilter === 'agents') labels.push('Subagents');
     if (sessionKindFilter === 'runs') labels.push('Runs');
     if (sessionKindFilter === 'external') labels.push(t('externalDeployment'));
     if (sessionKindFilter === 'all') labels.push('All');
     return labels;
-  }, [filterMy, filterFav, filterDone, filterLabels, sessionKindFilter, t]);
+  }, [filterMy, filterFav, filterDone, filterRunning, filterAwaiting, filterLabels, includeArchived, sessionKindFilter, t]);
 
   useEffect(() => {
     const start = (event: Event) => {
@@ -494,7 +512,7 @@ export function Sidebar({
     saveSessionListFilter('kind', next);
   };
 
-  const toggleFilter = (key: 'my' | 'fav' | 'done' | 'labels', value: boolean, setter: (v: boolean) => void) => {
+  const toggleFilter = (key: 'my' | 'fav' | 'done' | 'running' | 'awaiting' | 'labels', value: boolean, setter: (v: boolean) => void) => {
     const next = !value;
     setter(next);
     if (key === 'labels') {
@@ -502,6 +520,23 @@ export function Sidebar({
     } else {
       saveSessionListFilter(key === 'fav' ? 'favorites' : key, next);
     }
+  };
+  const resetSessionFilters = () => {
+    setKindFilter('chats');
+    setFilterMy(false);
+    setFilterFav(false);
+    setFilterDone(false);
+    setFilterRunning(false);
+    setFilterAwaiting(false);
+    setFilterLabels(false);
+    setIncludeArchived(false);
+    saveSessionListFilter('my', false);
+    saveSessionListFilter('favorites', false);
+    saveSessionListFilter('done', false);
+    saveSessionListFilter('running', false);
+    saveSessionListFilter('awaiting', false);
+    localStorage.setItem('sidebar-filter-labels', 'false');
+    if (!isMobile) localStorage.setItem('sidebar-search-archived', 'false');
   };
 
   const [ungroupedCollapsed, setUngroupedCollapsed] = useState(false);
@@ -626,6 +661,10 @@ export function Sidebar({
   const [personalFilesOpen, setPersonalFilesOpen] = useState(false);
   const [mobileDocumentRecents, setMobileDocumentRecents] = useState<MobileDocumentRecent[]>(readMobileDocumentRecents);
   const [mobileQuickFilesView, setMobileQuickFilesView] = useState<'recent' | 'session' | null>(null);
+  const [fileSearchQuery, setFileSearchQuery] = useState('');
+  const [fileSearchResults, setFileSearchResults] = useState<FileEntry[] | null>(null);
+  const [fileSearchLoading, setFileSearchLoading] = useState(false);
+  const [fileSearchError, setFileSearchError] = useState('');
   const [personalFiles, setPersonalFiles] = useState<Array<{ id: string; uri: string; relativePath: string; name: string; updatedAt: string }>>([]);
   const [personalFilesLoading, setPersonalFilesLoading] = useState(false);
   const [personalFilesError, setPersonalFilesError] = useState('');
@@ -635,34 +674,29 @@ export function Sidebar({
   const confirmPersonalFileAction = useConfirm();
   const fileTreeDragCounter = useRef(0);
 
-  const [sharedWithMe, setSharedWithMe] = useState<{ id: string; file_path: string; owner_username: string }[]>([]);
-  const [searchResults, setSearchResults] = useState<{ type: string; sessionId: string; sessionShortCode?: string; sessionName: string; projectName?: string | null; snippet: string; nameSnippet?: string; rank?: number; archived?: boolean; memoryTitle?: string; memoryOutcome?: string; memoryNextActions?: string[]; memoryCautions?: string[] }[] | null>(null);
+  const [searchResults, setSearchResults] = useState<{ type: string; sessionId: string; sessionShortCode?: string; sessionName: string; projectId?: string | null; projectName?: string | null; snippet: string; nameSnippet?: string; rank?: number; archived?: boolean; memoryTitle?: string; memoryOutcome?: string; memoryNextActions?: string[]; memoryCautions?: string[] }[] | null>(null);
+
+  const [searchNotice, setSearchNotice] = useState<'partial' | 'failed' | null>(null);
+  const [searchRetry, setSearchRetry] = useState(0);
 
   // Clear search helper — clears both query and results in one shot
   const clearSearch = useCallback(() => {
     setSearchQuery('');
     setSearchResults(null);
+    setSearchNotice(null);
   }, [setSearchQuery]);
 
-  useEffect(() => {
-    const token = localStorage.getItem('token');
-    if (!token) return;
-    fetch('/api/shares/with-me', {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-      .then(r => r.json())
-      .then(data => { if (Array.isArray(data)) setSharedWithMe(data); })
-      .catch(() => {});
-  }, []);
-
   // Debounced server-side tsvector search
-  // Pass includeArchived (History toggle) and the current session's projectId
+  // Pass includeArchived and the current session's projectId
   // so backend ranker can boost hits in the project the user is working in.
   useEffect(() => {
+    setSearchNotice(null);
+    setSearchResults(null);
     if (!searchQuery.trim() || searchQuery.length < 2) {
       setSearchResults(null);
       return;
     }
+    const controller = new AbortController();
     const timer = setTimeout(async () => {
       const tk = localStorage.getItem('token');
       const hdrs: Record<string, string> = {};
@@ -679,12 +713,28 @@ export function Sidebar({
           (s) => s.id === useSessionStore.getState().activeSessionId,
         )?.projectId;
         if (curProj) params.set('projectId', curProj);
-        const res = await fetch(`/api/search?${params.toString()}`, { headers: hdrs });
-        if (res.ok) setSearchResults(await res.json());
-      } catch {}
+        const res = await fetch(`/api/search?${params.toString()}`, { headers: hdrs, signal: controller.signal });
+        if (res.ok) {
+          const results = await res.json();
+          if (controller.signal.aborted) return;
+          setSearchResults(results);
+          setSearchNotice(res.headers.get('X-Tower-Search-Partial') === 'true' ? 'partial' : null);
+        } else if (!controller.signal.aborted) {
+          setSearchResults([]);
+          setSearchNotice('failed');
+        }
+      } catch (error) {
+        if (!controller.signal.aborted) {
+          setSearchResults([]);
+          setSearchNotice('failed');
+        }
+      }
     }, 300);
-    return () => clearTimeout(timer);
-  }, [searchQuery, includeArchived]);
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [searchQuery, includeArchived, searchRetry]);
 
   const handleFileTreeDrop = async (e: React.DragEvent) => {
     e.preventDefault();
@@ -698,7 +748,7 @@ export function Sidebar({
     // not need to search the full sessions[] list on the hot path.
     const uploadDir = treeRoot || activeSessionCwd || '';
     if (!uploadDir) {
-      toastError('Upload target not ready. Open the Files tab first, then try again.');
+      reportUploadUnknown('upload:sidebar');
       return;
     }
 
@@ -713,12 +763,13 @@ export function Sidebar({
     if (items.length === 0) return;
 
     try {
-      const { ok, fail } = await uploadDroppedFiles(uploadDir, items);
-      notifyUploadResult({ ok, fail });
+      const result = await uploadDroppedFiles(uploadDir, items);
+      const { ok, fail } = result;
+      notifyUploadResult(result);
       onRequestFileTree();
     } catch (err) {
       console.error('[sidebar] File upload error:', err);
-      emitProductNotice({ code: 'sidebar.upload.failed', technicalDetail: err });
+      reportUploadUnknown('upload:sidebar');
     }
   };
 
@@ -815,15 +866,46 @@ export function Sidebar({
   const [agentNavExpanded, setAgentNavExpanded] = useState(() => {
     try { return localStorage.getItem('sidebar-agent-nav-expanded:v1') === 'true'; } catch { return false; }
   });
+  const [agentNavWidth, setAgentNavWidth] = useState(() => {
+    try {
+      const stored = Number(localStorage.getItem('sidebar-agent-nav-width:v1'));
+      return Number.isFinite(stored) ? Math.min(224, Math.max(56, stored)) : 176;
+    } catch { return 176; }
+  });
+  const calculateAgentNavWidth = useCallback(({ clientX, startX, startValue }: { clientX: number; startX: number; startValue: number }) => (
+    Math.min(224, Math.max(56, startValue + clientX - startX))
+  ), []);
+  const persistAgentNavWidth = useCallback((width: number) => {
+    setAgentNavWidth(width);
+    try { localStorage.setItem('sidebar-agent-nav-width:v1', String(width)); } catch {}
+  }, []);
+  const { isResizing: isAgentNavResizing, startResize: startAgentNavResize } = useResizablePane({
+    value: agentNavWidth,
+    calculateValue: calculateAgentNavWidth,
+    onResize: setAgentNavWidth,
+    onResizeEnd: persistAgentNavWidth,
+    stopPropagation: true,
+  });
 
   useEffect(() => {
     const handler = (event: Event) => {
-      const sessionId = (event as CustomEvent<{ sessionId?: string }>).detail?.sessionId;
-      if (!sessionId) return;
-      const session = sessions.find((candidate) => candidate.id === sessionId);
+      const detail = (event as CustomEvent<{ sessionId?: string; origin?: 'created' }>).detail;
+      if (!detail?.sessionId) return;
+      const session = useSessionStore.getState().sessions.find((candidate) => candidate.id === detail.sessionId);
       if (!session) return;
 
       setSidebarTab('sessions');
+      // Creation is not a request to change the user's saved filters or search.
+      // An explicit "reveal in sidebar" action may still clear filters to locate
+      // a row that would otherwise be hidden.
+      if (detail.origin === 'created') {
+        if (agentFirstEnabled) {
+          setAgentNavScope('work');
+          setSelectedAgentProjectId(session.projectId || null);
+          setMobileAgentPane('detail');
+        }
+        return;
+      }
       setSearchQuery('');
 
       const presentationKind = getSessionPresentationKind(session);
@@ -858,7 +940,7 @@ export function Sidebar({
     };
     window.addEventListener('tower-reveal-session-in-sidebar', handler as EventListener);
     return () => window.removeEventListener('tower-reveal-session-in-sidebar', handler as EventListener);
-  }, [agentFirstEnabled, filterDone, filterFav, filterMy, sessions, setSearchQuery, setSidebarTab]);
+  }, [agentFirstEnabled, filterDone, filterFav, filterMy, setSearchQuery, setSidebarTab]);
 
   const toggleAgentNavExpanded = useCallback(() => {
     setAgentNavExpanded((expanded) => {
@@ -913,11 +995,59 @@ export function Sidebar({
   const toggleLabelCollapsed = useProjectStore((s) => s.toggleLabelCollapsed);
   const activeSpaceId = useSpaceStore((s) => s.activeSpaceId);
 
+  useEffect(() => {
+    const revealCreatedSession = (event: Event) => {
+      const detail = (event as CustomEvent<{ sessionId?: string; projectId?: string | null; label?: string | null }>).detail;
+      if (!detail?.sessionId) return;
+
+      // Only Deck view needs help locating the row. Normal lists already place a
+      // newly created session by their existing activity ordering.
+      if (!filterLabels) return;
+
+      const deckKey = `${detail.projectId || 'flat'}::${detail.label || '__uncategorized__'}`;
+      const projectStore = useProjectStore.getState();
+      if (projectStore.collapsedLabels.has(deckKey)) {
+        projectStore.toggleLabelCollapsed(detail.projectId || 'flat', detail.label || '__uncategorized__');
+      }
+
+      let attempts = 0;
+      const reveal = () => {
+        const row = document.querySelector<HTMLElement>(`[data-sidebar-session-id="${CSS.escape(detail.sessionId!)}"]`);
+        if (row) {
+          row.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+          return;
+        }
+        attempts += 1;
+        if (attempts < 8) window.requestAnimationFrame(reveal);
+      };
+      window.requestAnimationFrame(reveal);
+    };
+    window.addEventListener('tower-reveal-session-in-sidebar', revealCreatedSession);
+    return () => window.removeEventListener('tower-reveal-session-in-sidebar', revealCreatedSession);
+  }, [filterLabels]);
+
   // Filter projects by active space (for sidebar grouping)
   const projects = useMemo(() => {
     if (activeSpaceId === null) return allProjects;
     return allProjects.filter(p => p.spaceId === activeSpaceId);
   }, [allProjects, activeSpaceId]);
+
+  const sidebarSessions = useMemo(() => combineSidebarSessions(sessions, archivedSessions.sessions, includeArchived)
+    .filter(session => !session.archived || (
+      (activeSpaceId === null || !session.projectId || projects.some(project => project.id === session.projectId))
+      && matchesSessionListFilters(session, { kind: sessionKindFilter, my: filterMy, favorites: filterFav, done: filterDone, running: filterRunning, awaiting: filterAwaiting }, {
+        currentUsername, isUnread: unreadSessions.has(session.id), isStreaming: streamingSessions.has(session.id), isAwaiting: awaitingSessionIds.has(session.id),
+      })
+    )),
+  [sessions, archivedSessions.sessions, includeArchived, activeSpaceId, projects, sessionKindFilter, filterMy, filterFav, filterDone, filterRunning, filterAwaiting, currentUsername, unreadSessions, streamingSessions, awaitingSessionIds]);
+
+  const visibleSearchResults = useMemo(() => searchResults?.filter(result => {
+    if (!result.archived) return true;
+    if (!includeArchived) return false;
+    // Archive snippets must not bypass the same owner/Project/filter boundaries as rows.
+    const session = sidebarSessions.find(candidate => candidate.id === result.sessionId);
+    return !!session && (!selectedAgentProjectId || session.projectId === selectedAgentProjectId);
+  }) ?? null, [searchResults, includeArchived, sidebarSessions, selectedAgentProjectId]);
 
   // All projects — for "Move to project" context menu (no space filter)
   const allProjectsForMove = allProjects;
@@ -930,12 +1060,6 @@ export function Sidebar({
       return next;
     });
   }, []);
-
-  const isLatestCandidate = useCallback((session: SessionMeta) => {
-    if (!currentUsername) return true;
-    const lastUserUsername = (session as SessionMeta & { lastUserUsername?: string | null }).lastUserUsername;
-    return (lastUserUsername || session.ownerUsername) === currentUsername;
-  }, [currentUsername]);
 
   const [dismissedLatestSessionKeys, setDismissedLatestSessionKeys] = useState<Set<string>>(() => loadDismissedLatestSessionKeys());
 
@@ -966,31 +1090,23 @@ export function Sidebar({
     useSessionStore.getState().markSessionRead(sessionId);
   }, []);
 
-  // Sidebar top quick view: the user's actually most recently active sessions.
-  // It follows the explicit Chats/Subagents/Runs/All identity filter, but ignores unread
-  // and streaming state. Agent reports inside a normal parent Chat do not change
-  // that parent's identity; Task automation sessions remain Runs rather than Chats.
+  // Sidebar top quick view follows the same user-selected filters as the full
+  // list, while preserving its participation boundary and activity ordering.
+  // Agent reports inside a normal parent Chat do not change that parent's identity.
   // Dismissing removes only the current (sessionId, updatedAt) duplicate; the next
   // message bumps updatedAt and makes the session eligible again.
-  const latestQuickSessions = useMemo(() => {
-    return sessions
-      .filter((s) => {
-        if (!isLatestCandidate(s) || isLatestSessionDismissed(dismissedLatestSessionKeys, s)) return false;
-        if (selectedAgentProjectId && s.projectId !== selectedAgentProjectId) return false;
-        const presentationKind = getSessionPresentationKind(s);
-        if (sessionKindFilter === 'agents') return presentationKind === 'agent';
-        if (sessionKindFilter === 'runs') return presentationKind === 'run';
-        if (sessionKindFilter === 'external') return presentationKind === 'deployment';
-        if (sessionKindFilter === 'chats') return presentationKind === 'chat';
-        return sessionKindFilter === 'all';
-      })
-      .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
-  }, [sessions, isLatestCandidate, dismissedLatestSessionKeys, sessionKindFilter, selectedAgentProjectId]);
+  const latestQuickSessions = useMemo(() => buildSidebarLatestQuickSessions({
+    sessions: sidebarSessions, dismissedKeys: dismissedLatestSessionKeys, selectedProjectId: selectedAgentProjectId,
+    filters: { kind: sessionKindFilter, my: filterMy, favorites: filterFav, done: filterDone, running: filterRunning, awaiting: filterAwaiting },
+    currentUsername, unreadSessionIds: unreadSessions, streamingSessionIds: streamingSessions, awaitingSessionIds,
+  }), [sidebarSessions, dismissedLatestSessionKeys, selectedAgentProjectId, sessionKindFilter, filterMy, filterFav, filterDone, filterRunning, filterAwaiting, currentUsername, unreadSessions, streamingSessions, awaitingSessionIds]);
 
   const { filteredSessions, groupedSessions, isSearching } = useMemo(() => buildSidebarSessionListModel({
-    sessions, projects, searchResults, searchQuery, kind: sessionKindFilter, filterMy, filterFav, filterDone, currentUsername,
-    unreadSessionIds: unreadSessions, streamingSessionIds: useSessionStore.getState().streamingSessions,
-  }), [sessions, projects, searchResults, searchQuery, sessionKindFilter, filterMy, filterFav, filterDone, currentUsername, unreadSessions]);
+    sessions: sidebarSessions, projects, searchResults: visibleSearchResults, searchQuery, kind: sessionKindFilter, filterMy, filterFav, filterDone, filterRunning, filterAwaiting, currentUsername,
+    unreadSessionIds: unreadSessions, streamingSessionIds: streamingSessions, awaitingSessionIds,
+  }), [sidebarSessions, projects, visibleSearchResults, searchQuery, sessionKindFilter, filterMy, filterFav, filterDone, filterRunning, filterAwaiting, currentUsername, unreadSessions, streamingSessions, awaitingSessionIds]);
+
+  useSessionShortcuts(filteredSessions, activeSessionId, onSelectSession);
 
   const filteredSessionCountByProject = useMemo(() => {
     const counts = new Map<string, number>();
@@ -1005,9 +1121,27 @@ export function Sidebar({
   // Filters reshape only the right pane; they must not hide teammates or running
   // state. Personal pins remain the explicit ordering override: pinned Agents stay
   // at the top in the user's saved order, then unpinned Agents follow activity.
+  const [previousAgents, setPreviousAgents] = useState<Array<{ id: string; name: string }>>([]);
+  useEffect(() => {
+    const controller = new AbortController();
+    const token = localStorage.getItem('token');
+    setPreviousAgents([]);
+    void fetch('/api/agent-directory/previous-participation', {
+      headers: token ? { Authorization: `Bearer ${token}` } : {}, signal: controller.signal,
+    }).then(async (response) => {
+      if (!response.ok) return;
+      const data = await response.json();
+      if (!controller.signal.aborted && Array.isArray(data.agents)) setPreviousAgents(data.agents);
+    }).catch(() => {});
+    return () => controller.abort();
+  }, [allProjects]);
+
   const agentRailProjects = useMemo(
-    () => buildSidebarAgentRailModel({ projects, sessions }),
-    [projects, sessions],
+    // AI teammate navigation is a company/access directory, not a Space-scoped
+    // conversation view. Keep all active Projects visible here; Space filtering
+    // still applies to the conversation groups in the right pane.
+    () => buildSidebarAgentRailModel({ projects: allProjects, sessions }),
+    [allProjects, sessions],
   );
 
   const navigationGroupedSessions = useMemo(() => {
@@ -1061,6 +1195,44 @@ export function Sidebar({
   // session immediately snaps Files back to its own project.
   const activeFileProjectId = capabilityProjectId || sessions.find((session) => session.id === activeSessionId)?.projectId;
   const activeFileProject = projectsSortedForFiles.find((project) => project.id === activeFileProjectId && !project.archived) || null;
+
+  useEffect(() => {
+    const needle = fileSearchQuery.trim();
+    const rootPath = activeFileProject?.rootPath;
+    if (sidebarTab !== 'files' || !rootPath || needle.length < 2) {
+      setFileSearchResults(null);
+      setFileSearchLoading(false);
+      setFileSearchError('');
+      return;
+    }
+    let cancelled = false;
+    const timer = window.setTimeout(async () => {
+      setFileSearchLoading(true);
+      setFileSearchError('');
+      try {
+        const token = localStorage.getItem('token');
+        const headers: Record<string, string> = {};
+        if (token) headers.Authorization = `Bearer ${token}`;
+        const showHidden = useFileStore.getState().showHidden;
+        const response = await fetch(`/api/files/search?root=${encodeURIComponent(rootPath)}&q=${encodeURIComponent(needle)}${showHidden ? '&showHidden=true' : ''}`, { headers });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || t('fileSearchFailed'));
+        if (!cancelled) setFileSearchResults(Array.isArray(data.results) ? data.results : []);
+      } catch (error) {
+        if (!cancelled) {
+          setFileSearchResults([]);
+          setFileSearchError(error instanceof Error ? error.message : t('fileSearchFailed'));
+        }
+      } finally {
+        if (!cancelled) setFileSearchLoading(false);
+      }
+    }, 250);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [activeFileProject?.rootPath, fileSearchQuery, sidebarTab, t]);
+
   const folderProjects = useMemo(() => {
     const query = folderProjectQuery.trim().toLocaleLowerCase();
     return projectsSortedForFiles.filter((project) => {
@@ -1147,13 +1319,12 @@ export function Sidebar({
   const mobileSelectedAgent = selectedAgentProjectId ? agentRailProjects.find(({ project }) => project.id === selectedAgentProjectId)?.project ?? null : null;
   const mobileAgentNavigation = agentFirstEnabled && !isSearching ? mobileAgentPane === 'root' ? (
     <nav className="min-h-0 flex-1 overflow-y-auto px-3 pb-4 pt-2 min-[769px]:hidden" aria-label={t('agentNavigation')} data-mobile-agent-pane="root">
-      <div className="px-1 pb-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-surface-600">{t('mobileNavigationTitle')}</div>
       <div className="space-y-1">
         <button type="button" onClick={() => { setSelectedAgentProjectId(null); setAgentNavScope('work'); setMobileAgentPane('detail'); useFileStore.getState().activateChatSlot(); useSessionStore.getState().setActiveView('chat'); }} className="flex min-h-14 w-full items-center gap-3 rounded-xl px-3 text-left text-surface-200 hover:bg-surface-800/70">
           <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-primary-500/10 text-primary-300"><svg className="h-4.5 w-4.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" d="M12 7.25V12l3 1.75M4.75 8.5H2.5V6.25M3.2 8.1A9 9 0 1 1 3 15.5" /></svg></span>
           <span className="min-w-0 flex-1"><span className="block text-[14px] font-semibold">{t('recentConversationsNav')}</span><span className="mt-0.5 block text-[11px] text-surface-600">{t('mobileNewDescription')}</span></span><span className="text-surface-600" aria-hidden="true">›</span>
         </button>
-        <button type="button" onClick={() => { setSelectedAgentProjectId(null); setAgentNavScope('team'); setMobileAgentPane('detail'); useSessionStore.getState().setActiveView('aiTeam'); window.requestAnimationFrame(() => document.querySelector<HTMLElement>('[data-ai-team-scroll]')?.scrollTo({ top: 0 })); }} className="flex min-h-14 w-full items-center gap-3 rounded-xl px-3 text-left text-surface-200 hover:bg-surface-800/70">
+        <button type="button" onClick={() => { setSelectedAgentProjectId(null); setAgentNavScope('team'); setMobileAgentPane('detail'); window.dispatchEvent(new CustomEvent('tower-open-ai-team-home')); useSessionStore.getState().setActiveView('aiTeam'); window.requestAnimationFrame(() => document.querySelector<HTMLElement>('[data-ai-team-scroll]')?.scrollTo({ top: 0 })); }} className="flex min-h-14 w-full items-center gap-3 rounded-xl px-3 text-left text-surface-200 hover:bg-surface-800/70">
           <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-surface-800 text-surface-400"><svg className="h-4.5 w-4.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" d="M4 19.5V8.25L12 3l8 5.25V19.5M8 19.5v-5h8v5" /></svg></span>
           <span className="min-w-0 flex-1"><span className="block text-[14px] font-semibold">{t('aiTeammateManagement')}</span><span className="mt-0.5 block text-[11px] text-surface-600">{t('mobileHomeDescription')}</span></span><span className="text-surface-600" aria-hidden="true">›</span>
         </button>
@@ -1162,10 +1333,12 @@ export function Sidebar({
         <div className="space-y-1">
           {agentRailProjects.map(({ project, sessions: projectSessions }) => {
             const running = projectSessions.some((session) => streamingSessions.has(session.id));
-            const visibleCount = filteredSessionCountByProject.get(project.id) || 0;
+            const visibleCount = hydratedProjectSessionIds.has(project.id)
+              ? (filteredSessionCountByProject.get(project.id) || 0)
+              : (project.sessionCount ?? filteredSessionCountByProject.get(project.id) ?? 0);
             return <button key={`mobile-agent-${project.id}`} type="button" onClick={() => { setSelectedAgentProjectId(project.id); setAgentNavScope('work'); setMobileAgentPane('detail'); }} className="flex min-h-14 w-full items-center gap-3 rounded-xl px-3 text-left hover:bg-surface-800/70" aria-label={t('openAiConversations', { name: project.agent?.displayName || project.name })}>
               <AgentIdentityAvatar project={project} variant="list" showListAccent={false} className="h-10 w-10 shrink-0 rounded-xl" fallbackClassName="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-surface-800 text-[12px]" />
-              <span className="min-w-0 flex-1"><span className="block truncate text-[14px] font-semibold text-surface-200">{project.agent?.displayName || project.name}</span><span className="mt-0.5 block text-[11px] text-surface-600">{t('conversationCount', { count: visibleCount })}</span></span>
+              <span className="min-w-0 flex-1"><FadeOverflowText className="block overflow-hidden whitespace-nowrap text-[14px] font-semibold text-surface-200">{project.agent?.displayName || project.name}</FadeOverflowText><span className="mt-0.5 block text-[11px] text-surface-600">{t('conversationCount', { count: visibleCount })}</span></span>
               {running && <span className="tone-success flex items-center gap-1 text-[11px] font-semibold"><span className="h-2 w-2 rounded-full bg-current" />{t('running')}</span>}<span className="text-surface-600" aria-hidden="true">›</span>
             </button>;
           })}
@@ -1173,8 +1346,8 @@ export function Sidebar({
       </div>
     </nav>
   ) : (
-    <div className="flex min-h-12 items-center border-b border-surface-800/80 bg-surface-850/95 px-2 min-[769px]:hidden" data-mobile-agent-pane="detail">
-      <button type="button" onClick={() => setMobileAgentPane('root')} className="grid h-10 w-10 shrink-0 place-items-center rounded-lg text-surface-400 hover:bg-surface-800" aria-label={t('backToAiNavigation')}><svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" d="m15 19-7-7 7-7" /></svg></button>
+    <div className="flex min-h-14 items-center border-b border-surface-800/80 bg-surface-850/95 px-2 pr-11 min-[769px]:hidden" data-mobile-agent-pane="detail">
+      <button type="button" onClick={() => setMobileAgentPane('root')} className="grid h-12 w-12 shrink-0 place-items-center rounded-lg text-surface-400 hover:bg-surface-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/70" aria-label={t('backToAiNavigation')}><svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" d="m15 19-7-7 7-7" /></svg></button>
       <div className="min-w-0 flex-1 truncate px-1 text-[14px] font-semibold text-surface-200">{mobileSelectedAgent?.agent?.displayName || mobileSelectedAgent?.name || (agentNavScope === 'team' ? t('aiTeamHome') : t('latestSessions'))}</div>
     </div>
   ) : null;
@@ -1182,9 +1355,10 @@ export function Sidebar({
   // tabClass removed — tabs moved to Header
 
   return (
-    <aside className="tower-sidebar w-full min-w-0 bg-surface-850/95 flex flex-col h-full shrink-0">
+    <aside className="tower-sidebar tower-sidebar-secondary relative w-full min-w-0 bg-surface-850/95 flex flex-col h-full shrink-0">
+      <FileOperationFeedback scope="upload:sidebar" />
       {/* Sidebar header — collapse button + context label (tabs moved to Header) */}
-      {(sidebarTab === 'pins' || sidebarTab === 'history') ? (
+      {sidebarTab === 'pins' ? (
         <div className="flex items-center px-3 py-1.5 gap-2">
           <button
             onClick={() => setSidebarTab('sessions')}
@@ -1196,7 +1370,7 @@ export function Sidebar({
             {t('back')}
           </button>
           <span className="text-[14px] font-semibold text-gray-300">
-            {sidebarTab === 'pins' ? t('pins') : t('history')}
+            {t('pins')}
           </span>
           <div className="flex-1" />
           {onCollapseSidebar && (
@@ -1209,7 +1383,7 @@ export function Sidebar({
         </div>
       ) : sidebarTab === 'sessions' ? (
         <>
-          <SidebarSessionsToolbar
+          {(!isMobile || !agentFirstEnabled || mobileAgentPane === 'detail') && <SidebarSessionsToolbar
             t={t}
             searchInputRef={searchInputRef}
             searchQuery={searchQuery}
@@ -1223,15 +1397,29 @@ export function Sidebar({
             filterMy={filterMy}
             filterFav={filterFav}
             filterDone={filterDone}
+            filterRunning={filterRunning}
+            filterAwaiting={filterAwaiting}
             filterLabels={filterLabels}
+            includeArchived={includeArchived}
+            toggleIncludeArchived={toggleIncludeArchived}
             toggleFilter={(key) => {
               if (key === 'my') toggleFilter(key, filterMy, setFilterMy);
               if (key === 'fav') toggleFilter(key, filterFav, setFilterFav);
               if (key === 'done') toggleFilter(key, filterDone, setFilterDone);
+              if (key === 'running') toggleFilter(key, filterRunning, setFilterRunning);
+              if (key === 'awaiting') toggleFilter(key, filterAwaiting, setFilterAwaiting);
               if (key === 'labels') toggleFilter(key, filterLabels, setFilterLabels);
             }}
+            resetFilters={resetSessionFilters}
+            isMobile={isMobile}
             onCollapseSidebar={onCollapseSidebar}
-          />
+          />}
+          <SidebarSearchNotice notice={searchNotice} t={t} onRetry={() => setSearchRetry(value => value + 1)} />
+          {archivedSessions.loading && <p role="status" className="px-3 py-1 text-xs text-surface-500">{t('common:loading')}</p>}
+          {archivedSessions.error && <div role="alert" className="px-3 py-2 text-xs text-surface-400">
+            <p>{t('sessionArchiveLoadFailed')}</p>
+            <button onClick={archivedSessions.retry} className="mt-1 rounded px-2 py-1 text-primary-400 hover:bg-surface-800">{t('sessionTrashRetry')}</button>
+          </div>}
           {mobileAgentNavigation}
         </>
       ) : (
@@ -1276,81 +1464,28 @@ export function Sidebar({
         {sidebarTab === 'sessions' ? (
           <div className={agentFirstEnabled ? 'relative flex h-full min-h-0 min-w-0' : undefined}>
             {agentFirstEnabled && !isSearching && (
-              <nav className={`agent-nav-rail hidden h-full min-h-0 shrink-0 flex-col overflow-hidden border-r border-surface-800/80 bg-surface-900/95 px-2 py-2 transition-[width] duration-200 ease-out motion-reduce:transition-none min-[769px]:flex ${agentNavExpanded ? 'is-expanded w-44' : 'w-14'}`} aria-label={t('agentNavigation')}>
-                <button
-                  type="button"
-                  onClick={toggleAgentNavExpanded}
-                  className="mb-1 flex h-8 w-10 shrink-0 items-center justify-center rounded-md text-surface-600 transition-colors hover:bg-surface-800 hover:text-surface-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/70"
-                  aria-label={agentNavExpanded ? t('collapseAiNameList') : t('expandAiNameList')}
-                  title={agentNavExpanded ? t('collapseAiNameList') : t('expandAiNameList')}
-                  aria-expanded={agentNavExpanded}
-                >
-                  <svg className={`h-3.5 w-3.5 transition-transform ${agentNavExpanded ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="m9 5 7 7-7 7" /></svg>
-                </button>
-                <div className="w-40 shrink-0">
-                <button
-                  type="button"
-                  onClick={() => { setSelectedAgentProjectId(null); setAgentNavScope('work'); useFileStore.getState().activateChatSlot(); useSessionStore.getState().setActiveView('chat'); }}
-                  className={`flex h-9 w-40 shrink-0 items-center rounded-xl text-[11px] font-bold transition-colors ${agentNavScope === 'work' && selectedAgentProjectId === null ? 'bg-primary-500/15 text-primary-700 ring-1 ring-primary-500/30 dark:text-primary-200' : 'text-surface-500 hover:bg-surface-800 hover:text-surface-200'}`}
-                  aria-label={t('openRecentConversations')}
-                  title={t('conversationsNavTitle')}
-                  aria-pressed={agentNavScope === 'work' && selectedAgentProjectId === null}
-                >
-                  <span className="grid h-9 w-10 shrink-0 place-items-center"><svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" d="M12 7.25V12l3 1.75M4.75 8.5H2.5V6.25M3.2 8.1A9 9 0 1 1 3 15.5" /></svg></span>
-                  <span className={`min-w-0 flex-1 truncate text-left text-[13px] font-semibold transition-opacity duration-150 motion-reduce:transition-none ${agentNavExpanded ? 'opacity-100' : 'opacity-0'}`}>{t('recentConversationsNav')}</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => { setSelectedAgentProjectId(null); setAgentNavScope('team'); useSessionStore.getState().setActiveView('aiTeam'); window.requestAnimationFrame(() => document.querySelector<HTMLElement>('[data-ai-team-scroll]')?.scrollTo({ top: 0 })); }}
-                  className={`mt-1 flex h-9 w-40 shrink-0 items-center rounded-xl text-[11px] font-bold transition-colors ${agentNavScope === 'team' && selectedAgentProjectId === null ? 'bg-primary-500/15 text-primary-700 ring-1 ring-primary-500/30 dark:text-primary-200' : 'text-surface-500 hover:bg-surface-800 hover:text-surface-200'}`}
-                  aria-label={t('openAiTeamHome')}
-                  title={t('aiTeammateManagementTitle')}
-                  aria-pressed={agentNavScope === 'team' && selectedAgentProjectId === null}
-                >
-                  <span className="grid h-9 w-10 shrink-0 place-items-center"><svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" d="M4 19.5V8.25L12 3l8 5.25V19.5M8 19.5v-5h8v5" /></svg></span>
-                  <span className={`min-w-0 flex-1 truncate text-left text-[13px] font-semibold transition-opacity duration-150 motion-reduce:transition-none ${agentNavExpanded ? 'opacity-100' : 'opacity-0'}`}>{t('aiTeammateManagement')}</span>
-                </button>
-                <div className={`mt-2 h-px bg-surface-800 transition-[width] duration-200 motion-reduce:transition-none ${agentNavExpanded ? 'w-40' : 'ml-1.5 w-7'}`} />
-                </div>
-                <div className="scrollbar-none min-h-0 w-40 flex-1 overflow-y-auto overflow-x-hidden pt-2 [mask-image:linear-gradient(to_bottom,transparent_0,black_10px,black_calc(100%-10px),transparent_100%)]">
-                {agentRailProjects.map(({ project, sessions: projectSessions }) => {
-                  const selected = selectedAgentProjectId === project.id;
-                  const running = projectSessions.some((session) => streamingSessions.has(session.id));
-                  return (
-                    <button
-                      key={project.id}
-                      type="button"
-                      onClick={() => { setSelectedAgentProjectId(project.id); setAgentNavScope('work'); }}
-                      onContextMenu={(event) => {
-                        event.preventDefault();
-                        event.stopPropagation();
-                        setAgentRailMenu({ x: event.clientX, y: event.clientY, projectId: project.id });
-                      }}
-                      className={`relative flex h-10 w-40 shrink-0 items-center rounded-xl transition-colors ${selected ? 'bg-primary-500/12 ring-1 ring-primary-500/35' : 'hover:bg-surface-800/80'}`}
-                      aria-label={t('openAiConversations', { name: project.agent?.displayName || project.name })}
-                      title={project.agent?.displayName || project.name}
-                      aria-pressed={selected}
-                    >
-                      {selected && <span className="absolute -left-1.5 h-5 w-0.5 rounded-r bg-primary-500" aria-hidden="true" />}
-                      <span className="grid h-10 w-10 shrink-0 place-items-center"><AgentIdentityAvatar project={project} variant="list" showListAccent={false} className="h-7 w-7 shrink-0 rounded-lg" fallbackClassName="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-surface-800 text-[11px]" /></span>
-                      <span className={`min-w-0 flex-1 truncate text-left text-[13px] font-medium text-surface-300 transition-opacity duration-150 motion-reduce:transition-none ${agentNavExpanded ? 'opacity-100' : 'opacity-0'}`}>{project.agent?.displayName || project.name}</span>
-                      {running && <><span className={`tone-success h-2 w-2 shrink-0 rounded-full border-2 border-surface-900 bg-current transition-[transform] duration-200 motion-reduce:transition-none ${agentNavExpanded ? 'mr-2' : 'absolute bottom-0.5 left-8'}`} aria-hidden="true" /><span className="sr-only">{t('agentRunning')}</span></>}
-                    </button>
-                  );
-                })}
-                <button
-                  type="button"
-                  data-tour-id="agent-rail-create"
-                  onClick={() => window.dispatchEvent(new CustomEvent('tower-start-agent-academy'))}
-                  className="mt-2 flex h-10 w-40 shrink-0 items-center rounded-xl border border-dashed border-primary-500/30 text-primary-300 transition-colors hover:border-primary-500/55 hover:bg-primary-500/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/70"
-                  aria-label={t('newAiTeammate')}
-                  title={t('newAiTeammate')}
-                >
-                  <span className="grid h-10 w-10 shrink-0 place-items-center text-lg" aria-hidden="true">+</span>
-                  <span className={`min-w-0 flex-1 truncate text-left text-[13px] font-semibold transition-opacity duration-150 motion-reduce:transition-none ${agentNavExpanded ? 'opacity-100' : 'opacity-0'}`}>{t('newAiTeammate')}</span>
-                </button>
-                </div>
-              </nav>
+              <AgentNavigationRail
+                expanded={agentNavExpanded}
+                width={agentNavWidth}
+                isResizing={isAgentNavResizing}
+                scope={agentNavScope}
+                selectedProjectId={selectedAgentProjectId}
+                contextualProjectId={agentNavScope === 'work' && selectedAgentProjectId === null ? activeSessionProjectId : null}
+                previousAgents={previousAgents.filter((agent) => !allProjects.some((project) => project.id === agent.id))}
+                projects={agentRailProjects}
+                streamingSessionIds={streamingSessions}
+                onToggleExpanded={toggleAgentNavExpanded}
+                onOpenRecent={() => { setSelectedAgentProjectId(null); setAgentNavScope('work'); useFileStore.getState().activateChatSlot(); useSessionStore.getState().setActiveView('chat'); }}
+                onOpenTeam={() => { setSelectedAgentProjectId(null); setAgentNavScope('team'); window.dispatchEvent(new CustomEvent('tower-open-ai-team-home')); useSessionStore.getState().setActiveView('aiTeam'); window.requestAnimationFrame(() => document.querySelector<HTMLElement>('[data-ai-team-scroll]')?.scrollTo({ top: 0 })); }}
+                onSelectProject={(projectId) => { setSelectedAgentProjectId(projectId); setAgentNavScope('work'); }}
+                onOpenProjectMenu={(event, projectId) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  setAgentRailMenu({ x: event.clientX, y: event.clientY, projectId });
+                }}
+                onCreateAgent={() => window.dispatchEvent(new CustomEvent('tower-start-agent-academy'))}
+                onResizeStart={startAgentNavResize}
+              />
             )}
             {agentRailMenu && (() => {
               const group = groupedSessions?.groups.find(({ project }) => project.id === agentRailMenu.projectId);
@@ -1364,7 +1499,7 @@ export function Sidebar({
                   x={agentRailMenu.x}
                   y={agentRailMenu.y}
                   project={project}
-                  onRename={() => setAgentRailRename({ project, value: project.name })}
+                  onRename={() => setAgentRailRename({ project, value: project.agent?.displayName || project.name })}
                   onDelete={async () => {
                     const token = localStorage.getItem('token');
                     const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
@@ -1385,9 +1520,6 @@ export function Sidebar({
                   previewCount={projectSessions.length}
                   expanded={false}
                   onToggleExpanded={() => {}}
-                  agentSessionPreviewLimit={getAgentSessionPreviewLimit()}
-                  onChangeAgentSessionPreviewLimit={saveAgentSessionPreviewLimit}
-                  showAgentSessionLimitOptions
                   isPinned={project.pinned === true}
                   onTogglePin={() => project.pinned ? unpinProject(project.id) : pinProject(project.id)}
                   onMovePinUp={() => movePinnedProject(project.id, 'up')}
@@ -1404,22 +1536,23 @@ export function Sidebar({
                     event.preventDefault();
                     const value = agentRailRename.value.trim();
                     if (!value) return;
-                    const token = localStorage.getItem('token');
-                    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-                    if (token) headers.Authorization = `Bearer ${token}`;
-                    const response = await fetch(`/api/projects/${agentRailRename.project.id}`, { method: 'PATCH', headers, body: JSON.stringify({ name: value }) });
-                    if (response.ok) useProjectStore.getState().updateProject(agentRailRename.project.id, await response.json());
-                    setAgentRailRename(null);
+                    try {
+                      const updatedProject = await renameAgentDisplayName(agentRailRename.project.id, value, t('agentRenameFailed'));
+                      useProjectStore.getState().updateProject(updatedProject.id, updatedProject);
+                      setAgentRailRename(null);
+                    } catch {
+                      toastError(t('agentRenameFailed'));
+                    }
                   }}
                 >
                   <label className="mb-2 block text-[13px] font-semibold text-surface-300">{t('renameAi')}</label>
-                  <input autoFocus value={agentRailRename.value} onChange={(event) => setAgentRailRename({ ...agentRailRename, value: event.target.value })} className="h-9 w-full rounded-md border border-surface-700 bg-surface-900 px-2 text-[14px] text-surface-100 outline-none focus:border-primary-500" />
+                  <input autoFocus maxLength={120} value={agentRailRename.value} onChange={(event) => setAgentRailRename({ ...agentRailRename, value: event.target.value })} className="h-9 w-full rounded-md border border-surface-700 bg-surface-900 px-2 text-[14px] text-surface-100 outline-none focus:border-primary-500" />
                   <div className="mt-3 flex justify-end gap-2"><button type="button" onClick={() => setAgentRailRename(null)} className="rounded-md px-3 py-1.5 text-[13px] text-surface-400 hover:bg-surface-800">{t('common:cancel')}</button><button type="submit" className="rounded-md bg-primary-600 px-3 py-1.5 text-[13px] font-semibold text-white hover:bg-primary-500">{t('common:save')}</button></div>
                 </form>
               </div>
             )}
             <div className="scrollbar-none h-full min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden">
-            <div className="px-3">
+            <div className="pl-3">
             {agentNavScope === 'team' && !selectedAgentProjectId && !isSearching && (() => {
               const teammateCount = agentRailProjects.length;
               const runningCount = agentRailProjects.filter(({ sessions: projectSessions }) => projectSessions.some((session) => streamingSessions.has(session.id))).length;
@@ -1432,7 +1565,7 @@ export function Sidebar({
                       <span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-primary-500/12 text-primary-700 ring-1 ring-primary-500/25 dark:text-primary-200" aria-hidden="true"><svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M4 19.5V8.25L12 3l8 5.25V19.5M8 19.5v-5h8v5" /></svg></span>
                       <div className="min-w-0 flex-1"><div className="truncate text-[15px] font-semibold text-surface-100">{t('aiTeamHome')}</div><div className="text-[11px] text-surface-600">{t('aiTeamHomeDescription')}</div></div>
                     </div>
-                    <button type="button" onClick={() => window.dispatchEvent(new CustomEvent('tower-start-agent-academy'))} className="mt-2 flex min-h-10 w-full items-center gap-2 rounded-lg border border-primary-500/25 bg-primary-500/10 px-2 text-left text-[12px] font-semibold text-primary-700 hover:bg-primary-500/15 dark:text-primary-200"><svg className="h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg><span className="min-w-0 flex-1 truncate">{t('newAiTeammate')}</span></button>
+                    <button type="button" onClick={() => window.dispatchEvent(new CustomEvent('tower-start-agent-academy'))} className="mt-2 flex min-h-10 w-full items-center gap-2 rounded-lg tone-accent tone-action border px-2 text-left text-[12px] font-semibold"><svg className="h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg><span className="min-w-0 flex-1 truncate">{t('newAiTeammate')}</span></button>
                   </div>
 
                   <div className="grid grid-cols-4 border-y border-surface-800/80 py-2" aria-label={t('aiTeamUsageSummary')}>
@@ -1474,7 +1607,7 @@ export function Sidebar({
                 <div className="sticky top-0 z-10 flex min-h-14 items-center gap-2 border-b border-surface-800/80 bg-surface-850/95 px-1 py-2 backdrop-blur-sm min-[769px]:static min-[769px]:min-h-12 min-[769px]:bg-transparent">
                   <AgentIdentityAvatar project={project} variant="list" showListAccent={false} className="h-7 w-7 shrink-0 rounded-lg" fallbackClassName="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-surface-800 text-[11px]" />
                   <div className="min-w-0 flex-1">
-                    <div className="truncate text-[15px] font-semibold leading-5 tracking-[-0.01em] text-surface-100">{project.agent?.displayName || project.name}</div>
+                    <FadeOverflowText className="block overflow-hidden whitespace-nowrap text-[15px] font-semibold leading-5 tracking-[-0.01em] text-surface-100">{project.agent?.displayName || project.name}</FadeOverflowText>
                     <div className="truncate whitespace-nowrap text-[11px] leading-4 text-surface-600">{t('conversationCount', { count: projectSessions.length })}</div>
                   </div>
                   <button
@@ -1491,7 +1624,7 @@ export function Sidebar({
                   >
                     <svg aria-hidden="true" className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M3.75 10.5 12 3.75l8.25 6.75M5.25 9.75v9a1.5 1.5 0 0 0 1.5 1.5h3.5v-5.5h3.5v5.5h3.5a1.5 1.5 0 0 0 1.5-1.5v-9" /></svg>
                   </button>
-                  <button type="button" onClick={() => onNewSession(project.id)} className="grid h-9 w-9 shrink-0 place-items-center rounded-lg text-surface-500 transition-colors hover:bg-surface-800 hover:text-primary-300 min-[769px]:h-7 min-[769px]:w-7 min-[769px]:rounded-md" aria-label={t('startNewConversationWith', { name: project.agent?.displayName || project.name })} title={t('newSession')}>
+                  <button type="button" onClick={() => onNewSession(project.id)} className="grid h-9 w-9 shrink-0 place-items-center rounded-lg text-surface-500 transition-colors hover:bg-surface-800 hover:text-primary-300 min-[769px]:h-7 min-[769px]:w-7 min-[769px]:rounded-md" aria-label={t('newDefaultSessionWith', { name: project.agent?.displayName || project.name })} title={t('newDefaultSession')}>
                     <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>
                   </button>
                   <button
@@ -1527,6 +1660,7 @@ export function Sidebar({
                   selectedDeckGroups.set(session.label, deckSessions);
                 });
               }
+              const selectedDeckActivityGroups = sortDeckGroupsByLatestActivity(selectedDeckGroups, selectedUnlabeledSessions);
               const latestTotal = recentSessions.length;
               const latestDisplayedCount = Math.min(latestTotal, latestSessionsVisibleLimit);
               const latestVisibleSessions = recentSessions.slice(0, latestDisplayedCount);
@@ -1543,20 +1677,24 @@ export function Sidebar({
               return (
                 <div className="pt-1 pb-1">
                   <div className={`space-y-0.5 ${selectedAgentProjectId ? 'pt-1' : ''}`}>
-                      {selectedAgentProjectId && filterLabels && navigationGroupedSessions?.groups[0] && [...selectedDeckGroups.entries()].map(([label, deckSessions]) => (
+                      {selectedAgentProjectId && filterLabels && navigationGroupedSessions?.groups[0] && selectedDeckActivityGroups.map(({ label, sessions: deckSessions }) => (
                         <LabelGroup
-                          key={`${selectedAgentProjectId}:${label}`}
-                          label={label}
+                          key={`${selectedAgentProjectId}:${label ?? '__uncategorized__'}`}
+                          label={label ?? 'temp'}
                           sessions={deckSessions}
                           projectId={selectedAgentProjectId}
-                          isCollapsed={collapsedLabels.has(`${selectedAgentProjectId}::${label}`)}
-                          onToggle={() => toggleLabelCollapsed(selectedAgentProjectId, label)}
+                          isCollapsed={collapsedLabels.has(`${selectedAgentProjectId}::${label ?? '__uncategorized__'}`)}
+                          onToggle={() => toggleLabelCollapsed(selectedAgentProjectId, label ?? '__uncategorized__')}
                           onDropSession={(sessionId) => {
-                            useSessionStore.getState().updateSessionMeta(sessionId, { label });
+                            const store = useSessionStore.getState();
+                            const previousLabel = store.sessions.find((session) => session.id === sessionId)?.label ?? null;
+                            store.updateSessionMeta(sessionId, { label });
                             const token = localStorage.getItem('token');
                             const headers: Record<string, string> = { 'Content-Type': 'application/json' };
                             if (token) headers.Authorization = `Bearer ${token}`;
-                            void fetch(`/api/sessions/${sessionId}`, { method: 'PATCH', headers, body: JSON.stringify({ label }) });
+                            void fetch(`/api/sessions/${sessionId}`, { method: 'PATCH', headers, body: JSON.stringify({ label }) })
+                              .then((response) => { if (!response.ok) throw new Error('deck assignment failed'); })
+                              .catch(() => { store.updateSessionMeta(sessionId, { label: previousLabel }); toastError(t('deckAssignmentFailed')); });
                           }}
                           activeSessionId={activeSessionId}
                           currentUsername={currentUsername}
@@ -1566,39 +1704,12 @@ export function Sidebar({
                           onToggleFavorite={onToggleFavorite}
                           onMoveSession={handleMoveSession}
                           projects={allProjectsForMove}
-                          onNewSession={() => onNewSession(selectedAgentProjectId, label)}
+                          onNewSession={() => onNewSession(selectedAgentProjectId, label ?? undefined)}
+                          isSystemGroup={label === null}
                         />
                       ))}
                       {selectedAgentProjectId ? (
-                        filterLabels ? (
-                          selectedUnlabeledSessions.length > 0 && (
-                            <LabelGroup
-                              key={`${selectedAgentProjectId}:__uncategorized__`}
-                              label="temp"
-                              sessions={selectedUnlabeledSessions}
-                              projectId={selectedAgentProjectId}
-                              isCollapsed={collapsedLabels.has(`${selectedAgentProjectId}::__uncategorized__`)}
-                              onToggle={() => toggleLabelCollapsed(selectedAgentProjectId, '__uncategorized__')}
-                              onDropSession={(sessionId) => {
-                                useSessionStore.getState().updateSessionMeta(sessionId, { label: null });
-                                const token = localStorage.getItem('token');
-                                const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-                                if (token) headers.Authorization = `Bearer ${token}`;
-                                void fetch(`/api/sessions/${sessionId}`, { method: 'PATCH', headers, body: JSON.stringify({ label: null }) });
-                              }}
-                              activeSessionId={activeSessionId}
-                              currentUsername={currentUsername}
-                              onSelectSession={onSelectSession}
-                              onDeleteSession={onDeleteSession}
-                              onRenameSession={onRenameSession}
-                              onToggleFavorite={onToggleFavorite}
-                              onMoveSession={handleMoveSession}
-                              projects={allProjectsForMove}
-                              onNewSession={() => onNewSession(selectedAgentProjectId)}
-                              isSystemGroup
-                            />
-                          )
-                        ) : latestVisibleSessions.map((session) => (
+                        filterLabels ? null : latestVisibleSessions.map((session) => (
                           <SessionItem
                             key={`active-${session.id}`}
                             session={session}
@@ -1610,7 +1721,8 @@ export function Sidebar({
                             onToggleFavorite={onToggleFavorite}
                             onMoveToProject={handleMoveSession}
                             projects={allProjectsForMove}
-                            deleteActionIcon="archive"
+                            deleteActionIcon="trash"
+                            compactMetaAtNarrowWidth
                           />
                         ))
                       ) : (
@@ -1726,6 +1838,7 @@ export function Sidebar({
                               onToggleFavorite={onToggleFavorite}
                               onMoveToProject={handleMoveSession}
                               projects={allProjectsForMove}
+                              compactMetaAtNarrowWidth
                             />
                           ))}
                           {total > previewCount && (
@@ -1761,11 +1874,15 @@ export function Sidebar({
                 {/* Flat list — group by deck when filterLabels on and not searching */}
                 {(() => {
                   const applyLabel = (sessionId: string, label: string | null) => {
-                    useSessionStore.getState().updateSessionMeta(sessionId, { label });
+                    const store = useSessionStore.getState();
+                    const previousLabel = store.sessions.find((session) => session.id === sessionId)?.label ?? null;
+                    store.updateSessionMeta(sessionId, { label });
                     const token = localStorage.getItem('token');
                     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
                     if (token) headers['Authorization'] = `Bearer ${token}`;
-                    fetch(`/api/sessions/${sessionId}`, { method: 'PATCH', headers, body: JSON.stringify({ label }) }).catch(() => {});
+                    void fetch(`/api/sessions/${sessionId}`, { method: 'PATCH', headers, body: JSON.stringify({ label }) })
+                      .then((response) => { if (!response.ok) throw new Error('deck assignment failed'); })
+                      .catch(() => { store.updateSessionMeta(sessionId, { label: previousLabel }); toastError(t('deckAssignmentFailed')); });
                   };
 
                   if (!isSearching && filterLabels) {
@@ -1781,13 +1898,9 @@ export function Sidebar({
                         unlabeled.push(s);
                       }
                     }
-                    const sortedLabels = [...labelGroups.entries()].sort((a, b) => {
-                      const tA = Math.max(...a[1].map(s => new Date(s.updatedAt.includes('T') ? s.updatedAt : s.updatedAt.replace(' ', 'T') + 'Z').getTime()));
-                      const tB = Math.max(...b[1].map(s => new Date(s.updatedAt.includes('T') ? s.updatedAt : s.updatedAt.replace(' ', 'T') + 'Z').getTime()));
-                      return tB - tA;
-                    });
+                    const sortedDeckGroups = sortDeckGroupsByLatestActivity(labelGroups, unlabeled);
 
-                    if (sortedLabels.length === 0 && unlabeled.length === 0) return null;
+                    if (sortedDeckGroups.length === 0) return null;
 
                     // Render helper — used both for visible decks AND inside HiddenDecksAccordion
                     const renderLabelGroup = (label: string, labelSessions: SessionMeta[]) => {
@@ -1815,12 +1928,11 @@ export function Sidebar({
                     };
                     return (
                       <div className="space-y-0.5">
-                        {sortedLabels.map(([label, labelSessions]) => renderLabelGroup(label, labelSessions))}
-                        {unlabeled.length > 0 && (
+                        {sortedDeckGroups.map(({ label, sessions: labelSessions }) => label === null ? (
                           <LabelGroup
                             key="flat:__uncategorized__"
                             label="temp"
-                            sessions={unlabeled}
+                            sessions={labelSessions}
                             projectId="flat"
                             isCollapsed={collapsedLabels.has('flat::__uncategorized__')}
                             onToggle={() => toggleLabelCollapsed('flat', '__uncategorized__')}
@@ -1835,7 +1947,7 @@ export function Sidebar({
                             projects={allProjectsForMove}
                             isSystemGroup
                           />
-                        )}
+                        ) : renderLabelGroup(label, labelSessions))}
                       </div>
                     );
                   }
@@ -1855,6 +1967,7 @@ export function Sidebar({
                           onToggleFavorite={onToggleFavorite}
                           onMoveToProject={handleMoveSession}
                           projects={allProjectsForMove}
+                          compactMetaAtNarrowWidth
                         />
                       ))}
                     </div>
@@ -1863,17 +1976,22 @@ export function Sidebar({
               </>
             )}
             {/* Memory-card search snippets */}
-            {searchResults && searchResults.filter(r => r.type === 'memory_card').length > 0 && (
+            {visibleSearchResults && visibleSearchResults.filter(r => r.type === 'memory_card').length > 0 && (
               <div className="mt-2 border-t border-surface-800/50 pt-2">
                 <div className="tone-warning tone-text text-[12px] opacity-80 uppercase tracking-wider font-medium mb-1 px-1">Memory</div>
                 <div className="space-y-0.5">
-                  {searchResults.filter(r => r.type === 'memory_card').map((r, i) => {
-                    const target = sessions.find(s => s.id === r.sessionId);
-                    const fallback = r.archived
-                      ? { id: r.sessionId, shortCode: r.sessionShortCode, name: r.sessionName, projectId: null } as SessionMeta
-                      : null;
+                  {visibleSearchResults.filter(r => r.type === 'memory_card').map((r, i) => {
+                    const target = sidebarSessions.find(s => s.id === r.sessionId);
+                    const fallback = {
+                      id: r.sessionId,
+                      shortCode: r.sessionShortCode,
+                      name: r.sessionName,
+                      projectId: r.projectId ?? null,
+                      archived: !!r.archived,
+                      cwd: '', tags: [], favorite: false, totalCost: 0, totalTokens: 0,
+                      createdAt: '', updatedAt: '',
+                    } as SessionMeta;
                     const selectable = target || fallback;
-                    if (!selectable) return null;
                     return (
                       <button
                         key={i}
@@ -1884,7 +2002,7 @@ export function Sidebar({
                           <span className="truncate">{r.projectName ? `${r.projectName} · ${r.memoryTitle || r.sessionName}` : (r.memoryTitle || r.sessionName)}</span>
                           {r.archived && (
                             <span className="text-[11px] text-surface-600 bg-surface-800 px-1 py-px rounded shrink-0">
-                              {t('archivedBadge')}
+                              {t('sessionArchivedBadge')}
                             </span>
                           )}
                         </span>
@@ -1898,20 +2016,24 @@ export function Sidebar({
               </div>
             )}
             {/* Message search snippets */}
-            {searchResults && searchResults.filter(r => r.type === 'message').length > 0 && (
+            {visibleSearchResults && visibleSearchResults.filter(r => r.type === 'message').length > 0 && (
               <div className="mt-2 border-t border-surface-800/50 pt-2">
                 <div className="text-[12px] text-surface-600 uppercase tracking-wider font-medium mb-1 px-1">{t('messages')}</div>
                 <div className="space-y-0.5">
-                  {searchResults.filter(r => r.type === 'message').map((r, i) => {
-                    const target = sessions.find(s => s.id === r.sessionId);
-                    // Session may live in History (archived) and therefore not appear
-                    // in the in-memory `sessions` list. Fall back to a synthetic
-                    // selection payload so clicking still opens it.
-                    const fallback = r.archived
-                      ? { id: r.sessionId, shortCode: r.sessionShortCode, name: r.sessionName, projectId: null } as SessionMeta
-                      : null;
+                  {visibleSearchResults.filter(r => r.type === 'message').map((r, i) => {
+                    const target = sidebarSessions.find(s => s.id === r.sessionId);
+                    // Search can return an accessible session that is not currently
+                    // hydrated in the client store. Keep it directly openable.
+                    const fallback = {
+                      id: r.sessionId,
+                      shortCode: r.sessionShortCode,
+                      name: r.sessionName,
+                      projectId: r.projectId ?? null,
+                      archived: !!r.archived,
+                      cwd: '', tags: [], favorite: false, totalCost: 0, totalTokens: 0,
+                      createdAt: '', updatedAt: '',
+                    } as SessionMeta;
                     const selectable = target || fallback;
-                    if (!selectable) return null;
                     return (
                       <button
                         key={i}
@@ -1922,7 +2044,7 @@ export function Sidebar({
                           <span className="truncate">{r.projectName ? `${r.projectName} · ${r.sessionName}` : r.sessionName}</span>
                           {r.archived && (
                             <span className="text-[11px] text-surface-600 bg-surface-800 px-1 py-px rounded shrink-0">
-                              {t('archivedBadge')}
+                              {t('sessionArchivedBadge')}
                             </span>
                           )}
                         </span>
@@ -1943,232 +2065,33 @@ export function Sidebar({
           // root grow with the file tree and revives the outer sidebar scroll rail.
           // The project rail hides its scrollbar chrome; the file pane below is the
           // single visible vertical scroll owner.
-          <div data-sidebar-files-root="true" className={`h-full min-h-0 overflow-hidden ${isMobile ? 'flex flex-col' : 'grid grid-cols-[176px_minmax(0,1fr)]'}`}>
-            {!isMobile && (
-              <nav className="flex min-h-0 flex-col border-r border-surface-800/80 bg-surface-900/95 px-2 py-2" aria-label={t('selectProjectFolder')}>
-                <div className="relative mb-2 shrink-0">
-                  <svg className="pointer-events-none absolute left-2.5 top-2.5 h-3.5 w-3.5 text-surface-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8} aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" d="m21 21-4.35-4.35m2.1-5.4a7.5 7.5 0 1 1-15 0 7.5 7.5 0 0 1 15 0Z" /></svg>
-                  <input value={folderProjectQuery} onChange={(event) => setFolderProjectQuery(event.target.value)} placeholder={t('searchProjects')} className="h-8 w-full rounded-lg border border-surface-800 bg-surface-950 pl-8 pr-2 text-[12px] text-surface-200 outline-none placeholder:text-surface-650 focus:border-primary-500/60" aria-label={t('searchFolderProjects')} />
-                </div>
-                <div className="scrollbar-none min-h-0 flex-1 space-y-1 overflow-y-auto">
-                  {folderProjects.map((project) => {
-                    const selected = activeFileProject?.id === project.id;
-                    return <button key={project.id} type="button" onClick={() => {
-                      rememberAgentWorkspaceLocation(project.id, 'files');
-                      useSettingsStore.getState().setCapabilityProjectId(project.id);
-                      useFileStore.getState().clearSelection();
-                    }} className={`relative flex min-h-11 w-full items-center gap-2 rounded-xl px-2 text-left transition-colors ${selected ? 'bg-primary-500/12 text-primary-700 ring-1 ring-primary-500/35 dark:text-primary-200' : 'text-surface-400 hover:bg-surface-800/80 hover:text-surface-200'}`} aria-pressed={selected} title={project.agent?.displayName || project.name}>
-                      {selected && <span className="absolute -left-2 h-5 w-0.5 rounded-r bg-primary-500" aria-hidden="true" />}
-                      <AgentIdentityAvatar project={project} variant="list" showListAccent={false} className="h-7 w-7 shrink-0 rounded-lg" fallbackClassName="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-surface-800 text-[11px]" />
-                      <span className="min-w-0 flex-1 truncate text-[12px] font-semibold">{project.agent?.displayName || project.name}</span>
-                    </button>;
-                  })}
-                  {folderProjects.length === 0 && <p className="px-2 py-4 text-[12px] text-surface-600">{t('noMatchingProjects')}</p>}
-                </div>
-              </nav>
-            )}
-            <div className="flex min-h-0 min-w-0 flex-col overflow-hidden">
-            {isMobile && mobileProjectPickerOpen && (
-              <section className="min-h-full px-3 py-3">
-                <button type="button" onClick={() => { setMobileProjectPickerOpen(false); setMobileProjectQuery(''); }} className="mb-2 flex min-h-9 items-center gap-1 rounded-lg px-1 text-sm font-semibold text-surface-300 active:bg-surface-800"><span aria-hidden="true">‹</span><span>{t('files')}</span></button>
-                <h2 className="px-1 text-base font-bold text-surface-100">{t('selectProject')}</h2>
-                <div className="relative mt-3">
-                  <svg className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-surface-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="m21 21-4.35-4.35m2.1-5.4a7.5 7.5 0 1 1-15 0 7.5 7.5 0 0 1 15 0Z" /></svg>
-                  <input value={mobileProjectQuery} onChange={(event) => setMobileProjectQuery(event.target.value)} placeholder={t('searchProjects')} className="h-10 w-full rounded-xl border border-surface-800 bg-surface-950 pl-10 pr-3 text-sm text-surface-200 outline-none placeholder:text-surface-650 focus:border-primary-500/60" aria-label={t('searchFileProjects')} />
-                </div>
-                <div className="mt-2 divide-y divide-surface-800/80">
-                  {projectsSortedForFiles.filter((project) => project.rootPath && !project.archived && `${project.agent?.displayName || ''} ${project.name}`.toLowerCase().includes(mobileProjectQuery.trim().toLowerCase())).map((project) => {
-                    const selected = project.id === activeFileProject?.id;
-                    return <button key={project.id} type="button" onClick={() => {
-                      rememberAgentWorkspaceLocation(project.id, 'files');
-                      useSettingsStore.getState().setCapabilityProjectId(project.id);
-                      useFileStore.getState().clearSelection();
-                      setMobileProjectPickerOpen(false);
-                      setMobileProjectQuery('');
-                    }} className={`flex min-h-12 w-full items-center gap-3 px-1 text-left ${selected ? 'font-bold text-primary-200' : 'text-surface-300 active:bg-surface-800'}`}>
-                      <AgentIdentityAvatar project={project} variant="list" showListAccent={false} className="h-8 w-8 shrink-0 rounded-lg" fallbackClassName="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-surface-800 text-[11px]" />
-                      <span className="min-w-0 flex-1 truncate text-sm">{project.agent?.displayName || project.name}</span>
-                      {selected && <span className="shrink-0 text-primary-300" aria-hidden="true">✓</span>}
-                    </button>;
-                  })}
-                </div>
-              </section>
-            )}
-            {isMobile && !mobileProjectPickerOpen && mobileQuickFilesView === null && (
-              <section className="border-b border-surface-800 px-3 py-3">
-                <div className="mb-2 px-0.5 text-[11px] font-bold uppercase tracking-[0.12em] text-surface-600">{t('quickFiles')}</div>
-                <div className="grid grid-cols-2 gap-2">
-                  <button type="button" onClick={() => setMobileQuickFilesView('session')} className="flex min-h-12 items-center gap-2 rounded-xl border border-surface-800 bg-surface-900 px-3 text-left active:bg-surface-800"><span className="min-w-0 flex-1 text-[12px] font-semibold text-surface-200">{t('thisConversationFiles')}</span><span className="text-surface-600">›</span></button>
-                  <button type="button" onClick={() => setMobileQuickFilesView('recent')} disabled={mobileDocumentRecents.length === 0} className="flex min-h-12 items-center gap-2 rounded-xl border border-surface-800 bg-surface-900 px-3 text-left active:bg-surface-800 disabled:opacity-45"><span className="min-w-0 flex-1 text-[12px] font-semibold text-surface-200">{t('recentDocuments')}</span><span className="text-xs tabular-nums text-surface-600">{mobileDocumentRecents.length} ›</span></button>
-                </div>
-              </section>
-            )}
-            {isMobile && !mobileProjectPickerOpen && mobileQuickFilesView === 'recent' && (
-              <section className="min-h-full px-3 py-3">
-                <button type="button" onClick={() => setMobileQuickFilesView(null)} className="mb-2 flex min-h-9 items-center gap-1 rounded-lg px-1 text-sm font-semibold text-surface-300 active:bg-surface-800"><span aria-hidden="true">‹</span><span>{t('files')}</span></button>
-                <h2 className="px-1 text-base font-bold text-surface-100">{t('recentDocuments')}</h2>
-                <div className="mt-2 divide-y divide-surface-800/80">{mobileDocumentRecents.map((document) => <button key={document.path} type="button" onClick={() => onFileClick(document.path)} className="flex w-full items-center gap-2 px-1 py-3 text-left active:bg-surface-800" title={document.path}><span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-primary-500/10 text-sm text-primary-300" aria-hidden="true">📄</span><span className="min-w-0 flex-1"><span className="block truncate text-sm font-semibold text-surface-200">{document.name}</span><span className="block truncate text-[10px] text-surface-600">{document.path}</span></span></button>)}</div>
-              </section>
-            )}
-            {isMobile && !mobileProjectPickerOpen && mobileQuickFilesView === 'session' && <SessionFilesMenuSection activeSessionId={activeSessionId} placement="inline" isMobile onInlineBack={() => setMobileQuickFilesView(null)} onFileClick={onFileClick} />}
-            {isMobile && !mobileProjectPickerOpen && mobileQuickFilesView === null && (
-              <div className="border-b border-surface-800 bg-surface-900 px-3 py-3">
-                <div className="mb-2 px-0.5 text-[12px] font-bold text-surface-400">{t('projectFiles')}</div>
-                <div className="block text-[11px] font-bold text-surface-500">{t('project')}
-                  <button
-                    type="button"
-                    onClick={() => setMobileProjectPickerOpen(true)}
-                    className="mt-1.5 flex min-h-10 w-full items-center gap-2 rounded-xl border border-surface-700 bg-surface-950 px-3 text-left text-sm font-bold text-surface-100 outline-none focus:border-primary-500"
-                    aria-label={t('selectProjectForFiles')}
-                  >
-                    <span className="min-w-0 flex-1 truncate">{activeFileProject?.agent?.displayName || activeFileProject?.name || t('selectProject')}</span>
-                    <span className="shrink-0 text-surface-500" aria-hidden="true">›</span>
-                  </button>
-                </div>
-              </div>
-            )}
-            {mobileQuickFilesView === null && <div className="hidden">
-            <button
-              type="button"
-              data-tour-id="personal-todos"
-              onClick={() => onPersonalTodosClick?.()}
-              className="group mx-2 mb-1 flex h-9 items-center gap-2 rounded-md px-2 text-left transition hover:bg-surface-800"
-              title={t('openMyTodoInViewer')}
-            >
-              <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md border border-primary-500/50 bg-primary-500/10 text-[12px] text-primary-300" aria-hidden="true">✓</span>
-              <span className="min-w-0 flex-1 truncate text-[17px] font-bold leading-5 text-gray-300">{t('myTodo')}</span>
-              <span className="text-[12px] text-surface-600 transition group-hover:text-surface-300">{t('viewer')} ›</span>
-            </button>
-            <section className="mx-2 mb-2">
-              <button
-                type="button"
-                onClick={togglePersonalFiles}
-                className="group/personal flex h-8 w-full items-center gap-1.5 rounded-md px-2 text-left transition hover:bg-surface-800"
-                aria-expanded={personalFilesOpen}
-              >
-                <svg className={`h-3.5 w-3.5 shrink-0 text-surface-600 transition-transform group-hover/personal:text-surface-300 ${personalFilesOpen ? '' : '-rotate-90'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                </svg>
-                <span className="min-w-0 flex-1 truncate text-[17px] font-bold leading-5 text-gray-300">{t('viewMyFiles')}</span>
-                {!personalFilesLoading && personalFiles.length > 0 && <span className="text-[11px] tabular-nums text-surface-600">{personalFiles.length}</span>}
-              </button>
-              {personalFilesOpen && (
-                <div className="ml-1.5 border-l border-surface-700/25 py-1 pl-2">
-                  {personalFilesLoading ? (
-                    <p className="px-2 py-2 text-[12px] text-surface-500">{t('loadingMyFiles')}</p>
-                  ) : personalFilesError ? (
-                    <div className="px-2 py-2 text-[12px] text-red-300">
-                      <p>{personalFilesError}</p>
-                      <button type="button" onClick={() => { void loadPersonalFiles(); }} className="mt-1 font-semibold text-surface-200 hover:text-surface-50">{t('retry')}</button>
-                    </div>
-                  ) : personalFiles.length === 0 ? (
-                    <p className="px-2 py-2 text-[12px] text-surface-500">{t('noPersonalFilesHint')}</p>
-                  ) : (
-                    <div className="max-h-64 overflow-y-auto">
-                      {personalFiles.map((file) => (
-                        <div key={file.id} className="group flex h-[22px] items-center rounded text-[14px] text-gray-300 hover:bg-surface-800" onContextMenu={(event) => {
-                          event.preventDefault();
-                          event.stopPropagation();
-                          setPersonalFileMenu({ x: event.clientX, y: event.clientY, file });
-                        }}>
-                          <button type="button" onClick={() => onPersonalFileClick?.(file.uri)} className="flex min-w-0 flex-1 items-center gap-1.5 px-2 text-left" title={file.relativePath}>
-                            <span className="w-3 shrink-0" />
-                            <span className="shrink-0 text-[13px] text-blue-400" aria-hidden="true">▤</span>
-                            <span className="min-w-0 flex-1 truncate text-gray-400 group-hover:text-gray-200">{file.name}</span>
-                          </button>
-                          <button type="button" onClick={(event) => {
-                            const rect = event.currentTarget.getBoundingClientRect();
-                            setPersonalFileMenu({ x: rect.right, y: rect.bottom, file });
-                          }} className="mr-1 hidden h-5 w-5 shrink-0 items-center justify-center rounded text-surface-500 hover:bg-surface-700 hover:text-surface-100 group-hover:flex focus:flex" aria-label={t('namedFileActions', { name: file.name })} title={t('fileActions')}>⋯</button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
-            </section>
-            {/* User pins live at the top of Files so pinned files feel like personal shortcuts, not a separate mode. */}
-            <PinList
-              embedded
-              hideEmpty
-              onPinClick={(pin) => onPinClick?.(pin)}
-              onUnpin={(id) => onUnpinFile?.(id)}
-            />
-            </div>}
-            {mobileQuickFilesView === null && <div className="flex min-h-0 flex-1 flex-col space-y-1 px-2">
-              {!isMobile && (
-                <SessionFilesMenuSection
-                  activeSessionId={activeSessionId}
-                  placement="sidebar"
-                  onFileClick={onFileClick}
-                />
-              )}
-              {/* Files is quick navigation for the current Agent project. */}
-              {activeFileProject ? (
-                <>
-                  <FilesToolbar
-                    onRefresh={onRequestFileTree}
-                    onOpenWorkspace={() => {
-                      useSettingsStore.getState().setCapabilityProjectId(activeFileProject.id);
-                      useSessionStore.getState().setActiveView('projectFiles');
-                      useSessionStore.getState().setSidebarOpen(false);
-                    }}
-                    projects={[activeFileProject]}
-                  />
-                  <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-                    {!isMobile && <div className="mb-1 mt-2 shrink-0 px-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-surface-600">{t('workspaceFiles')}</div>}
-                    <div data-sidebar-files-scroll="true" className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain">
-                      <SidebarProjectFiles
-                        key={activeFileProject.id}
-                        project={activeFileProject}
-                        onFileClick={onFileClick}
-                        onPinFile={onPinFile}
-                        onNewSessionInFolder={onNewSessionInFolder}
-                      />
-                    </div>
-                  </div>
-              </>
-              ) : (
-                <div className="mx-2 mt-3 rounded-lg border border-surface-800 px-3 py-4 text-sm text-surface-500">{t('selectAiTeammateForFiles')}</div>
-              )}
-
-              <>
-              <div className="flex-1">
-
-              {/* Shared with me */}
-              {false && sharedWithMe.length > 0 && (
-                <div className="mt-3 px-2">
-                  <div className="text-[12px] text-gray-600 uppercase tracking-wide font-medium mb-1.5 px-1">
-                    {t('sharedWithMe')}
-                  </div>
-                  <div className="space-y-0.5">
-                    {sharedWithMe.map(s => (
-                      <button
-                        key={s.id}
-                        onClick={() => onFileClick(s.file_path)}
-                        className="w-full flex items-center gap-2 px-2 py-1.5 rounded text-[14px] text-gray-400 hover:text-white hover:bg-surface-700/50 transition-colors text-left"
-                      >
-                        <svg className="tone-success tone-text w-3.5 h-3.5 opacity-60 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
-                        </svg>
-                        <span className="truncate flex-1">{s.file_path.split('/').pop()}</span>
-                        <span className="text-[12px] text-gray-600 shrink-0">@{s.owner_username}</span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* Multi-select toolbar */}
-            {false && <SelectionToolbar onRefresh={() => { useFileStore.getState().bumpRefreshTrigger(); onRequestFileTree(); }} />}
-
-              {/* Bulk management stays in the Agent Home's 전체 파일 workspace. */}
-              {false && <FilesDropZone projects={allProjects} onRefresh={onRequestFileTree} />}
-              </>
-            </div>}
-            </div>
-          </div>
+          <DeferredSidebarSurface><LazySidebarFilesSurface
+            isMobile={isMobile}
+            activeSessionId={activeSessionId}
+            activeFileProject={activeFileProject}
+            folderProjects={folderProjects}
+            projectsSortedForFiles={projectsSortedForFiles}
+            folderProjectQuery={folderProjectQuery}
+            setFolderProjectQuery={setFolderProjectQuery}
+            mobileProjectPickerOpen={mobileProjectPickerOpen}
+            setMobileProjectPickerOpen={setMobileProjectPickerOpen}
+            mobileProjectQuery={mobileProjectQuery}
+            setMobileProjectQuery={setMobileProjectQuery}
+            mobileQuickFilesView={mobileQuickFilesView}
+            setMobileQuickFilesView={setMobileQuickFilesView}
+            mobileDocumentRecents={mobileDocumentRecents}
+            fileSearchQuery={fileSearchQuery}
+            setFileSearchQuery={setFileSearchQuery}
+            fileSearchResults={fileSearchResults}
+            fileSearchLoading={fileSearchLoading}
+            fileSearchError={fileSearchError}
+            onRequestFileTree={onRequestFileTree}
+            onFileClick={onFileClick}
+            onPinClick={onPinClick}
+            onUnpinFile={onUnpinFile}
+            onPinFile={onPinFile}
+            onNewSessionInFolder={onNewSessionInFolder}
+          /></DeferredSidebarSurface>
         ) : sidebarTab === 'prompts' ? (
           <div className="px-3">
             {onPromptAdd && (
@@ -2189,24 +2112,25 @@ export function Sidebar({
             ) : (
               <div className="space-y-0.5">
                 {prompts.map((prompt) => (
-                  <PromptItemComponent
-                    key={prompt.id}
-                    prompt={prompt}
-                    onClick={(p) => onPromptClick?.(p)}
-                    onEdit={(p) => onPromptEdit?.(p)}
-                    onDelete={(id) => onPromptDelete?.(id)}
-                  />
+                  <DeferredSidebarSurface key={prompt.id}>
+                    <LazyPromptItem
+                      prompt={prompt}
+                      onClick={(p) => onPromptClick?.(p)}
+                      onEdit={(p) => onPromptEdit?.(p)}
+                      onDelete={(id) => onPromptDelete?.(id)}
+                    />
+                  </DeferredSidebarSurface>
                 ))}
               </div>
             )}
           </div>
-        ) : sidebarTab === 'history' ? (
-          <HistoryPanel />
         ) : sidebarTab === 'pins' ? (
-          <PinList
-            onPinClick={(pin) => onPinClick?.(pin)}
-            onUnpin={(id) => onUnpinFile?.(id)}
-          />
+          <DeferredSidebarSurface>
+            <LazyPinList
+              onPinClick={(pin) => onPinClick?.(pin)}
+              onUnpin={(id) => onUnpinFile?.(id)}
+            />
+          </DeferredSidebarSurface>
         ) : null}
       </div>
 
@@ -2328,251 +2252,6 @@ function Breadcrumb({ treeRoot, onNavigate }: { treeRoot: string; onNavigate: (p
   );
 }
 
-/** Compact toolbar shown at top of Files tab — New, Upload, show hidden, refresh */
-/** Toggle button for multi-select mode */
-function SelectModeToggle() {
-  const selectMode = useFileStore((s) => s.selectMode);
-  const toggleSelectMode = useFileStore((s) => s.toggleSelectMode);
-  return (
-    <button
-      onClick={() => toggleSelectMode()}
-      className={`p-1 rounded transition-colors ${
-        selectMode
-          ? 'text-primary-400 bg-primary-600/20'
-          : 'text-surface-600 hover:text-primary-400 hover:bg-surface-800'
-      }`}
-      title={selectMode ? 'Exit select mode' : 'Select files (Ctrl+Click)'}
-    >
-      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-          d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
-      </svg>
-    </button>
-  );
-}
-
-function SortMenuItem({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`w-full flex items-center gap-2 px-3 py-1.5 text-[14px] transition-colors ${
-        active ? 'text-primary-300 bg-primary-500/10' : 'text-gray-400 hover:text-gray-200 hover:bg-surface-700/70'
-      }`}
-    >
-      <span className={`w-3.5 text-[12px] ${active ? 'text-primary-300' : 'text-transparent'}`}>✓</span>
-      <span className="truncate">{children}</span>
-    </button>
-  );
-}
-
-function FilesToolbar({
-  onRefresh,
-  onOpenWorkspace,
-  projects,
-}: {
-  onRefresh: (path?: string) => void;
-  onOpenWorkspace: () => void;
-  projects: { id: string; name: string; rootPath?: string | null; color?: string }[];
-}) {
-  const { t } = useTranslation('layout');
-  const isMobile = useSessionStore((s) => s.isMobile);
-  const showHidden = useFileStore((s) => s.showHidden);
-  const toggleShowHidden = useFileStore((s) => s.toggleShowHidden);
-  const bumpRefreshTrigger = useFileStore((s) => s.bumpRefreshTrigger);
-  const projectSortMode = useFileStore((s) => s.projectSortMode);
-  const fileSortMode = useFileStore((s) => s.fileSortMode);
-  const setProjectSortMode = useFileStore((s) => s.setProjectSortMode);
-  const setFileSortMode = useFileStore((s) => s.setFileSortMode);
-  const [sortMenuOpen, setSortMenuOpen] = useState(false);
-  const [uploadMenuOpen, setUploadMenuOpen] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const uploadTargetRef = useRef<string | null>(null);
-  const sortMenuRef = useRef<HTMLDivElement>(null);
-  const uploadMenuRef = useRef<HTMLDivElement>(null);
-
-  const handleToggleHidden = () => {
-    toggleShowHidden();
-    setTimeout(() => onRefresh(), 50);
-  };
-
-  // Close popovers on outside click
-  useEffect(() => {
-    if (!sortMenuOpen && !uploadMenuOpen) return;
-    const handler = (e: MouseEvent) => {
-      if (sortMenuRef.current && !sortMenuRef.current.contains(e.target as Node)) setSortMenuOpen(false);
-      if (uploadMenuRef.current && !uploadMenuRef.current.contains(e.target as Node)) setUploadMenuOpen(false);
-    };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, [sortMenuOpen, uploadMenuOpen]);
-
-  const projectsWithPath = projects.filter(p => p.rootPath);
-
-  const handleUploadClick = () => {
-    if (projectsWithPath.length === 0) {
-      toastError('No project folder available');
-      return;
-    }
-    if (projectsWithPath.length === 1) {
-      uploadTargetRef.current = projectsWithPath[0].rootPath!;
-      fileInputRef.current?.click();
-      return;
-    }
-    setUploadMenuOpen((v) => !v);
-  };
-
-  const handleUploadTargetClick = (targetDir: string) => {
-    uploadTargetRef.current = targetDir;
-    setUploadMenuOpen(false);
-    fileInputRef.current?.click();
-  };
-
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (!files || files.length === 0) return;
-    const uploadTarget = uploadTargetRef.current;
-    if (!uploadTarget) { toastError('Choose an upload folder first'); return; }
-
-    const formData = new FormData();
-    formData.append('targetDir', uploadTarget);
-    for (const file of Array.from(files)) formData.append('files', file);
-    try {
-      const token = localStorage.getItem('token');
-      const headers: Record<string, string> = {};
-      if (token) headers['Authorization'] = `Bearer ${token}`;
-      const res = await fetch('/api/files/upload', { method: 'POST', headers, body: formData });
-      const ct = res.headers.get('content-type') || '';
-      if (!ct.includes('application/json')) { toastError(`Upload failed (${res.status}): server returned non-JSON response`); return; }
-      const data = await res.json();
-      if (!res.ok) { emitProductNotice({ code: 'sidebar.upload.failed', technicalDetail: data.error, context: { status: res.status } }); return; }
-      const ok = data.results.filter((r: any) => !r.error);
-      const fail = data.results.filter((r: any) => r.error);
-      const targetName = uploadTarget.split('/').pop() || uploadTarget;
-      notifyUploadResult({ ok: ok.length, fail: fail.length }, `${targetName}/`);
-      bumpRefreshTrigger();
-    } catch (err) {
-      emitProductNotice({ code: 'sidebar.upload.failed', technicalDetail: err });
-    }
-    e.target.value = '';
-    uploadTargetRef.current = null;
-  };
-
-  const iconBtnClass = 'p-1 rounded text-surface-600 hover:text-primary-400 hover:bg-surface-800 transition-colors';
-
-  return (
-    <div className="px-1 pt-1 pb-1 space-y-1.5">
-      {/* Action buttons row */}
-      <div className="flex min-w-0 items-center gap-1 overflow-hidden">
-        <button
-          type="button"
-          onClick={onOpenWorkspace}
-          className={iconBtnClass}
-          title={t('openFileWorkspace')}
-          aria-label={t('openFileWorkspace')}
-        >
-          <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 5h5v5m0-5-7 7M19 14v4a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h4" />
-          </svg>
-        </button>
-        {/* File picker complements precise folder drag-and-drop. Keep this
-            icon-only because the file-tree toolbar has intentionally narrow widths. */}
-        <div className="relative" ref={uploadMenuRef}>
-          <button
-            type="button"
-            onClick={handleUploadClick}
-            className={`${iconBtnClass} tone-success hover:!text-[var(--tone-text)]`}
-            title={projectsWithPath.length === 1
-              ? t('filesWillBeAddedTo', { destination: projectsWithPath[0].name })
-              : t('chooseFilesFromComputer')}
-            aria-label={t('addFiles')}
-          >
-            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
-            </svg>
-          </button>
-          {uploadMenuOpen && (
-            <div className="absolute left-0 top-full mt-1 z-50 bg-surface-800 border border-surface-700 rounded-lg shadow-xl py-1 min-w-[220px]">
-              <div className="px-3 py-1 text-[12px] text-gray-500 font-medium">{t('selectUploadProject')}</div>
-              {projectsWithPath.map(p => (
-                <button
-                  key={p.id}
-                  className="w-full flex items-center gap-2 px-3 py-1.5 text-[14px] text-gray-300 hover:bg-primary-600/30 hover:text-white text-left"
-                  onClick={() => handleUploadTargetClick(p.rootPath!)}
-                  title={p.rootPath || undefined}
-                >
-                  <svg className="w-3.5 h-3.5 text-yellow-400/70 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.5}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 12.75V12A2.25 2.25 0 014.5 9.75h15A2.25 2.25 0 0121.75 12v.75m-8.69-6.44l-2.12-2.12a1.5 1.5 0 00-1.061-.44H4.5A2.25 2.25 0 002.25 6v12a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9a2.25 2.25 0 00-2.25-2.25h-5.379a1.5 1.5 0 01-1.06-.44z" />
-                  </svg>
-                  <span className="min-w-0 flex-1 truncate">{p.name}/</span>
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-        <input ref={fileInputRef} type="file" multiple hidden onChange={handleFileUpload} />
-
-        <div className="flex-1" />
-
-        {/* Sort menu */}
-        <div className="relative" ref={sortMenuRef}>
-          <button
-            onClick={() => setSortMenuOpen((v) => !v)}
-            className={iconBtnClass}
-            title={t('sort')}
-          >
-            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7h13M3 12h9M3 17h5m11-9l2 2m0 0l2-2m-2 2V4m0 12l-2-2m0 0l-2 2m2-2v6" />
-            </svg>
-          </button>
-          {sortMenuOpen && (
-            <div className="absolute right-0 top-full mt-1 z-50 w-56 bg-surface-800 border border-surface-700 rounded-lg shadow-xl py-1">
-              {!isMobile && <>
-                <div className="px-3 py-1.5 text-[12px] text-gray-500 uppercase tracking-wide font-semibold">{t('workspaceSort')}</div>
-                <SortMenuItem active={projectSortMode === 'pinned-recent'} onClick={() => setProjectSortMode('pinned-recent')}>{t('pinnedThenRecent')}</SortMenuItem>
-                <SortMenuItem active={projectSortMode === 'recent'} onClick={() => setProjectSortMode('recent')}>{t('recentActivity')}</SortMenuItem>
-                <SortMenuItem active={projectSortMode === 'name'} onClick={() => setProjectSortMode('name')}>{t('nameAz')}</SortMenuItem>
-                <SortMenuItem active={projectSortMode === 'created'} onClick={() => setProjectSortMode('created')}>{t('newestCreated')}</SortMenuItem>
-                <div className="my-1 border-t border-surface-700/70" />
-              </>}
-              <div className="px-3 py-1.5 text-[12px] text-gray-500 uppercase tracking-wide font-semibold">{t('fileSort')}</div>
-              <SortMenuItem active={fileSortMode === 'folders-name'} onClick={() => { setFileSortMode('folders-name'); setSortMenuOpen(false); }}>{t('foldersThenName')}</SortMenuItem>
-              <SortMenuItem active={fileSortMode === 'modified'} onClick={() => { setFileSortMode('modified'); setSortMenuOpen(false); }}>{t('recentlyModified')}</SortMenuItem>
-              <SortMenuItem active={fileSortMode === 'name'} onClick={() => { setFileSortMode('name'); setSortMenuOpen(false); }}>{t('nameAz')}</SortMenuItem>
-              {!isMobile && <SortMenuItem active={fileSortMode === 'type'} onClick={() => setFileSortMode('type')}>{t('byType')}</SortMenuItem>}
-            </div>
-          )}
-        </div>
-
-        {/* Show hidden toggle */}
-        <button
-          onClick={handleToggleHidden}
-          className={`${iconBtnClass} ${showHidden ? '!text-primary-400' : ''}`}
-          title={showHidden ? t('hideDotfiles') : t('showDotfiles')}
-        >
-          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            {showHidden ? (
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-            ) : (
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
-            )}
-          </svg>
-        </button>
-
-        {/* Select mode toggle */}
-        <SelectModeToggle />
-        {/* Refresh */}
-        <button onClick={() => onRefresh()} className={iconBtnClass} title={t('refreshAll')}>
-          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-          </svg>
-        </button>
-      </div>
-
-    </div>
-  );
-}
-
 /** Bottom drop zone for Files tab — drop files here or click to upload */
 function FilesDropZone({ projects, onRefresh }: {
   projects: { id: string; name: string; rootPath?: string | null; color?: string }[];
@@ -2607,11 +2286,12 @@ function FilesDropZone({ projects, onRefresh }: {
   ) => {
     if (items.length === 0) return;
     try {
-      const { ok, fail } = await uploadDroppedFiles(targetDir, items);
-      notifyUploadResult({ ok, fail });
+      const result = await uploadDroppedFiles(targetDir, items);
+      const { ok, fail } = result;
+      notifyUploadResult(result);
       bumpRefreshTrigger();
     } catch (err) {
-      emitProductNotice({ code: 'sidebar.upload.failed', technicalDetail: err });
+      reportUploadUnknown('upload:sidebar');
     }
     setShowProjectPicker(false);
     setPendingFiles(null);
@@ -2737,25 +2417,13 @@ function FileTreeToolbar({ treeRoot, onRefresh }: { treeRoot: string; onRefresh:
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
-    const formData = new FormData();
-    formData.append('targetDir', treeRoot);
-    for (const file of Array.from(files)) formData.append('files', file);
     try {
-      const token = localStorage.getItem('token');
-      const headers: Record<string, string> = {};
-      if (token) headers['Authorization'] = `Bearer ${token}`;
-      const res = await fetch('/api/files/upload', { method: 'POST', headers, body: formData });
-      const ct = res.headers.get('content-type') || '';
-      if (!ct.includes('application/json')) { toastError(`Upload failed (${res.status}): server returned non-JSON response`); return; }
-      const data = await res.json();
-      if (!res.ok) { emitProductNotice({ code: 'sidebar.upload.failed', technicalDetail: data.error, context: { status: res.status } }); return; }
-      const ok = data.results.filter((r: { error?: string }) => !r.error);
-      const fail = data.results.filter((r: { error?: string }) => r.error);
-      notifyUploadResult({ ok: ok.length, fail: fail.length });
+      const result = await uploadDroppedFiles(treeRoot, Array.from(files).map(file => ({ file, relativePath: file.name })));
+      notifyUploadResult(result);
       onRefresh();
     } catch (err) {
       console.error('[toolbar] File upload error:', err);
-      emitProductNotice({ code: 'sidebar.upload.failed', technicalDetail: err });
+      reportUploadUnknown('upload:sidebar');
     }
     // Reset input
     if (fileInputRef.current) fileInputRef.current.value = '';
@@ -3060,7 +2728,6 @@ function ProjectGroup({
   const { t } = useTranslation('layout');
   const agentFirstEnabled = useSettingsStore((s) => s.serverConfig?.agentFirstEnabled === true);
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null);
-  const [agentSessionPreviewLimit, setAgentSessionPreviewLimit] = useState<20 | 50>(() => getAgentSessionPreviewLimit());
   const [editing, setEditing] = useState(false);
   const [editName, setEditName] = useState(project.name);
   const [dragOver, setDragOver] = useState(false);
@@ -3089,15 +2756,6 @@ function ProjectGroup({
     });
   }, [expanded, showAllKey]);
   const editRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    const handlePreviewLimitUpdated = (event: Event) => {
-      const limit = (event as CustomEvent<{ limit?: number }>).detail?.limit;
-      if (limit === 20 || limit === 50) setAgentSessionPreviewLimit(limit);
-    };
-    window.addEventListener('tower:agent-session-preview-limit-updated', handlePreviewLimitUpdated);
-    return () => window.removeEventListener('tower:agent-session-preview-limit-updated', handlePreviewLimitUpdated);
-  }, []);
 
   // Label collapse state — subscribed via hook so toggle triggers re-render immediately
   const collapsedLabels = useProjectStore((s) => s.collapsedLabels);
@@ -3315,12 +2973,8 @@ function ProjectGroup({
           }
         }
 
-        // Sort label groups by most recent session activity
-        const sortedLabels = [...labelGroups.entries()].sort((a, b) => {
-          const latestA = Math.max(...a[1].map(s => new Date(s.updatedAt.includes('T') ? s.updatedAt : s.updatedAt.replace(' ', 'T') + 'Z').getTime()));
-          const latestB = Math.max(...b[1].map(s => new Date(s.updatedAt.includes('T') ? s.updatedAt : s.updatedAt.replace(' ', 'T') + 'Z').getTime()));
-          return latestB - latestA;
-        });
+        // Sort every deck, including the synthetic default group, by latest activity.
+        const sortedDeckGroups = sortDeckGroupsByLatestActivity(labelGroups, unlabeled);
 
         const toggleLabel = toggleLabelCollapsed;
 
@@ -3339,7 +2993,7 @@ function ProjectGroup({
         // session is unlabeled, keep the synthetic Uncategorized group visible.
         if (!showLabels) {
           const previewCount = agentFirstEnabled
-            ? Math.min(groupSessions.length, agentSessionPreviewLimit)
+            ? Math.min(groupSessions.length, SESSION_INITIAL_EXPANDED_LIMIT)
             : getPreviewCount(groupSessions);
           const displayedCount = getSessionDisplayCount(groupSessions.length, previewCount, expanded, visibleLimit);
           const visibleSessions = groupSessions.slice(0, displayedCount);
@@ -3349,7 +3003,7 @@ function ProjectGroup({
           return (
             <div className="ml-2.5 pl-3 border-l border-surface-700/25 space-y-0.5">
               {visibleSessions.map((session) => (
-                <SessionItem key={session.id} session={session} isActive={session.id === activeSessionId} currentUsername={currentUsername} onSelect={onSelectSession} onDelete={onDeleteSession} onRename={onRenameSession} onToggleFavorite={onToggleFavorite} onMoveToProject={onMoveSession} projects={projects} />
+                <SessionItem key={session.id} session={session} isActive={session.id === activeSessionId} currentUsername={currentUsername} onSelect={onSelectSession} onDelete={onDeleteSession} onRename={onRenameSession} onToggleFavorite={onToggleFavorite} onMoveToProject={onMoveSession} projects={projects} compactMetaAtNarrowWidth />
               ))}
               {hasMore && (
                 <button
@@ -3398,13 +3052,11 @@ function ProjectGroup({
         };
         return (
           <div className="ml-2.5 pl-3 border-l border-surface-700/25 space-y-0.5">
-            {sortedLabels.map(([label, sessions]) => renderProjectLabelGroup(label, sessions))}
-            {/* No-deck sessions stay discoverable in one synthetic Uncategorized group. */}
-            {unlabeled.length > 0 && (
+            {sortedDeckGroups.map(({ label, sessions }) => label === null ? (
               <LabelGroup
                 key={`${project.id}:__uncategorized__`}
                 label="temp"
-                sessions={unlabeled}
+                sessions={sessions}
                 projectId={project.id}
                 isCollapsed={collapsedLabels.has(`${project.id}::__uncategorized__`)}
                 onToggle={() => toggleLabel(project.id, '__uncategorized__')}
@@ -3420,7 +3072,7 @@ function ProjectGroup({
                 onNewSession={() => onNewSession()}
                 isSystemGroup
               />
-            )}
+            ) : renderProjectLabelGroup(label, sessions))}
           </div>
         );
       })()}
@@ -3441,18 +3093,9 @@ function ProjectGroup({
             if (useSessionStore.getState().isMobile) useSessionStore.getState().setSidebarOpen(false);
           }}
           sessionCount={groupSessions.length}
-          previewCount={agentFirstEnabled ? Math.min(groupSessions.length, agentSessionPreviewLimit) : getPreviewCount(groupSessions)}
+          previewCount={agentFirstEnabled ? Math.min(groupSessions.length, SESSION_INITIAL_EXPANDED_LIMIT) : getPreviewCount(groupSessions)}
           expanded={expanded}
-          onToggleExpanded={() => toggleExpanded(groupSessions.length, agentFirstEnabled ? Math.min(groupSessions.length, agentSessionPreviewLimit) : getPreviewCount(groupSessions))}
-          agentSessionPreviewLimit={agentSessionPreviewLimit}
-          onChangeAgentSessionPreviewLimit={(limit) => {
-            saveAgentSessionPreviewLimit(limit);
-            setAgentSessionPreviewLimit(limit);
-            clearSessionStoredVisibleCount(showAllKey);
-            setExpanded(false);
-            setVisibleLimit(limit);
-          }}
-          showAgentSessionLimitOptions={agentFirstEnabled}
+          onToggleExpanded={() => toggleExpanded(groupSessions.length, agentFirstEnabled ? Math.min(groupSessions.length, SESSION_INITIAL_EXPANDED_LIMIT) : getPreviewCount(groupSessions))}
           isPinned={project.pinned === true}
           onTogglePin={() => project.pinned ? unpinProject(project.id) : pinProject(project.id)}
           onMovePinUp={() => movePinnedProject(project.id, 'up')}
@@ -3468,7 +3111,6 @@ function ProjectGroup({
 function ProjectContextMenu({
   x, y, project, onRename, onDelete, onClose, onNewChat, onOpenHome,
   sessionCount, previewCount, expanded, onToggleExpanded,
-  agentSessionPreviewLimit, onChangeAgentSessionPreviewLimit, showAgentSessionLimitOptions,
   isPinned, onTogglePin, onMovePinUp, onMovePinDown, showPinControls = true,
 }: {
   x: number; y: number; project: Project;
@@ -3480,9 +3122,6 @@ function ProjectContextMenu({
   previewCount: number;
   expanded: boolean;
   onToggleExpanded: () => void;
-  agentSessionPreviewLimit: 20 | 50;
-  onChangeAgentSessionPreviewLimit: (limit: 20 | 50) => void;
-  showAgentSessionLimitOptions: boolean;
   isPinned: boolean;
   onTogglePin: () => void;
   onMovePinUp: () => void;
@@ -3492,7 +3131,6 @@ function ProjectContextMenu({
   const { t } = useTranslation('layout');
   const confirm = useConfirm();
   const ref = useRef<HTMLDivElement>(null);
-  const [showSettings, setShowSettings] = useState(false);
   const [showCredentials, setShowCredentials] = useState(false);
   const [showInvite, setShowInvite] = useState(false);
   const [showManageDecks, setShowManageDecks] = useState(false);
@@ -3543,7 +3181,7 @@ function ProjectContextMenu({
       observer.disconnect();
       if (frame) window.cancelAnimationFrame(frame);
     };
-  }, [x, y, showInvite, showSettings, showCredentials, showManageDecks]);
+  }, [x, y, showInvite, showCredentials, showManageDecks]);
 
   useEffect(() => {
     const menu = ref.current;
@@ -3635,16 +3273,8 @@ function ProjectContextMenu({
 
   const itemClass = "w-full flex items-center gap-2 px-3 py-2 text-[14px] text-gray-300 hover:bg-primary-600/30 hover:text-white transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary-400/70";
 
-  if (showSettings) {
-    return (
-      <div ref={ref} className="fixed z-50" style={adjustedPos}>
-        <ProjectSettingsPanel project={project} onClose={onClose} />
-      </div>
-    );
-  }
-
   if (showCredentials) {
-    return <AgentCredentialsModal project={project} onClose={onClose} />;
+    return <React.Suspense fallback={null}><AgentCredentialsModal project={project} onClose={onClose} /></React.Suspense>;
   }
 
   if (showManageDecks) {
@@ -3771,14 +3401,6 @@ function ProjectContextMenu({
           {expanded ? t('showLess') : t('showAll', { count: sessionCount })}
         </button>
       )}
-      {showAgentSessionLimitOptions && (
-        <>
-          <div className="border-t border-surface-700/50 my-1" />
-          <div className="px-3 py-1 text-[11px] font-semibold uppercase tracking-wider text-surface-500">{t('defaultConversationDisplay')}</div>
-          <button role="menuitemradio" aria-checked={agentSessionPreviewLimit === 20} className={itemClass} onClick={() => { onChangeAgentSessionPreviewLimit(20); onClose(); }}><span className="w-3.5 text-center text-primary-300">{agentSessionPreviewLimit === 20 ? '✓' : ''}</span>{t('showOnlyCount', { count: 20 })}</button>
-          <button role="menuitemradio" aria-checked={agentSessionPreviewLimit === 50} className={itemClass} onClick={() => { onChangeAgentSessionPreviewLimit(50); onClose(); }}><span className="w-3.5 text-center text-primary-300">{agentSessionPreviewLimit === 50 ? '✓' : ''}</span>{t('showOnlyCount', { count: 50 })}</button>
-        </>
-      )}
       <div className="border-t border-surface-700/50 my-1" />
       {/* Invite Members */}
       <button role="menuitem" className={itemClass} onClick={() => setShowInvite(true)}>
@@ -3799,15 +3421,6 @@ function ProjectContextMenu({
       <button role="menuitem" className={itemClass} onClick={() => setShowCredentials(true)}>
         <svg className="h-3.5 w-3.5 text-primary-300" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2} aria-hidden="true">
           <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 5.25a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM5.25 21a6.75 6.75 0 0113.5 0M17.25 9.75l1.5 1.5 3-3" />
-        </svg>
-        {t('agentCredentials.title')}
-      </button>
-      {/* Settings */}
-      <button role="menuitem" className={itemClass} onClick={() => setShowSettings(true)}>
-        <svg className="w-3.5 h-3.5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-            d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
         </svg>
         {t('settings')}
       </button>
@@ -3835,347 +3448,6 @@ function ProjectContextMenu({
         </svg>
         {t('deleteProject')}
       </button>
-    </div>
-  );
-}
-
-/* ── Project Settings Panel ── */
-
-type ProjectConnectionPreview = {
-  profiles: Array<{
-    id: string;
-    display_name: string;
-    provider: string;
-    active: boolean;
-    public_env_names: string[];
-    secret_env_names: string[];
-    referenced_credentials: Array<{
-      env_name: string;
-      credential_id: string;
-      display_name: string;
-      available: boolean;
-    }>;
-  }>;
-  loose_allowed_credentials: Array<{
-    id: string;
-    display_name: string;
-    provider: string;
-    env_name: string | null;
-    active: boolean;
-  }>;
-  targets: Array<{
-    id: number;
-    credential_id: string;
-    target_type: string;
-    target_ref: { repo?: string; secret_name?: string };
-    last_status: string | null;
-    last_checked_at: string | null;
-    last_synced_at: string | null;
-    last_error: string | null;
-  }>;
-  warnings: Array<{ type: string; credential_id: string; env_name: string | null; message: string }>;
-};
-
-function ProjectConnectionsPreview({ projectId }: { projectId: string }) {
-  const { t } = useTranslation('layout');
-  const [preview, setPreview] = useState<ProjectConnectionPreview | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    const token = localStorage.getItem('token');
-    const headers: Record<string, string> = {};
-    if (token) headers['Authorization'] = `Bearer ${token}`;
-    setLoading(true);
-    fetch(`/api/credential-vault/projects/${projectId}/preview`, { headers })
-      .then(async (res) => {
-        if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || 'Failed to load connections');
-        return res.json();
-      })
-      .then((data) => { if (!cancelled) { setPreview(data); setError(null); } })
-      .catch((err) => { if (!cancelled) setError(err.message || 'Failed to load connections'); })
-      .finally(() => { if (!cancelled) setLoading(false); });
-    return () => { cancelled = true; };
-  }, [projectId]);
-
-  const targetsByCredential = useMemo(() => {
-    const map = new Map<string, ProjectConnectionPreview['targets']>();
-    for (const target of preview?.targets ?? []) {
-      const list = map.get(target.credential_id) ?? [];
-      list.push(target);
-      map.set(target.credential_id, list);
-    }
-    return map;
-  }, [preview?.targets]);
-
-  const pill = (text: string, tone: 'ok' | 'warn' | 'muted' = 'muted') => (
-    <span className={`tone-pill px-1.5 py-0.5 rounded-full text-[11px] font-medium ${tone === 'ok' ? 'tone-success' : tone === 'warn' ? 'tone-warning' : 'tone-muted'}`}>
-      {text}
-    </span>
-  );
-
-  if (loading) return <div className="text-[13px] text-surface-500">{t('loadingConnections')}</div>;
-  if (error) return <div className="tone-card tone-warning text-[13px] rounded p-2">{error}</div>;
-
-  const hasConnections = (preview?.profiles?.length ?? 0) > 0 || (preview?.loose_allowed_credentials?.length ?? 0) > 0;
-
-  return (
-    <div className="space-y-2">
-      {!hasConnections && <div className="text-[13px] text-surface-500">{t('noProjectConnections')}</div>}
-
-      {preview?.profiles.map((profile) => (
-        <div key={profile.id} className="rounded-md border border-surface-700 bg-surface-850/70 p-2">
-          <div className="flex items-start justify-between gap-2">
-            <div className="min-w-0">
-              <div className="text-[14px] text-gray-200 font-medium truncate">{profile.display_name}</div>
-              <div className="text-[12px] text-surface-500 truncate">{profile.provider} · {profile.id}</div>
-            </div>
-            {pill(profile.active ? 'Connected' : 'Needs attention', profile.active ? 'ok' : 'warn')}
-          </div>
-          <div className="mt-2 flex flex-wrap gap-1">
-            {profile.public_env_names.map((name) => pill(name))}
-            {profile.secret_env_names.map((name) => pill(`${name} • secret`, profile.active ? 'ok' : 'warn'))}
-          </div>
-          {profile.referenced_credentials.length > 0 && (
-            <div className="mt-2 space-y-1">
-              {profile.referenced_credentials.map((credential) => (
-                <div key={`${profile.id}:${credential.env_name}`} className="flex items-center justify-between gap-2 text-[12px]">
-                  <span className="text-surface-400 truncate">{credential.display_name} → {credential.env_name}</span>
-                  {pill(credential.available ? 'allowed' : 'not allowed', credential.available ? 'ok' : 'warn')}
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      ))}
-
-      {preview?.loose_allowed_credentials.map((credential) => (
-        <div key={credential.id} className="tone-card tone-warning rounded-md p-2">
-          <div className="flex items-start justify-between gap-2">
-            <div className="min-w-0">
-              <div className="text-[14px] text-gray-200 font-medium truncate">{credential.display_name}</div>
-              <div className="text-[12px] text-surface-500 truncate">{credential.provider} · {credential.env_name || 'no env'}</div>
-            </div>
-            {pill('Direct key', 'warn')}
-          </div>
-          {(targetsByCredential.get(credential.id) ?? []).map((target) => (
-            <div key={target.id} className="mt-1 text-[12px] text-surface-500 truncate">
-              {t('githubActions')}: {target.target_ref.repo || 'repo'} / {target.target_ref.secret_name || 'secret'}
-              {target.last_status ? ` · ${target.last_status}` : ''}
-            </div>
-          ))}
-        </div>
-      ))}
-
-      {preview?.warnings?.length ? (
-        <div className="tone-card tone-warning text-[12px] rounded p-2">
-          {t('connectionWarnings', { count: preview.warnings.length })}
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-function ProjectSettingsPanel({ project, onClose }: { project: Project; onClose: () => void }) {
-  const { t } = useTranslation('layout');
-  const [description, setDescription] = useState(project.description || '');
-  const [rootPath, setRootPath] = useState(project.rootPath || '');
-  const [saving, setSaving] = useState(false);
-  const [members, setMembers] = useState<{ userId: number; username: string; role: string }[]>([]);
-  const [memberSearch, setMemberSearch] = useState('');
-  const [searchResults, setSearchResults] = useState<{ id: number; username: string }[]>([]);
-  const [isOwner, setIsOwner] = useState(false);
-  const searchTimeoutRef = useRef<ReturnType<typeof setTimeout>>(undefined);
-
-  const getAuthHeaders = () => {
-    const token = localStorage.getItem('token');
-    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-    if (token) headers['Authorization'] = `Bearer ${token}`;
-    return headers;
-  };
-
-  const currentUserId = getCurrentUserId() || null;
-
-  const isAdmin = getCurrentRole() === 'admin';
-
-  useEffect(() => {
-    fetchMembers();
-  }, []);
-
-  const fetchMembers = async () => {
-    try {
-      const res = await fetch(`/api/projects/${project.id}/members`, { headers: getAuthHeaders() });
-      if (res.ok) {
-        const data = await res.json();
-        setMembers(data);
-        setIsOwner(isAdmin || data.some((m: any) => m.userId === currentUserId && m.role === 'owner'));
-      }
-    } catch {}
-  };
-
-  const searchUsers = (q: string) => {
-    setMemberSearch(q);
-    if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
-    if (!q.trim()) { setSearchResults([]); return; }
-    searchTimeoutRef.current = setTimeout(async () => {
-      try {
-        const res = await fetch(`/api/users/search?q=${encodeURIComponent(q)}`, { headers: getAuthHeaders() });
-        if (res.ok) {
-          const users = await res.json();
-          setSearchResults(users.filter((u: any) => !members.some(m => m.userId === u.id)));
-        }
-      } catch {}
-    }, 300);
-  };
-
-  const handleAddMember = async (userId: number) => {
-    try {
-      await fetch(`/api/projects/${project.id}/members`, {
-        method: 'POST', headers: getAuthHeaders(), body: JSON.stringify({ userId }),
-      });
-      setMemberSearch(''); setSearchResults([]);
-      fetchMembers();
-    } catch {}
-  };
-
-  const handleRemoveMember = async (userId: number) => {
-    try {
-      const res = await fetch(`/api/projects/${project.id}/members/${userId}`, {
-        method: 'DELETE', headers: getAuthHeaders(),
-      });
-      if (!res.ok) {
-        const data = await res.json();
-        emitProductNotice({ code: 'sidebar.member.remove.failed', technicalDetail: data.error, context: { status: res.status } });
-      }
-      fetchMembers();
-    } catch {}
-  };
-
-  const handleSave = async () => {
-    setSaving(true);
-    const headers = getAuthHeaders();
-    try {
-      const body: Record<string, any> = {};
-      if (description !== (project.description || '')) body.description = description || null;
-      if (rootPath !== (project.rootPath || '')) body.rootPath = rootPath || null;
-      if (Object.keys(body).length > 0) {
-        const res = await fetch(`/api/projects/${project.id}`, {
-          method: 'PATCH', headers, body: JSON.stringify(body),
-        });
-        if (res.ok) {
-          const updated = await res.json();
-          useProjectStore.getState().updateProject(project.id, updated);
-          toastSuccess('Project updated');
-        } else {
-          toastError('Failed to update project');
-        }
-      }
-    } catch {
-      toastError('Failed to update project');
-    }
-    setSaving(false);
-    onClose();
-  };
-
-  const labelClass = "text-[12px] text-surface-500 uppercase tracking-wider font-medium mb-1";
-  const inputClass = "w-full bg-surface-700 border border-surface-600 rounded text-[14px] text-gray-200 px-2.5 py-1.5 placeholder-surface-600 outline-none focus:border-primary-500/50";
-
-  return (
-    <div className="bg-surface-800 border border-surface-700 rounded-lg shadow-xl p-3 min-w-[280px] max-w-[320px]">
-      <div className="flex items-center justify-between mb-3">
-        <h3 className="text-[15px] font-semibold text-gray-200">{project.name}</h3>
-        <button onClick={onClose} className="text-surface-600 hover:text-gray-300 transition-colors">
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-          </svg>
-        </button>
-      </div>
-
-      {/* Members */}
-      <div className="mb-3">
-        <div className={labelClass}>{t('projectMembers')}</div>
-        <div className="space-y-1 mb-2">
-          {members.map(m => (
-            <div key={m.userId} className="flex items-center justify-between text-[13px]">
-              <span className="text-gray-300">
-                {m.role === 'owner' ? '👑 ' : '👤 '}{m.username}
-                {m.userId === currentUserId && <span className="text-surface-600 ml-1">{t('youParenthetical')}</span>}
-              </span>
-              {isOwner && m.userId !== currentUserId && (
-                <button onClick={() => handleRemoveMember(m.userId)} className="text-surface-600 hover:text-red-400 transition-colors">
-                  <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
-                </button>
-              )}
-            </div>
-          ))}
-          {members.length === 0 && <span className="text-[13px] text-surface-600">{t('noMembers')}</span>}
-        </div>
-
-        {/* Add member search */}
-        {isOwner && (
-          <div className="relative">
-            <input
-              value={memberSearch}
-              onChange={(e) => searchUsers(e.target.value)}
-              placeholder={t('addMemberPlaceholder')}
-              className="w-full bg-surface-700 border border-surface-600 rounded text-[13px] text-gray-300 px-2 py-1 placeholder-surface-600 outline-none focus:border-primary-500/50"
-            />
-            {searchResults.length > 0 && (
-              <div className="absolute left-0 right-0 top-full mt-0.5 bg-surface-900 border border-surface-700 rounded shadow-lg z-10 max-h-[100px] overflow-y-auto">
-                {searchResults.map(u => (
-                  <button
-                    key={u.id}
-                    onClick={() => handleAddMember(u.id)}
-                    className="w-full text-left px-2 py-1 text-[13px] text-gray-300 hover:bg-surface-700 transition-colors"
-                  >
-                    {u.username}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-
-      {/* Description */}
-      <div className="mb-3">
-        <div className={labelClass}>{t('projectDescription')}</div>
-        <textarea
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-          placeholder={t('projectDescPlaceholder')}
-          rows={2}
-          className={`${inputClass} resize-none`}
-        />
-        <p className="text-[11px] text-surface-600 mt-0.5">{t('alsoSavedToAgentsMd')}</p>
-      </div>
-
-      {/* Root Path */}
-      <div className="mb-3">
-        <div className={labelClass}>{t('projectFolder')}</div>
-        <input
-          value={rootPath}
-          onChange={(e) => setRootPath(e.target.value)}
-          placeholder={t('autoCreatedIn')}
-          className={inputClass}
-        />
-        <p className="text-[11px] text-surface-600 mt-0.5">{t('newChatsUseProjectFolder')}</p>
-      </div>
-
-      {/* Actions */}
-      <div className="flex justify-end gap-2">
-        <button onClick={onClose} className="px-3 py-1 text-[13px] text-surface-500 hover:text-gray-300 transition-colors">
-          {t('common:cancel')}
-        </button>
-        <button
-          onClick={handleSave}
-          disabled={saving}
-          className="px-3 py-1.5 bg-primary-600 hover:bg-primary-500 rounded text-[13px] font-medium text-white transition-colors disabled:opacity-50"
-        >
-          {saving ? t('common:saving') : t('common:save')}
-        </button>
-      </div>
     </div>
   );
 }
@@ -4689,6 +3961,27 @@ function SpaceMoveSubmenu({ projectId, currentSpaceId, onClose }: {
 /* ── Label Group — Obsidian-style tree node (D&D drop target) ── */
 
 const LABEL_PREVIEW_COUNT = 5;
+const LABEL_LOAD_BATCH = 20;
+
+type DeckActivityGroup = { label: string | null; sessions: SessionMeta[]; latestActivity: number };
+
+function sessionActivityTime(session: SessionMeta): number {
+  const value = session.updatedAt.includes('T') ? session.updatedAt : `${session.updatedAt.replace(' ', 'T')}Z`;
+  const timestamp = new Date(value).getTime();
+  return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
+function sortDeckGroupsByLatestActivity(labelGroups: Map<string, SessionMeta[]>, unlabeled: SessionMeta[]): DeckActivityGroup[] {
+  const groups: DeckActivityGroup[] = [...labelGroups.entries()].map(([label, sessions]) => ({
+    label,
+    sessions,
+    latestActivity: Math.max(...sessions.map(sessionActivityTime)),
+  }));
+  if (unlabeled.length > 0) {
+    groups.push({ label: null, sessions: unlabeled, latestActivity: Math.max(...unlabeled.map(sessionActivityTime)) });
+  }
+  return groups.sort((a, b) => b.latestActivity - a.latestActivity || (a.label === null ? -1 : b.label === null ? 1 : a.label.localeCompare(b.label)));
+}
 
 /** Label display name mapping */
 function labelDisplay(label: string, t?: (key: string, options?: any) => string): { name: string } {
@@ -4706,6 +3999,7 @@ function DeckContextMenu({ x, y, label, sessions, projectId, onClose }: {
   x: number; y: number; label: string; sessions: SessionMeta[]; projectId: string; onClose: () => void;
 }) {
   const { t } = useTranslation('layout');
+  const confirm = useConfirm();
   const ref = useRef<HTMLDivElement>(null);
   const [adjustedPos, setAdjustedPos] = useState({ left: x, top: y });
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -4740,23 +4034,30 @@ function DeckContextMenu({ x, y, label, sessions, projectId, onClose }: {
 
   const itemClass = "w-full flex items-center gap-2 px-3 py-1.5 text-[14px] text-gray-300 hover:bg-primary-600/30 hover:text-white transition-colors";
 
-  const patchSessions = (patch: Record<string, any>) => {
+  const patchSessions = async (patch: Record<string, any>) => {
     const token = localStorage.getItem('token');
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     if (token) headers['Authorization'] = `Bearer ${token}`;
-    for (const s of sessions) {
-      useSessionStore.getState().updateSessionMeta(s.id, patch);
-      fetch(`/api/sessions/${s.id}`, {
+    const previous = sessions.map((session) => ({ id: session.id, label: session.label, visibility: session.visibility }));
+    for (const session of sessions) useSessionStore.getState().updateSessionMeta(session.id, patch);
+    try {
+      const responses = await Promise.all(sessions.map((session) => fetch(`/api/sessions/${session.id}`, {
         method: 'PATCH', headers, body: JSON.stringify(patch),
-      }).catch(() => {});
+      })));
+      if (responses.some((response) => !response.ok)) throw new Error('deck update failed');
+      return true;
+    } catch {
+      for (const snapshot of previous) useSessionStore.getState().updateSessionMeta(snapshot.id, { label: snapshot.label, visibility: snapshot.visibility });
+      toastError(t('deckAssignmentFailed'));
+      return false;
     }
   };
 
-  const handleRename = () => {
+  const handleRename = async () => {
     const newName = renameName.trim();
     if (!newName || newName === label) { setRenaming(false); return; }
     // Update all sessions with the new label
-    patchSessions({ label: newName });
+    if (!await patchSessions({ label: newName })) return;
     // Note: any `collapsedLabels` entry under the old label key becomes a dead
     // key. It drops out naturally on next render since no deck has that label
     // anymore — no explicit migration needed. (Removed `hidden` concept on
@@ -4808,10 +4109,13 @@ function DeckContextMenu({ x, y, label, sessions, projectId, onClose }: {
       <div className="border-t border-surface-700/50 my-1" />
       {/* Visibility toggle — only if sessions are in a project */}
       {hasProjectId && (
-        <button className={itemClass} onClick={() => {
+        <button className={itemClass} onClick={async () => {
           const newVis = allProject ? 'private' : 'project';
-          patchSessions({ visibility: newVis });
-          onClose();
+          if (!await confirm({
+            title: t(newVis === 'private' ? 'makePrivate' : 'makeShared'),
+            message: t(newVis === 'private' ? 'privateVisibilityWarning' : 'sharedVisibilityWarning'),
+          })) return;
+          void patchSessions({ visibility: newVis }).then((ok) => { if (ok) onClose(); });
         }}>
           {allProject ? (
             <svg className="w-3.5 h-3.5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
@@ -4826,33 +4130,24 @@ function DeckContextMenu({ x, y, label, sessions, projectId, onClose }: {
           {allProject ? t('makeAllPrivate') : t('shareAllWithProject')}
         </button>
       )}
-      {/* Ungroup all sessions in this deck */}
+      {/* Remove only the classification; sessions stay active. */}
       <button className={itemClass} onClick={() => {
-        const token = localStorage.getItem('token');
-        const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-        if (token) headers['Authorization'] = `Bearer ${token}`;
-        for (const s of sessions) {
-          useSessionStore.getState().updateSessionMeta(s.id, { label: null });
-          fetch(`/api/sessions/${s.id}`, {
-            method: 'PATCH', headers, body: JSON.stringify({ label: null }),
-          }).catch(() => {});
-        }
-        onClose();
+        void patchSessions({ label: null }).then((ok) => { if (ok) onClose(); });
       }}>
         <svg className="w-3.5 h-3.5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
           <path strokeLinecap="round" strokeLinejoin="round" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A2 2 0 013 12V7a4 4 0 014-4z" />
           <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6" />
         </svg>
-        {t('ungroupAll')} ({sessions.length})
+        {t('removeDeckClassification')} ({sessions.length})
       </button>
       <div className="border-t border-surface-700/50 my-1" />
-      {/* Delete deck — with confirmation */}
+      {/* Archive every session in the deck — separate from removing classification. */}
       {!confirmDelete ? (
         <button className={`${itemClass} !text-red-400 hover:!bg-red-950/30`} onClick={() => setConfirmDelete(true)}>
           <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" />
           </svg>
-          {t('deleteDeck')} ({sessions.length})
+          {t('archiveDeckSessions')} ({sessions.length})
         </button>
       ) : (
         <div className="px-2 py-1.5">
@@ -4915,36 +4210,9 @@ function LabelGroup({ label, sessions, projectId, isCollapsed, onToggle, onDropS
 }) {
   const { t } = useTranslation('layout');
   const [dragOver, setDragOver] = useState(false);
-  const showAllKey = `label::${projectId}::${label}`;
-  const [showAll, setShowAll] = useState(() => isSessionShowAllExpanded(showAllKey));
-  const [visibleLimit, setVisibleLimit] = useState(() => getInitialSessionVisibleLimit(showAllKey));
-  const toggleShowAll = useCallback(() => {
-    setShowAll((prev) => {
-      if (prev) {
-        clearSessionStoredVisibleCount(showAllKey);
-        setVisibleLimit(SESSION_INITIAL_EXPANDED_LIMIT);
-        return false;
-      }
-      const nextLimit = getNextSessionVisibleLimit(sessions.length, LABEL_PREVIEW_COUNT, false, visibleLimit);
-      setSessionStoredVisibleCount(showAllKey, nextLimit);
-      setVisibleLimit(nextLimit);
-      return true;
-    });
-  }, [sessions.length, showAllKey, visibleLimit]);
-  const showMoreSessions = useCallback(() => {
-    setShowAll(true);
-    setVisibleLimit((prev) => {
-      const next = getNextSessionVisibleLimit(sessions.length, LABEL_PREVIEW_COUNT, showAll, prev);
-      setSessionStoredVisibleCount(showAllKey, next);
-      return next;
-    });
-  }, [sessions.length, showAll, showAllKey]);
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null);
-  const hasMore = sessions.length > LABEL_PREVIEW_COUNT;
-  const displayedCount = getSessionDisplayCount(sessions.length, LABEL_PREVIEW_COUNT, showAll, visibleLimit);
-  const remainingCount = sessions.length - displayedCount;
-  const nextBatchCount = getNextSessionBatchCount(sessions.length, LABEL_PREVIEW_COUNT, showAll, visibleLimit);
-  const visibleSessions = !isCollapsed ? sessions.slice(0, displayedCount) : [];
+  const [visibleCount, setVisibleCount] = useState(LABEL_PREVIEW_COUNT);
+  const hasMore = sessions.length > visibleCount;
   const display = labelDisplay(label, t);
 
   return (
@@ -4978,22 +4246,10 @@ function LabelGroup({ label, sessions, projectId, isCollapsed, onToggle, onDropS
         </svg>
         {/* Label name */}
         <span className="text-[15px] font-semibold text-surface-400 max-[768px]:text-gray-300 truncate">{display.name}</span>
-        {/* Count */}
-        {hasMore ? (
-          <span
-            onClick={(e) => {
-              e.stopPropagation();
-              remainingCount > 0 ? showMoreSessions() : toggleShowAll();
-            }}
-            data-sidebar-session-showall-label={remainingCount > 0 ? `${projectId}::${label}` : undefined}
-            className="text-[12px] tabular-nums shrink-0 cursor-pointer transition-colors text-surface-600 hover:text-primary-400 max-[768px]:text-gray-500 ml-auto"
-            title={remainingCount > 0 ? t('showNextSessions', { count: nextBatchCount }) : t('showOnlySessions', { count: LABEL_PREVIEW_COUNT })}
-          >
-            {remainingCount > 0 ? `${displayedCount}/${sessions.length}` : sessions.length}
-          </span>
-        ) : (
-          <span className="text-[12px] tabular-nums text-surface-600 max-[768px]:text-gray-500 shrink-0 ml-auto">{sessions.length}</span>
-        )}
+        {/* Count is status only; list navigation uses explicit action labels. */}
+        <span className="ml-auto shrink-0 text-[12px] tabular-nums text-surface-600 max-[768px]:text-gray-500">
+          {t('sessionCountShort', { count: sessions.length })}
+        </span>
         {/* + New session in this deck — visible on hover (desktop), always on mobile */}
         {onNewSession && (
           <button
@@ -5007,13 +4263,35 @@ function LabelGroup({ label, sessions, projectId, isCollapsed, onToggle, onDropS
             </svg>
           </button>
         )}
+        {!isSystemGroup && (
+          <button
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              const rect = event.currentTarget.getBoundingClientRect();
+              setCtxMenu({ x: rect.right, y: rect.bottom + 4 });
+            }}
+            className="shrink-0 rounded p-0.5 text-surface-600 opacity-70 transition-colors hover:bg-surface-700/60 hover:text-primary-300 group-hover/label:opacity-100"
+            aria-label={t('openDeckActions', { name: display.name })}
+            title={t('more')}
+          >
+            <svg className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="12" cy="5" r="1.5" /><circle cx="12" cy="12" r="1.5" /><circle cx="12" cy="19" r="1.5" /></svg>
+          </button>
+        )}
       </div>
       {/* Sessions — indented under label like tree children */}
       {!isCollapsed && (
-        <div className="ml-2 pl-2.5 border-l border-surface-700/25 space-y-0.5">
-          {visibleSessions.map((session) => (
-            <SessionItem key={session.id} session={session} isActive={session.id === activeSessionId} currentUsername={currentUsername} onSelect={onSelectSession} onDelete={onDeleteSession} onRename={onRenameSession} onToggleFavorite={onToggleFavorite} onMoveToProject={onMoveSession} projects={projects} />
+        <div className="ml-2 space-y-1 border-l border-surface-700/25 pl-2.5">
+          {sessions.slice(0, visibleCount).map((session) => (
+            <SessionItem key={session.id} session={session} isActive={session.id === activeSessionId} currentUsername={currentUsername} onSelect={onSelectSession} onDelete={onDeleteSession} onRename={onRenameSession} onToggleFavorite={onToggleFavorite} onMoveToProject={onMoveSession} projects={projects} compactMetaAtNarrowWidth />
           ))}
+          <div className="flex items-center gap-2 px-1 py-1">
+            {hasMore && <button type="button" onClick={() => setVisibleCount((count) => Math.min(sessions.length, count + LABEL_LOAD_BATCH))} className="rounded px-1 py-1 text-[12px] font-semibold text-primary-400 hover:bg-primary-500/10">{t('viewMoreSessions', { count: Math.min(LABEL_LOAD_BATCH, sessions.length - visibleCount) })}</button>}
+            {visibleCount > LABEL_PREVIEW_COUNT && <button type="button" onClick={() => setVisibleCount(LABEL_PREVIEW_COUNT)} className="rounded px-1 py-1 text-[12px] font-semibold text-surface-500 hover:bg-surface-800 hover:text-surface-300">{t('showOnlyRecentSessions', { count: LABEL_PREVIEW_COUNT })}</button>}
+            <button type="button" onClick={() => window.dispatchEvent(new CustomEvent('tower-open-session-directory', { detail: { projectId: projectId === 'flat' ? null : projectId, label: isSystemGroup ? null : label } }))} className="ml-auto rounded px-1 py-1 text-[12px] font-semibold text-surface-500 hover:bg-surface-800 hover:text-primary-400">
+              {t('viewAllSessions', { count: sessions.length })}
+            </button>
+          </div>
         </div>
       )}
       {/* Deck context menu */}

@@ -1,3 +1,4 @@
+import { towerHttpUrl } from '../features/client-connection/connection';
 import i18n from '../i18n';
 
 /**
@@ -77,11 +78,14 @@ export async function patchSessionModel(
   sessionId: string,
   body: { modelUsed: string; engine?: string },
 ): Promise<void> {
-  await fetch(`/api/sessions/${sessionId}`, {
+  const response = await fetch(towerHttpUrl(`/api/sessions/${sessionId}`), {
     method: 'PATCH',
     headers: authHeaders(),
     body: JSON.stringify(body),
   });
+  if (!response.ok) {
+    throw new Error(`Session model update failed (${response.status})`);
+  }
 }
 
 export interface SwitchEngineApiResult {
@@ -110,7 +114,7 @@ export async function confirmEngineSwitch(
   targetModel?: string,
 ): Promise<SwitchEngineApiResult> {
   try {
-    const res = await fetch(`/api/sessions/${sessionId}/switch-engine`, {
+    const res = await fetch(towerHttpUrl(`/api/sessions/${sessionId}/switch-engine`), {
       method: 'POST',
       headers: authHeaders(),
       body: JSON.stringify({ toEngine, reason, ...(targetModel ? { targetModel } : {}) }),

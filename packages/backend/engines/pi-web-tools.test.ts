@@ -5,12 +5,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const firecrawlMocks = vi.hoisted(() => {
   const scrape = vi.fn();
   const search = vi.fn();
-  return { scrape, search };
+  const constructorOpts: any[] = [];
+  return { scrape, search, constructorOpts };
 });
 
 vi.mock('@mendable/firecrawl-js', () => {
   class FirecrawlClient {
-    constructor(_opts: any) {}
+    constructor(opts: any) { firecrawlMocks.constructorOpts.push(opts); }
     scrape = firecrawlMocks.scrape;
     search = firecrawlMocks.search;
   }
@@ -19,8 +20,10 @@ vi.mock('@mendable/firecrawl-js', () => {
 
 beforeEach(() => {
   process.env.FIRECRAWL_API_KEY = 'test-key';
+  delete process.env.FIRECRAWL_API_URL;
   firecrawlMocks.scrape.mockReset();
   firecrawlMocks.search.mockReset();
+  firecrawlMocks.constructorOpts.length = 0;
 });
 
 afterEach(() => {
@@ -48,6 +51,29 @@ describe('Pi web tools (Firecrawl-first)', () => {
     expect(result.content[0].text).toContain('Demo Page');
     expect(result.content[0].text).toContain('Hello');
     expect(firecrawlMocks.scrape).toHaveBeenCalledOnce();
+  });
+
+  it('passes no apiUrl by default (official endpoint)', async () => {
+    firecrawlMocks.scrape.mockResolvedValue({ markdown: 'body' });
+
+    const mod = await import('./pi-web-tools.ts');
+    mod.__test__.clearCaches();
+    mod.__test__.resetFirecrawl();
+
+    await mod.webFetchTool.execute('t1', { url: 'https://example.com' }, undefined as any);
+    expect(firecrawlMocks.constructorOpts[0]).toEqual({ apiKey: 'test-key' });
+  });
+
+  it('passes FIRECRAWL_API_URL as apiUrl when set (gateway base URL)', async () => {
+    process.env.FIRECRAWL_API_URL = 'https://gateway.example.com/fc';
+    firecrawlMocks.scrape.mockResolvedValue({ markdown: 'body' });
+
+    const mod = await import('./pi-web-tools.ts');
+    mod.__test__.clearCaches();
+    mod.__test__.resetFirecrawl();
+
+    await mod.webFetchTool.execute('t1', { url: 'https://example.com' }, undefined as any);
+    expect(firecrawlMocks.constructorOpts[0]).toEqual({ apiKey: 'test-key', apiUrl: 'https://gateway.example.com/fc' });
   });
 
   it('WebFetch caches identical URLs within the TTL', async () => {

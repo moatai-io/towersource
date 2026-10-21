@@ -1,142 +1,60 @@
 ---
-title: "Sessions — AI Chat"
+title: "Sessions — Requests and Follow-up Work"
 icon: "💬"
 order: 2
 ---
 
-# Sessions -- AI Chat
+# Sessions — requests and follow-up work
 
-> A Session is your private conversation space with Claude AI. Ask questions, write code, analyze files, and request complex tasks.
+A Session records conversation and execution for analysis, writing, editing, and verification. It uses its Project's instructions and files; it does not automatically know every conversation from other Sessions.
 
----
+## Create and find Sessions
 
-## What is a Session?
+Choose an appropriate AI teammate or accessible Project and start a Session. Use a specific title such as “Monthly sales analysis” or “Help refresh.” You can ask AI to rename the current Session.
 
-A Session is a 1-on-1 conversation thread with AI. While Channels are shared team spaces, Sessions are your personal workspace.
+Ask AI to find earlier conversations when you need continuity. Search summaries are clues; verify important decisions against the actual conversation or maintained document.
 
-Each Session maintains its own conversation context. You can have multiple Sessions open and organize them by topic.
+Visibility depends on ownership, explicit sharing, and applicable Project or audience rules. Sessions are not universally private, and a link alone does not grant access.
 
----
+## Messages and source material
 
-## Creating a New Session
+- Normally **Enter** sends a message and **Shift+Enter** inserts a line break. Input composition and device settings may affect this.
+- Attach a file or image, or provide a Project file path.
+- Use the `/` menu to discover Skills exposed to this Project.
+- When voice input is available, dictate a draft and check it before sending. Microphone permission and a configured voice service are required.
 
-### Basic creation
+## Change direction during execution
 
-1. Select the **Sessions** tab in the Sidebar.
-2. Click the **+ button** at the top.
-3. A new Session opens with the input box focused.
+You can send follow-up instructions while AI is working. Delivery depends on the engine and execution state.
 
-### Creating within a Project
+- Pi supports mid-run steering. Check the composer's pending and delivered state.
+- Other execution paths may queue the message for a later turn.
+- A new instruction or Stop does not undo completed commands or external changes.
 
-When you create a Session while a Project is selected, the Session belongs to that project. The project's AI settings (`AGENTS.md`) are automatically applied.
+For an urgent scope reduction, be explicit: “Stop editing files and summarize only the evidence found so far.” After Stop, check what completed and whether any work remains active.
 
----
+## Questions, approvals, and progress
 
-## Sending Messages
+AI may present a structured question for a consequential choice. Answer through the available options or supply another answer. For deletion, deployment, or external sending, review the exact target and effect before approval.
 
-| Action | Shortcut |
-|--------|----------|
-| Send message | **Enter** |
-| Line break (new line) | **Shift + Enter** |
-| Stop streaming | **Escape** |
-| Cancel queued message | **Escape** |
+Long work may show **Work Steps**, which track the AI run. These are separate from your private **My Todo** list. A completed checklist is not proof that an artifact is correct; inspect the result and verification evidence.
 
-### Streaming
+## Support AI Sessions
 
-When you send a message, AI streams its response in real time. You will see text appear character by character as it is generated.
+The main AI can delegate substantial independent work to support AI. A support AI has a persistent Agent Session and execution history. Agent Sessions are classified separately from ordinary Chats; direct human participation does not automatically turn one into a Chat.
 
-### Message Queueing
+The main AI receives reports, verifies evidence, and integrates the result. See [Working with support AI](./10-support-ai.md) for delegation, reuse, and stopping work.
 
-If you send additional messages while AI is still responding, they enter a **queue**. Once the current response finishes, queued messages are sent in order.
+## Artifacts and continuity
 
-- Queued messages appear above the input box
-- Press **Escape** to cancel a queued message
-- Press **Escape** during streaming to stop the current response
+Check the saved path and right-side Viewer when AI creates a file. Name the existing file and exact section for revisions instead of requesting a new copy unnecessarily.
 
-This means you never have to wait -- just keep typing your follow-up questions.
+Sessions and support AI in the same Project can operate on the same files. Separate editing ownership and preserve other contributors' changes.
 
----
+For a handoff, ask for the goal, completed outputs, file paths, verification, and remaining work. Explicitly ask for a separate sidebar conversation when that is what you need.
 
-## Slash Commands
+## Example
 
-Type `/` in the input box to open the command menu. Slash commands let you trigger specific actions quickly. Browse the list or type to filter by name.
+> Compare the Korean and English help with the current code. Verify the findings, update the documents, and check relative links. Preserve other contributors' changes. Do not deploy or commit.
 
----
-
-## File Attachments
-
-You can send files to AI along with your message.
-
-### How to attach
-
-| Method | Description |
-|--------|-------------|
-| **Drag and drop** | Drag a file onto the input box |
-| **Clipboard paste** | Paste a screenshot or image with Ctrl+V |
-| **From File Tree** | Drag a file from the Sidebar file tree to the input box |
-
-Attached files are sent to AI with your message. Supported formats include images, PDFs, code files, and more.
-
----
-
-## Session Management
-
-### Renaming
-
-Click a Session's name in the list to rename it. Give it a descriptive name that matches the conversation topic -- it makes sessions much easier to find later.
-
-### Favorites (Pin)
-
-Pin frequently used Sessions for quick access:
-
-- Right-click a Session -- select **Pin**
-- View all pinned items in the **Pins** section at the bottom of the Sidebar
-
-### Deleting
-
-Remove Sessions you no longer need:
-
-- Right-click a Session -- select **Delete**
-- Deleted Sessions cannot be recovered
-
-### Moving Between Projects
-
-You can move a Session to a different project:
-
-- Right-click a Session -- select **Move to Project**
-- Choose the target project
-
----
-
-## Turn Metrics
-
-Each AI response shows turn metrics at the bottom.
-
-| Metric | Description |
-|--------|-------------|
-| **Token count** | Input/output tokens used in this turn |
-| **Model** | The AI model that generated the response |
-| **Duration** | Time taken to generate the response |
-
-Monitoring token usage helps you manage costs effectively.
-
----
-
-## Draft Auto-Save
-
-Whatever you type in the input box is automatically saved per session.
-
-- Switch to another Session -- your draft is preserved
-- Close and reopen the browser -- your draft is still there
-- Sending a message clears that Session's draft
-
-You will never lose a long message because you accidentally switched tabs or closed the browser.
-
----
-
-## Tips
-
-- **One topic per Session**: Do not mix multiple subjects in a single Session. AI understands context better when conversations are focused.
-- **Use Projects**: Assigning Sessions to projects lets AI automatically reference project settings.
-- **Queue your questions**: Do not wait for AI to finish -- send follow-up questions immediately. They are processed in order.
-- **Attach files directly**: Instead of saying "analyze this code," drag the file into the input box for more accurate results.
+Read completion reports as three distinct things: **what changed, which checks ran, and what remains unverified**.

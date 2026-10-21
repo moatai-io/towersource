@@ -184,7 +184,7 @@ describe('AI Service first-class operations home', () => {
     expect(source).toContain("err.name === 'AbortError'");
     expect(source).toContain("aiServices.home.ui.copyLink");
     expect(source).toContain("aria-label={i18n.t('aiServices.home.copy.copyShareLink')}");
-    expect(source).toContain('grid grid-cols-2 gap-2 sm:flex sm:flex-wrap');
+    expect(source).toContain('flex flex-wrap gap-2 [&>button]:shrink-0 [&>button]:whitespace-nowrap');
     expect(source).toContain("i18n.t('aiServices.home.ui.openAgent')");
     expect(source).not.toContain('웹사이트 열기');
     expect(source).toContain("i18n.t('aiServices.home.ui.openAdvanced')");

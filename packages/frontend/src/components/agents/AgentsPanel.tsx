@@ -6,6 +6,8 @@ import { useTranslation } from 'react-i18next';
 import { useSettingsStore } from '../../stores/settings-store';
 import { useSessionStore } from '../../stores/session-store';
 import { useProjectStore } from '../../stores/project-store';
+import { getModelIdForBackend, useModelStore } from '../../stores/model-store';
+import { getModelDisplayName } from '../layout/model-display';
 import { toastError, toastSuccess } from '../../utils/toast';
 
 interface AgentWorkerSummary {
@@ -85,6 +87,7 @@ function toForm(agent: AgentDefinition | null): AgentDefinition {
 
 export function AgentsPanel() {
   const { t } = useTranslation('common');
+  const { t: modelLabel } = useTranslation('layout');
   const open = useSettingsStore((s) => s.agentsPanelOpen);
   const setOpen = useSettingsStore((s) => s.setAgentsPanelOpen);
   const sessions = useSessionStore((s) => s.sessions);
@@ -101,6 +104,7 @@ export function AgentsPanel() {
   const [editing, setEditing] = useState(false);
   const [creating, setCreating] = useState(false);
   const [form, setForm] = useState<AgentDefinition>(() => ({ ...EMPTY_AGENT }));
+  const selectablePiModels = useModelStore((state) => state.piModels);
   const [runTask, setRunTask] = useState('');
   const [pendingRun, setPendingRun] = useState<{ agentId: string; task: string; at: number } | null>(null);
 
@@ -263,7 +267,7 @@ export function AgentsPanel() {
             <h2 className="text-[17px] font-bold text-gray-100">{t('agentsPanel.title')}</h2>
             <p className="mt-0.5 text-[13px] text-surface-500">{t('agentsPanel.description')}</p>
           </div>
-          <button onClick={() => setOpen(false)} className="p-1 text-gray-500 transition-colors hover:text-gray-300" aria-label="Close agents panel">
+          <button onClick={() => setOpen(false)} className="p-1 text-gray-500 transition-colors hover:text-gray-300" aria-label={t('agentsPanel.close', { defaultValue: '지원 AI 패널 닫기' })}>
             <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
           </button>
         </div>
@@ -282,7 +286,7 @@ export function AgentsPanel() {
             <div className="mb-3 flex items-center justify-between gap-2">
               <div className="text-[12px] font-semibold uppercase tracking-wider text-surface-500">{t('agentsPanel.roles')}</div>
               <div className="flex items-center gap-2">
-                {loading && <span className="text-[12px] text-surface-600">loading…</span>}
+                {loading && <span className="text-[12px] text-surface-600">{t('loading')}</span>}
                 <button onClick={beginCreate} className="rounded-md border border-primary-500/40 bg-primary-500/10 px-2 py-1 text-[12px] font-semibold text-primary-300 hover:bg-primary-500/15">{t('agentsPanel.add')}</button>
               </div>
             </div>
@@ -333,35 +337,38 @@ export function AgentsPanel() {
                     <label className="block text-[13px] font-semibold text-surface-400">ID
                       <input value={form.id} onChange={(e) => updateForm({ id: e.target.value })} placeholder="reviewer" className="mt-1 w-full rounded-lg border border-surface-700 bg-surface-950 px-3 py-2 font-mono text-[14px] text-surface-100 outline-none focus:border-primary-500/60" />
                     </label>
-                    <label className="block text-[13px] font-semibold text-surface-400">Display name
+                    <label className="block text-[13px] font-semibold text-surface-400">{t('agentsPanel.displayName', { defaultValue: '표시 이름' })}
                       <input value={form.displayName || ''} onChange={(e) => updateForm({ displayName: e.target.value })} placeholder={t('agentsPanel.placeholder.displayName')} className="mt-1 w-full rounded-lg border border-surface-700 bg-surface-950 px-3 py-2 text-[14px] text-surface-100 outline-none focus:border-primary-500/60" />
                     </label>
-                    <label className="block text-[13px] font-semibold text-surface-400 md:col-span-2">Role
+                    <label className="block text-[13px] font-semibold text-surface-400 md:col-span-2">{t('agentsPanel.role', { defaultValue: '역할' })}
                       <input value={form.role} onChange={(e) => updateForm({ role: e.target.value })} placeholder={t('agentsPanel.placeholder.role')} className="mt-1 w-full rounded-lg border border-surface-700 bg-surface-950 px-3 py-2 text-[14px] text-surface-100 outline-none focus:border-primary-500/60" />
                     </label>
-                    <label className="block text-[13px] font-semibold text-surface-400 md:col-span-2">Instruction
+                    <label className="block text-[13px] font-semibold text-surface-400 md:col-span-2">{t('agentsPanel.instruction', { defaultValue: '작업 지침' })}
                       <textarea value={form.instruction} onChange={(e) => updateForm({ instruction: e.target.value })} rows={8} placeholder={t('agentsPanel.placeholder.instruction')} className="mt-1 w-full rounded-lg border border-surface-700 bg-surface-950 px-3 py-2 text-[14px] leading-relaxed text-surface-100 outline-none focus:border-primary-500/60" />
                     </label>
-                    <label className="block text-[13px] font-semibold text-surface-400 md:col-span-2">Goal <span className="font-normal text-surface-600">optional</span>
+                    <label className="block text-[13px] font-semibold text-surface-400 md:col-span-2">{t('agentsPanel.goal', { defaultValue: '목표' })} <span className="font-normal text-surface-600">{t('agentsPanel.optional', { defaultValue: '선택 사항' })}</span>
                       <input value={form.goal || ''} onChange={(e) => updateForm({ goal: e.target.value })} placeholder={t('agentsPanel.placeholder.goal')} className="mt-1 w-full rounded-lg border border-surface-700 bg-surface-950 px-3 py-2 text-[14px] text-surface-100 outline-none focus:border-primary-500/60" />
                     </label>
-                    <label className="block text-[13px] font-semibold text-surface-400">Engine
+                    <label className="block text-[13px] font-semibold text-surface-400">{t('agentsPanel.engine', { defaultValue: '실행 엔진' })}
                       <select value={form.engine || ''} onChange={(e) => updateForm({ engine: (e.target.value || undefined) as AgentDefinition['engine'] })} className="mt-1 w-full rounded-lg border border-surface-700 bg-surface-950 px-3 py-2 text-[14px] text-surface-100 outline-none focus:border-primary-500/60">
-                        <option value="">default</option>
+                        <option value="">{t('agentsPanel.default', { defaultValue: '기본값' })}</option>
                         <option value="pi">pi</option>
                         <option value="claude">claude</option>
                       </select>
                     </label>
-                    <label className="block text-[13px] font-semibold text-surface-400">Visibility
+                    <label className="block text-[13px] font-semibold text-surface-400">{t('agentsPanel.visibility', { defaultValue: '표시 범위' })}
                       <select value={form.visibility} onChange={(e) => updateForm({ visibility: e.target.value as AgentDefinition['visibility'] })} className="mt-1 w-full rounded-lg border border-surface-700 bg-surface-950 px-3 py-2 text-[14px] text-surface-100 outline-none focus:border-primary-500/60">
-                        <option value="background">background</option>
-                        <option value="sidebar">sidebar</option>
-                        <option value="team">team</option>
-                        <option value="system">system</option>
+                        <option value="background">{t('agentsPanel.background', { defaultValue: '백그라운드' })}</option>
+                        <option value="sidebar">{t('agentsPanel.sidebar', { defaultValue: '사이드바' })}</option>
+                        <option value="team">{t('agentsPanel.team', { defaultValue: '팀 공유' })}</option>
+                        <option value="system">{t('agentsPanel.system', { defaultValue: '시스템' })}</option>
                       </select>
                     </label>
-                    <label className="block text-[13px] font-semibold text-surface-400 md:col-span-2">Model <span className="font-normal text-surface-600">optional</span>
-                      <input value={form.model || ''} onChange={(e) => updateForm({ model: e.target.value })} placeholder="litellm-responses/smartest" className="mt-1 w-full rounded-lg border border-surface-700 bg-surface-950 px-3 py-2 font-mono text-[14px] text-surface-100 outline-none focus:border-primary-500/60" />
+                    <label className="block text-[13px] font-semibold text-surface-400 md:col-span-2">{t('agentsPanel.model', { defaultValue: '모델' })} <span className="font-normal text-surface-600">{t('agentsPanel.optional', { defaultValue: '선택 사항' })}</span>
+                      <select value={form.model || ''} onChange={(e) => updateForm({ model: e.target.value || undefined })} className="mt-1 w-full rounded-lg border border-surface-700 bg-surface-950 px-3 py-2 font-mono text-[14px] text-surface-100 outline-none focus:border-primary-500/60">
+                        <option value="">{t('agentsPanel.workspaceDefault', { defaultValue: '워크스페이스 기본값' })}</option>
+                        {selectablePiModels.map((model) => <option key={model.id} value={getModelIdForBackend(model.id)}>{model.kind === 'direct' ? 'Direct · ' : 'Auto · '}{getModelDisplayName(model, modelLabel)}</option>)}
+                      </select>
                     </label>
                   </div>
                 </div>
@@ -413,7 +420,7 @@ export function AgentsPanel() {
                 </div>
 
                 <section className="rounded-2xl border border-surface-800 bg-surface-950/25 p-5">
-                  <h4 className="mb-3 text-[13px] font-bold uppercase tracking-wider text-surface-500">Instruction</h4>
+                  <h4 className="mb-3 text-[13px] font-bold uppercase tracking-wider text-surface-500">{t('agentsPanel.instruction', { defaultValue: '작업 지침' })}</h4>
                   <pre className="max-h-64 overflow-auto whitespace-pre-wrap rounded-xl border border-surface-800 bg-black/20 p-4 text-[13px] leading-relaxed text-surface-300">{selected.instruction}</pre>
                 </section>
 
@@ -422,7 +429,7 @@ export function AgentsPanel() {
                     <h4 className="mb-3 text-[13px] font-bold uppercase tracking-wider text-surface-500">{t('agentsPanel.recentActivity')}</h4>
                     <div className="grid gap-4 md:grid-cols-2">
                       <div>
-                        <div className="text-[12px] font-semibold uppercase tracking-wider text-surface-600">Latest run</div>
+                        <div className="text-[12px] font-semibold uppercase tracking-wider text-surface-600">{t('agentsPanel.latestRun', { defaultValue: '최근 실행' })}</div>
                         <div className="mt-2 rounded-xl border border-surface-800 bg-black/15 p-3 text-[13px] leading-relaxed text-surface-300">
                           {selected.latestRun ? (
                             <>
@@ -430,7 +437,7 @@ export function AgentsPanel() {
                               <div>{selected.latestRun.result_summary || selected.latestRun.error || t('agentsPanel.noSummary')}</div>
                               {Array.isArray(selected.latestRun.artifact_paths) && selected.latestRun.artifact_paths.length > 0 && (
                                 <div className="mt-2 space-y-1 text-[12px] text-surface-500">
-                                  <div className="font-semibold uppercase tracking-wider">Detail artifacts</div>
+                                  <div className="font-semibold uppercase tracking-wider">{t('agentsPanel.detailArtifacts', { defaultValue: '상세 산출물' })}</div>
                                   {selected.latestRun.artifact_paths.slice(0, 5).map((artifactPath, index) => (
                                     <div key={`${index}-${String(artifactPath)}`} className="font-mono break-all">{String(artifactPath)}</div>
                                   ))}
@@ -441,7 +448,7 @@ export function AgentsPanel() {
                         </div>
                       </div>
                       <div>
-                        <div className="text-[12px] font-semibold uppercase tracking-wider text-surface-600">State card</div>
+                        <div className="text-[12px] font-semibold uppercase tracking-wider text-surface-600">{t('agentsPanel.stateCard', { defaultValue: '상태 카드' })}</div>
                         <div className="mt-2 rounded-xl border border-surface-800 bg-black/15 p-3 text-[13px] leading-relaxed text-surface-300">
                           {selected.stateCard ? (
                             <>
@@ -453,7 +460,7 @@ export function AgentsPanel() {
                       </div>
                     </div>
                     {selected.worker?.backing_session_id && (
-                      <div className="mt-3 text-[13px] text-surface-500">Backing session: <span className="font-mono text-surface-300">{selected.worker.backing_session_id}</span></div>
+                      <div className="mt-3 text-[13px] text-surface-500">{t('agentsPanel.backingSession', { defaultValue: '작업 세션' })}: <span className="font-mono text-surface-300">{selected.worker.backing_session_id}</span></div>
                     )}
                   </section>
                 )}

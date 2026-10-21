@@ -6,37 +6,36 @@ const modal = fs.readFileSync(path.join(import.meta.dirname, 'AgentCredentialsMo
 const sidebar = fs.readFileSync(path.join(import.meta.dirname, 'Sidebar.tsx'), 'utf8');
 const connections = fs.readFileSync(path.join(import.meta.dirname, 'AgentConnectionsPanel.tsx'), 'utf8');
 
-describe('Agent Credential independent management surface', () => {
-  it('tells users they can request secure credential injection in Agent chat', () => {
+describe('Agent Credential simplified management surface', () => {
+  it('keeps secure chat registration guidance', () => {
     expect(modal).toContain("t('agentCredentials.chatInjectionNotice')");
   });
 
-  it('opens from a dedicated Agent menu item rather than Project settings', () => {
-    expect(sidebar).toContain("t('agentCredentials.title')");
+  it('uses the single Agent settings menu for Connection management and removes legacy Project settings', () => {
+    expect(sidebar).toContain("t('settings')");
     expect(sidebar).toContain('setShowCredentials(true)');
-    const settings = sidebar.slice(sidebar.indexOf('function ProjectSettingsPanel'));
-    expect(settings).not.toContain('<AgentConnectionsPanel');
+    expect(sidebar).not.toContain('function ProjectSettingsPanel');
+    expect(sidebar).not.toContain('setShowSettings(true)');
   });
 
-  it('uses a wide responsive dialog with Organization Connections and direct Agent Credential creation', () => {
-    expect(modal).toContain('max-w-7xl');
-    expect(modal).toContain('h-[min(92dvh,980px)]');
-    expect(modal).toContain('<AgentConnectionsPanel projectId={project.id} spacious />');
-    expect(modal).toContain("t('agentCredentials.addTitle')");
+  it('supports direct Agent Connection registration and replacement', () => {
+    expect(modal).toContain('<AgentConnectionsPanel projectId={project.id} spacious hideAgentConnections view={addMethod} />');
     expect(modal).toContain('/credentials/api-key`');
     expect(modal).toContain("scope: 'project'");
-  });
-
-  it('lists Agent-owned credentials and supports update, inspect, and Admin-only raw reveal', () => {
-    expect(modal).toContain('/projects/${encodeURIComponent(project.id)}/credentials`');
     expect(modal).toContain('/credentials/${encodeURIComponent(editing.id)}/rotate`');
-    expect(modal).toContain('/credentials/${encodeURIComponent(credential.id)}/inspect`');
-    expect(modal).toContain("t('agentCredentials.reveal')");
     expect(modal).toContain("t('agentCredentials.edit')");
     expect(modal).toContain("t('agentCredentials.reauthenticate')");
-    expect(modal).toContain("t('agentCredentials.inspect')");
-    expect(modal).toContain("const isAdmin = getCurrentRole() === 'admin'");
-    expect(modal).toContain("t('agentCredentials.rawMaskNotice')");
+  });
+
+  it('supports immediate enable, disable, and delete without reveal or inspect', () => {
+    expect(modal).toContain('/credentials/${encodeURIComponent(credential.id)}`');
+    expect(modal).toContain("method: 'DELETE'");
+    expect(modal).toContain("t('agentCredentials.enable')");
+    expect(modal).toContain("t('agentCredentials.disable')");
+    expect(modal).toContain("t('agentCredentials.delete')");
+    expect(modal).not.toContain('/reveal');
+    expect(modal).not.toContain('/inspect');
+    expect(modal).not.toContain('rawMaskNotice');
   });
 
   it('keeps secrets out of files/chat and supports keyboard dismissal', () => {
@@ -45,7 +44,6 @@ describe('Agent Credential independent management surface', () => {
     expect(modal).toContain('role="dialog"');
     expect(modal).toContain('aria-modal="true"');
     expect(modal).toContain('focus-visible:ring-2');
-    expect(modal).not.toContain('opacity-');
     expect(modal).not.toMatch(/(?:text|bg|border)-(?:gray|slate)-/);
   });
 

@@ -1,7 +1,7 @@
 import { getModelDefaults, loadModelsFile, saveModelsFile, type PiModelEntry } from '../../config.js';
 import { getSecret, setSecret } from '../secret/secret-store.js';
 
-export type PublicInferenceProvider = 'openrouter' | 'openai-responses-compatible';
+export type PublicInferenceProvider = 'openrouter';
 
 const PROVIDERS: Record<PublicInferenceProvider, {
   secretName: string;
@@ -19,14 +19,6 @@ const PROVIDERS: Record<PublicInferenceProvider, {
     badge: 'OR',
     api: 'openai-completions',
   },
-  'openai-responses-compatible': {
-    secretName: 'TOWER_INFERENCE_RESPONSES_API_KEY',
-    defaultBaseUrl: 'https://api.openai.com/v1',
-    defaultModel: 'gpt-5.6-terra',
-    displayName: 'OpenAI-compatible Responses',
-    badge: 'API',
-    api: 'openai-responses',
-  },
 };
 
 function providerConfig(provider: string) {
@@ -37,7 +29,7 @@ function providerConfig(provider: string) {
 
 function normalizedBaseUrl(value: string | undefined, fallback: string): string {
   const url = (value || fallback).trim().replace(/\/$/, '');
-  if (!/^https?:\/\//i.test(url)) throw new Error('Base URL must start with http:// or https://');
+  if (url !== 'https://openrouter.ai/api/v1') throw new Error('Tower direct inference supports only the official OpenRouter endpoint');
   return url;
 }
 
@@ -52,16 +44,9 @@ export async function probeInferenceProvider(input: {
   if (!apiKey) throw new Error('API key is required');
   const baseUrl = normalizedBaseUrl(input.baseUrl, config.defaultBaseUrl);
   const modelId = (input.modelId || config.defaultModel).trim();
-  if (!modelId) throw new Error('Model ID is required');
+  if (!modelId.startsWith('openrouter/') || modelId.length <= 'openrouter/'.length) throw new Error('OpenRouter model ID required');
   const startedAt = Date.now();
-  const response = input.provider === 'openrouter'
-    ? await fetch(`${baseUrl}/key`, { headers: { Authorization: `Bearer ${apiKey}` }, signal: AbortSignal.timeout(15_000) })
-    : await fetch(`${baseUrl}/responses`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model: modelId, input: 'Reply with OK.', max_output_tokens: 8 }),
-        signal: AbortSignal.timeout(30_000),
-      });
+  const response = await fetch(`${baseUrl}/key`, { headers: { Authorization: `Bearer ${apiKey}` }, signal: AbortSignal.timeout(15_000) });
   if (!response.ok) {
     const text = await response.text().catch(() => '');
     throw new Error(`Provider rejected the connection (${response.status})${text ? `: ${text.slice(0, 240)}` : ''}`);
@@ -78,7 +63,7 @@ function publicModelEntry(provider: PublicInferenceProvider, modelId: string): P
     badge: config.badge,
     enabled: true,
     api: config.api,
-    reasoning: provider === 'openai-responses-compatible',
+    reasoning: false,
     contextWindow: 200000,
     maxTokens: 64000,
     roles: ['full', 'managed', 'standalone'],
@@ -95,6 +80,7 @@ export async function configureInferenceProvider(input: {
   const config = providerConfig(input.provider);
   const baseUrl = normalizedBaseUrl(input.baseUrl, config.defaultBaseUrl);
   const modelId = (input.modelId || config.defaultModel).trim();
+  if (!modelId.startsWith('openrouter/') || modelId.length <= 'openrouter/'.length) throw new Error('OpenRouter model ID required');
   const probe = await probeInferenceProvider({ ...input, baseUrl, modelId });
   await setSecret({
     name: config.secretName,

@@ -170,7 +170,7 @@ function openAgentSession(e: React.MouseEvent, sessionId: string) {
 function AgentSessionLink({
   sessionId,
   label,
-  title = "Open Agent Session in main tab",
+  title,
 }: {
   sessionId?: string;
   label?: string;
@@ -184,13 +184,41 @@ function AgentSessionLink({
       href={href}
       onClick={(e) => openAgentSession(e, sessionId)}
       className="inline-flex max-w-[260px] items-center gap-1 rounded-md px-1.5 py-0.5 text-[12px] font-medium text-surface-500 transition-colors hover:bg-white/5 hover:text-surface-300"
-      title={title}
+      title={title ?? t("agentCard.openSessionMain", { defaultValue: "작업 세션을 메인 탭에서 열기" })}
     >
       <span aria-hidden="true" className="text-surface-600">
         ↗
       </span>
       <span className="truncate">{label || t("agentCard.openSession")}</span>
     </a>
+  );
+}
+
+// Only link sessions already visible to this viewer. A missing list entry is
+// not proof of denial; keep the provenance label without fetching private metadata.
+function AgentCommunicationRoute({
+  fromId, fromName, toId, toName,
+}: {
+  fromId?: string; fromName?: string; toId?: string; toName?: string;
+}) {
+  const { t } = useTranslation("chat");
+  const sessions = useSessionStore((s) => s.sessions);
+  const endpoint = (id: string | undefined, fallback: string | undefined, role: "sender" | "recipient") => {
+    const session = id ? sessions.find((s) => s.id === id || s.shortCode === id) : undefined;
+    const name = session?.name || fallback || t(`agentCard.${role}`);
+    const title = t(`agentCard.${role}Named`, { name });
+    return session ? (
+      <AgentSessionLink sessionId={session.id} label={name} title={title} />
+    ) : (
+      <span className="min-w-0 max-w-[260px] truncate px-1.5 py-0.5" title={title}>{name}</span>
+    );
+  };
+  return (
+    <div className="flex min-w-0 flex-wrap items-center gap-1 px-2 py-1 text-[12px] text-surface-500" aria-label={t("agentCard.communicationRoute")}>
+      {endpoint(fromId, fromName, "sender")}
+      <span aria-hidden="true">→</span>
+      {endpoint(toId, toName, "recipient")}
+    </div>
   );
 }
 
@@ -369,6 +397,15 @@ export function AgentOriginBubble({
     (typeof meta.parentSessionName === "string"
       ? meta.parentSessionName
       : undefined);
+  const currentSessionId = useChatStore((s) => s.sessionId) || undefined;
+  const isIncomingRequest = !!metadata.agentSend;
+  const communicationRoute = (
+    <AgentCommunicationRoute
+      fromId={isIncomingRequest ? parentSessionId : backingSessionId}
+      fromName={isIncomingRequest ? parentSessionName || meta.fromName : agentName}
+      toId={currentSessionId}
+    />
+  );
   const cardKey = `agent-origin:${message.id}`;
   const [expanded, setExpanded] = useState(
     agentCardUiState.expanded.get(cardKey)?.expanded || false,
@@ -408,6 +445,7 @@ export function AgentOriginBubble({
               {agentIdentityLine}
             </div>
           )}
+          {communicationRoute}
           {summary && !expanded && (
             <div className="mt-1 line-clamp-4 whitespace-pre-wrap text-msg-size leading-relaxed text-surface-200">
               {renderAgentText(summary, onFileClick)}
@@ -496,14 +534,14 @@ export function AgentOriginBubble({
                       ? t("agentCard.parentNamed", { name: parentSessionName })
                       : t("agentCard.openParentSession")
                   }
-                  title="Open parent session"
+                  title={t("agentCard.openParentSession", { defaultValue: "부모 세션 열기" })}
                 />
               )}
               {backingSessionId && (
                 <AgentSessionLink
                   sessionId={backingSessionId}
                   label={t("agentCard.openFullConversation")}
-                  title="Open Agent backing session"
+                  title={t("agentCard.openBackingSession", { defaultValue: "작업 세션 열기" })}
                 />
               )}
             </div>
@@ -538,6 +576,12 @@ export function AgentCard({
   const promptPreview = getAgentPromptPreview(tool.name, tool.input);
   const resultMeta = parseAgentWorkerResult(tool.result, tool.input);
   const agentName = resultMeta?.name || description;
+  const currentSessionId = useChatStore((s) => s.sessionId) || undefined;
+  const targetSessionId = resultMeta?.backingSessionId ||
+    (typeof tool.input.session_id === "string" ? tool.input.session_id : undefined);
+  const communicationRoute = (
+    <AgentCommunicationRoute fromId={currentSessionId} toId={targetSessionId} toName={agentName} />
+  );
   const agentFace =
     resultMeta?.face ||
     (typeof tool.input.face === "string" ? tool.input.face : undefined);
@@ -662,6 +706,7 @@ export function AgentCard({
             </div>
           </div>
         </button>
+        {communicationRoute}
       </div>
     );
   }
@@ -727,9 +772,6 @@ export function AgentCard({
               />
             </svg>
           </div>
-          <div className="pl-9 pt-1">
-            <AgentSessionLink sessionId={resultMeta?.backingSessionId} />
-          </div>
           <span className="block pl-9 pt-1 text-[12px] font-medium text-surface-500 group-hover/agent-card:text-surface-300">
             {t("agentCard.collapseRequest")}
           </span>
@@ -745,6 +787,7 @@ export function AgentCard({
           )}
         </button>
 
+        {communicationRoute}
         <div className="border-t border-surface-700/35 px-3.5 py-2.5 space-y-2">
           {agentIsRunning && (
             <div className="text-[13px] text-surface-500">

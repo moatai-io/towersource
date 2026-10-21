@@ -1,3 +1,4 @@
+import { towerHttpUrl } from '../../features/client-connection/connection';
 import { useTranslation } from 'react-i18next';
 
 interface OfficePreviewToolbarProps {
@@ -19,7 +20,7 @@ export function OfficePreviewToolbar({
   const { t } = useTranslation('files');
   const token = localStorage.getItem('token') || '';
   const fileName = fileNameOf(filePath);
-  const downloadUrl = `/api/files/serve?path=${encodeURIComponent(filePath)}&download=1&token=${encodeURIComponent(token)}`;
+  const downloadUrl = towerHttpUrl(`/api/files/serve?path=${encodeURIComponent(filePath)}&download=1&token=${encodeURIComponent(token)}`);
 
   return (
     <div className="flex items-center gap-2 px-3 py-2 border-b border-surface-700 bg-surface-900/95 shrink-0">

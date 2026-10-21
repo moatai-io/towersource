@@ -1,3 +1,6 @@
+import { buildDownloadCommand, DOWNLOAD_TIMEOUT_MAX_SEC, type DownloadRequest, normalizeDownloadRequest } from '../services/execution/downloads/download-contract.js';
+import { requireCurrentAgentExecutionAccess } from '../services/authority/agent-execution-access.js';
+import { resolveProjectExecutionContext } from '../services/project-environment/project-execution-context.js';
 /**
  * pi-runtime-box-tools.ts — Pi native tools for Project execution.
  *
@@ -25,17 +28,14 @@ import {
 } from '../services/runtime-box/runtime-box-manager.js';
 import {
   listServices,
-  registerService,
-  startServiceProcess,
   stopService,
   readServiceLogs,
   formatServiceList,
 } from '../services/runtime-box/service-registry.js';
 import {
   classifyCommand,
-  extractPortFromCommand,
   isSimpleFileInspectionCommand,
-} from '../services/runtime-box/command-classifier.js';
+} from '../services/execution/command-classifier.js';
 import { RUNTIME_BOX_EXEC_TIMEOUT_MAX_SEC } from '../services/runtime-box/types.js';
 import {
   importProjectPrefixWorkbenchTools,
@@ -59,15 +59,18 @@ import {
 } from '../services/runtime-box/workbench-runtime-recreate.js';
 import type { RuntimeContext } from '../services/runtime-box/types.js';
 import { projectWorkbenchToolInventory } from '../services/runtime-box/workbench-tool-inventory.js';
-import { assertExperimentalWorkbenchToolAccess, isExperimentalUnifiedShellVisible, isExperimentalWorkbenchToolVisible } from '../services/runtime-box/workbench-tool-experiment-policy.js';
+import { assertExperimentalWorkbenchToolAccess, isExperimentalWorkbenchToolVisible } from '../services/runtime-box/workbench-tool-experiment-policy.js';
 import { recordFileEdit } from '../services/workspace/file-edit-log.js';
 import { isUserFacingSessionFile } from '../services/session/session-file-filter.js';
-import { executeWorkbenchRequest, type WorkbenchExecutionRequest } from '../services/runtime-box/workbench-execution-broker.js';
-import { resolveWorkbenchDeploymentId, selectPersistedWorkbenchExecutionProvider } from '../services/runtime-box/workbench-execution-provider-selector.js';
+import { executeWorkbenchRequest, type WorkbenchExecutionRequest } from '../services/execution/execution-broker.js';
+import { requiredWorkerExecutorCapabilities, selectProjectExecutionProvider } from '../services/execution/executor-selector.js';
+import { resolveProjectEnvironmentDeploymentId } from '../services/project-environment/project-environment-deployment.js';
 import { resolveRemoteWorkbenchCredentialEnv } from '../services/runtime-box/workbench-remote-credential-resolution.js';
+import { workbenchCredentialDiagnostics } from '../services/runtime-box/workbench-credential-diagnostics.js';
+import { prepareWorkbenchCredentials } from '../services/runtime-box/workbench-credential-preparation.js';
 import { resolveOperatorExecution } from '../services/runtime-box/workbench-operator-execution.js';
-import { getProjectComputeDeploymentBinding, getProjectComputeSettings } from '../services/runtime-box/workbench-project-compute-settings.js';
-import { cancelWorkbenchJob, getWorkbenchJob, listWorkbenchJobs } from '../services/runtime-box/workbench-job-registry.js';
+import { resolveEffectiveWorkbenchBinding } from '../services/runtime-box/workbench-effective-binding.js';
+import { cancelWorkbenchJob, getWorkbenchJob, listWorkbenchJobs } from '../services/execution/jobs/job-registry.js';
 import { requestLocalWorkbenchJobCancel } from '../services/runtime-box/workbench-job-runner.js';
 import {
   inspectWorkbenchProcess,
@@ -91,6 +94,8 @@ const EnvSchema = Type.Record(Type.String(), Type.String(), {
 });
 
 const WorkbenchExecuteParams = Type.Object({
+  gwsConnectionId: Type.Optional(Type.String({ minLength: 1, maxLength: 120, pattern: '^[A-Za-z0-9_-]+$', description: 'Existing project-authorized GWS connection ID required by a wrapper. Not a credential value or permission grant.' })),
+  credentialRequirements: Type.Optional(Type.Array(Type.String({ pattern: '^[A-Z][A-Z0-9_]{0,62}[A-Z0-9]$' }), { maxItems: 32, uniqueItems: true, description: 'Exact Credential environment names needed by this command or wrapper, never values. Worker execution still checks Vault access and suppresses credentials for install/unsafe commands. Not a permission grant.' })),
   command: Type.String({ minLength: 1, maxLength: 2000, description: 'Command or process to run in the shared Agent Workbench.' }),
   cwd: Type.Optional(Type.String({ description: 'Working directory. Project users use /workspace; Organization Admins may use allowlisted Tower source or organization workspace host paths through Operator Runtime.' })),
   lifecycle: Type.Optional(Type.Union([
@@ -117,6 +122,18 @@ const WorkbenchJobGetParams = Type.Object({
 
 const WorkbenchJobCancelParams = Type.Object({
   jobId: Type.Integer({ minimum: 1, description: 'Queued or running Workbench Job id.' }),
+});
+
+const ProjectDownloadParams = Type.Object({
+  url: Type.String({ description: 'Public HTTPS URL without credentials, query or fragment.' }),
+  destination: Type.String({ description: 'Project-relative new file. Partial data and checkpoint are preserved.' }),
+  expectedBytes: Type.Optional(Type.Integer({ minimum: 0 })),
+  sha256: Type.Optional(Type.Union([Type.String({ pattern: '^[a-fA-F0-9]{64}$' }), Type.Null()], { description: 'Supply one checksum only. Use null or omit when using MD5; never invent a hash.' })),
+  md5: Type.Optional(Type.Union([Type.String({ pattern: '^[a-fA-F0-9]{32}$' }), Type.Null()], { description: 'Official manifest MD5. Use null or omit when using SHA-256. Not adversarial authenticity.' })),
+  timeoutSec: Type.Optional(Type.Integer({ minimum: 1, maximum: DOWNLOAD_TIMEOUT_MAX_SEC })),
+  connectTimeoutSec: Type.Optional(Type.Integer({ minimum: 1, maximum: 120 })),
+  idleTimeoutSec: Type.Optional(Type.Integer({ minimum: 1, maximum: 600 })),
+  maxAttempts: Type.Optional(Type.Integer({ minimum: 1, maximum: 5 })),
 });
 
 const ProjectProcessParams = Type.Object({
@@ -311,9 +328,6 @@ function formatBanner(ctx: RuntimeContext): string {
     ? ctx.services_running.map(s => `${s.name}${s.port ? `:${s.port}` : ''}`).join(', ')
     : '없음';
 
-  const profileLine = ctx.credential_profiles && ctx.credential_profiles.length > 0
-    ? ctx.credential_profiles.map(p => `${p.display_name} (env: ${[...p.env_names, ...p.secret_env_names].join(', ') || 'none'})`).join('; ')
-    : '없음';
   const credentialLine = ctx.credential_env && (
     ctx.credential_env.injected.length > 0 ||
     ctx.credential_env.materialized_files.length > 0 ||
@@ -356,7 +370,6 @@ function formatBanner(ctx: RuntimeContext): string {
     `Services: ${svcLine}`,
     `Readiness: ${readinessLine}`,
     `Harness preferred: ${harnessLine}`,
-    `Credential profiles: ${profileLine}`,
     `Credential env: ${credentialLine}`,
     `Limits: ${ctx.box_limits.memory_mb}MB RAM / ${ctx.box_limits.cpu} CPU / idle stop ${ctx.box_limits.idle_stop_minutes}m`,
   ].join('\n');
@@ -413,15 +426,9 @@ function formatRuntimeTiming(totalMs: number, commandMs?: number): string {
  * Create Pi native Runtime Box tools for one project-scoped session.
  * The project/user/session identity is closed over here so the AI cannot forge it.
  */
-export function createRuntimeBoxPiTools(ctx: RuntimeBoxToolContext & { workbenchRolloutEnabled?: boolean }): ToolDefinition[] {
+export function createRuntimeBoxPiTools(ctx: RuntimeBoxToolContext & { workbenchRolloutEnabled?: boolean; runtimeBoxCompatibilityEnabled?: boolean }): ToolDefinition[] {
   const projectLabel = ctx.projectName || ctx.projectId;
 
-  const experimentalUnifiedShellVisible = isExperimentalUnifiedShellVisible({
-    projectId: ctx.projectId,
-    role: ctx.userRole,
-    sessionId: ctx.sessionId,
-    rolloutEnabled: ctx.workbenchRolloutEnabled,
-  });
   const experimentalWorkbenchToolsVisible = isExperimentalWorkbenchToolVisible({
     projectId: ctx.projectId,
     role: ctx.userRole,
@@ -622,63 +629,75 @@ export function createRuntimeBoxPiTools(ctx: RuntimeBoxToolContext & { workbench
   const workbenchExecuteTool: ToolDefinition = {
     name: 'bash',
     label: 'Bash',
-    description: `Run a shell command in the persistent working computer for project "${projectLabel}". Commands start in /workspace; Organization Admins can also target allowlisted Tower source and organization workspace paths through Operator Runtime.`,
-    promptSnippet: 'Use bash naturally for Project commands, package installation, tests, builds, scripts, and servers. Organization Admin host paths are routed to the credential-free Operator Runtime; Tower routes ordinary commands to the Project authority.',
+    description: `Run a shell command in the Project execution environment for "${projectLabel}". Commands start in /workspace and stay inside this Project.`,
+    promptSnippet: 'Use bash naturally for Project commands, package installation, tests, builds, scripts, and servers. Tower routes this Agent to its Project execution environment; Operator access is a separate native host permission.',
     promptGuidelines: [
-      'Use one outcome-oriented request; Tower classifies foreground, job, or service.',
+      'Use one outcome-oriented request. Tower only infers Job/Service for a single unambiguous invocation; pipelines, compound commands and unknown shell syntax default to foreground.',
       'Risky command patterns fail closed in this unified path.',
       'Long bounded commands return a durable Job handle that can outlive this Session.',
-      'Servers and watchers become managed Services with tracked logs, ports, TTL, and stop controls.',
+      'For compound or wrapper-based long-running commands, explicitly request lifecycle=service (or lifecycle=job for bounded work). Set service.port explicitly when it cannot be inferred. Managed Services have tracked logs, ports, TTL and stop controls.',
       'Install and combine project-scoped CLI tools freely when safe.',
       'Treat /workspace as the Project root. Only Organization Admins may target allowlisted Tower source or organization workspace host paths; this never grants Credential values or unbounded host access.',
     ],
     parameters: WorkbenchExecuteParams,
-    async execute(_toolCallId: string, params: WorkbenchExecutionRequest) {
+    async execute(_toolCallId: string, params: WorkbenchExecutionRequest, signal?: AbortSignal) {
+      let credentialSelection: ReturnType<typeof workbenchCredentialDiagnostics> | undefined;
       try {
+        const currentAccess = await requireCurrentAgentExecutionAccess(ctx);
         const operatorResolution = resolveOperatorExecution({
           request: params,
-          actorRole: ctx.userRole,
+          actorRole: currentAccess.userRole,
           projectRoot: ctx.projectRoot,
         });
         const routedParams = operatorResolution.request;
-        const deploymentId = resolveWorkbenchDeploymentId();
-        const deploymentBinding = await getProjectComputeDeploymentBinding(ctx.projectId, deploymentId).catch(error => {
-          if (error instanceof Error && error.message.includes('relation "project_compute_deployment_bindings" does not exist')) return undefined;
-          throw error;
-        });
-        const computeSettings = deploymentBinding ?? (deploymentId === 'development'
-          ? await getProjectComputeSettings(ctx.projectId).catch(error => {
-            if (error instanceof Error && error.message.includes('relation "project_compute_settings" does not exist')) return undefined;
-            throw error;
-          })
-          : undefined);
-        const provider = await selectPersistedWorkbenchExecutionProvider({
+        const deploymentId = resolveProjectEnvironmentDeploymentId();
+        const computeSettings = await resolveEffectiveWorkbenchBinding(ctx.projectId, deploymentId);
+        const requiredCapabilities = requiredWorkerExecutorCapabilities({ authorityMode: computeSettings?.authorityMode, actorRole: currentAccess.userRole });
+        const executionContext = await resolveProjectExecutionContext({
           projectId: ctx.projectId,
           actorUserId: Number(ctx.userId),
-          projectRoot: ctx.projectRoot,
-          defaultWorkerId: operatorResolution.operatorPlane ? undefined : computeSettings?.defaultWorkerId ?? undefined,
-          workstationMode: operatorResolution.operatorPlane ? true : computeSettings?.workstationMode,
-          authorityMode: operatorResolution.operatorPlane ? 'operator-plane' : computeSettings?.authorityMode,
-          actorRole: ctx.userRole,
+          sessionId: ctx.sessionId,
           deploymentId,
+          requiredCapabilities,
+          expectedProjectRoot: ctx.projectRoot,
+        });
+        const provider = await selectProjectExecutionProvider({
+          projectId: ctx.projectId,
+          actorUserId: Number(ctx.userId),
+          sessionId: ctx.sessionId,
+          projectRoot: executionContext.projectRoot,
+          defaultWorkerId: executionContext.preferredExecutorId,
+          workstationMode: executionContext.environmentMode === 'legacy-worker-workspace',
+          authorityMode: computeSettings?.authorityMode,
+          actorRole: currentAccess.userRole,
+          deploymentId,
+          runtimeBoxCompatibilityEnabled: ctx.runtimeBoxCompatibilityEnabled,
+          executionContext,
           request: routedParams,
         });
-        const request = provider.kind === 'remote-worker' && operatorResolution.credentialMode !== 'none'
-          ? (await resolveRemoteWorkbenchCredentialEnv({
+        const credentialResolution = provider.kind === 'remote-worker'
+          ? await prepareWorkbenchCredentials(provider, () => resolveRemoteWorkbenchCredentialEnv({
             projectId: ctx.projectId,
             userId: Number(ctx.userId),
+            projectRoot: ctx.projectRoot,
             request: routedParams,
-          })).request
-          : { ...routedParams, env: routedParams.env ? { ...routedParams.env } : undefined };
+          }))
+          : undefined;
+        const request = credentialResolution?.request
+          ?? { ...routedParams, env: routedParams.env ? { ...routedParams.env } : undefined };
+        credentialSelection = credentialResolution
+          ? workbenchCredentialDiagnostics(credentialResolution) : undefined;
         const result = await executeWorkbenchRequest({
           request,
-          context: { projectId: ctx.projectId, userId: ctx.userId, sessionId: ctx.sessionId },
+          signal,
+          context: { projectId: ctx.projectId, userId: ctx.userId, sessionId: ctx.sessionId, ...currentAccess },
           provider,
         });
         const execution = result.execution;
         if (execution.lifecycle === 'service') {
           return textResult(JSON.stringify({
             plan: result.plan,
+            credentialSelection,
             process: { handle: `service:${execution.service.id}`, kind: 'service', state: execution.service.status },
             service: execution.service,
           }, null, 2));
@@ -686,6 +705,7 @@ export function createRuntimeBoxPiTools(ctx: RuntimeBoxToolContext & { workbench
         if (execution.lifecycle === 'job') {
           return textResult(JSON.stringify({
             plan: result.plan,
+            credentialSelection,
             durable: true,
             process: { handle: `job:${execution.job.id}`, kind: 'job', state: execution.job.status },
             job: execution.job,
@@ -696,17 +716,50 @@ export function createRuntimeBoxPiTools(ctx: RuntimeBoxToolContext & { workbench
         recordRuntimeBoxTouchedFiles(ctx.sessionId, 'bash', touchedFiles);
         return textResult(JSON.stringify({
           plan: result.plan,
+          credentialSelection,
           execution: {
             lifecycle: execution.lifecycle,
             outcome: execution.outcome,
             stdout: runtime.stdout,
             stderr: runtime.stderr,
-            runtimeContext: runtime.runtime_context,
+            runtimeContext: credentialResolution ? {
+              ...runtime.runtime_context,
+              credential_env: {
+                ...runtime.runtime_context.credential_env,
+                suppressed: credentialResolution.suppressed,
+                suppress_reason: credentialResolution.suppressReason,
+              },
+            } : runtime.runtime_context,
           },
         }, null, 2), !execution.outcome.ok);
       } catch (error) {
-        return textResult(`[Workbench Execution Error] ${(error as Error).message}`, true);
+        return textResult(JSON.stringify({
+          error: `[Project execution error] ${(error as Error).message}`,
+          credentialSelection,
+          credentialSelectionStatus: credentialSelection ? 'resolved-before-execution-failure' : 'unavailable',
+        }, null, 2), true);
       }
+    },
+  } as ToolDefinition;
+
+  const projectDownloadTool = {
+    name: 'project_download', label: 'Project download',
+    description: 'Start an authorized public HTTPS download as a bounded resumable Job, never a Service. Observe handle with project_process. running means process liveness; only download.observation=receiving_bytes confirms transfer. blocked/stale/interrupted need diagnosis. No checksum verification unless a manifest checksum supplied. Unknown partial files are never appended blindly. Requires python3 on the executor.',
+    parameters: ProjectDownloadParams,
+    async execute(_toolCallId: string, params: DownloadRequest) {
+      try {
+        const normalized = normalizeDownloadRequest(params);
+        const command = buildDownloadCommand(normalized);
+        const currentAccess = await requireCurrentAgentExecutionAccess(ctx);
+        const deploymentId = resolveProjectEnvironmentDeploymentId();
+        const computeSettings = await resolveEffectiveWorkbenchBinding(ctx.projectId, deploymentId);
+        const requiredCapabilities = requiredWorkerExecutorCapabilities({ authorityMode: computeSettings?.authorityMode, actorRole: currentAccess.userRole });
+        const executionContext = await resolveProjectExecutionContext({ projectId: ctx.projectId, actorUserId: Number(ctx.userId), sessionId: ctx.sessionId, deploymentId, requiredCapabilities, expectedProjectRoot: ctx.projectRoot });
+        const request = { command, lifecycle: 'job' as const, timeoutSec: normalized.timeoutSec ?? DOWNLOAD_TIMEOUT_MAX_SEC };
+        const provider = await selectProjectExecutionProvider({ projectId: ctx.projectId, actorUserId: Number(ctx.userId), sessionId: ctx.sessionId, projectRoot: executionContext.projectRoot, defaultWorkerId: executionContext.preferredExecutorId, workstationMode: executionContext.environmentMode === 'legacy-worker-workspace', authorityMode: computeSettings?.authorityMode, actorRole: currentAccess.userRole, deploymentId, runtimeBoxCompatibilityEnabled: ctx.runtimeBoxCompatibilityEnabled, executionContext, request });
+        const result = await executeWorkbenchRequest({ request, context: { projectId: ctx.projectId, userId: ctx.userId, sessionId: ctx.sessionId, ...currentAccess }, provider });
+        return textResult(JSON.stringify(result));
+      } catch (e) { return textResult(`[Download Error] ${(e as Error).message}`, true); }
     },
   } as ToolDefinition;
 
@@ -718,6 +771,7 @@ export function createRuntimeBoxPiTools(ctx: RuntimeBoxToolContext & { workbench
     promptGuidelines: [
       'Treat handles as opaque and Project-scoped; never construct a bare numeric id.',
       'Use action=list when resuming work and the handle is unknown.',
+      'running is process liveness, not task progress. For downloads inspect download.observation; stale/unverified/interrupted must not be reported as normal transfer.',
       'Use action=logs for both Jobs and Services; Tower selects durable output or service log tail.',
       'Use action=stop for either Job cancellation or Service stop.',
     ],
@@ -824,6 +878,7 @@ export function createRuntimeBoxPiTools(ctx: RuntimeBoxToolContext & { workbench
 
       const startedAt = Date.now();
       try {
+        await requireCurrentAgentExecutionAccess(ctx);
         const box = await getOrCreateBox(ctx.projectId, ctx.userId);
         const result = await execInBox({
           boxId: box.id,
@@ -934,6 +989,7 @@ export function createRuntimeBoxPiTools(ctx: RuntimeBoxToolContext & { workbench
       ].join('\n');
 
       try {
+        await requireCurrentAgentExecutionAccess(ctx);
         const box = await getOrCreateBox(ctx.projectId, ctx.userId);
         const result = await execInBox({
           boxId: box.id,
@@ -1023,41 +1079,18 @@ export function createRuntimeBoxPiTools(ctx: RuntimeBoxToolContext & { workbench
       if (params.pinned && !params.purpose?.trim()) {
         return textResult('[RuntimeBox Error] pinned 서비스에는 purpose가 필수입니다.', true);
       }
-      try {
-        const box = await getOrCreateBox(ctx.projectId, ctx.userId);
-        await ensureRunning(Number(box.id), ctx.userId);
-        const detectedPort = params.port ?? extractPortFromCommand(params.command);
-        const registered = await registerService({
-          boxId: Number(box.id),
-          projectId: ctx.projectId,
-          userId: ctx.userId,
+      return (workbenchExecuteTool.execute as any)(_toolCallId, {
+        command: params.command,
+        cwd: params.cwd,
+        lifecycle: 'service',
+        service: {
           name: params.name,
-          command: params.command,
-          cwd: params.cwd,
-          internalPort: detectedPort,
+          port: params.port,
           pinned: params.pinned,
           purpose: params.purpose,
           ttlHours: params.ttl_hours,
-        });
-        const svc = await startServiceProcess(Number(registered.id));
-        return textResult([
-          `Service started: #${svc.id} ${svc.name}`,
-          `Status: ${svc.status}`,
-          `Command: ${svc.command}`,
-          `CWD: ${svc.cwd}`,
-          `Port: ${svc.internal_port ?? '(not detected)'}`,
-          `PID: ${svc.process_pid ?? '(unknown)'}`,
-          `Logs: ${svc.log_path ?? '(none)'}`,
-          svc.external_url ? `Preview: ${svc.external_url}` : '',
-          `Pinned: ${svc.pinned ? 'yes' : 'no'}`,
-          svc.expires_at ? `Expires: ${svc.expires_at}` : '',
-          '',
-          'Use service_logs with this service_id to inspect output. If Preview is present, open it in the browser while logged in.',
-        ].filter(Boolean).join('\n'));
-      } catch (e) {
-        const msg = e instanceof RuntimeBoxError ? e.reason : (e as Error).message;
-        return textResult(`[RuntimeBox Error] ${msg}`, true);
-      }
+        },
+      }, undefined, undefined, undefined);
     },
   } as ToolDefinition;
 
@@ -1104,37 +1137,14 @@ export function createRuntimeBoxPiTools(ctx: RuntimeBoxToolContext & { workbench
     },
   } as ToolDefinition;
 
-  // The AI-facing surface has one shell name. The harness chooses the executor:
-  // rollout Projects use the persistent Worker broker; compatibility Projects use
-  // the legacy Project executor. Runtime Box is not an ordinary AI-selectable tool.
-  const compatibilityBashTool = {
-    ...projectShellTool,
-    name: 'bash',
-    label: 'Bash',
-    description: `Run a shell command in the working computer for project "${projectLabel}". Commands start in /workspace.`,
-    promptSnippet: 'Use bash naturally for Project commands. Tower routes the command through this Project execution plane.',
-    promptGuidelines: [
-      'Treat /workspace as the Project root.',
-      'Use one bounded command. Prefer project_process-capable Projects for durable Jobs and Services.',
-      'Do not assume access to Tower control-plane files, other Projects, Docker, or host credentials.',
-    ],
-    parameters: WorkbenchExecuteParams,
-    async execute(toolCallId: string, params: WorkbenchExecutionRequest, signal: AbortSignal, onUpdate: (update: unknown) => void, context: unknown) {
-      if (params.lifecycle && !['auto', 'foreground'].includes(params.lifecycle)) {
-        return textResult('[Project Bash Error] Durable Jobs and Services require the persistent Project execution plane.', true);
-      }
-      return projectShellTool.execute(toolCallId, {
-        cmd: params.command,
-        cwd: params.cwd,
-        timeout_sec: params.timeoutSec,
-        env: params.env,
-        context_mode: 'compact',
-      }, signal, onUpdate, context as any);
-    },
-  } as ToolDefinition;
-  const stableRuntimeTools = [compatibilityBashTool, pdfRenderTool];
-  if (!experimentalUnifiedShellVisible) return stableRuntimeTools;
-  const unifiedShellTools = [workbenchExecuteTool, projectProcessTool, pdfRenderTool];
+  const compatibilityEnabled = ctx.runtimeBoxCompatibilityEnabled !== false;
+  // Ordinary Project shell access is no longer a Workbench beta rollout decision.
+  // Every authorized Project enters the Project Environment resolver; that resolver
+  // chooses canonical or legacy storage and fails closed when no executor is eligible.
+  // The rollout flag remains limited to diagnostic/mutation management surfaces below.
+  const unifiedShellTools = compatibilityEnabled
+    ? [workbenchExecuteTool, projectDownloadTool, projectProcessTool, pdfRenderTool]
+    : [workbenchExecuteTool, projectDownloadTool, projectProcessTool];
   if (!experimentalWorkbenchToolsVisible) return unifiedShellTools;
   return [
     ...unifiedShellTools,
@@ -1144,13 +1154,10 @@ export function createRuntimeBoxPiTools(ctx: RuntimeBoxToolContext & { workbench
     workbenchApplyTool,
     workbenchRuntimeRecreatePreviewTool,
     workbenchRuntimeRecreateApplyTool,
-    projectShellTool,
     workbenchJobListTool,
     workbenchJobGetTool,
     workbenchJobCancelTool,
     serviceListTool,
-    serviceStartTool,
-    serviceLogsTool,
-    serviceStopTool,
+    ...(compatibilityEnabled ? [serviceStartTool, serviceLogsTool, serviceStopTool] : []),
   ];
 }

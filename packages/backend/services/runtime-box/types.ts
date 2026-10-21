@@ -7,6 +7,17 @@
  * See README.md.
  */
 
+export type {
+  CommandClass,
+  CommandClassification,
+  ExecResult,
+  RuntimeContext,
+  ServiceRow,
+  ServiceStatus,
+  ServiceVisibility,
+} from '../execution/types.js';
+import type { ServiceVisibility } from '../execution/types.js';
+
 // ── Box 상태 ─────────────────────────────────────────────────────────────
 
 export type BoxStatus =
@@ -24,15 +35,6 @@ export type RuntimeProfile =
   | 'custom';           // v2+ future (custom image)
 
 // ── Service 상태 ─────────────────────────────────────────────────────────
-
-export type ServiceStatus = 'pending' | 'running' | 'stopped' | 'error' | 'expired';
-
-export type ServiceVisibility =
-  | 'private'           // 외부 접근 전혀 없음 (Box 내부에서만)
-  | 'project-internal'  // 같은 프로젝트 세션에서 접근 가능
-  | 'auth-required'     // Tower 로그인 필요
-  | 'unlisted'          // URL 알면 접근 가능 (random slug)
-  | 'public';           // 공개 (SEO 허용)
 
 // ── DB Row 타입 ─────────────────────────────────────────────────────────
 
@@ -59,39 +61,6 @@ export interface BoxRow {
   updated_at: string;
   secure_mode: string | null;
   network_policy: string | null;
-}
-
-/** runtime_box_services 테이블 행. */
-export interface ServiceRow {
-  id: number;
-  box_id: number | null;
-  project_id: string;
-  runner_kind: 'runtime-box' | 'remote-worker';
-  worker_id: string | null;
-  name: string;
-  display_name: string | null;
-  command: string;
-  cwd: string;
-  internal_port: number | null;
-  host_port: number | null;
-  external_url: string | null;
-  preview_token: string | null;
-  status: ServiceStatus;
-  visibility: ServiceVisibility;
-  process_pid: number | null;
-  log_path: string | null;
-  pinned: boolean;
-  purpose: string | null;
-  owner_user_id: number | null;
-  ttl_hours: number;
-  review_after: string | null;
-  started_at: string | null;
-  stopped_at: string | null;
-  expires_at: string | null;
-  last_active_at: string | null;
-  created_at: string;
-  created_by: number | null;
-  last_error: string | null;
 }
 
 // ── Exec 요청/결과 ────────────────────────────────────────────────────────
@@ -128,67 +97,6 @@ export interface ExecRequest {
   signal?: AbortSignal;
 }
 
-export interface ExecResult {
-  exit_code: number;
-  stdout: string;    // 최대 1MB
-  stderr: string;    // 최대 1MB
-  duration_ms: number;
-  timed_out: boolean;
-  oom_killed: boolean;
-  /** 실행된 runtime context 요약 (AI가 로컬과 혼동 방지). */
-  runtime_context: RuntimeContext;
-}
-
-/**
- * 명령 결과에 첨부되는 실행 context 배너.
- * AI가 host bash / project_shell 을 혼동하지 않도록 도움.
- * 결정: workspace/decisions/2026-06-01-project-runtime-plane-stress-test.md §9.1
- */
-export interface RuntimeContext {
-  runtime: 'project-runtime-box' | 'workbench-worker';
-  /** AI-facing native Workstation contract. Project scope is a default working convention, not a filesystem sandbox. */
-  workstation?: {
-    shell: 'native';
-    persistent_home: boolean;
-    host_tools: 'available';
-    default_scope: 'current-project';
-    guidance: string;
-  };
-  project_id: string;
-  project_name: string;
-  cwd: string;
-  mount: 'project rw';
-  services_running: Array<{ name: string; port: number | null; status: ServiceStatus }>;
-  box_limits: {
-    memory_mb: number;
-    cpu: number;
-    idle_stop_minutes: number;
-  };
-  credential_profiles?: Array<{
-    profile_id: string;
-    display_name: string;
-    env_names: string[];
-    secret_env_names: string[];
-    file_env_names?: string[];
-    skipped_existing: string[];
-  }>;
-  credential_env?: {
-    injected: Array<{ credential_id: string; env_name: string }>;
-    materialized_files: Array<{ credential_id: string; env_name: string; kind: 'file'; credential_type?: string }>;
-    skipped_existing: Array<{ credential_id: string; env_name: string }>;
-    skipped: Array<{ credential_id: string; env_name?: string; reason: string }>;
-    suppressed?: boolean;
-    suppress_reason?: string;
-  };
-  readiness?: {
-    baseline: 'tower-like-tooling';
-    summary: string;
-    doctor_command: string;
-    capabilities: string[];
-    harness_preferred: string[];
-  };
-}
-
 // ── 서비스 등록 요청 ──────────────────────────────────────────────────────
 
 export interface ServiceRegisterRequest {
@@ -207,19 +115,4 @@ export interface ServiceRegisterRequest {
   pinned?: boolean;
   purpose?: string;
   ttlHours?: number;
-}
-
-// ── 명령 분류 ────────────────────────────────────────────────────────────
-
-export type CommandClass =
-  | 'light'         // ls, cat, grep, 짧은 스크립트 → 즉시 exec
-  | 'heavy'         // npm install, npm test, pytest → heavy job slot 필요
-  | 'long-running'  // npm run dev, uvicorn, node server.js → 서비스 승격 권장
-  | 'risky';        // curl | bash, chmod +x random → 향후 Secure Run 승격
-
-export interface CommandClassification {
-  cls: CommandClass;
-  reason: string;
-  /** 서비스 승격 권장 시 제안 name (예: 'dev', 'api'). */
-  suggested_service_name?: string;
 }

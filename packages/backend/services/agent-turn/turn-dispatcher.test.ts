@@ -80,3 +80,26 @@ describe('agent turn dispatcher', () => {
     vi.useRealTimers();
   });
 });
+
+
+describe('abandoned owner reconciliation', () => {
+  it('retries discovery after a temporary reconciliation failure', async () => {
+    vi.useFakeTimers();
+    const order: string[] = [];
+    const reconcile = vi.fn()
+      .mockRejectedValueOnce(new Error('temporary DB outage'))
+      .mockImplementation(async () => { order.push('reconcile'); return 1; });
+    const findDue = vi.fn(async () => { order.push('discover'); return [candidate]; });
+    const dispatch = vi.fn(async () => { order.push('dispatch'); });
+    const dispatcher = createAgentTurnDispatcher({ reconcile, findDue, dispatch,
+      intervalMs: 1000, logger: { log: vi.fn(), warn: vi.fn() } });
+    try {
+      dispatcher.start();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(dispatch).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(order).toEqual(['reconcile', 'discover', 'dispatch']);
+      expect(dispatch).toHaveBeenCalledWith([candidate]);
+    } finally { dispatcher.stop(); vi.useRealTimers(); }
+  });
+});

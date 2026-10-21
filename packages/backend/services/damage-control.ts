@@ -1,14 +1,10 @@
 /**
  * Damage Control — role-based tool & Bash command restrictions.
  *
- * 6-tier role system (2026-05-27 — extends 2026-05-04 5-tier to add customer_manager):
- *   admin            → Tower 운영팀. unrestricted
- *   operator         → 고객사 운영 책임자. DENY_SYSTEM bash patterns
- *   customer_manager → 자기 담당 자체 호스팅 서버 전담 (user_customer_vms 매핑 scope).
- *                      workspace 접근은 operator 와 동등(전체). DENY_SYSTEM.
- *                      operator-host VM (TOWER_ROLE=full) 에서만 유효.
- *                      결정: workspace/decisions/2026-05-27-operator-host-privileged-roles-and-cross-project-relaxation.md
- *   member           → 일반 직원. DENY_SYSTEM + DENY_SYSPACKAGE bash patterns
+ * 5-tier role system (2026-08-27):
+ *   admin    → Tower 보안·조직·인증·비밀정보를 포함한 unrestricted 관리.
+ *   operator → 전체 서버 관찰·진단·트러블슈팅·복구. DENY_SYSTEM 및 Secret Guard 적용.
+ *   member   → 일반 직원. DENY_SYSTEM + DENY_SYSPACKAGE bash patterns
  *   guest            → 외부 파트너. member 와 도구 권한 동일 (DENY_SYSTEM + DENY_SYSPACKAGE).
  *                      차이는 *어떤 프로젝트에서 가능한지* 만 (auto-member ❌, project 생성 ❌).
  *   viewer           → 감사·관전. whitelist-only tools (read-only)
@@ -16,27 +12,20 @@
 
 import path from 'path';
 
-export type TowerRole = 'admin' | 'operator' | 'customer_manager' | 'member' | 'guest' | 'viewer';
+export type TowerRole = 'admin' | 'operator' | 'member' | 'guest' | 'viewer';
 
 export const VALID_ROLES = new Set<string>([
-  'admin', 'operator', 'customer_manager', 'member', 'guest', 'viewer',
+  'admin', 'operator', 'member', 'guest', 'viewer',
 ]);
 
-/**
- * Privileged trio — workspace 전체 접근이 가능한 role.
- * admin/operator 는 Tower 전역, customer_manager 는 operator-host VM 한정.
- * Used in 8+ places as the "workspace-class" gate.
- *
- * Tower 전역 *관리* 권한 (decisions/docs write, AdminPanel, library publish 등) 은
- * 별도 helper `isAdminOrOperator()` 를 쓴다 (services/pm/project-access.ts).
- */
+/** Workspace-wide operational roles. Secret reveal and admin-only settings remain admin-only. */
 export function isPrivilegedTowerRole(role: string | undefined | null): boolean {
-  return role === 'admin' || role === 'operator' || role === 'customer_manager';
+  return role === 'admin' || role === 'operator';
 }
 
 // ─── Bash deny patterns ─────────────────────────────────────────────────────
 
-/** System-destructive patterns (operator + customer_manager + member + guest) */
+/** System-destructive patterns (operator + member + guest) */
 const DENY_SYSTEM: Array<{ pattern: RegExp; label: string }> = [
   { pattern: /rm\s+(-[^\s]*)?r[^\s]*f[^\s]*\s+(\/(\s|$)|~|\$HOME)/,   label: 'recursive delete on root/home' },
   { pattern: /\bsudo\b/,                                               label: 'privilege escalation (sudo)' },
@@ -89,20 +78,18 @@ export function buildDamageControl(
       return { allowed: true };
     }
 
-    // ── Operator / customer_manager / Member / Guest: check Bash commands ──
-    // customer_manager 는 operator 와 동등 (workspace 전체 + DENY_SYSTEM 만, DENY_SYSPACKAGE 미적용).
-    // 결정: workspace/decisions/2026-05-27-operator-host-privileged-roles-and-cross-project-relaxation.md
+    // ── Operator / Member / Guest: check Bash commands ──
     if (toolName === 'Bash') {
       const command = String(input.command || '');
 
-      // DENY_SYSTEM (operator + customer_manager + member + guest)
+      // DENY_SYSTEM (operator + member + guest)
       for (const rule of DENY_SYSTEM) {
         if (rule.pattern.test(command)) {
           return { allowed: false, message: `[Damage Control] Blocked: ${rule.label}. The ${effectiveRole} role cannot run this command.` };
         }
       }
 
-      // DENY_SYSPACKAGE (member + guest 만 — operator 와 customer_manager 는 면제)
+      // DENY_SYSPACKAGE (member + guest only — operator is exempt)
       if (effectiveRole === 'member' || effectiveRole === 'guest') {
         for (const rule of DENY_SYSPACKAGE) {
           if (rule.pattern.test(command)) {

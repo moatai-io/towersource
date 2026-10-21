@@ -15,9 +15,10 @@ describe('agent character generation route', () => {
     expect(home).toContain('projectId: project.id');
   });
 
-  it('reports secret-free project readiness before exposing custom generation', () => {
+  it('reports secret-free Gateway readiness before exposing custom generation', () => {
     expect(api).toContain("router.get('/agent-characters/readiness'");
-    expect(api).toContain("hasProjectApiKeyCredential({ projectId, envName: 'OPENAI_IMAGE_API_KEY' })");
+    expect(api).toContain("resolveGatewayApiClient({ actorUserId: userId, projectId, apiId: 'openai-image' })");
+    expect(api).not.toContain("hasProjectApiKeyCredential({ projectId, envName: 'OPENAI_IMAGE_API_KEY' })");
     expect(draft).toContain("fetch(`/api/agent-characters/readiness?projectId=");
     expect(draft).toContain('characterGenerationReady ?');
     expect(draft).toContain("t('agentCreation.customCharacterConnectionRequired')");

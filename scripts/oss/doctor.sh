@@ -98,6 +98,7 @@ has_users=$(curl -fsS --max-time 10 "$URL/api/auth/status" 2>/dev/null | python3
 if [[ "$has_users" == "true" ]]; then
   check "OSS Worker bootstrap completed" test -s "$DATA_DIR/workers/$WORKER_ID/activated"
   check "Local Worker service active" systemctl is-active --quiet "tower-workbench-worker-$WORKER_ID.service"
+  check "Worker deployment maintenance enrolled and live fence loaded (not-enrolled requires installer DB input; old process requires safe activation)" "$CLOSURE_LINK/bin/worker-maintenance-readiness.py" --worker "$WORKER_ID" --require-ready
   check "Local Worker heartbeat active" systemctl is-active --quiet "tower-workbench-worker-$WORKER_ID-heartbeat.service"
   check "General skills materialized" bash -c 'manifest=$(find "$1/workspace/projects/general" -path "*/.tower/skills/manifest.json" -print -quit); [[ -n "$manifest" ]] && python3 -c '\''import json,sys; d=json.load(open(sys.argv[1])); assert len(d.get("skills", [])) > 0'\'' "$manifest"' _ "$DATA_DIR"
 else

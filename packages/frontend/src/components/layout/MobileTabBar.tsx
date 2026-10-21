@@ -16,11 +16,6 @@ const tabIcons: Record<string, React.ReactNode> = {
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
     </svg>
   ),
-  work: (
-    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 11l2 2 4-4m5-3.5A11.95 11.95 0 0112 3a11.95 11.95 0 01-8 2.5V11c0 5.25 3.4 8.74 8 10 4.6-1.26 8-4.75 8-10V5.5z" />
-    </svg>
-  ),
   settings: (
     <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
@@ -29,7 +24,11 @@ const tabIcons: Record<string, React.ReactNode> = {
   ),
 };
 
-export function MobileTabBar() {
+interface MobileTabBarProps {
+  onNavigateSessions?: () => void;
+}
+
+export function MobileTabBar({ onNavigateSessions }: MobileTabBarProps) {
   const { t } = useTranslation('layout');
   const mobileTab = useSessionStore((s) => s.mobileTab);
   const setMobileTab = useSessionStore((s) => s.setMobileTab);
@@ -39,11 +38,9 @@ export function MobileTabBar() {
   const setMobileFilesNavigationSurface = useSessionStore((s) => s.setMobileFilesNavigationSurface);
   const setAiNavigationSurface = useSessionStore((s) => s.setAiNavigationSurface);
   const openSettings = useSettingsStore((s) => s.setOpen);
-  const setActiveView = useSessionStore((s) => s.setActiveView);
   const agentFirstEnabled = useSettingsStore((s) => s.serverConfig?.agentFirstEnabled === true);
   const activeSessionId = useSessionStore((s) => s.activeSessionId);
   const sessions = useSessionStore((s) => s.sessions);
-  const workAttentionCount = useSessionStore((s) => s.unreadSessions.size);
   const projects = useProjectStore((s) => s.projects);
   const capabilityProjectId = useSettingsStore((s) => s.capabilityProjectId);
   const setCapabilityProjectId = useSettingsStore((s) => s.setCapabilityProjectId);
@@ -51,7 +48,6 @@ export function MobileTabBar() {
   const tabs: { id: MobileTab | 'settings'; label: string; icon: React.ReactNode; badge?: number }[] = agentFirstEnabled
     ? [
         { id: 'ai', label: t('conversationsNav'), icon: tabIcons.chat },
-        { id: 'work', label: t('workHubNav'), icon: tabIcons.work, badge: workAttentionCount },
         { id: 'files', label: t('files'), icon: tabIcons.files },
         { id: 'settings', label: t('settings'), icon: tabIcons.settings },
       ]
@@ -70,13 +66,12 @@ export function MobileTabBar() {
     }
     setMobileTab(tab);
     if (tab === 'ai') {
+      // Agent Home and other system tabs otherwise keep rendering ahead of the
+      // conversation even after activeView returns to chat.
+      useFileStore.getState().activateChatSlot();
+      onNavigateSessions?.();
       setAiNavigationSurface();
       setSidebarOpen(true);
-      setMobileContextOpen(false);
-    } else if (tab === 'work') {
-      useFileStore.getState().activateChatSlot();
-      setActiveView('work');
-      setSidebarOpen(false);
       setMobileContextOpen(false);
     } else if (tab === 'files') {
       const activeSessionProjectId = sessions.find((session) => session.id === activeSessionId)?.projectId || null;
@@ -96,7 +91,7 @@ export function MobileTabBar() {
   };
 
   return (
-    <nav className="tower-mobile-tab-bar bg-surface-900 border-t border-surface-800 shrink-0" style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}>
+    <nav className="tower-mobile-tab-bar shrink-0 border-t border-surface-800 bg-surface-900" style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}>
       <div className="h-16 flex items-stretch">
       {visibleTabs.map((tab) => (
         <button

@@ -193,12 +193,13 @@ async function readCliTokenFromInput(args: ParsedArgs): Promise<string> {
 }
 
 async function requireActiveUser(payload: JwtPayload): Promise<JwtPayload> {
-  const row = await queryOne<{ id: number; username: string; role: string; disabled: number | boolean }>(
-    'SELECT id, username, role, disabled FROM users WHERE id = $1',
+  const row = await queryOne<{ id: number; username: string; role: string; disabled: number | boolean; approval_status: string; auth_epoch: number }>(
+    'SELECT id, username, role, disabled, approval_status, auth_epoch FROM users WHERE id = $1',
     [payload.userId],
   );
-  if (!row || row.disabled === 1 || row.disabled === true) fail('token user is disabled or no longer exists');
-  return { userId: row.id, username: row.username, role: row.role, aud: payload.aud };
+  if (!row || row.disabled === 1 || row.disabled === true || row.approval_status !== 'active'
+      || Number(payload.authEpoch ?? 0) !== Number(row.auth_epoch)) fail('token user is inactive or token was revoked; run tower auth login again');
+  return { userId: row.id, username: row.username, role: row.role, aud: payload.aud, authEpoch: Number(row.auth_epoch) };
 }
 
 async function verifyCliTokenForImport(rawToken: string): Promise<JwtPayload> {

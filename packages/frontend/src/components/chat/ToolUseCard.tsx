@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import i18n from '../../i18n';
-import { getToolActivityLabel, getToolLabel, getToolSummary } from '../../utils/message-parser';
+import { getSleepDurationLabel, getToolActivityLabel, getToolLabel, getToolSummary } from '../../utils/message-parser';
 import { safeStr } from '../shared/parse-loose-json';
 import { useActiveSessionStreaming } from '../../hooks/useActiveSessionStreaming';
 import { useActiveSessionTurnState } from '../../hooks/useActiveSessionTurnState';
@@ -32,6 +32,10 @@ interface ToolChipProps {
 }
 
 const toolMeta: Record<string, { icon: React.ReactNode; color: string; bg: string; border: string }> = {
+  Sleep: {
+    icon: <><circle cx="12" cy="12" r="9" strokeWidth={1.5} /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 7v5l3 2" /></>,
+    color: 'text-surface-400', bg: 'bg-surface-800/40', border: 'border-surface-700/40',
+  },
   Bash: {
     icon: <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />,
     color: 'tone-success tone-text', bg: 'tone-success tone-bg-soft', border: 'tone-success tone-border',
@@ -101,12 +105,39 @@ function getToolMeta(name: string) {
 }
 
 function normalizeToolName(name: string) {
+  if (toolKind(name) === 'sleep') return 'Sleep';
   const shortName = name.split('.').pop()?.replace(/^functions__/, '') || name;
   return shortName.charAt(0).toUpperCase() + shortName.slice(1);
 }
 
 function toolKind(name: string) {
-  return (name.split('.').pop() || name).replace(/^functions__/, '').toLowerCase();
+  const shortName = (name.split('.').pop() || name).replace(/^functions__/, '').toLowerCase();
+  if (shortName === 'wait' || /^mcp__wait__wait$/.test(shortName)) return 'sleep';
+  if (/^mcp__(?:sleep|session[-_]wait)__sleep$/.test(shortName)) return 'sleep';
+  return shortName;
+}
+
+// Stopped/failed waits must not be presented as successful completions.
+function sleepResultState(result?: string): 'completed' | 'scheduled' | 'cancelled' | 'failed' | undefined {
+  if (!result) return undefined;
+  try {
+    const parsed = JSON.parse(result);
+    if(parsed?.status === 'scheduled') return 'scheduled';
+    if (parsed?.cancelled === true || parsed?.canceled === true || /^(cancelled|canceled|aborted)$/.test(parsed?.status)) return 'cancelled';
+    if (parsed?.ok === false || parsed?.isError === true || parsed?.error || /^(failed|error)$/.test(parsed?.status)) return 'failed';
+  } catch {
+    // Engines can return abort/error messages as plain tool output rather than JSON.
+    if (/^\s*(?:AbortError\b|(?:Error:\s*)?(?:sleep\s+)?(?:cancelled|canceled|aborted)\b)/i.test(result)) return 'cancelled';
+    if (/^\s*(?:Error\b|[A-Za-z]+Error:)/.test(result)) return 'failed';
+  }
+  return 'completed';
+}
+
+function sleepResultLabel(result?: string): string | undefined {
+  const state = sleepResultState(result);
+  if (!state) return undefined;
+  const defaults = { scheduled: '알람 설정됨', completed: '대기 완료', cancelled: '대기 취소됨', failed: '대기 실패' };
+  return i18n.t(`chat:sleep.${state}`, { defaultValue: defaults[state] });
 }
 
 const TOOL_RESULT_PREVIEW_LINES = 160;
@@ -384,9 +415,9 @@ export function ToolChip({ toolUseId, name, input, result, isActive, isLive = fa
       ? activeTurn.activeToolId === toolId
       : (!!activeTurn.activeToolSummary && activeTurn.activeToolSummary === summary));
   const isRunning = !!isLive && !result && isStreaming && (isCurrentTool || activeTurn.phase === 'tool_running' || isLast);
-  const meta = getToolMeta(name);
-
-  if (toolKind(name) === 'present_file' && result) return null;
+  const meta = getToolMeta(normalizeToolName(name));
+  const isSleep = toolKind(name) === 'sleep';
+  const completedLabel = isSleep ? sleepResultLabel(result) : undefined;
 
   return (
     <button
@@ -402,16 +433,16 @@ export function ToolChip({ toolUseId, name, input, result, isActive, isLive = fa
       </svg>
       <span
         className={`truncate ${isActive ? meta.color : 'text-gray-500'}`}
-        title={isRunning ? `${activityLabel} · ${summary} · ${name}` : `${summary} · ${name}`}
+        title={isRunning ? `${activityLabel} · ${summary} · ${name}` : `${completedLabel ? `${completedLabel} · ` : ''}${summary} · ${name}`}
       >
-        {isRunning ? activityLabel : summary}
+        {isRunning ? activityLabel : completedLabel || summary}
       </span>
-      {isRunning && (
+      {isRunning && !isSleep && (
         <span className="inline-flex items-center gap-1 text-[11px] text-primary-400 font-medium shrink-0">
           <RunIndicator size="xs" label="" />
         </span>
       )}
-      {result && (
+      {result && (!isSleep || sleepResultState(result) === 'completed') && (
         <svg className="w-2.5 h-2.5 tone-success tone-text opacity-60 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
         </svg>
@@ -503,6 +534,10 @@ export function ToolUseCard({ toolUseId, name, input, result, onFileClick, compa
   const meta = getToolMeta(normalizeToolName(name));
   const label = getToolLabel(normalizeToolName(name));
   const kind = toolKind(name);
+  const isSleep = kind === 'sleep';
+  const completedLabel = isSleep ? sleepResultLabel(result) : undefined;
+  const sleepDuration = isSleep ? getSleepDurationLabel(input) : undefined;
+  const sleepReason = isSleep && typeof input.reason === 'string' ? input.reason.trim() : '';
   const auqHistory = kind === 'askuserquestion' && Array.isArray(input.questions)
     ? resolveAskUserQuestionHistory(input.questions, result, input.answers)
     : null;
@@ -511,12 +546,13 @@ export function ToolUseCard({ toolUseId, name, input, result, onFileClick, compa
     try {
       const parsed = result ? JSON.parse(result) : {};
       return {
-        path: input.path || parsed.path,
+        ok: parsed.ok === true,
+        path: parsed.path,
         label: input.label || parsed.label,
         split: input.split || input.pane || parsed.split || parsed.pane,
       };
     } catch {
-      return { path: input.path, label: input.label, split: input.split || input.pane };
+      return { ok: false, path: undefined, label: input.label, split: input.split || input.pane };
     }
   })() : undefined;
   const editOldText = input.old_string || input.oldText || input.old_text || input.edits?.[0]?.oldText;
@@ -531,7 +567,9 @@ export function ToolUseCard({ toolUseId, name, input, result, onFileClick, compa
     }
   }, [result]);
 
-  if (kind === 'present_file' && result) return null;
+  if (kind === 'present_file' && result && presentedInfo?.ok === true && typeof presentedInfo.path === 'string') {
+    return <div className="my-2 min-w-0 text-[13px] text-surface-400"><ToolFileLink path={presentedInfo.path} onFileClick={onFileClick} /></div>;
+  }
   // While the floating AUQ is active it is the single interaction surface.
   // Do not duplicate the same unanswered prompt in the chat history behind it.
   if (kind === 'askuserquestion' && !auqHistory) return null;
@@ -560,20 +598,26 @@ export function ToolUseCard({ toolUseId, name, input, result, onFileClick, compa
             <span className={`text-[15px] font-semibold ${meta.color}`}>{label}</span>
             {isRunning && (
               <span className="flex items-center gap-1 text-[13px] text-primary-400 font-medium">
-                <RunIndicator size="xs" label="" />
+                {!isSleep && <RunIndicator size="xs" label="" />}
                 {activityLabel}
               </span>
             )}
-            {result && !isRunning && (
+            {result && !isRunning && (!isSleep || sleepResultState(result) === 'completed') && (
               <span className="text-[13px] tone-success tone-text opacity-80 font-medium flex items-center gap-1">
                 <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                 </svg>
-                Done
+                {completedLabel || 'Done'}
               </span>
             )}
           </div>
-          {!compact && <div className="text-[14px] text-gray-500 truncate mt-0.5">{summary}</div>}
+          {isSleep ? (
+            <div className="text-[13px] text-surface-400 space-y-0.5 mt-0.5">
+              {sleepDuration && <div>{sleepDuration}</div>}
+              {sleepReason && <div className="break-words">{sleepReason}</div>}
+              {result && sleepResultState(result) !== 'completed' && <div>{completedLabel}</div>}
+            </div>
+          ) : !compact && <div className="text-[14px] text-gray-500 truncate mt-0.5">{summary}</div>}
         </div>
 
         {/* Expand chevron */}
@@ -588,6 +632,11 @@ export function ToolUseCard({ toolUseId, name, input, result, onFileClick, compa
       {/* Expanded content */}
       {expanded && (
         <div className="border-t border-white/[0.06] tower-ui-block-density space-y-2">
+          {isSleep && isRunning && (
+            <p className="text-[13px] text-surface-400">
+              {i18n.t('chat:sleep.stopHint', { defaultValue: '대기를 취소하려면 현재 응답을 중지하세요.' })}
+            </p>
+          )}
           {/* === Bash === */}
           {kind === 'bash' && input.command && (
             <div className="bg-surface-950/60 rounded-lg p-3 font-mono text-[14px] overflow-x-auto whitespace-pre-wrap">
@@ -667,7 +716,7 @@ export function ToolUseCard({ toolUseId, name, input, result, onFileClick, compa
           )}
 
           {/* === Generic fallback === */}
-          {!['bash', 'read', 'write', 'edit', 'grep', 'glob', 'find', 'ls', 'task', 'askuserquestion', 'credential_vault_input', 'enterplanmode', 'exitplanmode', 'todowrite', 'present_file'].includes(kind) && Object.keys(input).length > 0 && (
+          {!['sleep', 'bash', 'read', 'write', 'edit', 'grep', 'glob', 'find', 'ls', 'task', 'askuserquestion', 'credential_vault_input', 'enterplanmode', 'exitplanmode', 'todowrite', 'present_file'].includes(kind) && Object.keys(input).length > 0 && (
             <ToolTextBlock raw={JSON.stringify(input, null, 2)} onFileClick={onFileClick} className="text-gray-400" />
           )}
 
@@ -694,7 +743,7 @@ export function ToolUseCard({ toolUseId, name, input, result, onFileClick, compa
           {/* Running indicator */}
           {isRunning && !result && kind !== 'askuserquestion' && (
             <div className="flex items-center gap-2 text-[13px] text-primary-400/70 pt-1">
-              <div className="w-3 h-3 border-2 border-primary-500/30 border-t-primary-400 rounded-full animate-spin" />
+              {!isSleep && <div className="w-3 h-3 border-2 border-primary-500/30 border-t-primary-400 rounded-full animate-spin" />}
               {activityLabel}
             </div>
           )}

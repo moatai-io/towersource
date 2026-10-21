@@ -15,6 +15,9 @@ fail() {
   exit 1
 }
 
+# Offline dependency smoke: no credentials or GitHub requests are needed.
+gh --version >/dev/null || fail "GitHub CLI is missing or cannot execute"
+
 required=(
   "$lib_root/dist/frontend/index.html"
   "$lib_root/dist/backend/packages/backend/index.js"

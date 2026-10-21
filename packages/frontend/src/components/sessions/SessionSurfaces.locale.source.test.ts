@@ -17,7 +17,7 @@ describe('session surfaces locale contract', () => {
   it('connects share, list, and related-session UI to layout translations', () => {
     expect(share).toContain("useTranslation('layout')");
     expect(share).toContain("t('sessionShare.title')");
-    expect(item).toContain('t("restoreNormalContext")');
+    expect(item).toContain('t("sessionActions")');
     expect(item).toContain("t('answerNeeded')");
     expect(related).toContain("useTranslation('layout')");
     expect(related).toContain("t('noRelatedSessions')");
@@ -25,7 +25,7 @@ describe('session surfaces locale contract', () => {
 
   it('ships matching English and Korean share keys', () => {
     expect(leafPaths(en.sessionShare).sort()).toEqual(leafPaths(ko.sessionShare).sort());
-    for (const key of ['awaitingAnswer', 'aiQuestionNeedsAnswer', 'restoreNormalContext', 'useLongContext', 'relatedSessionsLoadFailed', 'noRelatedSessions']) {
+    for (const key of ['awaitingAnswer', 'aiQuestionNeedsAnswer', 'sessionActions', 'relatedSessionsLoadFailed', 'noRelatedSessions']) {
       expect(en[key], `missing English layout key: ${key}`).toBeTruthy();
       expect(ko[key], `missing Korean layout key: ${key}`).toBeTruthy();
     }

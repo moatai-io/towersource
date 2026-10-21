@@ -1,3 +1,4 @@
+import { PublishPanel } from '../publish/PublishPanel';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import i18n from '../../i18n';
@@ -15,7 +16,8 @@ import { toastError, toastSuccess } from '../../utils/toast';
 import { AGENT_CHARACTERS, AgentCharacterAvatar, agentFaceImageUrl, characterFace } from '../../features/agent-profile/characters';
 import { AgentIdentityAvatar } from '../../features/agent-profile/AgentIdentityAvatar';
 import { AgentCredentialsModal } from '../layout/AgentCredentialsModal';
-import { getAgentWorkspaceLocation, rememberAgentWorkspaceLocation } from '../../features/agent-workspace/navigation-state';
+import { AGENT_WORKSPACE_LOCATION_EVENT, getAgentWorkspaceLocation, rememberAgentWorkspaceLocation, type AgentWorkspaceLocation } from '../../features/agent-workspace/navigation-state';
+import { getCurrentRole } from '../../utils/auth';
 
 function authHeaders(): Record<string, string> {
   const token = localStorage.getItem('token');
@@ -271,6 +273,7 @@ function parseWikiHome(content: string): WikiHomeModel {
 
 interface ProjectHomeProps {
   project: Project | null;
+  onBackToTeam?: () => void;
   onOpenFiles: () => void;
   onOpenFile: (path: string) => void;
 }
@@ -296,8 +299,10 @@ function loadProjectHomeTab(projectId?: string | null): ProjectHomeTab {
   }
 }
 
-export function ProjectHome({ project, onOpenFiles, onOpenFile }: ProjectHomeProps) {
+export function ProjectHome({ project, onOpenFiles, onOpenFile, onBackToTeam }: ProjectHomeProps) {
   const { t } = useTranslation('files');
+  const [publishingOpen, setPublishingOpen] = useState(false);
+  useEffect(() => setPublishingOpen(false), [project?.id]);
   const [homeTab, setHomeTab] = useState<ProjectHomeTab>(() => loadProjectHomeTab(project?.id));
   const [revealFilePath, setRevealFilePath] = useState<string | null>(null);
   const rootPath = project?.rootPath || '';
@@ -305,6 +310,7 @@ export function ProjectHome({ project, onOpenFiles, onOpenFile }: ProjectHomePro
   const openSkillsBrowser = useSettingsStore((s) => s.setSkillsBrowserOpen);
   const openAgentsPanel = useSettingsStore((s) => s.setAgentsPanelOpen);
   const aiServicesEnabled = useSettingsStore((s) => s.serverConfig?.aiServicesEnabled === true);
+  const canManageExternalDeployments = getCurrentRole() === 'admin';
   const setCapabilityProjectId = useSettingsStore((s) => s.setCapabilityProjectId);
   const sessions = useSessionStore((s) => s.sessions);
   const hydrateProjectSessions = useSessionStore((s) => s.hydrateProjectSessions);
@@ -324,7 +330,8 @@ export function ProjectHome({ project, onOpenFiles, onOpenFile }: ProjectHomePro
   const [agentHome, setAgentHome] = useState<any>(null);
   const [editingTeammate, setEditingTeammate] = useState(false);
   const [managingConnections, setManagingConnections] = useState(false);
-  const [teammateDraft, setTeammateDraft] = useState({ displayName: '', role: '', tagline: '', face: '', disabledSkills: [] as string[] });
+  // `superuser` remains the legacy API payload key for the Operator access toggle.
+  const [teammateDraft, setTeammateDraft] = useState({ displayName: '', role: '', tagline: '', face: '', disabledSkills: [] as string[], superuser: false });
   const [teammateSaving, setTeammateSaving] = useState(false);
   const [characterPrompt, setCharacterPrompt] = useState('');
   const [characterGenerating, setCharacterGenerating] = useState(false);
@@ -336,6 +343,18 @@ export function ProjectHome({ project, onOpenFiles, onOpenFile }: ProjectHomePro
 
   useEffect(() => {
     setHomeTab(loadProjectHomeTab(project?.id));
+  }, [project?.id]);
+
+  useEffect(() => {
+    const applyRequestedLocation = (event: Event) => {
+      const detail = (event as CustomEvent<{ projectId?: string; location?: AgentWorkspaceLocation }>).detail;
+      if (!project?.id || detail?.projectId !== project.id) return;
+      if (detail.location === 'home' || detail.location === 'files' || detail.location === 'work') {
+        setHomeTab(detail.location);
+      }
+    };
+    window.addEventListener(AGENT_WORKSPACE_LOCATION_EVENT, applyRequestedLocation);
+    return () => window.removeEventListener(AGENT_WORKSPACE_LOCATION_EVENT, applyRequestedLocation);
   }, [project?.id]);
 
   useEffect(() => {
@@ -587,6 +606,7 @@ export function ProjectHome({ project, onOpenFiles, onOpenFile }: ProjectHomePro
       tagline: project?.agent?.tagline || '',
       face: project?.agent?.face || '',
       disabledSkills,
+      superuser: project?.agent?.authorityPolicy?.superuser === true,
     });
     setCharacterPrompt('');
     setCharacterGeneratorOpen(false);
@@ -594,6 +614,7 @@ export function ProjectHome({ project, onOpenFiles, onOpenFile }: ProjectHomePro
   }, [project]);
   const saveTeammate = useCallback(async () => {
     if (!project?.id || !teammateDraft.displayName.trim()) return;
+    const previousOperatorAccess = project.agent?.authorityPolicy?.superuser === true;
     setTeammateSaving(true);
     try {
       const res = await fetch(`/api/projects/${project.id}/agent-profile`, { method: 'PATCH', headers: { ...authHeaders(), 'Content-Type': 'application/json' }, body: JSON.stringify(teammateDraft) });
@@ -601,13 +622,16 @@ export function ProjectHome({ project, onOpenFiles, onOpenFile }: ProjectHomePro
       if (!res.ok || !updatedProject?.id) throw new Error(updatedProject?.error || t('projectHome.teammateUpdateFailed'));
       useProjectStore.getState().updateProject(updatedProject.id, updatedProject);
       setEditingTeammate(false);
-      toastSuccess(t('projectHome.teammateSaved'));
+      const operatorAccessChanged = previousOperatorAccess !== teammateDraft.superuser;
+      toastSuccess(operatorAccessChanged
+        ? t(teammateDraft.superuser ? 'projectHome.operatorAccessEnabled' : 'projectHome.operatorAccessDisabled')
+        : t('projectHome.teammateSaved'));
     } catch (error) {
       toastError(error instanceof Error ? error.message : t('projectHome.teammateUpdateFailed'));
     } finally {
       setTeammateSaving(false);
     }
-  }, [project?.id, teammateDraft, t]);
+  }, [project?.agent?.authorityPolicy?.superuser, project?.id, teammateDraft, t]);
 
   const generateCharacter = useCallback(async () => {
     if (!project?.id || !characterPrompt.trim()) return;
@@ -658,12 +682,16 @@ export function ProjectHome({ project, onOpenFiles, onOpenFile }: ProjectHomePro
   const projectMemberCount = (project as typeof project & { memberCount?: number }).memberCount;
 
   return (
-    <div className="relative z-10 h-full overflow-auto bg-surface-950 text-gray-100">
+    <div className="relative z-10 flex h-full min-h-0 flex-col overflow-hidden bg-surface-950 text-gray-100">
       <header className="pointer-events-auto sticky top-0 z-30 border-b border-surface-800 bg-surface-950 px-3 py-2 shadow-sm sm:px-5 sm:py-2.5 lg:px-8">
         <div className="flex min-h-9 w-full flex-wrap items-center gap-x-3 gap-y-1 lg:flex-nowrap lg:gap-4">
           <div className="flex min-w-0 flex-1 items-center gap-2 text-sm font-semibold text-surface-200 lg:flex-initial">
-            <AgentIdentityAvatar project={project} className="h-7 w-7 shrink-0 rounded-lg border border-surface-700/60" />
+            {onBackToTeam && <button type="button" onClick={onBackToTeam} className="shrink-0 rounded-lg border border-surface-700 px-3 py-2 text-xs text-surface-300 hover:bg-surface-800">{t('projectHome.backToTeam')}</button>}
+            <AgentIdentityAvatar project={project} className={`h-7 w-7 shrink-0 rounded-lg border ${project.agent?.authorityPolicy?.superuser === true ? 'border-amber-400 ring-1 ring-amber-400/40' : 'border-surface-700/60'}`} />
             <span className="truncate">{project.agent?.displayName || project.name}</span>
+            {project.agent?.authorityPolicy?.superuser === true && <span className="rounded-full border border-amber-500/50 bg-amber-500/10 px-2 py-0.5 text-[10px] font-bold tracking-wide text-amber-300">{t('projectHome.operatorAccessBadge')}</span>}
+            <button type="button" onClick={() => setPublishingOpen(true)} className="min-h-9 shrink-0 rounded-lg border border-surface-700 px-3 text-xs text-surface-300 hover:bg-surface-800">{t('projectHome.publishingHub')}</button>
+            <button type="button" onClick={editTeammate} className="ml-auto min-h-9 shrink-0 touch-manipulation rounded-lg border border-surface-700 px-3 text-xs font-bold text-surface-300 hover:border-primary-500/50 hover:text-primary-200 lg:ml-2">{t('projectHome.agentSettings')}</button>
           </div>
           <nav className="relative z-10 order-3 flex w-full shrink-0 items-center gap-1 overflow-x-auto lg:order-none lg:w-auto" aria-label={t('projectHome.navigationLabel')}>
             <button type="button" onClick={() => { setHomeTab('home'); if (project?.id) rememberAgentWorkspaceLocation(project.id, 'home'); }} className={homeTabClass(homeTab === 'home')}>{t('projectHome.homeTab')}</button>
@@ -674,10 +702,11 @@ export function ProjectHome({ project, onOpenFiles, onOpenFile }: ProjectHomePro
           <div className="ml-auto hidden min-w-0 max-w-[260px] truncate font-mono text-[11px] text-surface-600 xl:block" title={rootPath}>{compactPath(rootPath)}</div>
         </div>
       </header>
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
       {homeTab === 'files' ? (
-        <FileExchangeDropTarget destination={{ scope: 'project', projectId: project.id, relativeDirectory: 'uploads' }} label={t('projectHome.copyToWorkspace', { name: project.agent?.displayName || project.name })} className="h-[calc(100vh-58px)] min-h-[560px]"><FilesWorkspace embedded initialProjectId={project.id} revealPath={revealFilePath} onRevealComplete={() => setRevealFilePath(null)} onFileClick={onOpenFile} /></FileExchangeDropTarget>
+        <FileExchangeDropTarget destination={{ scope: 'project', projectId: project.id, relativeDirectory: 'uploads' }} label={t('projectHome.copyToWorkspace', { name: project.agent?.displayName || project.name })} className="h-full min-h-0"><FilesWorkspace embedded initialProjectId={project.id} revealPath={revealFilePath} onRevealComplete={() => setRevealFilePath(null)} onFileClick={onOpenFile} /></FileExchangeDropTarget>
       ) : homeTab === 'graph' ? (
-        <div className="h-[calc(100vh-58px)] min-h-[560px]"><WorkspaceKnowledgeGraph projectId={project.id} rootPath={rootPath} onOpenFile={onOpenFile} onOpenSession={openSession} /></div>
+        <div className="h-full min-h-0"><WorkspaceKnowledgeGraph projectId={project.id} rootPath={rootPath} onOpenFile={onOpenFile} onOpenSession={openSession} /></div>
       ) : homeTab === 'work' ? (
         <div className="mx-auto w-full max-w-6xl px-3 py-3 sm:px-5 sm:py-4 lg:px-8"><div className="mb-3 flex items-center justify-between"><div><div className="text-[11px] font-bold uppercase tracking-[.16em] text-surface-500">Workstreams</div><h1 className="mt-1 text-xl font-bold text-surface-100">{t('projectHome.allWork')}</h1></div><button onClick={() => setHomeTab('home')} className="rounded-lg border border-surface-700 px-3 py-1.5 text-xs font-semibold text-surface-300">{t('projectHome.backHome')}</button></div><div className="space-y-3">{workstreams.map(item=><section key={item.id} className="rounded-2xl border border-surface-800 bg-surface-900/70 p-4"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><h2 className="truncate text-sm font-bold text-surface-200">{item.title}</h2><p className="mt-1 text-[11px] text-surface-600">{item.status==='resolved'?t('projectHome.completedWork'):t('projectHome.workedOn')} · {formatRelativeTime(item.lastAt)}</p></div><span className="text-xs font-semibold tabular-nums text-surface-400">{item.todoTotal>0?`${item.todoDone}/${item.todoTotal}`:item.status==='resolved'?t('projectHome.done'):item.status==='waiting'?t('projectHome.needsAttention'):t('projectHome.inProgress')}</span></div><div className="mt-3 border-t border-surface-800 pt-2">{item.sessions?.length?item.sessions.map(session=><button key={session.id} onClick={()=>openSession(session.id)} className="flex w-full items-center justify-between gap-3 rounded-lg px-2 py-2 text-left hover:bg-surface-800/55"><span className="min-w-0"><span className="block truncate text-xs font-semibold text-surface-300">{session.name}</span><span className="mt-0.5 block text-[10px] text-surface-600">{session.owner} · {session.todoTotal>0?`${session.todoDone}/${session.todoTotal} todo`:t('projectHome.stepsNotRecorded')}</span></span><span className="text-[11px] text-primary-300">{t('projectHome.openSession')} ›</span></button>):<p className="px-2 py-2 text-xs text-surface-600">{t('projectHome.noLinkedSessions')}</p>}</div></section>)}</div></div>
       ) : <div className="mx-auto w-full max-w-6xl px-3 py-3 pb-[calc(1rem+env(safe-area-inset-bottom,0px))] sm:px-5 sm:py-4 lg:px-8">
@@ -696,10 +725,13 @@ export function ProjectHome({ project, onOpenFiles, onOpenFile }: ProjectHomePro
               onOpenSession={openSession}
               onOpenWork={openWork}
               onOpenAllWork={() => setHomeTab('work')}
-              onExternalDeploy={aiServicesEnabled ? () => window.dispatchEvent(new CustomEvent('tower-open-ai-services', { detail: { projectId: project.id } })) : undefined}
+              onOpenAllConversations={() => window.dispatchEvent(new CustomEvent('tower-open-session-directory', { detail: { projectId: project.id } }))}
+              onExternalDeploy={aiServicesEnabled && canManageExternalDeployments ? () => window.dispatchEvent(new CustomEvent('tower-open-ai-services', { detail: { projectId: project.id } })) : undefined}
             />
       </div>}
+      </div>
 
+       {publishingOpen && project && <PublishPanel open={publishingOpen} onClose={() => setPublishingOpen(false)} initialProjectId={project.id} />}
        {managingConnections && <AgentCredentialsModal project={project} onClose={() => setManagingConnections(false)} />}
 
        {editingTeammate && (
@@ -710,6 +742,7 @@ export function ProjectHome({ project, onOpenFiles, onOpenFile }: ProjectHomePro
               <label className="block text-xs font-semibold text-surface-400">{t('projectHome.name')}<input value={teammateDraft.displayName} onChange={(e)=>setTeammateDraft({...teammateDraft,displayName:e.target.value})} className="mt-1 w-full rounded-xl border border-surface-700 bg-surface-950 px-3 py-2.5 text-sm text-surface-100"/></label>
               <label className="block text-xs font-semibold text-surface-400">{t('projectHome.role')}<input value={teammateDraft.role} onChange={(e)=>setTeammateDraft({...teammateDraft,role:e.target.value})} className="mt-1 w-full rounded-xl border border-surface-700 bg-surface-950 px-3 py-2.5 text-sm text-surface-100"/></label>
               <label className="block text-xs font-semibold text-surface-400">{t('projectHome.tagline')}<textarea value={teammateDraft.tagline} onChange={(e)=>setTeammateDraft({...teammateDraft,tagline:e.target.value})} rows={3} className="mt-1 w-full rounded-xl border border-surface-700 bg-surface-950 px-3 py-2.5 text-sm text-surface-100"/></label>
+              {['admin','operator'].includes(getCurrentRole() || '') && <label className="flex cursor-pointer items-start justify-between gap-4 rounded-xl border border-amber-500/35 bg-amber-500/5 p-3"><span><span className="block text-xs font-bold text-amber-200">{t('projectHome.operatorAccess')}</span><span className="mt-1 block text-[11px] leading-4 text-surface-500">{t('projectHome.operatorAccessDescription')}</span></span><input type="checkbox" checked={teammateDraft.superuser} onChange={(event)=>setTeammateDraft((current)=>({...current,superuser:event.target.checked}))} className="mt-0.5 h-4 w-4 shrink-0 accent-amber-500" /></label>}
               <section className="rounded-xl border border-surface-700 bg-surface-950/55 p-3">
                 <div className="flex items-start justify-between gap-3"><div><div className="text-xs font-bold text-surface-200">{t('projectHome.skillsForTeammate')}</div><p className="mt-1 text-[11px] leading-4 text-surface-500">{t('projectHome.disabledSkillHint')}</p></div><span className="shrink-0 text-[11px] text-surface-500">{t('projectHome.skillsEnabledCount', { enabled: skills.length-teammateDraft.disabledSkills.length, total: skills.length })}</span></div>
                 <div className="mt-3 max-h-48 space-y-1 overflow-y-auto pr-1">
@@ -720,7 +753,7 @@ export function ProjectHome({ project, onOpenFiles, onOpenFile }: ProjectHomePro
               <section aria-labelledby="profile-selection-title">
                 <div id="profile-selection-title" className="text-xs font-bold text-surface-200">{t('projectHome.selectProfile')}</div>
                 <p className="mt-1 text-[11px] leading-4 text-surface-500">{t('projectHome.selectDefaultProfile')}</p>
-                <div className="mt-2 grid grid-cols-6 gap-2 sm:grid-cols-8">{AGENT_CHARACTERS.map((character)=>{const selected=characterFace(teammateDraft.face)===character.id;const characterLabel=t(`agentCreation.characterLabels.${character.id}`);return <button key={character.id} type="button" title={characterLabel} onClick={()=>setTeammateDraft((current)=>({...current,face:`character:${character.id}`}))} aria-label={t('projectHome.profileSelectionLabel',{name:characterLabel,selected})} aria-pressed={selected} className={`relative rounded-xl border p-1 ${selected?'border-primary-400 bg-primary-500/20 ring-1 ring-primary-400/40':'border-surface-700 bg-surface-950 hover:border-surface-500'}`}><AgentCharacterAvatar id={character.id} className="h-auto w-full rounded-lg"/>{selected&&<span className="absolute right-0.5 top-0.5 grid h-4 w-4 place-items-center rounded-full bg-primary-500 text-[10px] font-bold text-white" aria-hidden="true">✓</span>}</button>})}</div>
+                <div className="mt-2 grid grid-cols-6 gap-2 sm:grid-cols-8">{AGENT_CHARACTERS.map((character)=>{const selected=characterFace(teammateDraft.face)===character.id;const characterLabel=t(`agentCreation.characterLabels.${character.id}`, { defaultValue: character.label });return <button key={character.id} type="button" title={characterLabel} onClick={()=>setTeammateDraft((current)=>({...current,face:`character:${character.id}`}))} aria-label={t('projectHome.profileSelectionLabel',{name:characterLabel,selected})} aria-pressed={selected} className={`relative rounded-xl border p-1 ${selected?'border-primary-400 bg-primary-500/20 ring-1 ring-primary-400/40':'border-surface-700 bg-surface-950 hover:border-surface-500'}`}><AgentCharacterAvatar id={character.id} className="h-auto w-full rounded-lg"/>{selected&&<span className="absolute right-0.5 top-0.5 grid h-4 w-4 place-items-center rounded-full bg-primary-500 text-[10px] font-bold text-white" aria-hidden="true">✓</span>}</button>})}</div>
               </section>
               <section className="border-t border-surface-700 pt-3" aria-labelledby="profile-generator-title">
                 <div className="flex items-center justify-between gap-3">

@@ -43,10 +43,19 @@ describe('Operator Prod upgrade orchestration source contract', () => {
   it('requires exact migration approval and backs up before applying or cutting over', () => {
     expect(orchestrator).toContain('"$approved_migration_rev" != "$source_rev"');
     expect(orchestrator).toContain('migration approval does not equal source revision');
-    expect(orchestrator).toContain('pg_dump -Fc --file "$backup" "$DATABASE_URL"');
+    expect(orchestrator).toContain('pg_dump "${backup_scope[@]}" -Fc "${backup_exclusions[@]}" --file "$backup" "$DATABASE_URL"');
+    expect(orchestrator).toContain('TOWER_OPERATOR_BACKUP_LOCAL_POSTGRES');
+    expect(orchestrator).toContain('Local backup database identity mismatch');
+    expect(orchestrator).toContain('Full administrator backup cannot exclude tables');
+    const backupSetup = orchestrator.indexOf('write_state backing-up');
+    const privateMask = orchestrator.lastIndexOf('umask 077', backupSetup);
+    expect(privateMask).toBeGreaterThan(0);
+    expect(privateMask).toBeLessThan(backupSetup);
+    expect(orchestrator).toContain('chmod 700 "$backup_dir"');
+    expect(orchestrator).toContain('pg_restore --list');
     expect(orchestrator).toContain('sha256sum "$backup" >"$backup.sha256"');
     const prepare = orchestrator.indexOf('prepare --source-rev "$source_rev" --ack-db-migrations-separate');
-    const backup = orchestrator.indexOf('pg_dump -Fc');
+    const backup = orchestrator.indexOf('sudo -n -u postgres pg_dump');
     const migration = orchestrator.indexOf('apply-db-migrations.js" apply');
     const activation = orchestrator.indexOf('activate --approve-rev "$source_rev"');
     expect(prepare).toBeLessThan(backup);
@@ -66,9 +75,14 @@ describe('Operator Prod upgrade orchestration source contract', () => {
     expect(reconcile).not.toContain('upgrade-production');
   });
 
-  it('keeps Workers outside the mutation path and exposes durable start/status entry points', () => {
-    expect(orchestrator).toContain("'workerRestartIncluded':False");
-    expect(orchestrator).toContain('Workers remain untouched');
+  it('synchronizes Workers only when the exact revision changes Worker contracts', () => {
+    expect(orchestrator).toContain("r['workerRestartIncluded']=bool(r['workerRelatedChangedPaths'])");
+    expect(orchestrator).toContain("'workerRestartIncluded':r['workerRestartIncluded']");
+    expect(orchestrator).toContain('if [[ "$worker_restart_required" = true ]]');
+    expect(orchestrator).toContain("write_state worker-sync 'waiting up to 10 minutes for idle Workers and synchronizing exact revision'");
+    expect(orchestrator).toContain('tower-worker-maintenance" deploy-installed "$source_rev_store" --wait-seconds 600');
+    expect(orchestrator).toContain("write_state done 'exact Operator Prod verified; Worker and Fleet unchanged'");
+    expect(orchestrator.indexOf("record_timing finalIdentity")).toBeLessThan(orchestrator.indexOf('if [[ "$worker_restart_required" = true ]]'));
     expect(orchestrator).not.toContain('systemctl');
     expect(orchestrator).not.toContain('tower-workbench-worker.service');
     expect(orchestrator).toContain('run_dir="$run_root/$source_rev"');

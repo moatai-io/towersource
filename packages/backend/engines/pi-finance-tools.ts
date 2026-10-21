@@ -20,6 +20,7 @@ import path from 'path';
 import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
 import {
   prepareFileRepresentation,
+  withPreparedLocalFile,
   type PreparedFileRepresentation,
 } from '../services/content-safety/file-representation-gateway.js';
 import { applyModelOutputBudget } from '../services/content-safety/model-output-budget-gateway.js';
@@ -364,7 +365,8 @@ export function createExcelReadTool(ctx: ExcelToolContext): ToolDefinition {
       const sheetArg = sheet ? JSON.stringify(sheet) : 'None';
 
       try {
-        const filePath = await resolveFinanceInputPath(rawFilePath, ctx);
+        const prepared = await prepareFinanceInput(rawFilePath, ctx);
+        return await withPreparedLocalFile(prepared, undefined, 100 * 1024 * 1024, async filePath => {
         const result = withExcelPythonEnv(ctx, ({ tempDir, readerDir }) => {
           const pyScript = `
 import json, sys
@@ -432,6 +434,7 @@ except Exception as e:
 
         const budgeted = applyModelOutputBudget([{ type: 'text' as const, text: lines.join('\n') }]);
         return { content: budgeted.content, details: { outputBudget: budgeted } };
+        });
       } catch (err: any) {
         return { content: [{ type: 'text' as const, text: `excel_read failed: ${err.message}` }], details: undefined };
       }
@@ -470,7 +473,8 @@ export function createExcelQueryTool(ctx: ExcelToolContext): ToolDefinition {
       const sheetArg = sheet ? JSON.stringify(sheet) : 'None';
 
       try {
-        const filePath = await resolveFinanceInputPath(rawFilePath, ctx);
+        const prepared = await prepareFinanceInput(rawFilePath, ctx);
+        return await withPreparedLocalFile(prepared, undefined, 100 * 1024 * 1024, async filePath => {
         const result = withExcelPythonEnv(ctx, ({ tempDir, readerDir }) => {
           const pyScript = `
 import sys
@@ -493,6 +497,7 @@ except Exception as e:
         });
         const budgeted = applyModelOutputBudget([{ type: 'text' as const, text: result }]);
         return { content: budgeted.content, details: { outputBudget: budgeted } };
+        });
       } catch (err: any) {
         return { content: [{ type: 'text' as const, text: `excel_query failed: ${err.message}` }], details: undefined };
       }

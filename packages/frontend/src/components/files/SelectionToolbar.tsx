@@ -188,10 +188,12 @@ export function SelectionToolbar({ onRefresh }: { onRefresh: () => void }) {
 }
 
 /** Modal for choosing/creating a destination folder */
-export function MoveToFolderModal({ selectedPaths, onClose, onComplete }: {
+export function MoveToFolderModal({ selectedPaths, onClose, onComplete, rootPath, onMove }: {
   selectedPaths: string[];
   onClose: () => void;
   onComplete: () => void;
+  rootPath?: string;
+  onMove?: (targetDir: string) => Promise<void>;
 }) {
   const { t } = useTranslation('files');
   const [targetDir, setTargetDir] = useState('');
@@ -252,7 +254,7 @@ export function MoveToFolderModal({ selectedPaths, onClose, onComplete }: {
     const parts = browsePath.split('/');
     parts.pop();
     const parent = parts.join('/');
-    if (parent) handleNavigate(parent);
+    if (parent && (!rootPath || parent === rootPath || parent.startsWith(`${rootPath}/`))) handleNavigate(parent);
   };
 
   const handleCreateFolder = async () => {
@@ -274,6 +276,17 @@ export function MoveToFolderModal({ selectedPaths, onClose, onComplete }: {
   const handleMove = async () => {
     if (!targetDir || moving) return;
     setMoving(true);
+    if (onMove) {
+      try {
+        await onMove(targetDir);
+        onComplete();
+      } catch (err: any) {
+        toastError(err.message || t('selection.moveFailed', { count: selectedPaths.length }));
+      } finally {
+        setMoving(false);
+      }
+      return;
+    }
 
     let success = 0;
     let fail = 0;
@@ -314,7 +327,7 @@ export function MoveToFolderModal({ selectedPaths, onClose, onComplete }: {
 
         {/* Current path breadcrumb */}
         <div className="px-4 py-2 border-b border-surface-800 flex items-center gap-1 text-[13px] text-gray-500 overflow-x-auto">
-          <button onClick={handleGoUp} className="shrink-0 p-0.5 hover:text-white transition-colors" title={t('goUp')}>
+          <button onClick={handleGoUp} disabled={browsePath === rootPath} className="shrink-0 p-0.5 hover:text-white transition-colors" title={t('goUp')}>
             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
             </svg>

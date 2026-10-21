@@ -6,19 +6,16 @@ const WS_SYNC_CHANNEL = 'tower_ws_events';
 export type WsSyncEnvelope =
   | { origin: string; scope: 'all'; data: any }
   | { origin: string; scope: 'session'; sessionId: string; data: any }
-  | { origin: string; scope: 'room'; roomId: string; data: any }
   | { origin: string; scope: 'user'; userId: number; data: any };
 
 export type OutboundWsSyncEnvelope =
   | { scope: 'all'; data: any }
   | { scope: 'session'; sessionId: string; data: any }
-  | { scope: 'room'; roomId: string; data: any }
   | { scope: 'user'; userId: number; data: any };
 
 export interface WsSyncHandlers {
   all(data: any): void;
   session(sessionId: string, data: any): void;
-  room(roomId: string, data: any): void;
   user(userId: number, data: any): void;
 }
 
@@ -31,7 +28,7 @@ export function parseWsSyncPayload(payload: string): WsSyncEnvelope | null {
     const parsed = JSON.parse(payload);
     if (!parsed || typeof parsed !== 'object') return null;
     if (typeof parsed.origin !== 'string') return null;
-    if (!['all', 'session', 'room', 'user'].includes(parsed.scope)) return null;
+    if (!['all', 'session', 'user'].includes(parsed.scope)) return null;
     if (!('data' in parsed)) return null;
     return parsed as WsSyncEnvelope;
   } catch {
@@ -55,11 +52,6 @@ export function dispatchWsSyncEnvelope(
         handlers.session(envelope.sessionId, envelope.data);
       }
       return;
-    case 'room':
-      if (typeof envelope.roomId === 'string' && envelope.roomId) {
-        handlers.room(envelope.roomId, envelope.data);
-      }
-      return;
     case 'user':
       if (typeof envelope.userId === 'number' && Number.isFinite(envelope.userId)) {
         handlers.user(envelope.userId, envelope.data);
@@ -75,8 +67,10 @@ export async function initWsSync(origin: string, handlers: WsSyncHandlers): Prom
   if (!isPgEnabled()) return;
   if (listenerClient) return;
 
+  let acquiredClient: PoolClient | null = null;
   try {
     const client = await getPgPool().connect();
+    acquiredClient = client;
     await client.query(`LISTEN ${WS_SYNC_CHANNEL}`);
     client.on('notification', (msg) => {
       if (msg.channel !== WS_SYNC_CHANNEL || !msg.payload || !registeredHandlers || !registeredOrigin) return;
@@ -91,7 +85,9 @@ export async function initWsSync(origin: string, handlers: WsSyncHandlers): Prom
     console.log(`[ws-sync] LISTEN ${WS_SYNC_CHANNEL}`);
   } catch (err: any) {
     console.error('[ws-sync] init failed:', err.message || err);
-    try { listenerClient?.release(); } catch {}
+    // LISTEN can fail before listenerClient is assigned. Discard the acquired
+    // connection: subscription state may be uncertain after a lost response.
+    try { acquiredClient?.release(true); } catch {}
     listenerClient = null;
   }
 }

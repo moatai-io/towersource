@@ -1,46 +1,31 @@
 /**
- * credential-vault-cli.ts — admin CLI for Workspace Credential Vault MVP.
- *
- * Usage:
- *   npx tsx packages/backend/scripts/credential-vault-cli.ts <command> [options]
+ * Minimal admin CLI for the VM-shared Credential Vault.
  *
  * Commands:
- *   list
- *   add-api-key --id gemini-default --provider gemini --secret-name GEMINI_API_KEY --env-name GEMINI_API_KEY --display "Gemini default" [--scope internal-default] [--by 1]
- *     - secret value is read from stdin; it is never echoed.
- *   grant-project --project-id <uuid> --credential-id gemini-default --mode allow [--env-name GEMINI_API_KEY] [--by 1]
- *   add-gh-target --credential-id gemini-default --project-id <uuid> --repo juliuschun/verita2 --secret-name GEMINI_API_KEY [--by 1]
- *   status-gh --target-id 1 [--by 1]
- *   sync-gh --target-id 1 [--by 1]
+ *   list [--scope workspace|project] [--project-id UUID] [--json]
+ *   add-api-key --id ID --provider PROVIDER --secret-name NAME
+ *     [--env-name ENV] [--display NAME] [--scope workspace|project]
+ *     [--project-id UUID] [--by USER_ID]
+ *
+ * Secret input is read from stdin and is never echoed.
  */
 
 import readline from 'readline';
 import { initPg, closePgPool } from '../db/pg.js';
-import {
-  checkGitHubActionsSecretStatus,
-  listCredentialProfiles,
-  listWorkspaceCredentials,
-  setProjectCredentialPolicy,
-  setProjectCredentialProfilePolicy,
-  syncGitHubActionsSecret,
-  upsertApiKeyCredential,
-  upsertCredentialProfile,
-  upsertGitHubActionsSecretTarget,
-} from '../services/credential-vault/credential-vault-service.js';
+import { listWorkspaceCredentials, upsertApiKeyCredential } from '../services/credential-vault/credential-vault-service.js';
 
 type Args = Record<string, string | boolean | undefined> & { _command: string };
 
 function parseArgs(argv: string[]): Args {
   const out: Args = { _command: argv[0] || 'help' };
   for (let i = 1; i < argv.length; i++) {
-    const a = argv[i];
-    if (a === '--json') { out.json = true; continue; }
-    if (a.startsWith('--')) {
-      const key = a.slice(2);
-      const next = argv[i + 1];
-      if (!next || next.startsWith('--')) out[key] = true;
-      else { out[key] = next; i += 1; }
-    }
+    const arg = argv[i];
+    if (arg === '--json') { out.json = true; continue; }
+    if (!arg.startsWith('--')) continue;
+    const key = arg.slice(2);
+    const next = argv[i + 1];
+    if (!next || next.startsWith('--')) out[key] = true;
+    else { out[key] = next; i += 1; }
   }
   return out;
 }
@@ -52,11 +37,18 @@ function str(args: Args, key: string, required = true): string | undefined {
   return undefined;
 }
 
-function num(args: Args, key: string, fallback?: number): number {
+function num(args: Args, key: string, fallback: number): number {
   const value = args[key];
-  if (typeof value === 'string') return parseInt(value, 10);
-  if (fallback !== undefined) return fallback;
-  throw new Error(`--${key} required`);
+  if (typeof value !== 'string') return fallback;
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isInteger(parsed) || parsed <= 0) throw new Error(`--${key} must be a positive integer`);
+  return parsed;
+}
+
+function scope(args: Args): 'workspace' | 'project' {
+  const value = str(args, 'scope', false) ?? 'workspace';
+  if (value !== 'workspace' && value !== 'project') throw new Error('--scope must be workspace or project');
+  return value;
 }
 
 async function readStdinSecret(): Promise<string> {
@@ -65,50 +57,61 @@ async function readStdinSecret(): Promise<string> {
     for await (const chunk of process.stdin) chunks.push(chunk as Buffer);
     return Buffer.concat(chunks).toString('utf8').trim();
   }
-
   const rl = readline.createInterface({ input: process.stdin, output: process.stderr });
   return new Promise((resolve) => {
     process.stderr.write('Secret value (input hidden): ');
-    const stdin = process.stdin as any;
-    if (stdin.setRawMode) stdin.setRawMode(true);
-    let buf = '';
+    const stdin = process.stdin as NodeJS.ReadStream;
+    stdin.setRawMode?.(true);
+    let buffer = '';
     stdin.on('data', (data: Buffer) => {
-      const s = data.toString('utf8');
-      if (s === '\n' || s === '\r' || s === '\r\n') {
-        if (stdin.setRawMode) stdin.setRawMode(false);
+      const value = data.toString('utf8');
+      if (value === '\n' || value === '\r' || value === '\r\n') {
+        stdin.setRawMode?.(false);
         rl.close();
         process.stderr.write('\n');
-        resolve(buf);
-      } else if (s === '\u0003') {
+        resolve(buffer);
+      } else if (value === '\u0003') {
         process.exit(130);
-      } else if (s === '\u007f') {
-        buf = buf.slice(0, -1);
+      } else if (value === '\u007f') {
+        buffer = buffer.slice(0, -1);
       } else {
-        buf += s;
+        buffer += value;
       }
     });
   });
 }
 
+function printUsage(): void {
+  console.log(`Usage: npx tsx packages/backend/scripts/credential-vault-cli.ts <command>
+
+Commands:
+  list [--scope workspace|project] [--project-id UUID] [--json]
+  add-api-key --id ID --provider PROVIDER --secret-name NAME [--env-name ENV]
+              [--display NAME] [--scope workspace|project] [--project-id UUID] [--by USER_ID]`);
+}
+
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
   await initPg();
-
   try {
     if (args._command === 'list') {
-      const rows = await listWorkspaceCredentials(args.by ? { userId: num(args, 'by', 1), includePersonal: true } : undefined);
+      const selectedScope = scope(args);
+      const projectId = str(args, 'project-id', selectedScope === 'project');
+      const rows = await listWorkspaceCredentials({ scope: selectedScope, projectId });
       if (args.json) console.log(JSON.stringify(rows, null, 2));
       else {
-        console.log('ID'.padEnd(24) + 'PROVIDER'.padEnd(14) + 'KIND'.padEnd(10) + 'SECRET_NAME'.padEnd(24) + 'SCOPE');
-        console.log('-'.repeat(90));
-        for (const r of rows) {
-          console.log(r.id.padEnd(24) + r.provider.padEnd(14) + r.kind.padEnd(10) + r.secret_name.padEnd(24) + r.scope);
+        console.log('ID'.padEnd(28) + 'PROVIDER'.padEnd(16) + 'KIND'.padEnd(12) + 'SCOPE'.padEnd(12) + 'PROJECT');
+        console.log('-'.repeat(104));
+        for (const row of rows) {
+          console.log(row.id.padEnd(28) + row.provider.padEnd(16) + row.kind.padEnd(12) + row.scope.padEnd(12) + (row.project_id ?? '-'));
         }
       }
       return;
     }
 
     if (args._command === 'add-api-key') {
+      const selectedScope = scope(args);
+      const projectId = str(args, 'project-id', selectedScope === 'project');
       const secretValue = await readStdinSecret();
       const row = await upsertApiKeyCredential({
         id: str(args, 'id')!,
@@ -117,117 +120,21 @@ async function main(): Promise<void> {
         secretName: str(args, 'secret-name')!,
         secretValue,
         defaultEnvName: str(args, 'env-name', false),
-        scope: (str(args, 'scope', false) as any) ?? 'workspace',
+        scope: selectedScope,
+        projectId,
         actorUserId: num(args, 'by', 1),
       });
-      console.log(JSON.stringify({ ok: true, credential: { id: row.id, provider: row.provider, secret_name: row.secret_name, scope: row.scope } }, null, 2));
+      console.log(JSON.stringify({ ok: true, credential: { id: row.id, provider: row.provider, scope: row.scope, projectId: row.project_id } }, null, 2));
       return;
     }
 
-    if (args._command === 'list-profiles') {
-      const rows = await listCredentialProfiles();
-      if (args.json) console.log(JSON.stringify(rows, null, 2));
-      else {
-        console.log('ID'.padEnd(28) + 'PROVIDER'.padEnd(14) + 'TYPE'.padEnd(14) + 'ENV'.padEnd(28) + 'SECRET_REFS');
-        console.log('-'.repeat(110));
-        for (const r of rows) {
-          console.log(
-            r.id.padEnd(28) +
-            r.provider.padEnd(14) +
-            r.profile_type.padEnd(14) +
-            Object.keys(r.env || {}).join(',').slice(0, 26).padEnd(28) +
-            Object.keys(r.secret_refs || {}).join(','),
-          );
-        }
-      }
-      return;
-    }
-
-    if (args._command === 'add-profile') {
-      const row = await upsertCredentialProfile({
-        id: str(args, 'id')!,
-        provider: str(args, 'provider')!,
-        profileType: (str(args, 'type', false) as any) ?? 'custom',
-        displayName: str(args, 'display', false) ?? str(args, 'id')!,
-        env: JSON.parse(str(args, 'env-json', false) ?? '{}'),
-        secretRefs: JSON.parse(str(args, 'secret-refs-json', false) ?? '{}'),
-        actorUserId: num(args, 'by', 1),
-      });
-      console.log(JSON.stringify({ ok: true, profile: { id: row.id, provider: row.provider, profile_type: row.profile_type } }, null, 2));
-      return;
-    }
-
-    if (args._command === 'grant-profile') {
-      await setProjectCredentialProfilePolicy({
-        projectId: str(args, 'project-id')!,
-        profileId: str(args, 'profile-id')!,
-        mode: (str(args, 'mode', false) as any) ?? 'allow',
-        actorUserId: num(args, 'by', 1),
-      });
-      console.log(JSON.stringify({ ok: true }, null, 2));
-      return;
-    }
-
-    if (args._command === 'grant-project') {
-      await setProjectCredentialPolicy({
-        projectId: str(args, 'project-id')!,
-        credentialId: str(args, 'credential-id')!,
-        mode: (str(args, 'mode', false) as any) ?? 'allow',
-        targetEnvName: str(args, 'env-name', false),
-        actorUserId: num(args, 'by', 1),
-      });
-      console.log(JSON.stringify({ ok: true }, null, 2));
-      return;
-    }
-
-    if (args._command === 'add-gh-target') {
-      const row = await upsertGitHubActionsSecretTarget({
-        credentialId: str(args, 'credential-id')!,
-        projectId: str(args, 'project-id', false) ?? null,
-        repo: str(args, 'repo')!,
-        secretName: str(args, 'secret-name')!,
-        actorUserId: num(args, 'by', 1),
-      });
-      console.log(JSON.stringify({ ok: true, target: { id: row.id, credential_id: row.credential_id, target_ref: row.target_ref } }, null, 2));
-      return;
-    }
-
-    if (args._command === 'status-gh') {
-      const status = await checkGitHubActionsSecretStatus({
-        targetId: num(args, 'target-id'),
-        actorUserId: num(args, 'by', 1),
-      });
-      console.log(JSON.stringify({ ok: status.status !== 'error', ...status }, null, 2));
-      return;
-    }
-
-    if (args._command === 'sync-gh') {
-      const result = await syncGitHubActionsSecret({
-        targetId: num(args, 'target-id'),
-        actorUserId: num(args, 'by', 1),
-      });
-      console.log(JSON.stringify(result, null, 2));
-      return;
-    }
-
-    console.log(`Usage: npx tsx packages/backend/scripts/credential-vault-cli.ts <command>
-
-Commands:
-  list
-  list-profiles
-  add-api-key --id ID --provider PROVIDER --secret-name SECRET_NAME [--env-name ENV] [--display NAME] [--scope workspace|internal-default|project]
-  grant-project --project-id PROJECT_ID --credential-id ID [--mode inherit|allow|deny|override]
-  add-profile --id ID --provider PROVIDER --type llm_backend --display NAME --env-json '{...}' --secret-refs-json '{...}'
-  grant-profile --project-id PROJECT_ID --profile-id ID [--mode allow|deny]
-  add-gh-target --credential-id ID [--project-id PROJECT_ID] --repo OWNER/REPO --secret-name SECRET_NAME
-  status-gh --target-id ID
-  sync-gh --target-id ID`);
+    printUsage();
   } finally {
     await closePgPool();
   }
 }
 
-main().catch(err => {
-  console.error(`credential-vault-cli error: ${err.message}`);
+main().catch((error) => {
+  console.error(`credential-vault-cli error: ${error instanceof Error ? error.message : String(error)}`);
   process.exit(1);
 });

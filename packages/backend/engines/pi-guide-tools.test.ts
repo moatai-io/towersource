@@ -75,6 +75,30 @@ describe('Pi runtime guide resource tools', () => {
     expect(parsed.content).toContain('JSON must be strictly valid');
   });
 
+  it('aligns discovery metadata, injected guidelines, and guide content without losing detailed rules', async () => {
+    const metadata = listRuntimeGuideResources().find(guide => guide.name === 'visualization')!;
+    const tool = createRuntimeGuideReadTool({ userRole: 'member' }) as any;
+    const { content } = JSON.parse(readText(await tool.execute('consistency', { name: 'visualization' })));
+    for (const text of [metadata.description, tool.promptGuidelines.join('\n'), content]) {
+      expect(text).toContain('Basic Mermaid flowcharts using the shared core rules do not require a guide read');
+      expect(text).not.toContain('Read before producing chart, mermaid');
+      expect(text).not.toContain('before relying on exact schemas or Mermaid edge/label rules');
+    }
+    expect(content).toContain('via `runtime_guide_read`');
+    expect(content).not.toContain('via `guide_read`');
+    expect(content).toContain('FLOWCHART LABELS');
+    expect(content).not.toContain('Applies to ALL shapes');
+    expect(content).toContain('Plain-text children must NOT be quoted');
+    expect(content).toContain('NEVER `-.x.->`');
+    expect(content).toContain('row data goes in the "data" field, NOT "rows"');
+    expect(content).toContain('the inner array MUST close before the outer object');
+    expect(content).toContain('Allowed exceptions (low contrast risk)');
+    expect(content).toContain('credential_vault_input');
+    expect(content).toContain('accepts an offer to open secure input');
+    expect(content).not.toContain('**```secure-input**');
+    expect(content).not.toContain('"target": ".env"');
+  });
+
   it('reads the full publishing guide resource', async () => {
     const tool = createRuntimeGuideReadTool({ userRole: 'member' });
     const result = await (tool as any).execute('call-3', { name: 'publishing' });

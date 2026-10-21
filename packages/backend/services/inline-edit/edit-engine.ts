@@ -6,7 +6,7 @@
 // raw response so that callers can drop the result straight into the file.
 
 import { runUtilityTextTask } from '../ai/utility-agent.js';
-import { getModelDefaults } from '../../config.js';
+import { getModelDefaults, resolveLegacyPiModelId } from '../../config.js';
 import {
   SYSTEM_PROMPT_TEXT,
   SYSTEM_PROMPT_HTML,
@@ -82,7 +82,7 @@ export async function runInlineEdit(req: InlineEditRequest): Promise<InlineEditR
   const beforeContext = (req.beforeContext ?? '').slice(-LIMITS.maxContextChars);
   const afterContext = (req.afterContext ?? '').slice(0, LIMITS.maxContextChars);
   const instruction = (req.instruction ?? '').trim();
-  const model = req.model || getModelDefaults().ai_reply || DEFAULT_INLINE_EDIT_MODEL;
+  const model = resolveLegacyPiModelId(req.model || getModelDefaults().ai_reply || DEFAULT_INLINE_EDIT_MODEL);
 
   if (!selection || !selection.trim()) {
     throw new Error('selection is empty');

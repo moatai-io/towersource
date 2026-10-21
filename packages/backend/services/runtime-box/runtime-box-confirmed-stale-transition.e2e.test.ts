@@ -110,7 +110,7 @@ run('confirmed-stale reconcile atomic transition', () => {
   afterAll(async () => {
     await modules?.closePg?.().catch(() => undefined);
     await docker('rm', '-f', containerName).catch(() => undefined);
-    await docker('rm', '-f', pgName).catch(() => undefined);
+    await docker('rm', '-f', '-v', pgName).catch(() => undefined);
     if (previousDatabaseUrl === undefined) delete process.env.DATABASE_URL;
     else process.env.DATABASE_URL = previousDatabaseUrl;
   });

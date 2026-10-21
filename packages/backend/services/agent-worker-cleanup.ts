@@ -53,7 +53,7 @@ export async function archiveStaleAgentWorkers(): Promise<number> {
      archived_sessions AS (
        UPDATE sessions s
           SET archived = 1,
-              updated_at = now()
+              archived_at = now()
          FROM archived_workers aw
         WHERE s.id = aw.backing_session_id
         RETURNING s.id

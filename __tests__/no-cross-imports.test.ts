@@ -9,6 +9,7 @@ import path from 'path';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
 
+// Cross-layer test fixtures may inspect the opposite layer; shipped modules may not import it.
 function scanTs(dir: string): string[] {
   const results: string[] = [];
   if (!fs.existsSync(dir)) return results;
@@ -16,7 +17,7 @@ function scanTs(dir: string): string[] {
     const full = path.join(dir, entry.name);
     if (entry.isDirectory() && entry.name !== 'node_modules' && entry.name !== 'dist') {
       results.push(...scanTs(full));
-    } else if (/\.(ts|tsx)$/.test(entry.name)) {
+    } else if (/\.(ts|tsx)$/.test(entry.name) && !/\.(test|spec)\.(ts|tsx)$/.test(entry.name)) {
       results.push(full);
     }
   }

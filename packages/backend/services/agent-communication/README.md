@@ -42,3 +42,25 @@ Agent Session 사이의 background turn 실행 계약을 소유한다.
 - `../session/spawn-rpc.ts`
 - `../agent-turn/README.md`
 - `work/2026-08-10-agent-conversation-lifecycle-deep-module-plan.md`
+
+## Persistent worker completion and recovery
+
+Worker callbacks with an `agentReport.runId` use `ensureAgentRunReportDelivered`,
+the same durable acceptance and lease path used by settlement recovery. Both
+therefore address `agent-report:<parentSessionId>:<runId>` rather than producing
+a separate legacy spawn completion plus a recovery report. Legacy callbacks
+without a worker run ID retain their completion-shadow behavior.
+
+Worker settlement checks backing engine activity before reading persisted
+assistant text. A streaming prefix is not a completed result and must not be
+used to complete a run or backfill a parent report. This local-engine guard
+does not by itself prove distributed exactly-once delivery or prevent all
+post-crash partial-text cases.
+
+Regression contracts: `../agent-workers.long-result.source.test.ts` and
+`../session/spawn-rpc.source.test.ts`; durable delivery tests live alongside
+this module. Source tests protect routing, not live model/stream timing.
+
+### Report startup acknowledgement
+
+The background wake runner owns its startup acknowledgement. Callers must start `runSessionTurnStream` before waiting for that acknowledgement; otherwise the report lease remains claimed while the code waits for an event that cannot occur. The first streamed event records `started_turn` using the delivery owner fence. Paused or archived worker states must survive asynchronous completion; only explicit resume may return a paused worker to idle.

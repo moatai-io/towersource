@@ -16,7 +16,7 @@ const identityFile = process.env.TOWER_LOCAL_WORKER_IDENTITY_FILE?.trim();
 const projectIds = (process.env.TOWER_LOCAL_WORKER_PROJECT_IDS ?? '').split(',').map(value => value.trim()).filter(Boolean);
 const capabilities = (process.env.TOWER_LOCAL_WORKER_CAPABILITIES ?? 'job,service,shell').split(',').map(value => value.trim()).filter(Boolean);
 const intervalMs = Math.max(2_000, Number(process.env.TOWER_LOCAL_WORKER_HEARTBEAT_MS ?? 5_000));
-const maxRuns = Number(process.env.TOWER_LOCAL_WORKER_MAX_RUNS ?? 4);
+const maxRuns = Number(process.env.TOWER_LOCAL_WORKER_MAX_RUNS ?? 20);
 if (!Number.isInteger(maxRuns) || maxRuns < 3 || maxRuns > 1_000) {
   throw new Error('TOWER_LOCAL_WORKER_MAX_RUNS must be an integer between 3 and 1000 capacity units');
 }
@@ -24,11 +24,13 @@ if (!Number.isInteger(maxRuns) || maxRuns < 3 || maxRuns > 1_000) {
 if (!workerId || !baseUrl || !controlPlaneUrl || !identityFile || projectIds.length === 0) {
   throw new Error('TOWER_LOCAL_WORKER_ID, BASE_URL, CONTROL_PLANE_URL, IDENTITY_FILE, and PROJECT_IDS are required');
 }
-const token = fs.readFileSync(identityFile, 'utf8').trim();
-if (!token) throw new Error('Worker identity token file is empty');
+if (!fs.readFileSync(identityFile, 'utf8').trim()) throw new Error('Worker identity token file is empty');
 const capacity = { cpuTotal: 4, memoryMbTotal: 8192, activeRuns: 0, maxRuns };
 
 async function post(path: string, body: unknown): Promise<void> {
+  // Maintenance replaces this file atomically; pick it up without a restart.
+  const token = fs.readFileSync(identityFile!, 'utf8').trim();
+  if (!token) throw new Error('Worker identity token file is empty');
   const response = await fetch(`${controlPlaneUrl!.replace(/\/$/, '')}${path}`, {
     method: 'POST',
     headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },

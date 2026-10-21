@@ -1,62 +1,64 @@
 ---
-title: "Tower at a glance"
+title: "Tower at a Glance"
 icon: "📖"
 order: 0
 ---
 
 # Tower at a glance
 
-Tower is a self-hosted workspace where teams work with AI teammates across conversations, files, tools, credentials, automations, and published outputs.
+Tower is a self-hosted workspace where teams work with AI teammates across conversations, files, tools, and recurring work.
 
-Remember this basic flow:
+> **Find the responsible AI teammate → delegate in a Session → inspect results and verification → save or deliver what you need.**
 
-> **Choose an AI teammate or Project → delegate work in a Session → review files and progress → share only the result you need.**
+## Start with your goal
+
+| Goal | Guide |
+|---|---|
+| Choose an AI teammate and delegate a first task | [Getting started](./01-getting-started.md) |
+| Change a request, find earlier conversations, and continue work | [Sessions](./02-sessions.md) |
+| Analyze material, preserve originals, and deliver files | [Files](./04-files.md) |
+| Review work records, progress, and recurring execution | [Work and Automations](./05-work-and-automations.md) |
+| Create PDFs, presentations, charts, and web outputs | [Visual outputs](./06-visual-outputs.md) |
+| Check settings, Skills, service connections, and access | [Settings and Connections](./07-settings-permissions-connections.md) |
+| Input faster and delegate precisely | [Shortcuts and effective requests](./08-shortcuts-effective-requests.md) |
+| Understand Agent authority and operational conditions | [Authority and connection operations](./09-agent-authority-connections.md) |
+| Delegate specialist work and reuse a colleague | [Support AI](./10-support-ai.md) |
+| Understand personal tasks, Secretariat, dashboards, and services | [Personal work and services](./11-personal-and-services.md) |
 
 ## Core concepts
 
 | Concept | Meaning |
 |---|---|
-| **AI teammate** | A Primary Agent with a visible role and accountable workspace |
-| **Project** | The technical boundary for files, Sessions, members, permissions, and Credentials |
-| **Session** | A durable conversation and execution history inside a Project |
-| **Files** | Reusable source material and generated artifacts |
-| **My Work** | Ongoing work, approvals, and execution history |
-| **Automations** | Scheduled or recurring AI work |
-| **Skills** | Specialized, reusable operating instructions |
-| **Connection** | An approved external account that an AI teammate may use within policy |
+| AI teammate | A Primary Agent with a role and accountable workspace |
+| Project | The technical boundary for files, Sessions, access, and Connections |
+| Session | Conversation, execution, decisions, and follow-up history |
+| Support AI | A specialist delegated work by the main AI, which integrates its report |
+| Files and Viewer | Access to preserved material and artifacts |
+| Work Steps | Progress of the current AI run, separate from private My Todo |
+| My Work | Related work records, conversations, approvals, and follow-up decisions |
+| Automations | Scheduled or recurring execution |
+| Skills | Reusable specialist operating instructions |
+| Connection | Authorized access to an external service |
 
-## Common workflow
+## Availability and safety
 
-1. Open the relevant AI teammate or Project.
-2. Start a Session or continue an existing one.
-3. State the audience, output format, and important constraints.
-4. Review generated files in the Viewer Pane or Files surface.
-5. Continue revisions in the same Session.
-6. Use an Automation when the work should run on a schedule.
+Features vary with installation version, role, Project policy, and service connections. Experimental voice features require explicit server enablement. Source code or documentation alone does not prove availability on every server.
 
-## Permissions and credentials
+- Directory visibility and execution or file access are distinct.
+- Sessions and support AI in one Project can operate on the same files.
+- Private personal material and shared Project files have different access boundaries.
+- Reading a conversation attachment and permanently preserving its original are separate requests.
+- Confirm the destination and scope for delivery or publication.
+- Use secure input for passwords and API keys, not chat or documents.
 
-Project membership and roles govern access to Project Sessions and files. Personal files and notes use a separate user boundary. Credential values do not belong in chat, source files, skills, or reusable documents; Tower supplies approved credentials only to eligible executions.
+## Earlier features
 
-## Help topics
-
-1. [Getting Started](./01-getting-started.md)
-2. [Sessions](./02-sessions.md)
-3. [Channels — historical UI guide](./03-channels.md)
-4. [Files](./04-files.md)
-5. [Work and Automations](./05-work-and-automations.md)
-6. [Visual Outputs and Artifacts](./06-visual-outputs.md)
-7. [Settings, Permissions, and Connections](./07-settings-permissions-connections.md)
-8. [Shortcuts and Effective Requests](./08-shortcuts-effective-requests.md)
-
-## Documentation status
-
-English is the default source language for new OSS documentation. Pages marked **Historical UI guide** describe an earlier or retired surface and are not the current product contract.
-
-The Channel guide is retained for historical reference. Current execution history and ongoing work belong in Sessions, Work, notifications, and Automations.
+The internal Channels UI is retired. Do not follow earlier `@ai` and `@task` channel workflows. The [Channels transition page](./03-channels.md) preserves old links and points to current paths; retirement does not imply deletion of historical data.
 
 ## Maintained references
 
 - [Installation Guide](../../../INSTALL.md)
 - [Architecture](../../tower-guide/architecture.md)
 - [Skills](../../tower-guide/skills.md)
+
+Describe the outcome, audience, format, and permitted scope in ordinary language. Check completion reports for saved artifacts, checks actually run, and remaining uncertainty.

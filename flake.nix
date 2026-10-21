@@ -43,9 +43,13 @@
         paths = [
           pkgs.pretendard
           pkgs.noto-fonts-cjk-sans
+          pkgs.noto-fonts-cjk-serif
           pkgs.nanum
+          pkgs.nanum-gothic-coding
           pkgs.noto-fonts-color-emoji
           pkgs.inter
+          pkgs.dejavu_fonts
+          pkgs.liberation_ttf
         ];
       };
       # Harness document/CAD analysis tools execute one explicit Python runtime.
@@ -63,7 +67,7 @@
       ]);
       # Project Worker baseline mirrors the Runtime Box's built-in work-computer
       # capabilities. Application dependencies remain Project-local via uv/npm.
-      workerGws = pkgs.stdenvNoCC.mkDerivation {
+      workerGws = pkgs.stdenv.mkDerivation {
         pname = "gws";
         version = "0.22.5";
         src = pkgs.fetchurl {
@@ -71,26 +75,40 @@
           hash = "sha256-3njs29LxqEzKAGOn7LxEAkD8FLbrzLsX9GRreSqMXB8=";
         };
         sourceRoot = ".";
+        nativeBuildInputs = [ pkgs.autoPatchelfHook pkgs.makeWrapper ];
+        buildInputs = [ pkgs.stdenv.cc.cc.lib ];
         installPhase = ''
           mkdir -p "$out/bin"
           install -m755 gws "$out/bin/gws"
         '';
+        # Trust belongs to the executable closure, not a controller-side
+        # Credential path. Keep explicit custom CA settings for private PKI.
+        postFixup = ''
+          wrapProgram "$out/bin/gws" \
+            --set-default SSL_CERT_FILE "${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt"
+        '';
+        doInstallCheck = true;
+        installCheckPhase = ''
+          "$out/bin/gws" --version | grep -F "gws 0.22.5"
+        '';
       };
-      workerMermaid = pkgs.buildNpmPackage {
-        pname = "tower-worker-mermaid-cli";
-        version = "11.16.0";
+      workerPublishingTools = pkgs.buildNpmPackage {
+        pname = "tower-worker-publishing-tools";
+        version = "1.0.0";
         src = ./packages/backend/sandbox-images/runtime-box-node22-python313;
         postPatch = ''
           cp publishing-package.json package.json
           cp publishing-package-lock.json package-lock.json
         '';
-        npmDepsHash = "sha256-VNIPx/NFHXplvVmgfZ1JZR55Uz91apkBqBmM9tyuj9I=";
+        npmDepsHash = "sha256-LFh0KGxha4Z/NapkPSEd5ckvsGLi0KltpJhuWqIoAU0=";
         PUPPETEER_SKIP_DOWNLOAD = "true";
         dontNpmBuild = true;
         installPhase = ''
-          mkdir -p "$out/lib/node_modules/tower-mermaid" "$out/bin"
-          cp -R node_modules package.json package-lock.json "$out/lib/node_modules/tower-mermaid/"
-          ln -s "$out/lib/node_modules/tower-mermaid/node_modules/.bin/mmdc" "$out/bin/mmdc"
+          mkdir -p "$out/lib/node_modules/tower-publishing-tools" "$out/bin"
+          cp -R node_modules package.json package-lock.json "$out/lib/node_modules/tower-publishing-tools/"
+          for command in mmdc marp svgo; do
+            ln -s "$out/lib/node_modules/tower-publishing-tools/node_modules/.bin/$command" "$out/bin/$command"
+          done
         '';
       };
       workerPandoc = pkgs.stdenvNoCC.mkDerivation {
@@ -125,6 +143,7 @@
       ]);
       workerBaseline = [
         pkgs.bash
+        pkgs.bubblewrap
         pkgs.chromium
         pkgs.coreutils
         pkgs.curl
@@ -168,7 +187,7 @@
         pkgs.yq-go
         pkgs.zip
         workerGws
-        workerMermaid
+        workerPublishingTools
         workerPython
       ];
       towerNixRender = pkgs.writeShellApplication {
@@ -177,6 +196,7 @@
           pkgs.chromium
           pkgs.coreutils
           pkgs.python3
+          pkgs.which
         ];
         runtimeEnv = {
           CHROMIUM_PATH = "${pkgs.chromium}/bin/chromium";
@@ -300,7 +320,7 @@
         dontFixup = true;
         outputHashMode = "recursive";
         outputHashAlgo = "sha256";
-        outputHash = "sha256-TQ7v0t1oFgl6wTtCUJOyuukRwiXy9h29wNrSP2NWWtU=";
+        outputHash = "sha256-u1peDeQ5D2usfmuWd1mfILQn/AAd1YVReRRvlLr42J0=";
       };
 
       # Runtime dependencies are ~1.08 GB but change only with the lockfile or
@@ -319,7 +339,12 @@
           cp -R ${towerAppNpmDeps}/node_modules work/node_modules
           cp -R ${towerAppNpmDeps}/packages/backend/node_modules work/packages/backend/node_modules
           chmod -R u+w work/node_modules work/packages/backend/node_modules
-          (cd work && node ${./scripts/apply-pi-eventstream-patch.mjs})
+          mkdir -p pi-sdk-checks
+          cp ${./scripts/pi-sdk-behavior.mjs} pi-sdk-checks/pi-sdk-behavior.mjs
+          cp ${./scripts/apply-pi-eventstream-patch.mjs} pi-sdk-checks/apply-pi-eventstream-patch.mjs
+          cp ${./scripts/check-pi-sdk-runtime.mjs} pi-sdk-checks/check-pi-sdk-runtime.mjs
+          (cd work && node ../pi-sdk-checks/apply-pi-eventstream-patch.mjs)
+          (cd work && node ../pi-sdk-checks/check-pi-sdk-runtime.mjs)
           runHook postBuild
         '';
         installPhase = ''
@@ -333,15 +358,31 @@
         dontFixup = true;
       };
 
-      towerApp = pkgs.stdenvNoCC.mkDerivation {
+      mkTowerApp = { prebuiltDist ? null }: pkgs.stdenvNoCC.mkDerivation {
         pname = "tower-app";
         version = releaseVersion;
         src = towerAppSrc;
         nativeBuildInputs = [ npm10Node22 pkgs.nodejs_22 pkgs.makeWrapper pkgs.python3 ];
         dontConfigure = true;
         NODE_ENV = "production";
+        # Vite cannot read .git from a Nix source; embed this closure's revision.
+        SOURCE_REV = sourceRev;
 
-        buildPhase = ''
+        buildPhase = if prebuiltDist != null then ''
+          runHook preBuild
+          export HOME="$TMPDIR/home"
+          mkdir -p "$HOME"
+          test -f ${prebuiltDist}/artifact-manifest.json
+          test -f ${prebuiltDist}/dist/frontend/index.html
+          test -f ${prebuiltDist}/dist/backend/packages/backend/index.js
+          test -f ${prebuiltDist}/dist/runtime-packages/@tower/shared/package.json
+          rm -rf dist
+          cp -R ${prebuiltDist}/dist ./dist
+          # Nix inputs are read-only; only this build-local copy may be extended
+          # during install (e.g. authoritative migration SQL). Never chmod the input.
+          chmod -R u+w ./dist
+          runHook postBuild
+        '' else ''
           runHook preBuild
           export HOME="$TMPDIR/home"
           mkdir -p "$HOME"
@@ -371,6 +412,12 @@
           cp package.json "$app/package.json"
           cp packages/backend/models.json "$app/packages/backend/models.json"
           cp -R packages/backend/db "$app/packages/backend/db"
+          mkdir -p "$app/dist/backend/packages/backend/db/migrations"
+          cp packages/backend/db/migrations/*.sql "$app/dist/backend/packages/backend/db/migrations/"
+          # Provisioning bootstrap/Worker need the same versioned scaffold and skills.
+          mkdir -p "$app/templates" "$app/skills"
+          cp -R templates/workspace "$app/templates/workspace"
+          cp -R skills/managed "$app/skills/managed"
           cp -R docs/tower-guide/resources "$app/docs/tower-guide/resources"
           mkdir -p "$app/node_modules"
           for runtimeDependency in ${towerAppRuntime}/node_modules/* ${towerAppRuntime}/node_modules/.[!.]*; do
@@ -387,28 +434,88 @@
           cp ${./scripts/nix-app/tower-app-probe} "$out/bin/tower-app-probe"
           cp ${./scripts/nix-app/tower-app-start-shadow} "$out/bin/tower-app-start-shadow"
           cp ${./scripts/nix-app/tower-app-start-production} "$out/bin/tower-app-start-production"
+          cp ${./scripts/nix-app/tower-app-start-provisioning} "$out/bin/tower-app-start-provisioning"
+          cp ${./scripts/nix-app/tower-app-provisioning-command} "$out/bin/tower-app-provisioning-command"
+          cp ${./scripts/nix-app/prepare-provisioning-host} "$out/bin/prepare-provisioning-host"
+          cp ${./scripts/nix-app/enroll-provisioning-worker} "$out/bin/enroll-provisioning-worker"
+          cp ${./scripts/nix-app/provisioning-runtime-context} "$out/bin/provisioning-runtime-context"
+          cp ${./scripts/nix-app/prepare-provisioning-managed-skills} "$out/bin/prepare-provisioning-managed-skills"
+          cp ${./scripts/nix-app/prepare-provisioning-bwrap-policy} "$out/bin/prepare-provisioning-bwrap-policy"
+          cp ${./scripts/nix-app/prepare-provisioning-main-https} "$out/bin/prepare-provisioning-main-https"
+          cp ${./scripts/nix-app/prepare-provisioning-owner} "$out/bin/prepare-provisioning-owner"
+          ln -s ${pkgs.bubblewrap}/bin/bwrap "$out/bin/tower-provisioning-bwrap"
           cp ${./scripts/nix-app/tower-app-deploy-verify} "$out/bin/tower-app-deploy-verify"
           cp ${./scripts/nix-app/tower-app-probe-isolated-db} "$out/bin/tower-app-probe-isolated-db"
           cp ${./scripts/nix-app/tower-app-pdf-smoke} "$out/bin/tower-app-pdf-smoke"
           cp ${./scripts/nix-app/tower-app-document-smoke} "$out/bin/tower-app-document-smoke"
-          cp ${./scripts/nix-app/tower-app-runtime-box-smoke} "$out/bin/tower-app-runtime-box-smoke"
+          printf '%s\n' '{"version":1}' > "$out/share/tower/worker-maintenance-protocol.json"
+          cp ${./scripts/nix-app/worker-maintenance-readiness.py} "$out/bin/worker-maintenance-readiness.py"
+          chmod +x "$out/bin/worker-maintenance-readiness.py"
+          patchShebangs "$out/bin/worker-maintenance-readiness.py"
+          wrapProgram "$out/bin/worker-maintenance-readiness.py" \
+            --prefix PATH : ${lib.makeBinPath [ pkgs.python3 pkgs.systemd ]}
+          cp ${./scripts/nix-app/tower-worker-maintenance} "$out/bin/tower-worker-maintenance"
+          cp ${./scripts/nix-app/install-worker-maintenance} "$out/bin/install-worker-maintenance"
+          chmod +x "$out/bin/tower-worker-maintenance" "$out/bin/install-worker-maintenance"
+          patchShebangs "$out/bin/tower-worker-maintenance" "$out/bin/install-worker-maintenance"
+          wrapProgram "$out/bin/tower-worker-maintenance" \
+            --set PYTHONDONTWRITEBYTECODE 1 \
+            --prefix PATH : ${lib.makeBinPath [ pkgs.python3 pkgs.nodejs_22 pkgs.nix pkgs.systemd ]}
+          wrapProgram "$out/bin/install-worker-maintenance" \
+            --set PYTHONDONTWRITEBYTECODE 1 \
+            --prefix PATH : ${lib.makeBinPath [ pkgs.python3 pkgs.nodejs_22 pkgs.nix pkgs.systemd ]}
           cp ${./scripts/nix-app/tower-workbench-worker} "$out/bin/tower-workbench-worker"
           cp ${./scripts/nix-app/tower-workbench-worker-heartbeat} "$out/bin/tower-workbench-worker-heartbeat"
           cp ${./scripts/nix-app/runtime-compute-doctor} "$out/bin/runtime-compute-doctor"
+          cp ${./packages/backend/sandbox-images/runtime-box-node22-python313/tower-html-render} "$out/bin/tower-html-render"
           cp ${./packages/backend/project-compute-baseline.json} "$out/share/tower/compute-baseline.json"
           cp ${./scripts/nix-app/install-local-workbench-worker-units} "$out/bin/install-local-workbench-worker-units"
           cp ${./scripts/nix-app/install-system-workbench-worker-units} "$out/bin/install-system-workbench-worker-units"
+          cp ${./scripts/nix-app/tower-worker-permission-preflight} "$out/bin/tower-worker-permission-preflight"
+          cp ${./scripts/nix-app/tower-shared-worker-install-preflight} "$out/bin/tower-shared-worker-install-preflight"
+          cp ${./scripts/nix-app/tower-shared-worker-host-policy} "$out/bin/tower-shared-worker-host-policy"
+          cp ${./scripts/nix-app/tower-protected-input-publish} "$out/bin/tower-protected-input-publish"
+          cp ${./scripts/nix-app/tower-shared-output-publish} "$out/bin/tower-shared-output-publish"
+          chmod +x "$out/bin/tower-protected-input-publish" "$out/bin/tower-shared-output-publish"
+          patchShebangs "$out/bin/tower-protected-input-publish" "$out/bin/tower-shared-output-publish"
+          wrapProgram "$out/bin/tower-protected-input-publish" --prefix PATH : ${lib.makeBinPath [ pkgs.acl pkgs.python3 ]}
+          wrapProgram "$out/bin/tower-shared-output-publish" --prefix PATH : ${lib.makeBinPath [ pkgs.acl pkgs.python3 ]}
+          chmod +x "$out/bin/tower-worker-permission-preflight" "$out/bin/tower-shared-worker-install-preflight" "$out/bin/tower-shared-worker-host-policy"
+          patchShebangs "$out/bin/tower-worker-permission-preflight" "$out/bin/tower-shared-worker-install-preflight" "$out/bin/tower-shared-worker-host-policy"
+          wrapProgram "$out/bin/tower-worker-permission-preflight" \
+            --prefix PATH : ${lib.makeBinPath [ pkgs.python3 ]}
+          wrapProgram "$out/bin/tower-shared-worker-install-preflight" \
+            --prefix PATH : ${lib.makeBinPath [ pkgs.bash pkgs.coreutils pkgs.curl pkgs.acl pkgs.shadow pkgs.util-linux pkgs.python3 ]}
+          wrapProgram "$out/bin/tower-shared-worker-host-policy" \
+            --prefix PATH : ${lib.makeBinPath [ pkgs.python3 ]}
           cp ${./scripts/nix-app/tower-workbench-assignment-reconciler} "$out/bin/tower-workbench-assignment-reconciler"
           cp ${./scripts/nix-app/install-workbench-assignment-reconciler-unit} "$out/bin/install-workbench-assignment-reconciler-unit"
+          cp ${./scripts/nix-app/install-worker-scope-coordinator} "$out/bin/install-worker-scope-coordinator"
           ln -s ${towerNixRender}/bin/tower-nix-render "$out/bin/tower-nix-render"
-          chmod +x "$out/bin/tower-app-probe" "$out/bin/tower-app-start-shadow" "$out/bin/tower-app-start-production" "$out/bin/tower-app-deploy-verify" "$out/bin/tower-app-probe-isolated-db" "$out/bin/tower-app-pdf-smoke" "$out/bin/tower-app-document-smoke" "$out/bin/tower-app-runtime-box-smoke" "$out/bin/tower-workbench-worker" "$out/bin/tower-workbench-worker-heartbeat" "$out/bin/runtime-compute-doctor" "$out/bin/install-local-workbench-worker-units" "$out/bin/install-system-workbench-worker-units" "$out/bin/tower-workbench-assignment-reconciler" "$out/bin/install-workbench-assignment-reconciler-unit"
-          patchShebangs "$out/bin/tower-app-probe" "$out/bin/tower-app-start-shadow" "$out/bin/tower-app-start-production" "$out/bin/tower-app-deploy-verify" "$out/bin/tower-app-probe-isolated-db" "$out/bin/tower-app-pdf-smoke" "$out/bin/tower-app-document-smoke" "$out/bin/tower-app-runtime-box-smoke" "$out/bin/tower-workbench-worker" "$out/bin/tower-workbench-worker-heartbeat" "$out/bin/runtime-compute-doctor" "$out/bin/install-local-workbench-worker-units" "$out/bin/install-system-workbench-worker-units" "$out/bin/tower-workbench-assignment-reconciler" "$out/bin/install-workbench-assignment-reconciler-unit"
+          chmod +x "$out/bin/tower-app-probe" "$out/bin/tower-app-start-shadow" "$out/bin/tower-app-start-production" "$out/bin/tower-app-deploy-verify" "$out/bin/tower-app-probe-isolated-db" "$out/bin/tower-app-pdf-smoke" "$out/bin/tower-app-document-smoke" "$out/bin/tower-workbench-worker" "$out/bin/tower-workbench-worker-heartbeat" "$out/bin/runtime-compute-doctor" "$out/bin/tower-html-render" "$out/bin/install-local-workbench-worker-units" "$out/bin/install-system-workbench-worker-units" "$out/bin/tower-workbench-assignment-reconciler" "$out/bin/install-workbench-assignment-reconciler-unit" "$out/bin/install-worker-scope-coordinator"
+          patchShebangs "$out/bin/tower-app-probe" "$out/bin/tower-app-start-shadow" "$out/bin/tower-app-start-production" "$out/bin/tower-app-deploy-verify" "$out/bin/tower-app-probe-isolated-db" "$out/bin/tower-app-pdf-smoke" "$out/bin/tower-app-document-smoke" "$out/bin/tower-workbench-worker" "$out/bin/tower-workbench-worker-heartbeat" "$out/bin/runtime-compute-doctor" "$out/bin/tower-html-render" "$out/bin/install-local-workbench-worker-units" "$out/bin/install-system-workbench-worker-units" "$out/bin/tower-workbench-assignment-reconciler" "$out/bin/install-workbench-assignment-reconciler-unit" "$out/bin/install-worker-scope-coordinator"
           wrapProgram "$out/bin/tower-app-probe" \
-            --prefix PATH : ${lib.makeBinPath [ pkgs.nodejs_22 pkgs.python3 pkgs.coreutils ]}
+            --prefix PATH : ${lib.makeBinPath [ pkgs.nodejs_22 pkgs.python3 pkgs.coreutils pkgs.gh ]}
           wrapProgram "$out/bin/tower-app-start-shadow" \
+            --set TOWER_PROJECT_SETFACL_BIN "${lib.getBin pkgs.acl}/bin/setfacl" \
             --prefix PATH : ${lib.makeBinPath [ pkgs.nodejs_22 pkgs.coreutils ]}
+          # Backend issue MCP invokes gh; do not depend on mutable host packages.
           wrapProgram "$out/bin/tower-app-start-production" \
-            --prefix PATH : ${lib.makeBinPath [ pkgs.nodejs_22 towerAnalysisPython pkgs.coreutils ]} \
+            --set TOWER_PROJECT_SETFACL_BIN "${lib.getBin pkgs.acl}/bin/setfacl" \
+            --prefix PATH : ${lib.makeBinPath [ pkgs.nodejs_22 towerAnalysisPython pkgs.coreutils pkgs.gh ]} \
+            --set TOWER_DOCUMENT_PYTHON "${towerAnalysisPython}/bin/python3" \
+            --set TOWER_CAD_PYTHON "${towerAnalysisPython}/bin/python3" \
+            --set PDF_EXPORT_RENDERER_MODE nix \
+            --set NIX_RENDERER_BIN "$out/bin/tower-nix-render"
+          chmod +x "$out/bin/tower-app-start-provisioning" "$out/bin/tower-app-provisioning-command" "$out/bin/prepare-provisioning-host" "$out/bin/enroll-provisioning-worker" "$out/bin/provisioning-runtime-context" "$out/bin/prepare-provisioning-managed-skills" "$out/bin/prepare-provisioning-bwrap-policy" "$out/bin/prepare-provisioning-main-https" "$out/bin/prepare-provisioning-owner"
+          patchShebangs "$out/bin/tower-app-start-provisioning" "$out/bin/tower-app-provisioning-command" "$out/bin/prepare-provisioning-host" "$out/bin/enroll-provisioning-worker" "$out/bin/provisioning-runtime-context" "$out/bin/prepare-provisioning-managed-skills" "$out/bin/prepare-provisioning-bwrap-policy" "$out/bin/prepare-provisioning-main-https" "$out/bin/prepare-provisioning-owner"
+          wrapProgram "$out/bin/enroll-provisioning-worker" \
+            --prefix PATH : ${lib.makeBinPath [ pkgs.nodejs_22 pkgs.coreutils pkgs.postgresql_16 pkgs.curl pkgs.python3 pkgs.util-linux pkgs.systemd ]}
+          wrapProgram "$out/bin/tower-app-provisioning-command" \
+            --prefix PATH : ${lib.makeBinPath [ pkgs.nodejs_22 pkgs.coreutils pkgs.nix pkgs.systemd ]}
+          wrapProgram "$out/bin/tower-app-start-provisioning" \
+            --set TOWER_PROJECT_SETFACL_BIN "${lib.getBin pkgs.acl}/bin/setfacl" \
+            --prefix PATH : ${lib.makeBinPath [ pkgs.nodejs_22 towerAnalysisPython pkgs.coreutils pkgs.gh ]} \
             --set TOWER_DOCUMENT_PYTHON "${towerAnalysisPython}/bin/python3" \
             --set TOWER_CAD_PYTHON "${towerAnalysisPython}/bin/python3" \
             --set PDF_EXPORT_RENDERER_MODE nix \
@@ -425,17 +532,25 @@
             --set NIX_RENDERER_BIN "$out/bin/tower-nix-render"
           wrapProgram "$out/bin/tower-app-document-smoke" \
             --prefix PATH : ${lib.makeBinPath [ towerAnalysisPython pkgs.coreutils ]}
-          wrapProgram "$out/bin/tower-app-runtime-box-smoke" \
-            --prefix PATH : ${lib.makeBinPath [ pkgs.docker-client pkgs.coreutils pkgs.bash pkgs.util-linux ]}
           wrapProgram "$out/bin/tower-workbench-worker" \
             --prefix PATH : "$out/bin" \
             --prefix PATH : ${lib.makeBinPath workerBaseline} \
             --set TOWER_APP_ROOT "$out" \
+            --set TOWER_WORKER_BWRAP_BIN "${pkgs.bubblewrap}/bin/bwrap" \
             --set TOWER_COMPUTE_BASELINE_MANIFEST "$out/share/tower/compute-baseline.json" \
+            --set NODE_PATH "${workerPublishingTools}/lib/node_modules/tower-publishing-tools/node_modules" \
+            --set SSL_CERT_FILE "${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt" \
+            --set NODE_EXTRA_CA_CERTS "${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt" \
+            --set NIX_SSL_CERT_FILE "${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt" \
             --set FONTCONFIG_FILE "${pkgs.makeFontsConf { fontDirectories = [ rendererFonts ]; }}"
           wrapProgram "$out/bin/runtime-compute-doctor" \
+            --prefix PATH : "$out/bin" \
             --prefix PATH : ${lib.makeBinPath workerBaseline} \
             --set TOWER_COMPUTE_BASELINE_MANIFEST "$out/share/tower/compute-baseline.json" \
+            --set NODE_PATH "${workerPublishingTools}/lib/node_modules/tower-publishing-tools/node_modules" \
+            --set SSL_CERT_FILE "${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt" \
+            --set NODE_EXTRA_CA_CERTS "${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt" \
+            --set NIX_SSL_CERT_FILE "${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt" \
             --set FONTCONFIG_FILE "${pkgs.makeFontsConf { fontDirectories = [ rendererFonts ]; }}"
           wrapProgram "$out/bin/tower-workbench-worker-heartbeat" \
             --prefix PATH : ${lib.makeBinPath [ pkgs.nodejs_22 pkgs.coreutils ]} \
@@ -444,13 +559,16 @@
             --prefix PATH : ${lib.makeBinPath [ pkgs.nodejs_22 pkgs.coreutils pkgs.systemd ]} \
             --set TOWER_APP_ROOT "$out"
           wrapProgram "$out/bin/install-system-workbench-worker-units" \
-            --prefix PATH : ${lib.makeBinPath [ pkgs.nodejs_22 pkgs.coreutils pkgs.systemd pkgs.shadow ]} \
+            --prefix PATH : ${lib.makeBinPath [ pkgs.nodejs_22 pkgs.python3 pkgs.coreutils pkgs.systemd pkgs.shadow pkgs.util-linux ]} \
             --set TOWER_APP_ROOT "$out"
           wrapProgram "$out/bin/tower-workbench-assignment-reconciler" \
-            --prefix PATH : ${lib.makeBinPath [ pkgs.nodejs_22 pkgs.coreutils pkgs.systemd ]} \
+            --prefix PATH : ${lib.makeBinPath [ pkgs.nodejs_22 pkgs.coreutils pkgs.systemd pkgs.util-linux ]} \
             --set TOWER_APP_ROOT "$out"
           wrapProgram "$out/bin/install-workbench-assignment-reconciler-unit" \
             --prefix PATH : ${lib.makeBinPath [ pkgs.coreutils pkgs.systemd ]} \
+            --set TOWER_APP_ROOT "$out"
+          wrapProgram "$out/bin/install-worker-scope-coordinator" \
+            --prefix PATH : ${lib.makeBinPath [ pkgs.nodejs_22 pkgs.coreutils pkgs.systemd ]} \
             --set TOWER_APP_ROOT "$out"
           cat > "$out/share/tower/release-manifest.json" <<'JSON'
           ${builtins.toJSON {
@@ -478,27 +596,42 @@
           "$out/bin/tower-app-probe" "$out"
           test -x "$out/bin/tower-app-start-shadow"
           test -x "$out/bin/tower-app-start-production"
+          test -x "$out/bin/tower-app-start-provisioning"
+          test -x "$out/bin/tower-app-provisioning-command"
+          test -x "$out/bin/prepare-provisioning-host"
+          test -x "$out/bin/enroll-provisioning-worker"
+          test -x "$out/bin/provisioning-runtime-context"
+          test -x "$out/bin/prepare-provisioning-managed-skills"
+          test -x "$out/bin/prepare-provisioning-bwrap-policy"
+          test -x "$out/bin/prepare-provisioning-main-https"
+          test -x "$out/bin/prepare-provisioning-owner"
+          test -x "${lib.getBin pkgs.acl}/bin/setfacl"
+          grep -F '${lib.getBin pkgs.acl}/bin/setfacl' "$out/bin/tower-app-start-production"
+          grep -F '${lib.getBin pkgs.acl}/bin/setfacl' "$out/bin/tower-app-start-shadow"
+          "$out/bin/tower-shared-output-publish" --help >/dev/null
+          "$out/bin/tower-protected-input-publish" --help >/dev/null
           test -x "$out/bin/tower-app-deploy-verify"
           test -x "$out/bin/tower-app-probe-isolated-db"
           test -x "$out/bin/tower-app-pdf-smoke"
           test -x "$out/bin/tower-app-document-smoke"
-          test -x "$out/bin/tower-app-runtime-box-smoke"
           test -x "$out/bin/tower-workbench-worker"
           test -x "$out/bin/tower-workbench-worker-heartbeat"
           test -x "$out/bin/runtime-compute-doctor"
           test -s "$out/share/tower/compute-baseline.json"
           test -x "$out/bin/install-local-workbench-worker-units"
           test -x "$out/bin/install-system-workbench-worker-units"
+          test -x "$out/bin/tower-worker-permission-preflight"
           test -x "$out/bin/tower-workbench-assignment-reconciler"
           test -x "$out/bin/install-workbench-assignment-reconciler-unit"
+          test -x "$out/bin/install-worker-scope-coordinator"
           test -x "$out/bin/tower-nix-render"
           "$out/bin/tower-app-pdf-smoke"
           "$out/bin/tower-app-document-smoke"
-          TOWER_CAD_PYTHON="${towerAnalysisPython}/bin/python3" "${pkgs.nodejs_22}/bin/node" --input-type=module - <<'NODE'
+          TOWER_CAD_PYTHON="${towerAnalysisPython}/bin/python3" TOWER_CAD_SMOKE_MODULE="$out/lib/tower/dist/backend/packages/backend/engines/pi-cad-view-tool.js" "${pkgs.nodejs_22}/bin/node" --input-type=module - <<'NODE'
           import { mkdtemp, writeFile } from 'node:fs/promises';
           import { tmpdir } from 'node:os';
           import path from 'node:path';
-          import { renderCadToCachedImage } from './dist/backend/packages/backend/engines/pi-cad-view-tool.js';
+          const { renderCadToCachedImage } = await import(process.env.TOWER_CAD_SMOKE_MODULE);
           const dir = await mkdtemp(path.join(tmpdir(), 'tower-cad-smoke-'));
           const dxf = path.join(dir, 'tiny.dxf');
           await writeFile(dxf, '0\nSECTION\n2\nENTITIES\n0\nLINE\n8\n0\n10\n0\n20\n0\n11\n10\n21\n10\n0\nENDSEC\n0\nEOF\n');
@@ -510,16 +643,22 @@
           test -f "$out/lib/tower/packages/shared/index.js"
           test -f "$out/lib/tower/packages/shared/agent-career.js"
           test "$(readlink "$out/lib/tower/node_modules/@tower/shared")" = "../../packages/shared"
-          node -e "import('$out/lib/tower/dist/backend/packages/backend/routes/api.js')"
+          TOWER_PACKAGED_RELEASE=true TOWER_VERSION='${releaseVersion}' TOWER_BASE_VERSION='${releaseBaseVersion}' GIT_SHA='${sourceShortRev}' SOURCE_REV='${sourceRev}' \
+            node -e "import('$out/lib/tower/dist/backend/packages/backend/routes/api.js')"
           if grep -R -a -F "${toString ./.}" "$out/lib/tower/dist"; then
             echo "source checkout path leaked into compiled dist" >&2
             exit 1
           fi
         '';
       };
+      towerApp = mkTowerApp { };
     in {
+      lib.${system}.mkTowerAppFromDist = artifact: mkTowerApp { prebuiltDist = artifact; };
+
       packages.${system} = {
-        inherit npm10 npm10Node22 towerNixRender towerNixRendererCheck workerPandoc towerAppNpmDeps towerAppRuntime towerApp;
+        inherit npm10 npm10Node22 towerNixRender towerNixRendererCheck workerPandoc workerGws towerAppNpmDeps towerAppRuntime towerApp;
+        # Small independently buildable ACL dependency used by Backend wrappers.
+        towerProjectAcl = lib.getBin pkgs.acl;
         default = towerNixRender;
       };
 

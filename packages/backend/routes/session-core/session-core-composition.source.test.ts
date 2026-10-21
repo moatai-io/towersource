@@ -9,8 +9,11 @@ const sessionCoreSource = fs.readFileSync(path.join(import.meta.dirname, 'sessio
 const sessionCoreRoutes = [
   'GET /sessions',
   'POST /sessions',
+  'GET /sessions/:id/composer-actions',
   'GET /sessions/:id',
   'GET /sessions/:id/full',
+  'GET /sessions/:id/initial-interview',
+  'POST /sessions/:id/initial-interview',
   'GET /sessions/:id/messages',
 ] as const;
 
@@ -49,10 +52,9 @@ describe('Session Core route composition contracts', () => {
     ]) expect(rootRoutes.has(retained)).toBe(true);
   });
 
-  it('keeps access checks and backward-compatible message response modes', () => {
-    expect(sessionCoreSource).toContain('await canAccessSession');
-    expect(sessionCoreSource).toContain('await canCreateInProject');
-    expect(sessionCoreSource).toContain('await canAccessRoom');
+  it('keeps backward-compatible message response modes', () => {
+    // Access denial and context-read ordering execute in session-core-access.test.ts.
+    // Retain response-mode wiring until it has an HTTP behavior equivalent.
     expect(sessionCoreSource).toContain('getMessagesPaginated');
     expect(sessionCoreSource).toContain('const messages = await getMessages');
   });

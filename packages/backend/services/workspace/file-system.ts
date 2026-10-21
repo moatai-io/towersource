@@ -10,7 +10,7 @@ import { config } from '../../config.js';
  *
  * Tower invariant: on every machine the backend process owns the workspace
  * at `$HOME/workspace`, regardless of which OS user runs it (`enterpriseai`
- * on the moat-internal box, `toweradmin` on demo-org, etc.). So a path
+ * on the moat-internal box, `tower-user` on demo-org, etc.). So a path
  * emitted by the AI as `~/workspace/projects/foo/bar.md` resolves correctly
  * on every VM without the AI having to know the per-machine prefix.
  *
@@ -140,7 +140,8 @@ export function getFileTree(dirPath: string, depth = 2, opts?: { skipSafetyCheck
       try {
         const stat = fs.statSync(fullPath);
         entry.modified = stat.mtime.toISOString();
-        if (!item.isDirectory()) {
+        entry.isDirectory = stat.isDirectory();
+        if (!entry.isDirectory) {
           entry.size = stat.size;
           entry.extension = path.extname(item.name).slice(1);
         }
@@ -154,7 +155,7 @@ export function getFileTree(dirPath: string, depth = 2, opts?: { skipSafetyCheck
       return a.name.localeCompare(b.name);
     });
   } catch (error: any) {
-    throw new Error(`Cannot read directory: ${error.message}`);
+    throw Object.assign(new Error(`Cannot read directory: ${error.message}`), { code: error.code });
   }
 }
 
@@ -217,6 +218,8 @@ export async function getFileTreeAsync(dirPath: string, depth = 2, opts?: { skip
         const result = stats[i];
         if (result.status === 'fulfilled') {
           statPromises[i].entry.modified = result.value.mtime.toISOString();
+          statPromises[i].entry.isDirectory = result.value.isDirectory();
+          if (statPromises[i].entry.isDirectory) delete statPromises[i].entry.extension;
           if (!statPromises[i].entry.isDirectory) {
             statPromises[i].entry.size = result.value.size;
           }
@@ -234,7 +237,7 @@ export async function getFileTreeAsync(dirPath: string, depth = 2, opts?: { skip
 
     return sorted;
   } catch (error: any) {
-    throw new Error(`Cannot read directory: ${error.message}`);
+    throw Object.assign(new Error(`Cannot read directory: ${error.message}`), { code: error.code });
   }
 }
 

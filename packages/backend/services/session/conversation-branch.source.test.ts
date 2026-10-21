@@ -26,15 +26,19 @@ describe('conversation branch source contract', () => {
     expect(chatRuntime).toContain('const isHiddenChild = !!data.session.parentSessionId && !isSidebarPeer');
   });
 
-  it('supports destructive current-session replay by truncating at the selected user message', () => {
+  it('supports non-destructive current-session replay by superseding the selected tail', () => {
     expect(service).toContain('rewindConversationForReplay');
     expect(service).toContain("conversation_rewind_requires_pi_session");
     expect(service).toContain('AND message_seq < $2');
     expect(service).toContain('transaction(async (client) =>');
     expect(service).toContain('const db = withClient(client)');
     expect(service).toContain('SELECT id FROM sessions WHERE id = $1 FOR UPDATE');
-    expect(service).toContain('SELECT id, role, message_seq FROM messages WHERE id = $1 AND session_id = $2 FOR UPDATE');
-    expect(service).toContain('DELETE FROM messages WHERE session_id = $1 AND message_seq >= $2');
+    expect(service).toContain('SELECT id, role, message_seq FROM messages');
+    expect(service).toContain("AND COALESCE(metadata->>'contextState', 'active') = 'active'");
+    expect(service).toContain('FOR UPDATE');
+    expect(service).toContain("'contextState', 'superseded'");
+    expect(service).toContain('WHERE session_id = $1 AND message_seq >= $2');
+    expect(service).not.toContain('DELETE FROM messages WHERE session_id = $1 AND message_seq >= $2');
     expect(service).toContain('UPDATE sessions SET pi_session_file = $1, updated_at = NOW() WHERE id = $2');
   });
 

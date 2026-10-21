@@ -10,12 +10,12 @@
  * - Dry-run by default.
  * - Idempotent: skips a legacy task if an automation already has
  *   definition_json.legacyTaskId = <task id>.
- * - Apply creates automation first, then disables the legacy task schedule to
- *   prevent double execution.
+ * - Apply creates/reuses a disabled Automation, disables the legacy schedule,
+ *   then enables the Automation. Retries reconcile interrupted cutovers.
  */
 import { closePgPool } from '../packages/backend/db/pg.js';
-import { execute, queryOne } from '../packages/backend/db/pg-repo.js';
-import { createAutomation } from '../packages/backend/services/task/automation-manager.js';
+import { queryOne } from '../packages/backend/db/pg-repo.js';
+import { applyLegacyTaskScheduleMigrationItem } from '../packages/backend/services/task/legacy-task-migration-apply.js';
 import { planLegacyTaskScheduleMigration } from '../packages/backend/services/task/legacy-task-migration.js';
 
 const apply = process.argv.includes('--apply');
@@ -39,50 +39,25 @@ async function main() {
       continue;
     }
 
-    const existing = await queryOne<{ id: string }>(
-      `SELECT id FROM automations
+    const existing = await queryOne<{ id: string; enabled: boolean }>(
+      `SELECT id, enabled FROM automations
        WHERE definition_json->>'legacyTaskId' = $1
          AND status != 'archived'
        LIMIT 1`,
       [item.legacyTaskId],
     );
-    if (existing) {
-      result.skipped.push({ legacyTaskId: item.legacyTaskId, reason: `already migrated as ${existing.id}` });
+    if (dryRun && existing) {
+      result.skipped.push({ legacyTaskId: item.legacyTaskId, reason: `already migrated as ${existing.id}; apply would reconcile cutover state` });
       continue;
     }
 
-    const a = item.proposedAutomation;
     if (dryRun) {
       result.created.push({ legacyTaskId: item.legacyTaskId, automationId: '<dry-run>' });
       continue;
     }
 
-    const automation = await createAutomation({
-      userId: a.userId!,
-      projectId: a.projectId || undefined,
-      name: a.name,
-      description: a.description,
-      prompt: a.prompt,
-      model: a.model || undefined,
-      workflow: a.workflow || undefined,
-      jobType: a.jobType,
-      scopeType: a.scopeType,
-      definitionJson: a.definitionJson,
-      mode: a.mode,
-      cwd: a.cwd,
-      triggerType: a.triggerType,
-      cronConfig: a.cronConfig || undefined,
-      onceAt: a.onceAt || undefined,
-    });
-
-    await execute(
-      `UPDATE tasks
-       SET schedule_enabled = 0, updated_at = CURRENT_TIMESTAMP
-       WHERE id = $1`,
-      [item.legacyTaskId],
-    );
-
-    result.created.push({ legacyTaskId: item.legacyTaskId, automationId: automation.id });
+    const migrated = await applyLegacyTaskScheduleMigrationItem(item);
+    result.created.push({ legacyTaskId: item.legacyTaskId, automationId: migrated.automationId });
   }
 
   console.log(JSON.stringify(result, null, 2));

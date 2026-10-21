@@ -22,6 +22,16 @@ describe('Tower two-theme contract', () => {
     expect(useTheme).toContain('style.colorScheme = theme');
   });
 
+  it('binds dark utilities to the explicit Tower theme, never OS preference', () => {
+    expect(styles).toContain('@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));');
+  });
+
+  it('keeps the Team Home create action on semantic contrast tokens', () => {
+    const sidebar = fs.readFileSync(path.join(root, 'components/layout/Sidebar.tsx'), 'utf-8');
+    expect(sidebar).toContain('tone-accent tone-action border px-2 text-left');
+    expect(sidebar).not.toContain('text-primary-700 hover:bg-primary-500/15 dark:text-primary-200');
+  });
+
   it('removes personal palette selection and legacy theme selectors', () => {
     expect(settingsPanel).not.toContain('themeOptions');
     expect(settingsPanel).not.toContain('setTheme(');

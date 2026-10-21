@@ -6,6 +6,12 @@ const header = fs.readFileSync(path.resolve(import.meta.dirname, '../layout/Head
 const app = fs.readFileSync(path.resolve(import.meta.dirname, '../../App.tsx'), 'utf8');
 
 describe('AI Team navigation', () => {
+  it('shows unanswered question attention in recent conversations', () => {
+    expect(panel).toContain('useChatStore((s) => s.turnStateBySession)');
+    expect(panel).toContain("turnStateBySession[session.id]?.phase === 'awaiting_user'");
+    expect(panel).toContain("aria-label={t('awaitingAnswer')}");
+  });
+
   it('opens the conversation workspace from the primary AI tab', () => {
     expect(header).toContain("case 'ai':");
     expect(header).toContain('store.setAiNavigationSurface()');

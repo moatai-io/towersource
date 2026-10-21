@@ -4,7 +4,7 @@
  */
 import path from 'node:path';
 import { config } from '../../config.js';
-import { getPersistedWorkbenchWorker } from './workbench-worker-repository.js';
+import { getPersistedWorkbenchWorker } from '../execution/worker/worker-repository.js';
 import { requestProjectWorkerAssignment } from './workbench-project-worker-assignment.js';
 
 /** Queue only standard, production, user-facing Projects; never fail Project creation. */
@@ -20,7 +20,8 @@ export async function requestAutomaticProjectWorkerAssignment(input: {
   const root = path.resolve(input.rootPath);
   const projectsRoot = path.resolve(config.workspaceRoot, 'projects');
   if (!root.startsWith(`${projectsRoot}${path.sep}`)) return 'skipped';
-  const workerId = env.TOWER_PRIMARY_WORKER_ID?.trim() || 'tower-prod-local-01';
+  const workerId = env.TOWER_PRIMARY_WORKER_ID?.trim();
+  if (!workerId) return 'skipped';
   const worker = await getPersistedWorkbenchWorker(workerId);
   if (!worker || worker.deploymentId !== 'production' || worker.status !== 'healthy' || worker.draining) return 'skipped';
   await requestProjectWorkerAssignment({

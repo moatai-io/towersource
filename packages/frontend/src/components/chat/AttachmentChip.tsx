@@ -1,5 +1,6 @@
 import type { Attachment } from '../../stores/chat-store';
 import { fileServeUrl } from '../../utils/file-path-links';
+import { sessionAttachmentContentUrl } from '../../utils/session-attachment-links';
 import { useSessionStore } from '../../stores/session-store';
 import { useTranslation } from 'react-i18next';
 
@@ -98,7 +99,7 @@ export function AttachmentChip({ attachment, onRemove }: AttachmentChipProps) {
   const isFile = attachment.type === 'file';
   const activeSessionId = useSessionStore((s) => s.activeSessionId);
   const sessionPreviewUrl = attachment.sessionAttachmentId && activeSessionId
-    ? `/api/session-attachments/${encodeURIComponent(activeSessionId)}/${attachment.sessionAttachmentId}/content`
+    ? sessionAttachmentContentUrl(activeSessionId, `session://attachments/${attachment.sessionAttachmentId}`, localStorage.getItem('token'))
     : null;
   const isImage = isFile && attachment.mimeType?.startsWith('image/');
 

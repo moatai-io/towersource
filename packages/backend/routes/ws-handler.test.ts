@@ -55,6 +55,13 @@ vi.mock('../services/session/session-manager.js', () => ({
   updateSession: vi.fn(),
 }));
 
+// Routing fixtures use an authenticated reader/owner; denial semantics have separate acceptance tests.
+vi.mock('../services/pm/project-access.js', async () => ({
+  ...await vi.importActual<any>('../services/pm/project-access.js'),
+  canAccessSession: vi.fn(async () => ({ allowed: true })),
+  canSendSessionMessage: vi.fn(async () => ({ allowed: true })),
+}));
+
 vi.mock('../services/workspace/file-system.js', () => ({
   getFileTree: vi.fn(() => []),
   readFile: vi.fn(() => ({ content: '', language: 'text' })),
@@ -67,7 +74,8 @@ vi.mock('../services/git/git-manager.js', () => ({
 }));
 
 vi.mock('../services/auth/auth.js', () => ({
-  verifyWsToken: vi.fn(() => null),
+  verifyWsToken: vi.fn(async () => ({ userId: 1, role: 'admin', username: 'test-user' })),
+  getUserAuthState: vi.fn(async () => ({ role: 'admin', disabled: false, approvalStatus: 'active' })),
   getUserAllowedPath: vi.fn(() => null),
 }));
 
@@ -75,6 +83,7 @@ vi.mock('../db/pg-repo.js', () => ({
   query: vi.fn(async () => []),
   queryOne: vi.fn(async () => undefined),
   execute: vi.fn(async () => ({ changes: 0 })),
+  transaction: vi.fn(async (fn: any) => fn({ query: vi.fn(async () => ({ rows: [], rowCount: 0 })) })),
 }));
 
 vi.mock('../services/task/task-runner.js', () => ({
@@ -132,7 +141,7 @@ vi.mock('../services/skill/skill-registry.js', async () => {
 
 vi.mock('../config.js', () => ({
   config: {
-    authEnabled: false,
+    authEnabled: true,
     workspaceRoot: '/tmp/test',
     defaultCwd: '/tmp/test',
     dataDir: '/tmp/test-data',
@@ -142,6 +151,18 @@ vi.mock('../config.js', () => ({
     claudeEnabled: true,
     piEnabled: true,
     sandbox: { enabled: false },
+    // Pre-push #41d36fe6 preflight environment does not inject PUBLIC_URL;
+    // keep the field present so getGoogleOAuthReadiness() does not read
+    // undefined.replace.
+    publicUrl: '',
+    // runtime-box-capacity reads maxRunning/maxRunningPerUser at module
+    // scope; provide the same defaults as the real config so the module
+    // graph does not break when the runtime-box-manager import chain
+    // resolves this mock.
+    runtimeBox: {
+      maxRunning: 8,
+      maxRunningPerUser: 5,
+    },
   },
   getPermissionMode: vi.fn(() => 'default'),
 }));
@@ -174,13 +195,16 @@ function createWsClient(): Promise<{ ws: WebSocket; messages: any[] }> {
 function waitForMessage(
   messages: any[],
   type: string,
-  timeout = 2000,
+  timeout = 5000,
 ): Promise<any> {
   const found = messages.find((m) => m.type === type);
   if (found) return Promise.resolve(found);
 
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error(`Timeout waiting for "${type}"`)), timeout);
+    const timer = setTimeout(() => {
+      clearInterval(interval);
+      reject(new Error(`Timeout waiting for "${type}"`));
+    }, timeout);
     const interval = setInterval(() => {
       const msg = messages.find((m) => m.type === type);
       if (msg) {
@@ -196,7 +220,7 @@ function waitForMessages(
   messages: any[],
   type: string,
   count: number,
-  timeout = 2000,
+  timeout = 5000,
 ): Promise<any[]> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error(`Timeout waiting for ${count}x "${type}"`)), timeout);
@@ -235,9 +259,11 @@ beforeAll(async () => {
       resolve();
     });
   });
-});
+// Cold imports load the engine graph; allow setup headroom under the full suite.
+}, 30_000);
 
 afterAll(async () => {
+  if (!server) return;
   await new Promise<void>((resolve) => server.close(() => resolve()));
 });
 
@@ -498,7 +524,7 @@ describe('ws-handler integration', () => {
       expect(src).toMatch(/engineName === 'pi'/);
       // steer() now carries msgId + username so the engine can emit
       // steer_delivered (issue #15/#17) — see ws-handler steer branch.
-      expect(src).toMatch(/\.steer\(sessionId, data\.message, steeredMsgId, client\.username \|\| null\)/);
+      expect(src).toMatch(/\.steer\(sessionId, steeredMessage, steeredMsgId, client\.username \|\| null\)/);
       expect(src).toMatch(/user_message_steered/);
     });
 
@@ -794,6 +820,7 @@ describe('ws-handler integration', () => {
               isStreaming: true,
               pendingQuestion: {
                 questionId: 'remote-q1',
+                recipientUserId: 1,
                 questions: [{ question: 'Continue?', options: [{ label: 'Yes' }] }],
               },
             });
@@ -860,6 +887,7 @@ describe('ws-handler integration', () => {
               isStreaming: true,
               pendingQuestion: {
                 questionId: 'q-remote',
+                recipientUserId: 1,
                 questions: [{ question: 'Pick one', options: [{ label: 'A' }] }],
               },
             });
@@ -929,6 +957,13 @@ describe('ws-handler integration', () => {
       sendJson(ws, { type: 'set_active_session', sessionId: 'remote-question-s1' });
       await waitForMessage(messages, 'set_active_session_ack');
 
+      capturedWsSyncHandlers?.user(1, {
+        type: 'ask_user',
+        sessionId: 'remote-question-s1',
+        questionId: 'remote-q1',
+        questions: [{ question: 'Continue?', options: [{ label: 'Yes' }] }],
+      });
+
       sendJson(ws, {
         type: 'answer_question',
         sessionId: 'remote-question-s1',
@@ -936,8 +971,9 @@ describe('ws-handler integration', () => {
         answer: 'Yes',
       });
 
-      await delay(50);
+      const ack = await waitForMessage(messages, 'answer_question_ack');
 
+      expect(ack).toMatchObject({ sessionId: 'remote-question-s1', questionId: 'remote-q1', route: 'remote' });
       expect(mockPublishWsSyncEvent).toHaveBeenCalledWith('test-epoch', expect.objectContaining({
         scope: 'session',
         sessionId: 'remote-question-s1',

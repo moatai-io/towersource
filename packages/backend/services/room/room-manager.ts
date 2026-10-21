@@ -1,63 +1,21 @@
 /**
- * Room Manager — PostgreSQL-backed room CRUD + PgAdapter implementation.
+ * Room archive and Notification Hub persistence.
  *
- * All room data (chat_rooms, room_members, room_messages, room_ai_context,
- * notifications, attachments) lives in PG.  User data lives in SQLite.
- * This module bridges the two.
+ * Retired internal Channel data remains readable from PostgreSQL for archive,
+ * access checks, and historical session continuity. Channel mutation helpers
+ * have been removed; notification CRUD remains active.
  */
 
 import { v4 as uuidv4 } from 'uuid';
 import { getPgPool } from '../../db/pg.js';
-import { queryOne, query, execute } from '../../db/pg-repo.js';
+import { queryOne, query } from '../../db/pg-repo.js';
 import { getAccessibleProjectIds } from '../pm/project-membership-manager.js';
-import { generateShortCode } from '../session/short-code.js';
-
-const PG_UNIQUE_VIOLATION = '23505';
-const SHORT_CODE_MAX_RETRIES = 5;
-const CHANNEL_NAME_CONFLICT_CODE = 'CHANNEL_NAME_CONFLICT';
-
-export class ChannelNameConflictError extends Error {
-  code = CHANNEL_NAME_CONFLICT_CODE;
-  existingRoomId: string;
-  existingRoomName: string;
-
-  constructor(existingRoom: { id: string; name: string }) {
-    super(`An active channel named "${existingRoom.name}" already exists`);
-    this.name = 'ChannelNameConflictError';
-    this.existingRoomId = existingRoom.id;
-    this.existingRoomName = existingRoom.name;
-  }
-}
-
-/** Normalize channel labels for human-facing duplicate detection. */
-export function normalizeChannelName(name: string): string {
-  return name.trim().replace(/\s+/g, ' ').toLocaleLowerCase();
-}
-
-async function assertActiveUserChannelNameAvailable(name: string, excludeRoomId?: string): Promise<void> {
-  const normalized = normalizeChannelName(name);
-  if (!normalized) throw new Error('Channel name is required');
-  const existing = await queryOne<{ id: string; name: string }>(
-    `SELECT id, name FROM chat_rooms
-      WHERE COALESCE(archived, 0) = 0
-        AND COALESCE(kind, 'user') = 'user'
-        AND lower(regexp_replace(trim(name), '\\s+', ' ', 'g')) = $1
-        AND ($2::text IS NULL OR id <> $2)
-      ORDER BY created_at ASC LIMIT 1`,
-    [normalized, excludeRoomId ?? null],
-  );
-  if (existing) throw new ChannelNameConflictError(existing);
-}
 
 // ── Types ────────────────────────────────────────────────────────────
 
 export interface Room {
   id: string;
-  /**
-   * URL-friendly short code (8자 base32) — `/r/<shortCode>` 형태로 채널 deep link.
-   * 마이그레이션 070 적용 후 신규 채널은 항상 발급, 기존은 부팅 시 backfill.
-   * 결정: issue #11 Phase 2 확장 (sessions.short_code 와 동일 패턴).
-   */
+  /** Historical URL-friendly short code used by `/r/<shortCode>` archive links. */
   shortCode?: string;
   name: string;
   description: string | null;
@@ -105,12 +63,7 @@ export interface RoomMember {
 
 export interface RoomMessage {
   id: string;
-  /**
-   * URL anchor token (8자 base32) — `/r/<roomShortCode>#m-<shortId>` 형태.
-   * (room_id, short_id) composite unique — 채널 안에서만 unique.
-   * 마이그레이션 071 적용 후 신규 메시지는 항상 발급, 기존은 부팅 시 backfill.
-   * 결정: issue #11 Phase 3 채널 메시지 앵커.
-   */
+  /** Historical archive anchor token used by `/r/<roomShortCode>#m-<shortId>`. */
   shortId?: string | null;
   roomId: string;
   senderId: number | null;
@@ -124,24 +77,6 @@ export interface RoomMessage {
   editedAt: string | null;
   deletedAt: string | null;
   createdAt: string;
-}
-
-// ── Validation Helpers ───────────────────────────────────────────────
-
-const VALID_ROOM_TYPES = new Set(['team', 'project', 'dashboard']);
-const VALID_MEMBER_ROLES = new Set(['owner', 'admin', 'member', 'readonly']);
-const VALID_MSG_TYPES = new Set(['human', 'ai_summary', 'ai_task_ref', 'ai_error', 'ai_reply', 'system', 'webhook']);
-
-function assertRoomType(v: string): asserts v is Room['roomType'] {
-  if (!VALID_ROOM_TYPES.has(v)) throw new Error(`Invalid room type: ${v}`);
-}
-
-function assertMemberRole(v: string): asserts v is RoomMember['role'] {
-  if (!VALID_MEMBER_ROLES.has(v)) throw new Error(`Invalid member role: ${v}`);
-}
-
-function assertMsgType(v: string): asserts v is RoomMessage['msgType'] {
-  if (!VALID_MSG_TYPES.has(v)) throw new Error(`Invalid message type: ${v}`);
 }
 
 // ── Username Cache (SQLite → memory) ─────────────────────────────────
@@ -258,106 +193,8 @@ async function rowToMember(r: any): Promise<RoomMember> {
   };
 }
 
-// ── Room CRUD ────────────────────────────────────────────────────────
+// ── Room archive reads ───────────────────────────────────────────────
 
-export async function createRoom(
-  name: string,
-  description: string | null,
-  roomType: string,
-  createdBy: number,
-  projectId?: string,
-): Promise<Room> {
-  assertRoomType(roomType);
-  await assertActiveUserChannelNameAvailable(name);
-  const pool = getPgPool();
-
-  // INSERT with short_code — sessions.short_code 와 같은 8자 코드 정책.
-  // unique 충돌은 거의 없지만 partial unique index 위반 시 최대 5회 재시도.
-  let room: Room | null = null;
-  for (let attempt = 0; attempt < SHORT_CODE_MAX_RETRIES; attempt++) {
-    const shortCode = generateShortCode();
-    try {
-      const { rows } = await pool.query(
-        `INSERT INTO chat_rooms (short_code, name, description, room_type, project_id, created_by)
-         VALUES ($1, $2, $3, $4, $5, $6)
-         RETURNING *`,
-        [shortCode, name, description, roomType, projectId ?? null, createdBy],
-      );
-      room = rowToRoom(rows[0]);
-      break;
-    } catch (err: any) {
-      if (err?.code === PG_UNIQUE_VIOLATION && attempt < SHORT_CODE_MAX_RETRIES - 1) continue;
-      throw err;
-    }
-  }
-  if (!room) throw new Error('Failed to create room with short_code');
-
-  // Auto-add creator as owner
-  await pool.query(
-    `INSERT INTO room_members (room_id, user_id, role, invited_by, membership_source)
-     VALUES ($1, $2, 'owner', $2, 'creator')`,
-    [room.id, createdBy],
-  );
-  await pool.query(
-    `INSERT INTO room_membership_events (
-       room_id, user_id, event_type, actor_user_id, membership_source, next_role, reason
-     ) VALUES ($1, $2, 'joined', $2, 'creator', 'owner', 'Channel created')`,
-    [room.id, createdBy],
-  );
-  invalidateMemberCache(room.id);
-
-  // Legacy callers may still pass projectId. Preserve its old member-seeding
-  // behavior, but represent the project only as a context link and clear room
-  // ownership before returning the new people-centered channel.
-  if (projectId) {
-    await pool.query(
-      `INSERT INTO channel_resource_links (
-         channel_id, resource_type, resource_id, capability, added_by
-       ) VALUES ($1, 'project', $2, 'read', $3)
-       ON CONFLICT (channel_id, resource_type, resource_id) DO NOTHING`,
-      [room.id, projectId, createdBy],
-    );
-    room.resourceLinks = [{ resourceType: 'project', resourceId: projectId, capability: 'read' }];
-  }
-
-  // Auto-add project members for compatibility with project-origin creation.
-  if (projectId) {
-    try {
-      const { getProjectMembers } = await import('../pm/project-membership-manager.js');
-      const members = await getProjectMembers(projectId);
-      for (const m of members) {
-        if (m.userId === createdBy) continue; // already owner
-        const added = await pool.query(
-          `INSERT INTO room_members (room_id, user_id, role, invited_by, membership_source)
-           VALUES ($1, $2, 'member', $3, 'legacy_project_backfill')
-           ON CONFLICT (room_id, user_id) DO NOTHING
-           RETURNING room_id`,
-          [room.id, m.userId, createdBy],
-        );
-        if ((added.rowCount ?? 0) > 0) {
-          await pool.query(
-            `INSERT INTO room_membership_events (
-               room_id, user_id, event_type, actor_user_id, membership_source, next_role, reason
-             ) VALUES ($1, $2, 'joined', $3, 'legacy_project_backfill', 'member', 'Legacy Project-origin channel creation')`,
-            [room.id, m.userId, createdBy],
-          );
-        }
-      }
-    } catch (err: any) {
-      console.error(`[room-manager] Failed to auto-add project members:`, err.message);
-    }
-  }
-
-  if (projectId) {
-    await pool.query('UPDATE chat_rooms SET project_id = NULL WHERE id = $1', [room.id]);
-    room.projectId = null;
-  }
-
-  // Ensure cache reflects the final member roster for the new room.
-  invalidateMemberCache(room.id);
-
-  return room;
-}
 
 export async function getRoom(roomId: string): Promise<Room | null> {
   const { rows } = await getPgPool().query(
@@ -395,85 +232,10 @@ export async function getRoom(roomId: string): Promise<Room | null> {
   return rows.length > 0 ? rowToRoom(rows[0]) : null;
 }
 
-/** URL key (short_code or UUID) 로 채널 1건 조회. `/r/<key>` 라우팅용. */
-export async function getRoomByKey(key: string): Promise<Room | null> {
-  const isUuidLike = key.length === 36 && key.includes('-');
-  const rows = await query<any>(
-    isUuidLike ? 'SELECT * FROM chat_rooms WHERE id = $1' : 'SELECT * FROM chat_rooms WHERE short_code = $1',
-    [key],
-  );
-  return rows.length > 0 ? rowToRoom(rows[0]) : null;
-}
-
-/**
- * 부팅 시 room_messages.short_id 가 NULL 인 기존 채널 메시지를 backfill.
- * 500-row batch fire-and-forget. (room_id, short_id) composite unique 라
- * 충돌 risk 거의 0.
- */
-export async function backfillRoomMessageShortIds(batchSize: number = 500): Promise<number> {
-  let totalUpdated = 0;
-  while (true) {
-    const rows = await query<{ id: string }>(
-      'SELECT id FROM room_messages WHERE short_id IS NULL LIMIT $1',
-      [batchSize],
-    );
-    if (rows.length === 0) break;
-    for (const row of rows) {
-      for (let attempt = 0; attempt < SHORT_CODE_MAX_RETRIES; attempt++) {
-        const code = generateShortCode();
-        try {
-          await execute(
-            'UPDATE room_messages SET short_id = $1 WHERE id = $2 AND short_id IS NULL',
-            [code, row.id],
-          );
-          totalUpdated++;
-          break;
-        } catch (err: any) {
-          if (err?.code === PG_UNIQUE_VIOLATION && attempt < SHORT_CODE_MAX_RETRIES - 1) continue;
-          console.warn(`[room-manager] backfillRoomMessageShortIds: row ${row.id} failed:`, err?.message);
-          break;
-        }
-      }
-    }
-  }
-  return totalUpdated;
-}
-
-/** 부팅 시 chat_rooms.short_code 가 NULL 인 기존 채널을 backfill. */
-export async function backfillRoomShortCodes(): Promise<number> {
-  const rows = await query<{ id: string }>('SELECT id FROM chat_rooms WHERE short_code IS NULL', []);
-  if (rows.length === 0) return 0;
-
-  let updated = 0;
-  for (const row of rows) {
-    for (let attempt = 0; attempt < SHORT_CODE_MAX_RETRIES; attempt++) {
-      const code = generateShortCode();
-      try {
-        await execute(
-          'UPDATE chat_rooms SET short_code = $1 WHERE id = $2 AND short_code IS NULL',
-          [code, row.id],
-        );
-        updated++;
-        break;
-      } catch (err: any) {
-        if (err?.code === PG_UNIQUE_VIOLATION && attempt < SHORT_CODE_MAX_RETRIES - 1) continue;
-        throw err;
-      }
-    }
-  }
-  return updated;
-}
-
 export async function listRooms(userId: number, role?: string): Promise<Room[]> {
   const pool = getPgPool();
   const userRole = role || (await queryOne<{ role: string }>('SELECT role FROM users WHERE id = $1', [userId]))?.role || 'member';
   const isAdmin = userRole === 'admin';
-
-  // 2026-04-10 (100-user scale): this function used to do N+1 queries per
-  // sidebar load (one INSERT per room for auto-join, plus one SELECT per
-  // non-project room for membership). For 100 users × 50 rooms that was
-  // ~5000 sequential round-trips. Rewritten to use batched multi-row
-  // INSERT + single batched SELECT below.
 
   // Listing is read-only: it never creates room membership. Privileged users
   // may inspect normal channels without being inserted into their audience.
@@ -572,115 +334,11 @@ export async function listRooms(userId: number, role?: string): Promise<Room[]> 
   return result;
 }
 
-export async function updateRoom(
-  roomId: string,
-  updates: { name?: string; description?: string; archived?: boolean; projectId?: string | null },
-): Promise<Room | null> {
-  const sets: string[] = [];
-  const vals: any[] = [];
-  let idx = 1;
 
-  if (updates.name !== undefined) {
-    await assertActiveUserChannelNameAvailable(updates.name, roomId);
-    sets.push(`name = $${idx++}`);
-    vals.push(updates.name.trim().replace(/\s+/g, ' '));
-  }
-  if (updates.description !== undefined) {
-    sets.push(`description = $${idx++}`);
-    vals.push(updates.description);
-  }
-  if (updates.archived !== undefined) {
-    sets.push(`archived = $${idx++}`);
-    vals.push(updates.archived ? 1 : 0);  // column is INTEGER, not BOOLEAN
-  }
-  // projectId is no longer channel ownership. Legacy PATCH callers must use
-  // the resource-link endpoints instead of moving a channel between projects.
 
-  if (sets.length === 0) return getRoom(roomId);
+// ── Membership archive reads ─────────────────────────────────────────
 
-  sets.push(`updated_at = NOW()`);
-  vals.push(roomId);
 
-  const { rows } = await getPgPool().query(
-    `UPDATE chat_rooms SET ${sets.join(', ')} WHERE id = $${idx} RETURNING *`,
-    vals,
-  );
-  return rows.length > 0 ? rowToRoom(rows[0]) : null;
-}
-
-export async function deleteRoom(roomId: string): Promise<boolean> {
-  const { rowCount } = await getPgPool().query(
-    'DELETE FROM chat_rooms WHERE id = $1',
-    [roomId],
-  );
-  invalidateMemberCache(roomId);
-  return (rowCount ?? 0) > 0;
-}
-
-// ── Members ──────────────────────────────────────────────────────────
-
-export async function addMember(
-  roomId: string,
-  userId: number,
-  role: string = 'member',
-  audit: { actorUserId?: number | null; source?: RoomMember['membershipSource']; reason?: string } = {},
-): Promise<RoomMember> {
-  assertMemberRole(role);
-  const pool = getPgPool();
-  const existing = await pool.query('SELECT role FROM room_members WHERE room_id = $1 AND user_id = $2', [roomId, userId]);
-  const hadHistory = await pool.query('SELECT 1 FROM room_membership_events WHERE room_id = $1 AND user_id = $2 LIMIT 1', [roomId, userId]);
-  const source = audit.source || 'manual_invite';
-  const { rows } = await pool.query(
-    `INSERT INTO room_members (room_id, user_id, role, invited_by, membership_source)
-     VALUES ($1, $2, $3, $4, $5)
-     ON CONFLICT (room_id, user_id) DO UPDATE SET
-       role = EXCLUDED.role,
-       invited_by = EXCLUDED.invited_by,
-       membership_source = EXCLUDED.membership_source
-     RETURNING *`,
-    [roomId, userId, role, audit.actorUserId ?? null, source],
-  );
-  if (existing.rowCount === 0) {
-    await pool.query(
-      `INSERT INTO room_membership_events (
-         room_id, user_id, event_type, actor_user_id, membership_source, next_role, reason
-       ) VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-      [roomId, userId, hadHistory.rowCount ? 'rejoined' : 'joined', audit.actorUserId ?? null, source, role, audit.reason ?? null],
-    );
-  } else if (existing.rows[0].role !== role) {
-    await pool.query(
-      `INSERT INTO room_membership_events (
-         room_id, user_id, event_type, actor_user_id, membership_source, previous_role, next_role, reason
-       ) VALUES ($1, $2, 'role_changed', $3, $4, $5, $6, $7)`,
-      [roomId, userId, audit.actorUserId ?? null, source, existing.rows[0].role, role, audit.reason ?? null],
-    );
-  }
-  invalidateMemberCache(roomId);
-  return await rowToMember(rows[0]);
-}
-
-export async function removeMember(
-  roomId: string,
-  userId: number,
-  audit: { actorUserId?: number | null; reason?: string; selfLeave?: boolean } = {},
-): Promise<boolean> {
-  const pool = getPgPool();
-  const removed = await pool.query(
-    'DELETE FROM room_members WHERE room_id = $1 AND user_id = $2 RETURNING role, membership_source',
-    [roomId, userId],
-  );
-  if ((removed.rowCount ?? 0) > 0) {
-    const row = removed.rows[0];
-    await pool.query(
-      `INSERT INTO room_membership_events (
-         room_id, user_id, event_type, actor_user_id, membership_source, previous_role, reason
-       ) VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-      [roomId, userId, audit.selfLeave ? 'left' : 'removed', audit.actorUserId ?? null, row.membership_source, row.role, audit.reason ?? null],
-    );
-  }
-  invalidateMemberCache(roomId);
-  return (removed.rowCount ?? 0) > 0;
-}
 
 export interface RoomMembershipEvent {
   id: string;
@@ -741,43 +399,7 @@ export async function getMembers(roomId: string): Promise<RoomMember[]> {
   return members;
 }
 
-export async function updateMemberRole(
-  roomId: string,
-  userId: number,
-  role: string,
-  audit: { actorUserId?: number | null; reason?: string } = {},
-): Promise<boolean> {
-  assertMemberRole(role);
-  const pool = getPgPool();
-  const current = await pool.query(
-    'SELECT role, membership_source FROM room_members WHERE room_id = $1 AND user_id = $2',
-    [roomId, userId],
-  );
-  if (current.rowCount === 0 || current.rows[0].role === role) return false;
-  const changed = await pool.query(
-    `UPDATE room_members SET role = $1
-      WHERE room_id = $2 AND user_id = $3
-      RETURNING membership_source`,
-    [role, roomId, userId],
-  );
-  if ((changed.rowCount ?? 0) > 0) {
-    await pool.query(
-      `INSERT INTO room_membership_events (
-         room_id, user_id, event_type, actor_user_id, membership_source, previous_role, next_role, reason
-       ) VALUES ($1, $2, 'role_changed', $3, $4, $5, $6, $7)`,
-      [roomId, userId, audit.actorUserId ?? null, changed.rows[0].membership_source, current.rows[0].role, role, audit.reason ?? null],
-    );
-  }
-  invalidateMemberCache(roomId);
-  return (changed.rowCount ?? 0) > 0;
-}
 
-export async function updateLastRead(roomId: string, userId: number): Promise<void> {
-  await getPgPool().query(
-    'UPDATE room_members SET last_read_at = NOW() WHERE room_id = $1 AND user_id = $2',
-    [roomId, userId],
-  );
-}
 
 export async function isMember(roomId: string, userId: number): Promise<boolean> {
   const { rows } = await getPgPool().query(
@@ -795,38 +417,8 @@ export async function getMemberRole(roomId: string, userId: number): Promise<str
   return rows.length > 0 ? rows[0].role : null;
 }
 
-// ── Messages ─────────────────────────────────────────────────────────
+// ── Message archive reads ─────────────────────────────────────────────
 
-export async function sendMessage(
-  roomId: string,
-  senderId: number | null,
-  content: string,
-  msgType: string = 'human',
-  metadata: Record<string, unknown> = {},
-  taskId?: string,
-  replyTo?: string,
-): Promise<RoomMessage> {
-  assertMsgType(msgType);
-  // short_id with retry — (room_id, short_id) composite unique. 채널 안에서만
-  // 충돌 검사하므로 birthday risk 거의 0.  결정: issue #11 Phase 3 채널 앵커.
-  const pool = getPgPool();
-  for (let attempt = 0; attempt < SHORT_CODE_MAX_RETRIES; attempt++) {
-    const shortId = generateShortCode();
-    try {
-      const { rows } = await pool.query(
-        `INSERT INTO room_messages (room_id, sender_id, msg_type, content, metadata, task_id, reply_to, short_id)
-         VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8)
-         RETURNING *`,
-        [roomId, senderId, msgType, content, JSON.stringify(metadata), taskId ?? null, replyTo ?? null, shortId],
-      );
-      return await rowToMessage(rows[0]);
-    } catch (err: any) {
-      if (err?.code === PG_UNIQUE_VIOLATION && attempt < SHORT_CODE_MAX_RETRIES - 1) continue;
-      throw err;
-    }
-  }
-  throw new Error('Failed to send message with short_id');
-}
 
 export async function getMessages(
   roomId: string,
@@ -859,23 +451,7 @@ export async function getMessages(
   return await Promise.all(rows.map(rowToMessage));
 }
 
-export async function editMessage(messageId: string, content: string): Promise<RoomMessage | null> {
-  const { rows } = await getPgPool().query(
-    `UPDATE room_messages SET content = $1, edited_at = NOW()
-     WHERE id = $2 AND deleted_at IS NULL
-     RETURNING *`,
-    [content, messageId],
-  );
-  return rows.length > 0 ? await rowToMessage(rows[0]) : null;
-}
 
-export async function deleteMessage(messageId: string): Promise<boolean> {
-  const { rowCount } = await getPgPool().query(
-    'UPDATE room_messages SET deleted_at = NOW() WHERE id = $1 AND deleted_at IS NULL',
-    [messageId],
-  );
-  return (rowCount ?? 0) > 0;
-}
 
 export async function getMessage(messageId: string): Promise<RoomMessage | null> {
   const { rows } = await getPgPool().query(
@@ -907,214 +483,8 @@ export async function getUnreadCounts(userId: number): Promise<Map<string, numbe
   return counts;
 }
 
-// ── AI Session (Persistent Channel AI) ──────────────────────────────
-// Channel AI sessions live in the sessions table with label = 'channel_ai'.
-// The chat_rooms table stores ai_engine_session_id as a cache for quick resume.
-
-export interface ChannelAiSession {
-  sessionId: string;          // Tower session ID (sessions table)
-  engineSessionId: string | null;  // SDK session ID (for resume)
-  messageCount: number;
-  /**
-   * Pinned CLAUDE_CONFIG_DIR for this channel session (PR-1, 2026-05-09).
-   * NULL = no pinned dir; caller falls back to runtime getConfigDir lookup.
-   * Forwarded to channelReply so the SDK spawn + backup land in the correct
-   * account directory (e.g. ~/.claude-gmail/ for gmail-account projects).
-   */
-  configDir: string | null;
-  /** Authority snapshot bound to the resumable engine context. */
-  authorityFingerprint: string | null;
-}
-
-/**
- * Get or create the persistent channel AI session for a room.
- * Looks up sessions table first; falls back to chat_rooms cache.
- */
-export async function getOrCreateChannelAiSession(
-  roomId: string,
-  roomName: string,
-  userId: number,
-  projectId: string | null,
-  engine: string,
-  projectRootPath?: string,
-  agentProjectId?: string | null,
-  agentDisplayName?: string,
-  modelUsed?: string | null,
-): Promise<ChannelAiSession> {
-  const pool = getPgPool();
-
-  // 1. Look up existing channel_ai session in sessions table.
-  //    NOTE: we deliberately include archived rows. If a user accidentally
-  //    deleted the channel session from the sidebar (delete = soft-delete,
-  //    archived=1), the conversation history is still intact — we RESURRECT it
-  //    instead of creating a fresh empty session (which is what made channel AI
-  //    threads "disappear"). An explicit "@ai /reset" relabels the session to
-  //    'channel_ai_reset' (see clearChannelAiSession), so a reset is correctly
-  //    excluded from this lookup and a brand-new session is created.
-  //    결정: workspace/decisions/2026-05-23-channel-ai-session-isolation.md
-  const sessionLabel = agentProjectId ? 'channel_agent' : 'channel_ai';
-  const { rows } = await pool.query(
-    `SELECT id, claude_session_id, pi_session_file, engine, turn_count, config_dir, archived, channel_authority_fingerprint
-       FROM sessions
-      WHERE room_id = $1
-        AND label = $2
-        AND (($3::text IS NULL AND channel_agent_project_id IS NULL) OR channel_agent_project_id = $3)
-      ORDER BY updated_at DESC LIMIT 1`,
-    [roomId, sessionLabel, agentProjectId ?? null],
-  );
-
-  if (rows.length > 0) {
-    // Resurrect if it was archived by an accidental sidebar delete.
-    if (rows[0].archived === 1) {
-      await pool.query(
-        `UPDATE sessions SET archived = 0, updated_at = NOW() WHERE id = $1`,
-        [rows[0].id],
-      );
-      console.log(`[room-manager] Resurrected archived ${sessionLabel} session ${rows[0].id} for room ${roomId}`);
-    }
-    return {
-      sessionId: rows[0].id,
-      engineSessionId: rows[0].engine === 'pi'
-        ? rows[0].pi_session_file ?? null
-        : rows[0].claude_session_id ?? null,
-      messageCount: rows[0].turn_count ?? 0,
-      configDir: rows[0].config_dir ?? null,
-      authorityFingerprint: rows[0].channel_authority_fingerprint ?? null,
-    };
-  }
-
-  // 2. No session exists — create one
-  // Owner is null (system-owned) — channel AI is a shared team resource, not owned by any individual.
-  // Visibility is 'project' so all project members can see it.
-  // cwd priority: explicit project rootPath → backend process cwd (never the old hardcoded
-  // '/home/tower' — breaks on self-hosted servers like demo-org where the home dir differs).
-  const { createSession, updateSession } = await import('../session/session-manager.js');
-  const sessionCwd = projectRootPath || process.cwd();
-  const session = await createSession(
-    agentDisplayName ? `${agentDisplayName} · #${roomName}` : `🤖 ${roomName}`,
-    sessionCwd,
-    undefined,             // shared channel session, not an individual's private thread
-    projectId,
-    engine,
-    roomId,
-    undefined,
-    undefined,
-    sessionLabel,
-    modelUsed,
-  );
-  await updateSession(session.id, { label: sessionLabel, visibility: 'project' });
-  if (agentProjectId) {
-    await pool.query(
-      `UPDATE sessions
-          SET channel_agent_project_id = $2,
-              project_agent_profile_snapshot = NULL,
-              project_id = $2,
-              updated_at = NOW()
-        WHERE id = $1`,
-      [session.id, agentProjectId],
-    );
-    const { getSessionProjectAgentRuntimeProfile } = await import('../pm/project-agent-profile.js');
-    await getSessionProjectAgentRuntimeProfile(session.id, agentProjectId);
-  }
-
-  // session.configDir was pinned in createSession via getConfigDir(projectId).
-  // Forward it so the channel's first turn lands in the correct account dir.
-  return {
-    sessionId: session.id,
-    engineSessionId: null,
-    messageCount: 0,
-    configDir: session.configDir ?? null,
-    authorityFingerprint: null,
-  };
-}
-
-/**
- * Update channel AI session after a successful reply.
- * Syncs both sessions table and chat_rooms cache.
- */
-export async function updateChannelAiSession(
-  roomId: string,
-  sessionId: string,
-  engineSessionId: string,
-  authorityFingerprint?: string,
-): Promise<void> {
-  const pool = getPgPool();
-
-  // Update sessions table
-  const { claimEngineSessionId, getSession, updateSession } = await import('../session/session-manager.js');
-  const session = await getSession(sessionId);
-  await claimEngineSessionId(sessionId, session?.engine, engineSessionId);
-  await updateSession(sessionId, {
-    turnCount: undefined,  // will be incremented below
-  });
-
-  // Increment turn count
-  await pool.query(
-    `UPDATE sessions
-        SET turn_count = COALESCE(turn_count, 0) + 1,
-            channel_authority_fingerprint = COALESCE($2, channel_authority_fingerprint),
-            updated_at = NOW()
-      WHERE id = $1`,
-    [sessionId, authorityFingerprint ?? null],
-  );
-
-  // Sync chat_rooms cache
-  await pool.query(
-    `UPDATE chat_rooms
-     SET ai_engine_session_id = $2,
-         ai_session_created_at = COALESCE(ai_session_created_at, NOW()),
-         ai_session_message_count = COALESCE(ai_session_message_count, 0) + 1
-     WHERE id = $1`,
-    [roomId, engineSessionId],
-  );
-}
-
-/**
- * Clear channel AI session (on @ai /reset).
- * Archives the session and clears the room cache.
- */
-export async function clearChannelAiSession(roomId: string): Promise<void> {
-  const pool = getPgPool();
-
-  // Archive existing channel_ai session(s) AND relabel them to
-  // 'channel_ai_reset'. The relabel is what makes a /reset distinct from an
-  // accidental sidebar delete: getOrCreateChannelAiSession only resurrects
-  // rows still labeled 'channel_ai', so a reset session is left archived and a
-  // brand-new conversation starts. Data is preserved either way (soft-delete).
-  // 결정: workspace/decisions/2026-05-23-channel-ai-session-isolation.md
-  await pool.query(
-    `UPDATE sessions SET archived = 1, label = 'channel_ai_reset', updated_at = NOW()
-     WHERE room_id = $1 AND label = 'channel_ai' AND (archived IS NULL OR archived = 0)`,
-    [roomId],
-  );
-
-  // Clear room cache
-  await pool.query(
-    `UPDATE chat_rooms
-     SET ai_engine_session_id = NULL,
-         ai_session_created_at = NULL,
-         ai_session_message_count = 0
-     WHERE id = $1`,
-    [roomId],
-  );
-}
-
 // ── AI Context ───────────────────────────────────────────────────────
 
-export async function saveAiContext(
-  roomId: string,
-  content: string,
-  tokenCount: number,
-  sourceTaskId: string,
-): Promise<string> {
-  const { rows } = await getPgPool().query(
-    `INSERT INTO room_ai_context (room_id, context_type, content, token_count, source_task_id)
-     VALUES ($1, 'task_summary', $2, $3, $4)
-     RETURNING id`,
-    [roomId, content, tokenCount, sourceTaskId],
-  );
-  return rows[0].id;
-}
 
 export async function getAiContexts(
   roomId: string,
@@ -1138,12 +508,6 @@ export async function getAiContexts(
   }));
 }
 
-export async function cleanupExpiredContexts(): Promise<number> {
-  const { rowCount } = await getPgPool().query(
-    'DELETE FROM room_ai_context WHERE expires_at IS NOT NULL AND expires_at <= NOW()',
-  );
-  return rowCount ?? 0;
-}
 
 // ── Notifications ────────────────────────────────────────────────────
 

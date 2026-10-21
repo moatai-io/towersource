@@ -1,12 +1,13 @@
 ---
 name: materialize-managed-skills
-description: Tower dev/operator helper for applying the curated teamskills/default skill set into Project Runtime Box `.tower/skills` folders. Use when deploying organization skills to self-hosted servers, running "materialize skills", or verifying project-mounted skill manifests.
+description: Tower dev/operator helper for applying the curated teamskills/default skill set into Project-visible `.tower/skills` folders. Use when deploying organization skills to self-hosted servers, running "materialize skills", or verifying project-mounted skill manifests.
+version: 0.1.1
 argument-hint: "[--all-projects | --project <id-or-name> | --project-root <path>]"
 ---
 
 # materialize-managed-skills
 
-Tower dev/operator-only helper. This skill documents the supported, repeatable path for materializing the curated teamskills/default skill set into project-local Runtime Box skill folders.
+Tower dev/operator-only helper. This skill documents the supported, repeatable path for materializing the curated teamskills/default skill set into Project-visible `.tower/skills` folders. The Project workspace is the authority; Runtime Box is only a legacy compatibility consumer where still present.
 
 Boundary: this skill owns only generated `.tower/skills/` runtime copies. Project-owned local skill gardens live separately in `SKILL_GARDEN.md`, `skills/`, and `skill-lab/`; do not prune or overwrite them from the materializer. See `~/workspace/decisions/2026-06-10-project-local-skill-garden-materialization.md` and `~/workspace/decisions/2026-06-26-skills-external-repo-and-no-managed-seed.md`.
 
@@ -16,7 +17,8 @@ Use this when the operator says:
 
 - "materialize skills"
 - "자체 호스팅 서버 전체 프로젝트에 스킬 배포"
-- "Project Runtime Box teamskills 깔아"
+- "Project에 teamskills 깔아"
+- "legacy Runtime Box의 project skill copy도 확인해"
 - "demo-server / demo-org 에 기본 스킬셋 넣어"
 - "`.tower/skills` manifest 검증"
 
@@ -69,7 +71,7 @@ Do not hand-maintain a separate list unless intentionally overriding with:
 RUNTIME_BOX_MATERIALIZED_SKILLS=<comma-separated-list>
 ```
 
-`RUNTIME_BOX_MATERIALIZE_SKILLS=true` is the automatic materialization gate for Runtime Box startup; the CLI can still be run manually after deploy to backfill every project immediately.
+`RUNTIME_BOX_MATERIALIZE_SKILLS`와 `RUNTIME_BOX_MATERIALIZED_SKILLS`는 남아 있는 compatibility 설정명이다. 현재 정본은 Project별 `.tower/skills` materialization이며, CLI는 배포 후 Project-visible copies를 backfill할 때 사용할 수 있다. Runtime Box startup 연동은 compatibility 경로에서만 의미가 있다.
 
 ## Success criteria
 
@@ -78,14 +80,14 @@ For the current customer default set:
 - `summary.fail` is `0`
 - `summary.skillCount` matches `teamskills/skillset.json` defaultSkills length
 - `skipped` is empty for all projects
-- every project has `/workspace/.tower/skills/manifest.json` in Runtime Box / `<project>/.tower/skills/manifest.json` on host
+- every canonical Project has `<project>/.tower/skills/manifest.json`; legacy Runtime Box가 실제 consumer이면 그 안의 `/workspace/.tower/skills/manifest.json`도 같은 manifest를 노출
 - `offer-A4-html` is **not** included in customer defaults
 
 ## Common errors and deployment tips
 
-### Deploy may look stalled during Runtime Box image build
+### Compatibility deploy may look stalled during Runtime Box image build
 
-`ensure-runtime-box-image.sh` can spend a while in Docker build output. If the chat/tool stream is interrupted, do **not** rerun the whole deploy blindly. First inspect the remote state:
+Runtime Box compatibility까지 포함한 배포에서는 `ensure-runtime-box-image.sh`가 Docker build output에 오래 머물 수 있다. canonical Project skill materialization 자체는 이 이미지에 의존하지 않는다. compatibility 배포 중 chat/tool stream이 끊겨도 전체 배포를 맹목적으로 다시 실행하지 말고 remote state를 먼저 확인한다.
 
 ```bash
 ssh <target> 'cd ~/tower; git rev-parse --short HEAD; node -p "require(\"./package.json\").version"; pm2 status tower-prod; curl -sS http://localhost:32364/api/health'

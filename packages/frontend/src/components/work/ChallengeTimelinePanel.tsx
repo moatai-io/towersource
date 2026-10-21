@@ -339,7 +339,7 @@ function WorkstreamList({ embedded = false, projects, selectedWorkstreamKey, onS
     .sort((a, b) => new Date(b.lastAt).getTime() - new Date(a.lastAt).getTime());
 
   return (
-    <section aria-labelledby={embedded ? undefined : 'work-list-title'} aria-label={embedded ? tr('challenge.timeline.workList') : undefined} className={`overflow-hidden ${embedded ? 'border-y border-surface-800 bg-surface-950 lg:border-x-0' : 'rounded-xl border border-surface-800 bg-surface-900/55'}`}>
+    <section aria-labelledby={embedded ? undefined : 'work-list-title'} aria-label={embedded ? tr('challenge.timeline.workList') : undefined} className={`@container/worklist overflow-hidden ${embedded ? 'border-y border-surface-800 bg-surface-950 lg:border-x-0' : 'rounded-xl border border-surface-800 bg-surface-900/55'}`}>
       {!embedded && <div className="border-b border-surface-800 bg-surface-950/45 px-4 py-3">
         <h2 id="work-list-title" className="text-[17px] font-semibold text-surface-100">{tr('challenge.timeline.workList')}</h2>
         <p className="mt-1 text-[12px] leading-5 text-surface-500">{tr('challenge.timeline.workListDescription')}</p>
@@ -356,13 +356,13 @@ function WorkstreamList({ embedded = false, projects, selectedWorkstreamKey, onS
           const selected = selectedWorkstreamKey === key;
           const status = primarySession ? activityStatus(primarySession, challenge) : { label: workstreamStatusLabel(challenge), tone: 'border-surface-700 bg-surface-850 text-surface-400' };
           const agentNames = Array.from(new Set(sessions.map((session) => session.agentName))).join(', ');
-          return <button key={key} type="button" data-workstream-key={key} aria-current={selected ? 'true' : undefined} onClick={() => onSelectWorkstream(key)} className={`grid min-h-20 w-full grid-cols-[minmax(0,1fr)_auto] gap-3 px-4 py-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary-500/60 ${selected ? 'bg-primary-500/10' : 'hover:bg-surface-800/30'}`}>
+          return <button key={key} type="button" data-workstream-key={key} aria-current={selected ? 'true' : undefined} onClick={() => onSelectWorkstream(key)} className={`grid min-h-20 w-full grid-cols-1 @min-[32rem]/worklist:grid-cols-[minmax(0,1fr)_auto] gap-3 px-4 py-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary-500/60 ${selected ? 'bg-primary-500/10' : 'hover:bg-surface-800/30'}`}>
             <span className="min-w-0">
-              <span className="flex min-w-0 flex-wrap items-center gap-2"><span className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${status.tone}`}>{status.label}</span><span className="min-w-0 flex-1 truncate text-[14px] font-semibold text-surface-100">{challenge.title}</span></span>
+              <span className="flex min-w-0 flex-wrap items-center gap-2"><span className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${status.tone}`}>{status.label}</span><span className="min-w-0 flex-1 basis-full @min-[32rem]/worklist:basis-0 line-clamp-2 [overflow-wrap:anywhere] text-[14px] font-semibold text-surface-100">{challenge.title}</span></span>
               <span className="mt-1 block truncate text-[12px] text-surface-400">{currentStep}</span>
               <span className="mt-1 block truncate text-[11px] text-surface-600">{challenge.projectName}{agentNames ? ` · ${agentNames}` : ''}</span>
             </span>
-            <span className="flex shrink-0 flex-col items-end justify-between gap-2">
+            <span className="flex shrink-0 flex-row items-center justify-between gap-2 @min-[32rem]/worklist:flex-col @min-[32rem]/worklist:items-end">
               <time className="text-[10px] text-surface-600">{formatDateTime(challenge.lastAt)}</time>
               <span className="text-[11px] font-semibold tabular-nums text-surface-400">{challenge.todoTotal > 0 ? `${challenge.todoDone}/${challenge.todoTotal}` : tr('challenge.timeline.stepCountMissing')}</span>
             </span>
@@ -388,7 +388,7 @@ function WorkstreamOverview({ challenge, onBack }: { challenge: ChallengeRow; on
       : 'border-primary-500/25 bg-primary-500/10 text-primary-700 dark:text-primary-200';
 
   return (
-    <section aria-labelledby="workstream-overview-title" className="mx-auto w-full max-w-5xl pb-6 [word-break:keep-all] [overflow-wrap:break-word]">
+    <section aria-labelledby="workstream-overview-title" className="@container/overview mx-auto w-full max-w-5xl pb-6 [word-break:keep-all] [overflow-wrap:break-word]">
       <button type="button" onClick={onBack} className="mb-3 inline-flex min-h-9 items-center gap-1 rounded-lg px-2 text-[12px] font-semibold text-surface-500 transition-colors hover:bg-surface-800 hover:text-surface-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/60">
         <span aria-hidden="true">←</span> {tr('challenge.timeline.title')}
       </button>
@@ -420,7 +420,7 @@ function WorkstreamOverview({ challenge, onBack }: { challenge: ChallengeRow; on
         </div>
       </article>
 
-      <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1.25fr)_minmax(280px,.75fr)]">
+      <div className="mt-4 grid gap-4 @min-[52rem]/overview:grid-cols-[minmax(0,1.25fr)_minmax(280px,.75fr)]">
         <div className="space-y-4">
           <OverviewSection title={tr('challenge.timeline.currentProgress')} description={tr('challenge.timeline.currentProgressDescription')}>
             <div className="grid gap-3 md:grid-cols-2">
@@ -477,7 +477,7 @@ function ProjectTimeline({ project, start, end, expandedIds, onToggle }: { proje
     <section>
       <div className="mb-2 flex items-baseline justify-between gap-3">
         <h2 className="text-[17px] font-semibold tracking-tight text-surface-100">{project.name}</h2>
-        <span className="text-[12px] text-surface-600">{project.challengeCount} workstreams · {project.todoLeft} left</span>
+        <span className="text-[12px] text-surface-600">{tr('challenge.timeline.workstreamCount', { defaultValue: '{{count}}개 작업 흐름', count: project.challengeCount })} · {tr('challenge.timeline.todoLeftCount', { defaultValue: '{{count}}개 단계 남음', count: project.todoLeft })}</span>
       </div>
       <div className="max-w-full overscroll-x-contain overflow-x-auto rounded-2xl border border-surface-800 bg-surface-900/55">
         <div className="min-w-[1060px]">
@@ -566,17 +566,17 @@ function WorkstreamDetail({ challenge, sessions }: { challenge: ChallengeRow; se
   return (
     <div className="border-t border-surface-800 bg-surface-950/45 px-4 py-4">
       <div className="mb-4 grid grid-cols-2 gap-2 md:grid-cols-5">
-        <MiniStat label="Sessions" value={challenge.sessionCount} />
-        <MiniStat label="Snapshots" value={challenge.segments.reduce((sum, segment) => sum + segment.snapshotCount, 0)} />
-        <MiniStat label="Todo left" value={challenge.todoLeft} tone={challenge.todoLeft === 0 ? 'green' : 'amber'} />
-        <MiniStat label="Backlog" value={backlog.length} tone={backlog.length > 0 ? 'primary' : 'gray'} />
-        <MiniStat label="Questions" value={questions.length} tone={questions.length > 0 ? 'amber' : 'gray'} />
+        <MiniStat label={tr('challenge.timeline.sessions', { defaultValue: '세션' })} value={challenge.sessionCount} />
+        <MiniStat label={tr('challenge.timeline.snapshots', { defaultValue: '스냅샷' })} value={challenge.segments.reduce((sum, segment) => sum + segment.snapshotCount, 0)} />
+        <MiniStat label={tr('challenge.timeline.todoLeft', { defaultValue: '남은 진행 단계' })} value={challenge.todoLeft} tone={challenge.todoLeft === 0 ? 'green' : 'amber'} />
+        <MiniStat label={tr('challenge.timeline.backlog', { defaultValue: '후속 작업' })} value={backlog.length} tone={backlog.length > 0 ? 'primary' : 'gray'} />
+        <MiniStat label={tr('challenge.timeline.questions', { defaultValue: '열린 질문' })} value={questions.length} tone={questions.length > 0 ? 'amber' : 'gray'} />
       </div>
 
       <div className="grid gap-4 lg:grid-cols-[1.35fr_0.9fr]">
         <section>
           <div className="mb-2 flex items-center justify-between gap-3">
-            <h3 className="text-[13px] font-semibold uppercase tracking-[0.14em] text-surface-500">Session breakdown</h3>
+            <h3 className="text-[13px] font-semibold uppercase tracking-[0.14em] text-surface-500">{tr('challenge.timeline.sessionBreakdown', { defaultValue: '세션별 작업 내역' })}</h3>
             <span className="text-[11px] text-surface-600">{tr('challenge.timeline.sessionRowHint')}</span>
           </div>
           <div className="space-y-2">
@@ -662,19 +662,19 @@ function SessionCard({ session, expanded, onToggle }: { session: WorkSession; ex
             <span className={`mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-md border border-surface-700 text-[12px] text-surface-500 transition-transform ${expanded ? 'rotate-90 border-primary-400/50 text-primary-700 dark:text-primary-200' : ''}`}>›</span>
             <div className="min-w-0">
               <div className="truncate text-[13px] font-semibold text-surface-200">{session.name}</div>
-              <div className="mt-1 text-[11px] text-surface-600">{session.owner} · last {formatDateTime(session.lastAt)} · {session.snapshotCount} snapshots</div>
+              <div className="mt-1 text-[11px] text-surface-600">{session.owner} · {tr('challenge.timeline.lastActivity', { defaultValue: '최근 활동: {{time}}', time: formatDateTime(session.lastAt) })} · {tr('challenge.timeline.snapshotCount', { defaultValue: '{{count}}개 스냅샷', count: session.snapshotCount })}</div>
               {session.runTitles.length > 0 && !expanded && (
-                <div className="mt-2 truncate text-[11px] text-surface-500">latest: {session.runTitles[session.runTitles.length - 1]}</div>
+                <div className="mt-2 truncate text-[11px] text-surface-500">{tr('challenge.timeline.latest', { defaultValue: '최근 작업' })}: {session.runTitles[session.runTitles.length - 1]}</div>
               )}
             </div>
           </div>
           <div className="flex shrink-0 items-start gap-3">
             <div className="text-right">
-              <div className={`text-[12px] font-semibold ${session.todoLeft === 0 ? 'text-emerald-700 dark:text-emerald-300' : 'text-amber-700 dark:text-amber-300'}`}>{session.todoLeft === 0 ? 'done' : `${session.todoLeft} left`}</div>
+              <div className={`text-[12px] font-semibold ${session.todoLeft === 0 ? 'text-emerald-700 dark:text-emerald-300' : 'text-amber-700 dark:text-amber-300'}`}>{session.todoLeft === 0 ? tr('challenge.timeline.done', { defaultValue: '완료' }) : tr('challenge.timeline.todoLeftCount', { defaultValue: '{{count}}개 단계 남음', count: session.todoLeft })}</div>
               <div className="mt-1 text-[11px] text-surface-600">{session.todoTotal > 0 ? `${session.todoDone}/${session.todoTotal}` : tr('challenge.timeline.stepCountMissing')}</div>
             </div>
             <button type="button" onClick={(event) => { event.stopPropagation(); openSession(session.id); }} className="rounded-lg border border-primary-500/30 bg-primary-500/10 px-2.5 py-1 text-[11px] font-semibold text-primary-700 dark:text-primary-200 transition-colors hover:bg-primary-500/20">
-              Open ↗
+              {tr('challenge.timeline.openSession', { defaultValue: '세션 보기' })} ↗
             </button>
           </div>
         </div>

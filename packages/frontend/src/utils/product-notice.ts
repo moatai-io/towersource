@@ -3,7 +3,6 @@ import { toastError, toastInfo, toastSuccess, toastWarning } from './toast';
 
 export type ProductNoticeCode =
   | 'oauth.connect.failed'
-  | 'sidebar.upload.failed'
   | 'sidebar.personal.rename.failed'
   | 'sidebar.personal.archive.failed'
   | 'sidebar.session.move.failed'
@@ -30,7 +29,6 @@ export interface ProductNotice {
 
 const NOTICE_KEYS: Record<ProductNoticeCode, string> = {
   'oauth.connect.failed': 'oauthConnectFailed',
-  'sidebar.upload.failed': 'sidebarUploadFailed',
   'sidebar.personal.rename.failed': 'personalRenameFailed',
   'sidebar.personal.archive.failed': 'personalArchiveFailed',
   'sidebar.session.move.failed': 'sessionMoveFailed',

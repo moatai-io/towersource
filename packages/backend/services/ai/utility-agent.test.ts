@@ -80,7 +80,7 @@ describe('utility-agent', () => {
     expect(result).toBe('mini title');
   });
 
-  it('uses a Claude utility fallback for unsupported Pi default providers', async () => {
+  it('routes retired direct provider utility work through LiteLLM mini', async () => {
     mockQuickReply.mockResolvedValueOnce('title text');
     vi.doMock('../../config.js', () => ({
       config: { claudeEnabled: true, piEnabled: true },
@@ -101,9 +101,9 @@ describe('utility-agent', () => {
       fallbackText: 'fallback',
     });
 
-    expect(mockGetEngine).toHaveBeenCalledWith('claude');
+    expect(mockGetEngine).toHaveBeenCalledWith('pi');
     expect(mockQuickReply.mock.calls[0][1]).toMatchObject({
-      model: 'claude-haiku-4-5-20251001',
+      model: 'litellm-responses/mini',
       systemPrompt: 'system',
     });
     expect(result).toBe('title text');
@@ -122,4 +122,30 @@ describe('utility-agent', () => {
 
     expect(result).toBe('fallback');
   });
+  it.each([
+    ['success', 'generated', undefined, undefined],
+    ['', 'fallback', 'empty_response', undefined],
+    [new Error('LiteLLM Responses API error 502: private-body'), 'fallback', 'provider_http', 502],
+  ])('reports safe result metadata for %s', async (value, status, reason, httpStatus) => {
+    vi.doMock('../../config.js', () => ({
+      config: { claudeEnabled: true, piEnabled: true },
+      loadModelsFile: () => ({ claude: [], pi: [] }),
+    }));
+    if (value instanceof Error) mockQuickReply.mockRejectedValueOnce(value);
+    else mockQuickReply.mockResolvedValueOnce(value);
+    const { runUtilityTextTask } = await import('./utility-agent.ts');
+    const onResult = vi.fn();
+    await runUtilityTextTask({ prompt: 'private-prompt', systemPrompt: 'system', model: 'litellm-responses/mini', fallbackText: 'fallback', onResult });
+    expect(onResult).toHaveBeenCalledWith({ status, reason, model: 'litellm-responses/mini', httpStatus });
+    expect(JSON.stringify(onResult.mock.calls)).not.toMatch(/private-body|private-prompt/);
+  });
+
+  it('reports timeout rather than generated when returning fallback', async () => {
+    mockQuickReply.mockReturnValueOnce(new Promise(() => {}));
+    const { runUtilityTextTask } = await import('./utility-agent.ts');
+    const onResult = vi.fn();
+    expect(await runUtilityTextTask({ prompt: 'test', systemPrompt: 'system', model: 'litellm-responses/mini', fallbackText: 'fallback', timeoutMs: 5, onResult })).toBe('fallback');
+    expect(onResult).toHaveBeenCalledWith(expect.objectContaining({ status: 'fallback', reason: 'timeout' }));
+  });
+
 });

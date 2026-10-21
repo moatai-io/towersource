@@ -25,7 +25,7 @@ describe('project execution gate', () => {
       actionClass: 'read',
     });
     expect(result.decision).toBe('deny');
-    expect(result.reason).toContain('not a member');
+    expect(result.reason).toContain('does not have access');
   });
 
   it('treats credential use as allowed when the project execution context has the credential', () => {
@@ -57,9 +57,9 @@ describe('project execution gate', () => {
     expect(noTool.requirements).toContain('install_or_select_runbox_profile');
   });
 
-  it('keeps secret value visibility admin/owner-only by default', () => {
+  it('allows trusted Project members to reveal attached values and denies restricted/deployed profiles', () => {
     const member = evaluateExecutionGate({ ...memberCtx, actionClass: 'secret-read' });
-    expect(member.decision).toBe('deny');
+    expect(member.decision).toBe('allow');
 
     const owner = evaluateExecutionGate({
       ...memberCtx,
@@ -69,14 +69,46 @@ describe('project execution gate', () => {
     });
     expect(owner.decision).toBe('allow');
 
+    const restricted = evaluateExecutionGate({
+      ...memberCtx,
+      actionClass: 'secret-read',
+      policy: { trustLevel: 'restricted', secretValueVisibility: 'project_members' },
+    });
+    expect(restricted.decision).toBe('deny');
+
     const admin = evaluateExecutionGate({
       ...memberCtx,
       userRole: 'admin',
-      projectMember: false,
+      projectMember: true,
       projectRole: null,
       actionClass: 'secret-read',
+      policy: { secretValueVisibility: 'admin_only' },
     });
     expect(admin.decision).toBe('allow');
+  });
+
+  it('lets an invited operator manage connections and explicitly enabled host actions', () => {
+    const credentialAdmin = evaluateExecutionGate({
+      ...memberCtx,
+      userRole: 'operator',
+      projectMember: true,
+      projectRole: null,
+      actionClass: 'credential-admin',
+    });
+    expect(credentialAdmin.decision).toBe('allow');
+    expect(credentialAdmin.requiredCapability).toBe('credential:admin');
+
+    const hostAdmin = evaluateExecutionGate({
+      ...memberCtx,
+      userRole: 'operator',
+      projectMember: false,
+      projectRole: null,
+      actionClass: 'host-admin',
+      explicitConfirmation: true,
+      policy: { allowHostAdmin: true },
+    });
+    expect(hostAdmin.decision).toBe('allow');
+    expect(hostAdmin.requiredCapability).toBe('system:admin');
   });
 
   it('allows ops projects to cross project boundaries', () => {
@@ -145,7 +177,7 @@ describe('project execution gate', () => {
     expect(result.requirements).toContain('preflight_checks');
   });
 
-  it('lets admins participate without project membership but still preserves high-impact confirmation', () => {
+  it('denies uninvited admins even when deployment is confirmed', () => {
     const result = evaluateExecutionGate({
       userId: 1,
       userRole: 'admin',
@@ -154,7 +186,18 @@ describe('project execution gate', () => {
       actionClass: 'deploy',
       explicitConfirmation: true,
     });
-    expect(result.decision).toBe('allow');
+    expect(result.decision).toBe('deny');
+  });
+
+  it.each(['admin', 'operator'])('requires membership for %s attached-credential execution while retaining management authority', (role) => {
+    expect(evaluateExecutionGate({ userId: 1, userRole: role, projectMember: false, actionClass: 'credential-admin' }).decision).toBe('deny');
+    expect(evaluateExecutionGate({ userId: 1, userRole: role, projectMember: false, actionClass: 'secret-read' }).decision).toBe('deny');
+  });
+
+  it('returns canonical policy and capability metadata', () => {
+    const result = evaluateExecutionGate({ ...memberCtx, actionClass: 'credential-use', credentialAvailable: true });
+    expect(result.policyId).toBe('tower.control-plane.authorization.v1');
+    expect(result.requiredCapability).toBe('credential:execute');
   });
 
   it('classifies high impact actions', () => {
@@ -162,5 +205,61 @@ describe('project execution gate', () => {
     expect(isHighImpactExecutionAction('credential-use')).toBe(false);
     expect(isHighImpactExecutionAction('deploy')).toBe(true);
     expect(isHighImpactExecutionAction('secret-read')).toBe(true);
+  });
+});
+
+
+describe('Agent capability ceiling in the execution gate', () => {
+  const context = { userId: 7, projectId: 'agent-a', projectMember: true, projectWritable: true };
+  const cases = [
+    ['cross-project', 'allowCrossProject'], ['self-hosted-server', 'allowCustomerVmOps'],
+    ['container', 'allowContainerOps'], ['deploy', 'allowDeploy'],
+  ] as const;
+
+  it.each(cases)('%s requires Agent policy, not elevated requester role', (actionClass, flag) => {
+    for (const userRole of ['member', 'operator', 'admin']) {
+      const input = { ...context, userRole, actionClass, explicitConfirmation: true, credentialAvailable: true };
+      expect(evaluateExecutionGate(input).decision).toBe('deny');
+      expect(evaluateExecutionGate({ ...input, policy: { [flag]: true } }).decision).toBe('allow');
+      expect(evaluateExecutionGate({ ...input, policy: { trustLevel: 'ops', [flag]: false } }).decision).toBe('deny');
+    }
+  });
+
+  it.each(['member', 'operator', 'admin'])('keeps restricted Agent read-only for %s', userRole => {
+    const input = { ...context, userRole, policy: { trustLevel: 'restricted' as const, allowHostAdmin: true, allowDeploy: true } };
+    expect(evaluateExecutionGate({ ...input, actionClass: 'read' }).decision).toBe('allow');
+    for (const actionClass of ['write', 'credential-use', 'secret-read', 'deploy', 'host-admin'] as const) {
+      expect(evaluateExecutionGate({ ...input, actionClass, explicitConfirmation: true }).decision).toBe('deny');
+    }
+  });
+
+  it.each(['viewer', 'guest', 'unknown'])('does not let %s mutate or execute with project membership', userRole => {
+    for (const actionClass of ['write', 'install-tool', 'credential-use', 'secret-read', 'cross-project'] as const) {
+      expect(evaluateExecutionGate({ ...context, userRole, actionClass, policy: { trustLevel: 'ops' } }).decision).toBe('deny');
+    }
+  });
+
+  it('respects explicit read-only project sharing', () => {
+    expect(evaluateExecutionGate({ ...context, userRole: 'member', projectWritable: false, actionClass: 'write' }).decision).toBe('deny');
+    expect(evaluateExecutionGate({ ...context, userRole: 'member', projectWritable: false, actionClass: 'read' }).decision).toBe('allow');
+  });
+
+  it('requires identity even for platform administrators', () => {
+    for (const userId of [undefined, 0, -1, 1.2]) {
+      expect(evaluateExecutionGate({ ...context, userId, userRole: 'admin', actionClass: 'read' }).decision).toBe('deny');
+    }
+  });
+
+  it('requires both explicit host capability and platform entrance authorization', () => {
+    const input = { ...context, actionClass: 'host-admin' as const, explicitConfirmation: true };
+    expect(evaluateExecutionGate({ ...input, userRole: 'admin' }).decision).toBe('deny');
+    expect(evaluateExecutionGate({ ...input, userRole: 'operator', policy: { allowHostAdmin: true } }).decision).toBe('allow');
+    expect(evaluateExecutionGate({ ...input, userRole: 'admin', policy: { allowHostAdmin: true } }).decision).toBe('allow');
+    expect(evaluateExecutionGate({ ...input, userRole: 'admin', policy: { allowHostAdmin: true }, explicitConfirmation: false }).decision).toBe('needs_confirmation');
+  });
+
+  it('does not reinterpret explicit admin-only reveal as shared credential management', () => {
+    expect(evaluateExecutionGate({ ...context, userRole: 'operator', actionClass: 'secret-read', policy: { secretValueVisibility: 'admin_only' } }).decision).toBe('deny');
+    expect(evaluateExecutionGate({ ...context, userRole: 'admin', actionClass: 'secret-read', auditAvailable: false }).decision).toBe('deny');
   });
 });

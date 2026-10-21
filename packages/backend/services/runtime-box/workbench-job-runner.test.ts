@@ -1,10 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { execInBox, getOrCreateBox } from './runtime-box-manager.js';
-import { claimWorkbenchJob, createWorkbenchJob, getWorkbenchJob, heartbeatWorkbenchJob, runClaimedWorkbenchJob } from './workbench-job-registry.js';
+import { claimWorkbenchJob, createWorkbenchJob, getWorkbenchJob, heartbeatWorkbenchJob, runClaimedWorkbenchJob } from '../execution/jobs/job-registry.js';
 import { enqueueLocalWorkbenchJob, inspectLocalWorkbenchJob, requestLocalWorkbenchJobCancel, shutdownLocalWorkbenchJobRunners } from './workbench-job-runner.js';
 
 vi.mock('./runtime-box-manager.js', () => ({ getOrCreateBox: vi.fn(), execInBox: vi.fn() }));
-vi.mock('./workbench-job-registry.js', () => ({
+vi.mock('../execution/jobs/job-registry.js', () => ({
   createWorkbenchJob: vi.fn(), claimWorkbenchJob: vi.fn(), heartbeatWorkbenchJob: vi.fn(),
   runClaimedWorkbenchJob: vi.fn(), getWorkbenchJob: vi.fn(),
 }));

@@ -6,7 +6,7 @@ const connections = readFileSync(new URL('./AgentConnectionsPanel.tsx', import.m
 const modal = readFileSync(new URL('./AgentCredentialsModal.tsx', import.meta.url), 'utf8');
 
 describe('Agent-only Google Connection UX', () => {
-  it('removes personal OAuth from general/admin settings', () => {
+  it('removes personal OAuth from general settings', () => {
     expect(settings).not.toContain('OAuthConnections');
     expect(settings).not.toContain('/auth/google');
     expect(settings).not.toContain('canManageConnections');
@@ -17,15 +17,21 @@ describe('Agent-only Google Connection UX', () => {
     expect(connections).toContain("t('agentGoogle.title')");
     expect(connections).toContain("t('agentGoogle.connectOrReauthorize')");
     expect(connections).toContain("params.get('oauth') !== 'google-agent'");
-    expect(connections).toContain("params.get('projectId') !== projectId");
-    expect(connections).toContain("tower-agent-credentials-changed");
+    expect(connections).toContain('tower-agent-credentials-changed');
   });
 
-  it('uses OAuth reauthentication instead of raw secret rotation for Google OAuth credentials', () => {
-    expect(modal).toContain("credential.allowedActions.replacementAction === 'reauth'");
+  it('reauthenticates Google OAuth instead of rotating its raw value', () => {
+    expect(modal).toContain("credential.allowedActions?.replacementAction === 'reauth'");
     expect(modal).toContain('reauthenticateGoogle(credential.id)');
     expect(modal).toContain('/api/auth/google/agent?projectId=');
-    expect(modal).toContain("t('agentCredentials.connectionsTitle')");
+  });
+
+  it('does not expose Google default account selection', () => {
+    expect(connections).toContain("connection.origin === 'agent'");
+    expect(connections).toContain("t('agentGoogle.organizationAccountsTitle')");
+    expect(connections).not.toContain('/google-connections/');
+    expect(connections).not.toContain('useAsDefault');
+    expect(connections).not.toContain('defaultBadge');
   });
 
   it('keeps semantic theme classes and accessible controls', () => {

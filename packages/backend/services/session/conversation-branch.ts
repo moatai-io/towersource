@@ -22,7 +22,7 @@ export interface ConversationRewindResult {
   replayPrompt: string;
   sourceSessionId: string;
   sourceMessageId: string;
-  deletedMessageCount: number;
+  supersededMessageCount: number;
 }
 
 function toRehydrateMessages(rows: any[]): RehydrateInputMessage[] {
@@ -46,7 +46,9 @@ export async function branchConversation(input: {
     throw Object.assign(new Error('conversation_branch_source_in_progress'), { status: 409 });
   }
   const target = await queryOne<any>(
-    `SELECT id, role, content, message_seq FROM messages WHERE id = $1 AND session_id = $2`,
+    `SELECT id, role, content, message_seq FROM messages
+      WHERE id = $1 AND session_id = $2
+        AND COALESCE(metadata->>'contextState', 'active') = 'active'`,
     [input.sourceMessageId, input.sourceSessionId],
   );
   if (!target) throw Object.assign(new Error('conversation_branch_message_not_found'), { status: 404 });
@@ -75,6 +77,7 @@ export async function branchConversation(input: {
             duration_ms, input_tokens, output_tokens, created_at, username, metadata, message_seq
        FROM messages
       WHERE session_id = $2 AND ${boundary}
+        AND COALESCE(metadata->>'contextState', 'active') = 'active'
       ORDER BY message_seq ASC`,
     [child.id, input.sourceSessionId, target.message_seq],
   );
@@ -96,6 +99,7 @@ export async function branchConversation(input: {
       const rows = await query<any>(
         `SELECT id, role, content, created_at FROM messages
           WHERE session_id = $1 AND role IN ('user', 'assistant')
+            AND COALESCE(metadata->>'contextState', 'active') = 'active'
           ORDER BY message_seq ASC`, [child.id],
       );
       const messages = toRehydrateMessages(rows);
@@ -130,7 +134,9 @@ export async function rewindConversationForReplay(input: {
   }
 
   const target = await queryOne<any>(
-    `SELECT id, role, content, message_seq FROM messages WHERE id = $1 AND session_id = $2`,
+    `SELECT id, role, content, message_seq FROM messages
+      WHERE id = $1 AND session_id = $2
+        AND COALESCE(metadata->>'contextState', 'active') = 'active'`,
     [input.sourceMessageId, input.sourceSessionId],
   );
   if (!target) throw Object.assign(new Error('conversation_rewind_message_not_found'), { status: 404 });
@@ -146,11 +152,12 @@ export async function rewindConversationForReplay(input: {
   const prefixRows = await query<any>(
     `SELECT id, role, content, created_at FROM messages
       WHERE session_id = $1 AND role IN ('user', 'assistant') AND message_seq < $2
+        AND COALESCE(metadata->>'contextState', 'active') = 'active'
       ORDER BY message_seq ASC`,
     [input.sourceSessionId, target.message_seq],
   );
   const piSessionFile = await rehydratePiSessionFromMessages(input.sourceSessionId, toRehydrateMessages(prefixRows), source.cwd);
-  const deleted = await transaction(async (client) => {
+  const superseded = await transaction(async (client) => {
     const db = withClient(client);
     const lockedSource = await db.queryOne<{ id: string }>(
       `SELECT id FROM sessions WHERE id = $1 FOR UPDATE`,
@@ -158,7 +165,10 @@ export async function rewindConversationForReplay(input: {
     );
     if (!lockedSource) throw Object.assign(new Error('conversation_rewind_source_not_found'), { status: 404 });
     const lockedTarget = await db.queryOne<{ id: string; role: string; message_seq: number }>(
-      `SELECT id, role, message_seq FROM messages WHERE id = $1 AND session_id = $2 FOR UPDATE`,
+      `SELECT id, role, message_seq FROM messages
+        WHERE id = $1 AND session_id = $2
+          AND COALESCE(metadata->>'contextState', 'active') = 'active'
+        FOR UPDATE`,
       [input.sourceMessageId, input.sourceSessionId],
     );
     if (!lockedTarget) throw Object.assign(new Error('conversation_rewind_message_not_found'), { status: 404 });
@@ -168,20 +178,28 @@ export async function rewindConversationForReplay(input: {
     if (String(lockedTarget.message_seq) !== String(target.message_seq)) {
       throw Object.assign(new Error('conversation_rewind_message_seq_changed'), { status: 409 });
     }
-    const deleteResult = await db.execute(
-      `DELETE FROM messages WHERE session_id = $1 AND message_seq >= $2`,
-      [input.sourceSessionId, target.message_seq],
+    const supersedeResult = await db.execute(
+      `UPDATE messages
+          SET metadata = COALESCE(metadata, '{}'::jsonb) || jsonb_build_object(
+                'contextState', 'superseded',
+                'supersededByRewindAt', NOW()::text,
+                'supersededFromMessageId', $3::text
+              ),
+              updated_at = NOW()
+        WHERE session_id = $1 AND message_seq >= $2
+          AND COALESCE(metadata->>'contextState', 'active') <> 'superseded'`,
+      [input.sourceSessionId, target.message_seq, input.sourceMessageId],
     );
     await db.execute(
       `UPDATE sessions SET pi_session_file = $1, updated_at = NOW() WHERE id = $2`,
       [piSessionFile, input.sourceSessionId],
     );
-    return deleteResult;
+    return supersedeResult;
   });
 
   return {
     session: await getSession(input.sourceSessionId), replayPrompt,
     sourceSessionId: input.sourceSessionId, sourceMessageId: input.sourceMessageId,
-    deletedMessageCount: deleted.changes,
+    supersededMessageCount: superseded.changes,
   };
 }

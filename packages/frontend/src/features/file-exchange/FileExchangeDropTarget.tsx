@@ -3,12 +3,12 @@ import React from 'react';
 import { useTranslation } from 'react-i18next';
 import { useConfirm } from '../../hooks/useDialog';
 import { toastError, toastSuccess } from '../../utils/toast';
+import { transferFile } from './fileExchange';
 import {
   FILE_EXCHANGE_DRAG_TYPE,
   decodeExchangeDrag,
-  transferFile,
   type ExchangeDestinationRef,
-} from './fileExchange';
+} from './fileExchangeDrag';
 
 interface FileExchangeDropTargetProps {
   destination: ExchangeDestinationRef;

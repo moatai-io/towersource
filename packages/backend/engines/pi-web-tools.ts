@@ -37,6 +37,16 @@ export interface PiWebToolContext {
   projectId?: string;
 }
 
+/**
+ * FIRECRAWL_API_URL(선택)이 있으면 그 base URL로 Firecrawl을 호출한다.
+ * 중앙 API 게이트웨이 경유 시 virtual key + 게이트웨이 URL만 VM에 두는 구성을 위한 것으로,
+ * 미설정 시 공식 엔드포인트(api.firecrawl.dev)를 그대로 사용한다.
+ */
+function createFirecrawlClient(apiKey: string): FirecrawlClient {
+  const apiUrl = process.env.FIRECRAWL_API_URL?.trim();
+  return new FirecrawlClient(apiUrl ? { apiKey, apiUrl } : { apiKey });
+}
+
 function getFirecrawl(): FirecrawlClient | null {
   if (firecrawlSingleton) return firecrawlSingleton;
   if (firecrawlInitFailed) return null;
@@ -46,7 +56,7 @@ function getFirecrawl(): FirecrawlClient | null {
     return null;
   }
   try {
-    firecrawlSingleton = new FirecrawlClient({ apiKey });
+    firecrawlSingleton = createFirecrawlClient(apiKey);
     return firecrawlSingleton;
   } catch {
     firecrawlInitFailed = true;
@@ -67,7 +77,7 @@ async function resolveFirecrawl(ctx: PiWebToolContext | undefined, targetType: s
     targetType,
   });
   if (!resolved?.value) return null;
-  return new FirecrawlClient({ apiKey: resolved.value });
+  return createFirecrawlClient(resolved.value);
 }
 
 // ---------- Cache + rate guard ----------

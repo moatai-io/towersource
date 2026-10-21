@@ -3,37 +3,16 @@ import { useTranslation } from 'react-i18next';
 import type { Automation, SessionMeta } from '@tower/shared';
 import { useSessionStore } from '../../stores/session-store';
 import { useAiPanelStore } from '../../stores/ai-panel-store';
-import { openTowerFile } from '../../utils/file-path-links';
 import { useConfirm } from '../../hooks/useDialog';
 import {
   automationYamlDraft,
   validateAutomationYamlV1,
-  type AutomationConditionEvaluation,
   type AutomationYamlValidationResult,
 } from './automation-yaml';
 
 const API = '/api/automations';
 
 type AsyncState = 'idle' | 'running' | 'done' | 'error';
-
-type ObserveState = {
-  status: AsyncState;
-  message: string | null;
-  stdout?: string | null;
-  stderr?: string | null;
-};
-
-type ConditionState = {
-  status: AsyncState;
-  result?: AutomationConditionEvaluation;
-  message: string | null;
-};
-
-type SaveState = {
-  status: 'idle' | 'saving' | 'saved' | 'error';
-  message: string | null;
-  path?: string;
-};
 
 type EditorThreadState = {
   status: AsyncState;
@@ -107,16 +86,6 @@ function WorkbenchCard({ title, eyebrow, value, detail }: { title: string; eyebr
   );
 }
 
-function ResultBox({ state }: { state: ObserveState | ConditionState | { status: AsyncState; message: string | null; wouldCallAi?: boolean } }) {
-  if (!state.message) return null;
-  const tone = state.status === 'error'
-    ? 'border-red-300 bg-red-50 text-red-800 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-200'
-    : 'wouldCallAi' in state && state.wouldCallAi
-      ? 'border-amber-300 bg-amber-50 text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100'
-      : 'border-blue-300 bg-blue-50 text-blue-900 dark:border-blue-500/30 dark:bg-blue-500/10 dark:text-blue-100';
-  return <div className={`mt-3 rounded-lg border px-3 py-2 text-xs ${tone}`}><div className="font-semibold">{state.message}</div></div>;
-}
-
 export function AutomationWorkbenchModal({ automation: a, onClose, onOpenLegacyEdit, embedded = false, showAssistant = true }: {
   automation: Automation;
   onClose?: () => void;
@@ -140,10 +109,6 @@ export function AutomationWorkbenchModal({ automation: a, onClose, onOpenLegacyE
   const localValidation = useMemo(() => validateAutomationYamlV1(yaml), [yaml]);
   const [serverValidation, setServerValidation] = useState<AutomationYamlValidationResult | null>(null);
   const [serverValidationError, setServerValidationError] = useState<string | null>(null);
-  const [saveState, setSaveState] = useState<SaveState>({ status: 'idle', message: null });
-  const [observe, setObserve] = useState<ObserveState>({ status: 'idle', message: null });
-  const [condition, setCondition] = useState<ConditionState>({ status: 'idle', message: null });
-  const [full, setFull] = useState<{ status: AsyncState; message: string | null; wouldCallAi?: boolean }>({ status: 'idle', message: null });
   const validation = serverValidation || localValidation;
 
   useEffect(() => {
@@ -157,10 +122,6 @@ export function AutomationWorkbenchModal({ automation: a, onClose, onOpenLegacyE
     let cancelled = false;
     setServerValidation(null);
     setServerValidationError(null);
-    setSaveState({ status: 'idle', message: null });
-    setObserve({ status: 'idle', message: null });
-    setCondition({ status: 'idle', message: null });
-    setFull({ status: 'idle', message: null });
     setChangeIntent(null);
     setApplyState({ status: 'idle', message: null });
     fetchJson<AutomationYamlValidationResult>(`${API}/validate-yaml`, { method: 'POST', body: JSON.stringify({ yaml }) })
@@ -176,39 +137,6 @@ export function AutomationWorkbenchModal({ automation: a, onClose, onOpenLegacyE
       .catch(() => { if (!cancelled) setIntentDiagnostics([]); });
     return () => { cancelled = true; };
   }, [a.id, applyState.status]);
-
-  const runObserve = async () => {
-    setObserve({ status: 'running', message: t('observeRunning') });
-    try {
-      const r = await fetchJson<{ status: string; summaryText?: string | null; stdoutText?: string | null; stderrText?: string | null; error?: string | null }>(`${API}/${a.id}/observe-dry-run`, { method: 'POST' });
-      setObserve({ status: r.status === 'success' || r.status === 'skipped' ? 'done' : 'error', message: r.summaryText || r.error || `observe ${r.status}`, stdout: r.stdoutText, stderr: r.stderrText });
-    } catch (err: any) {
-      setObserve({ status: 'error', message: err.message || t('observeFailed') });
-    }
-  };
-
-  const runCondition = async () => {
-    setCondition({ status: 'running', message: t('conditionRunning') });
-    try {
-      const r = await fetchJson<AutomationConditionEvaluation>(`${API}/${a.id}/condition-dry-run`, { method: 'POST', body: JSON.stringify({ yaml, stdoutText: observe.stdout || '' }) });
-      setCondition({ status: r.errors.length ? 'error' : 'done', result: r, message: r.aiNeeded ? t('aiConditionMet') : t('aiConditionNotMet') });
-    } catch (err: any) {
-      setCondition({ status: 'error', message: err.message || t('conditionFailed') });
-    }
-  };
-
-  const runFullPreview = async () => {
-    setFull({ status: 'running', message: t('fullPreviewRunning') });
-    try {
-      const r = await fetchJson<{ observe: { status: string; summaryText?: string | null; stdoutText?: string | null; stderrText?: string | null; error?: string | null }; condition: AutomationConditionEvaluation; wouldCallAi: boolean }>(`${API}/${a.id}/full-dry-run`, { method: 'POST', body: JSON.stringify({ yaml }) });
-      const observeStatus = r.observe.status === 'success' || r.observe.status === 'skipped' ? 'done' : 'error';
-      setObserve({ status: observeStatus, message: r.observe.summaryText || r.observe.error || `observe ${r.observe.status}`, stdout: r.observe.stdoutText, stderr: r.observe.stderrText });
-      setCondition({ status: r.condition.errors.length ? 'error' : 'done', result: r.condition, message: r.wouldCallAi ? t('aiConditionMet') : t('aiConditionNotMet') });
-      setFull({ status: observeStatus, wouldCallAi: r.wouldCallAi, message: r.wouldCallAi ? t('fullPreviewAi') : t('fullPreviewNoAi') });
-    } catch (err: any) {
-      setFull({ status: 'error', message: err.message || t('fullPreviewFailed') });
-    }
-  };
 
   const suggestEdit = async () => {
     if (!message.trim()) return;
@@ -317,18 +245,8 @@ export function AutomationWorkbenchModal({ automation: a, onClose, onOpenLegacyE
     }
   };
 
-  const saveYaml = async () => {
-    setSaveState({ status: 'saving', message: t('saveRunning') });
-    try {
-      const r = await fetchJson<{ path: string; relativePath: string }>(`${API}/${a.id}/save-yaml`, { method: 'POST', body: JSON.stringify({ yaml }) });
-      setSaveState({ status: 'saved', message: `${r.relativePath} ${t('savedSuffix')}`, path: r.path });
-    } catch (err: any) {
-      setSaveState({ status: 'error', message: err.message || t('saveFailed') });
-    }
-  };
-
   const kind = runKind(a, t);
-  const conditionText = a.jobType === 'ai_prompt' ? t('conditionTextAi') : t('conditionTextGate');
+  const conditionText = a.jobType === 'ai_prompt' ? t('conditionTextAi') : t('singleJobNoAi');
 
   return (
     <div className={embedded ? 'w-full' : 'fixed inset-0 z-40 flex items-start justify-center overflow-y-auto bg-black/50 p-3 sm:p-5'} onClick={embedded ? undefined : onClose}>
@@ -347,31 +265,13 @@ export function AutomationWorkbenchModal({ automation: a, onClose, onOpenLegacyE
             <div className="grid grid-cols-2 gap-3">
               <WorkbenchCard title={t('whenCheck')} eyebrow={t('startCondition')} value={triggerLabel(a, t) || t('manualRun')} detail={a.triggerType === 'manual' ? t('manualOnlyDetail') : t('scheduledDetail')} />
               <WorkbenchCard title={t('whatCheck')} eyebrow={t('checkTarget')} value={kind} detail={a.cwd ? t('workingDirectory', { path: a.cwd }) : t('defaultProjectLocation')} />
-              <WorkbenchCard title={t('whenAi')} eyebrow={t('interventionCondition')} value={a.jobType === 'ai_prompt' ? t('alwaysAi') : t('onlyWhenNeeded')} detail={conditionText} />
-              <WorkbenchCard title={t('whereReport')} eyebrow={t('reportLocation')} value={a.mode === 'channel' ? t('channelTarget') : a.mode === 'inject' ? t('existingSessionTarget') : t('newSessionTarget')} detail={t('reportingDetail')} />
+              <WorkbenchCard title={t('whenAi')} eyebrow={t('interventionCondition')} value={a.jobType === 'ai_prompt' ? t('alwaysAi') : t('noAiStep')} detail={conditionText} />
+              <WorkbenchCard title={t('whereReport')} eyebrow={t('reportLocation')} value={a.jobType !== 'ai_prompt' ? t('runHistoryTarget') : a.mode === 'inject' ? t('existingSessionTarget') : t('newSessionTarget')} detail={a.jobType === 'ai_prompt' && a.mode === 'channel' ? t('legacyChannelDetail') : t('reportingDetail')} />
             </div>
 
             <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 dark:border-blue-500/30 dark:bg-blue-500/10">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <h3 className="text-base font-semibold text-blue-950 dark:text-blue-100">{t('previewFlowTitle')}</h3>
-                  <p className="mt-1 text-sm text-blue-800/80 dark:text-blue-200/80">{t('previewFlowDescription')}</p>
-                </div>
-                <button disabled={full.status === 'running'} onClick={runFullPreview} className="shrink-0 rounded-lg bg-blue-700 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-600 disabled:opacity-50 dark:bg-blue-500 dark:hover:bg-blue-400">{full.status === 'running' ? t('previewRunning') : t('previewFlow')}</button>
-              </div>
-              <ResultBox state={full} />
-              {(observe.message || condition.message) && (
-                <div className="mt-3 grid gap-2 text-xs sm:grid-cols-2">
-                  {observe.message && <div className="rounded-lg border border-slate-200 bg-white p-2 text-slate-700 dark:border-surface-700 dark:bg-surface-950/40 dark:text-surface-300"><b>{t('checkResult')}</b><br />{observe.message}</div>}
-                  {condition.message && <div className="rounded-lg border border-slate-200 bg-white p-2 text-slate-700 dark:border-surface-700 dark:bg-surface-950/40 dark:text-surface-300"><b>{t('aiJudgment')}</b><br />{condition.message}</div>}
-                </div>
-              )}
-              <div className="mt-3 flex flex-wrap gap-2 border-t border-blue-200/70 pt-3 dark:border-blue-500/20">
-                <button disabled={observe.status === 'running'} onClick={runObserve} className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-50 dark:border-surface-700 dark:bg-transparent dark:text-surface-300 dark:hover:bg-surface-850">{observe.status === 'running' ? t('checking') : t('viewCheck')}</button>
-                <button disabled={condition.status === 'running'} onClick={runCondition} className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-50 dark:border-surface-700 dark:bg-transparent dark:text-surface-300 dark:hover:bg-surface-850">{condition.status === 'running' ? t('judging') : t('viewJudgment')}</button>
-              </div>
-              {observe.stdout && <pre className="mt-2 max-h-32 overflow-auto whitespace-pre-wrap rounded bg-white/70 p-2 text-[11px] text-slate-800 dark:bg-black/20 dark:text-surface-200">{observe.stdout}</pre>}
-              {observe.stderr && <pre className="mt-2 max-h-32 overflow-auto whitespace-pre-wrap rounded bg-red-950/10 p-2 text-[11px] text-red-700 dark:text-red-200">{observe.stderr}</pre>}
+              <h3 className="text-base font-semibold text-blue-950 dark:text-blue-100">{t('previewFlowTitle')}</h3>
+              <p className="mt-1 text-sm text-blue-800/80 dark:text-blue-200/80">{t('previewFlowDescription')}</p>
             </div>
 
             <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 dark:border-surface-800 dark:bg-surface-900/60">
@@ -381,14 +281,12 @@ export function AutomationWorkbenchModal({ automation: a, onClose, onOpenLegacyE
                   <span className={`rounded-full border px-2 py-1 text-[11px] font-semibold ${validation.ok ? 'border-emerald-600/30 bg-emerald-50 text-emerald-800 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-200' : 'border-red-600/30 bg-red-50 text-red-800 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-200'}`}>{validation.ok ? t('saveAvailable') : t('needsChanges')}</span>
                   <span className="text-[11px] text-slate-500 dark:text-surface-500">{serverValidation ? t('validationDone') : serverValidationError ? t('localValidation') : t('validating')}</span>
                   <button disabled={!validation.ok || applyState.status === 'running'} onClick={createChangeIntent} className="rounded-lg border border-blue-600/30 bg-blue-50 px-3 py-1.5 text-xs font-semibold text-blue-800 hover:bg-blue-100 disabled:opacity-50 dark:border-blue-500/30 dark:bg-blue-500/10 dark:text-blue-200">{t('createReviewDraft')}</button>
-                  <button disabled={!validation.ok || saveState.status === 'saving'} onClick={saveYaml} className="rounded-lg border border-emerald-600/30 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-800 hover:bg-emerald-100 disabled:opacity-50 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-200">{t('saveSource')}</button>
                   <button onClick={onOpenLegacyEdit} className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100 dark:border-surface-700 dark:text-surface-300 dark:hover:bg-surface-850">{t('basicSettings')}</button>
                 </div>
               </div>
               {applyState.message && <div className={`mb-3 rounded-lg border px-3 py-2 text-xs ${applyState.status === 'error' ? 'border-red-300 bg-red-50 text-red-800 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-200' : 'border-blue-300 bg-blue-50 text-blue-900 dark:border-blue-500/30 dark:bg-blue-500/10 dark:text-blue-100'}`}>{applyState.message}</div>}
               {changeIntent && changeIntent.status === 'proposed' && <div className={`mb-3 rounded-xl border p-3 text-xs ${changeIntent.riskLevel === 'high' ? 'border-red-300 bg-red-50 text-red-900 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-100' : 'border-amber-300 bg-amber-50 text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100'}`}><div className="font-semibold">{t('pendingApply', { risk: changeIntent.riskLevel })}</div><div className="mt-1 break-all opacity-80">{t('reviewHash')}: {changeIntent.proposalHash}</div><div className="mt-1">{t('expires')}: {new Date(changeIntent.expiresAt).toLocaleString()}</div>{changeIntent.warnings.length > 0 && <ul className="mt-2 list-disc pl-4">{changeIntent.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul>}<button disabled={applyState.status === 'running'} onClick={applyChangeIntent} className={`mt-3 rounded-lg px-3 py-2 font-semibold text-white disabled:opacity-50 ${changeIntent.riskLevel === 'high' ? 'bg-red-600 hover:bg-red-500' : 'bg-blue-700 hover:bg-blue-600'}`}>{t('applyReviewedChange')}</button></div>}
               {intentDiagnostics.filter((intent) => intent.status === 'applying').map((intent) => <div key={intent.id} className="mb-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100"><div>{t('interruptedChange')}</div><div className="mt-1 opacity-75">{t('applyStarted')}: {intent.applyingAt ? new Date(intent.applyingAt).toLocaleString() : t('recordedNone')}</div><button disabled={applyState.status === 'running' || !intent.applyingAt || Date.now() - new Date(intent.applyingAt).getTime() < 120000} onClick={() => reconcileChangeIntent(intent)} className="mt-2 rounded-md border border-amber-600/40 px-2 py-1 font-semibold disabled:opacity-50">{t('reconcile')}</button></div>)}
-              {saveState.message && <div className="mb-3 flex items-center justify-between gap-3 rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-2 text-xs text-emerald-800 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-200"><span className="min-w-0 truncate">{saveState.message}</span>{saveState.path && <button onClick={() => openTowerFile(saveState.path!)} className="shrink-0 rounded-md border border-emerald-600/30 px-2 py-1 font-semibold">{t('openFile')}</button>}</div>}
               {(serverValidationError || validation.issues.length > 0) && <div className="mb-3 space-y-1 rounded-lg border border-surface-300 bg-white p-2 text-xs dark:border-surface-800 dark:bg-surface-950/60">{serverValidationError && <div className="text-amber-700 dark:text-amber-300"><b>{t('server')}</b>: {serverValidationError}. {t('serverValidationFallback')}</div>}{validation.issues.slice(0, 4).map((issue, index) => <div key={`${issue.path}-${index}`} className={issue.severity === 'error' ? 'text-red-700 dark:text-red-300' : 'text-amber-700 dark:text-amber-300'}><b>{issue.path}</b>: {issue.message}</div>)}</div>}
               {showSource && <textarea value={yaml} onChange={(e) => setYaml(e.target.value)} className="h-[360px] w-full resize-y rounded-lg border border-slate-200 bg-white p-3 font-mono text-xs leading-relaxed text-slate-800 outline-none focus:border-blue-500 dark:border-surface-800 dark:bg-surface-950 dark:text-surface-300" />}
             </div>

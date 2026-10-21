@@ -9,10 +9,6 @@
       "openrouter": {
         "name": "OpenRouter",
         "description": "Use OpenRouter Auto as the starting model and change it later if needed."
-      },
-      "openai-responses-compatible": {
-        "name": "OpenAI-compatible Responses",
-        "description": "Use OpenAI or another endpoint that supports the Responses API."
       }
     },
     "apiKey": "API key",

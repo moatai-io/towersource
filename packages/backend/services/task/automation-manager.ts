@@ -10,11 +10,11 @@
  */
 
 import { query, queryOne, execute, transaction, withClient } from '../../db/pg-repo.js';
+import { calculateZonedNextRun, applyScheduleActiveHours, validateScheduleTimezone } from './schedule-clock.js';
 import type { PoolClient } from 'pg';
 import { getAccessibleProjectIds } from '../pm/project-membership-manager.js';
 import { v4 as uuidv4 } from 'uuid';
 import path from 'path';
-import { getModelDefaults } from '../../config.js';
 import { classifyJobRisk, type JobRiskLevel } from './job-risk.js';
 import { getProject } from '../pm/project-manager.js';
 
@@ -165,8 +165,8 @@ function mapRow(row: any): Automation {
     name: row.name,
     description: row.description || '',
     prompt: row.prompt || '',
-    model: row.model || getModelDefaults().session,
-    workflow: row.workflow || 'auto',
+    model: row.model || 'preset/core',
+    workflow: row.workflow || 'default',
 
     jobType: row.job_type || 'ai_prompt',
     scopeType: row.scope_type || (row.project_id ? 'project' : 'system'),
@@ -239,69 +239,11 @@ function mapRunRow(row: any): AutomationRun {
 
 // ── Next run calculation ──
 
-export function calculateNextRun(cron: CronConfig, from: Date = new Date()): Date {
-  const next = new Date(from);
-
-  switch (cron.type) {
-    case 'daily': {
-      next.setHours(cron.hour ?? 9, cron.minute ?? 0, 0, 0);
-      if (next <= from) next.setDate(next.getDate() + 1);
-      return next;
-    }
-    case 'weekdays': {
-      next.setHours(cron.hour ?? 9, cron.minute ?? 0, 0, 0);
-      if (next <= from) next.setDate(next.getDate() + 1);
-      while (next.getDay() === 0 || next.getDay() === 6) {
-        next.setDate(next.getDate() + 1);
-      }
-      return next;
-    }
-    case 'weekly': {
-      const targetDay = cron.day ?? 1;
-      next.setHours(cron.hour ?? 9, cron.minute ?? 0, 0, 0);
-      let daysUntil = targetDay - next.getDay();
-      if (daysUntil < 0) daysUntil += 7;
-      if (daysUntil === 0 && next <= from) daysUntil = 7;
-      next.setDate(next.getDate() + daysUntil);
-      return next;
-    }
-    case 'interval': {
-      const minutes = cron.minutes ?? (cron.hours ?? 1) * 60;
-      const intervalMs = minutes * 60 * 1000;
-      return new Date(from.getTime() + intervalMs);
-    }
-    default:
-      return new Date(from.getTime() + 3600_000);
-  }
-}
+/** All registry scheduling uses the persisted timezone, never the host clock. */
+export const calculateNextRun = calculateZonedNextRun;
 
 function applyActiveHoursWindow(nextRun: Date, automation: Automation): Date {
-  const def = automation.definitionJson || {};
-  const activeHours = (def as any).activeHours;
-  if (!activeHours || typeof activeHours !== 'object') return nextRun;
-
-  const startHour = Number(activeHours.startHour);
-  const endHour = Number(activeHours.endHour);
-  if (!Number.isFinite(startHour) || !Number.isFinite(endHour)) return nextRun;
-  if (startHour < 0 || startHour > 23 || endHour < 1 || endHour > 24 || startHour >= endHour) return nextRun;
-
-  // Tower servers for this deployment run in Asia/Seoul local time. Keep this
-  // deliberately simple for interval jobs: active window is [startHour, endHour).
-  const adjusted = new Date(nextRun);
-  const hour = adjusted.getHours();
-
-  if (hour < startHour) {
-    adjusted.setHours(startHour, 0, 0, 0);
-    return adjusted;
-  }
-
-  if (hour >= endHour) {
-    adjusted.setDate(adjusted.getDate() + 1);
-    adjusted.setHours(startHour, 0, 0, 0);
-    return adjusted;
-  }
-
-  return adjusted;
+  return applyScheduleActiveHours(nextRun, automation.definitionJson?.activeHours, automation.timezone || 'Asia/Seoul');
 }
 
 function describeTrigger(triggerType: AutomationTrigger, cronConfig?: CronConfig, onceAt?: string): string {
@@ -398,6 +340,7 @@ export async function createAutomation(data: {
   cwd?: string;
   triggerType?: AutomationTrigger;
   cronConfig?: CronConfig;
+  enabled?: boolean;
   onceAt?: string;
   parentId?: string;
   roomId?: string;
@@ -405,6 +348,7 @@ export async function createAutomation(data: {
   roomMessageId?: string;
 }): Promise<Automation> {
   assertNoNewInternalChannelDependency(data);
+  validateScheduleTimezone(data.timezone || 'Asia/Seoul');
   const id = uuidv4();
   const triggerType = data.triggerType || 'manual';
 
@@ -413,7 +357,7 @@ export async function createAutomation(data: {
   if (triggerType === 'once' && data.onceAt) {
     nextRunAt = new Date(data.onceAt).toISOString();
   } else if (triggerType === 'cron' && data.cronConfig) {
-    nextRunAt = calculateNextRun(data.cronConfig).toISOString();
+    nextRunAt = calculateNextRun(data.cronConfig, new Date(), data.timezone || 'Asia/Seoul').toISOString();
   }
 
   // Determine sort_order
@@ -429,7 +373,13 @@ export async function createAutomation(data: {
   let resolvedCwd = data.cwd || null;
   if (resolvedProjectId) {
     const project = await getProject(resolvedProjectId);
-    const projectRoot = project?.rootPath ? project.rootPath : null;
+    if (!project) {
+      throw new Error('The selected Agent no longer exists. Choose an active Agent.');
+    }
+    if (project.archived || project.lifecycleStatus !== 'active') {
+      throw new Error('The selected Agent is retired. Choose an active Agent.');
+    }
+    const projectRoot = project.rootPath || null;
     if (projectRoot) {
       if (!resolvedCwd) {
         resolvedCwd = projectRoot;
@@ -447,8 +397,8 @@ export async function createAutomation(data: {
 
   const jobType = data.jobType || 'ai_prompt';
   const scopeType = data.scopeType || (resolvedProjectId ? 'project' : 'system');
-  const model = data.model || getModelDefaults().session;
-  const workflow = data.workflow || 'auto';
+  const model = data.model || 'preset/core';
+  const workflow = data.workflow || 'default';
   const mode = data.mode || 'spawn';
   const definitionJson = data.definitionJson || {
     prompt: data.prompt || '',
@@ -471,7 +421,7 @@ export async function createAutomation(data: {
   const riskLevel = data.riskLevel || classifyJobRisk(jobType, definitionJson);
 
   const previewAutomation = {
-    definitionJson,
+    definitionJson, timezone: data.timezone || 'Asia/Seoul',
   } as Automation;
   if (nextRunAt) {
     nextRunAt = applyActiveHoursWindow(new Date(nextRunAt), previewAutomation).toISOString();
@@ -493,9 +443,9 @@ export async function createAutomation(data: {
       $9, $10, $11, $12, $13, $14, $15,
       $16, $17, $18,
       $19, $20, $21,
-      'idle', true, $22,
-      $23,
-      $24, $25, $26, $27
+      'idle', $22, $23,
+      $24,
+      $25, $26, $27, $28
     )
   `, [
     id, data.userId, resolvedProjectId,
@@ -503,7 +453,7 @@ export async function createAutomation(data: {
     jobType, scopeType, JSON.stringify(definitionJson), riskLevel, data.timeoutSeconds ?? null, data.timezone || 'Asia/Seoul', data.createdBySessionId || null,
     mode, data.targetId || null, resolvedCwd || null,
     triggerType, data.cronConfig ? JSON.stringify(data.cronConfig) : null, data.onceAt || null,
-    sortOrder,
+    data.enabled ?? true, sortOrder,
     nextRunAt,
     data.parentId || null, data.roomId || null, data.triggeredBy || null, data.roomMessageId || null,
   ]);
@@ -643,8 +593,20 @@ async function updateAutomationWithDb(db: AutomationDb, id: string, updates: Par
   runCount: number;
   lastStatus: string | null;
   lastError: string | null;
-}>): Promise<Automation | null> {
+}>, allowCreationPlanActivation = false): Promise<Automation | null> {
   assertNoNewInternalChannelDependency(updates);
+  const planExisting = !allowCreationPlanActivation ? await getAutomationWithDb(db, id) : null;
+  const creationPlan = planExisting?.definitionJson?.creationPlan as { status?: string } | undefined;
+  if (creationPlan?.status === 'draft' && updates.enabled === true && !allowCreationPlanActivation) {
+    throw new Error('Creation plan requires reviewed hash activation');
+  }
+  if (creationPlan?.status === 'draft' && !allowCreationPlanActivation
+      && Object.keys(updates).some(key => !['enabled', 'status', 'updatedByUserId', 'sessionId'].includes(key))) {
+    throw new Error('Creation draft configuration is immutable; review a new plan');
+  }
+  if (creationPlan && updates.definitionJson !== undefined && !allowCreationPlanActivation) {
+    updates = { ...updates, definitionJson: { ...updates.definitionJson, creationPlan } };
+  }
   const fields: string[] = [];
   const values: any[] = [];
   let paramIndex = 1;
@@ -671,7 +633,7 @@ async function updateAutomationWithDb(db: AutomationDb, id: string, updates: Par
   if (updates.definitionJson !== undefined) addField('definition_json', JSON.stringify(updates.definitionJson));
   if (updates.riskLevel !== undefined) addField('risk_level', updates.riskLevel);
   if (updates.timeoutSeconds !== undefined) addField('timeout_seconds', updates.timeoutSeconds);
-  if (updates.timezone !== undefined) addField('timezone', updates.timezone);
+  if (updates.timezone !== undefined) { validateScheduleTimezone(updates.timezone); addField('timezone', updates.timezone); }
   if (updates.createdBySessionId !== undefined) addField('created_by_session_id', updates.createdBySessionId);
   if (updates.updatedByUserId !== undefined) {
     addField('updated_by_user_id', updates.updatedByUserId);
@@ -705,7 +667,7 @@ async function updateAutomationWithDb(db: AutomationDb, id: string, updates: Par
   if (fields.length === 0) return getAutomationWithDb(db, id);
 
   // Recalculate next_run_at if schedule parameters changed
-  if (updates.triggerType !== undefined || updates.cronConfig !== undefined || updates.onceAt !== undefined || updates.enabled !== undefined) {
+  if (updates.triggerType !== undefined || updates.cronConfig !== undefined || updates.onceAt !== undefined || updates.enabled !== undefined || updates.timezone !== undefined || updates.definitionJson !== undefined) {
     const existing = await getAutomationWithDb(db, id);
     if (existing) {
       const triggerType = updates.triggerType ?? existing.triggerType;
@@ -718,7 +680,7 @@ async function updateAutomationWithDb(db: AutomationDb, id: string, updates: Par
         if (triggerType === 'once' && onceAt) {
           nextRunAt = new Date(onceAt).toISOString();
         } else if (triggerType === 'cron' && cronConfig) {
-          nextRunAt = calculateNextRun(cronConfig).toISOString();
+          nextRunAt = applyActiveHoursWindow(calculateNextRun(cronConfig, new Date(), updates.timezone ?? existing.timezone), { ...existing, ...updates } as Automation).toISOString();
         }
       }
       addField('next_run_at', nextRunAt);
@@ -739,6 +701,11 @@ export async function updateAutomation(id: string, updates: Parameters<typeof up
 
 export async function updateAutomationInTransaction(client: PoolClient, id: string, updates: Parameters<typeof updateAutomationWithDb>[2]): Promise<Automation | null> {
   return updateAutomationWithDb(withClient(client), id, updates);
+}
+
+/** Internal creation-plan path only: caller holds the row lock and verifies its hash. */
+export async function activateCreationPlanInTransaction(client: PoolClient, id: string, updates: Parameters<typeof updateAutomationWithDb>[2]): Promise<Automation | null> {
+  return updateAutomationWithDb(withClient(client), id, updates, true);
 }
 
 export async function deleteAutomation(id: string): Promise<boolean> {
@@ -858,7 +825,7 @@ export async function advanceSchedule(automation: Automation, status: string, er
       WHERE id = $3
     `, [status, error, automation.id]);
   } else if (automation.triggerType === 'cron' && automation.cronConfig) {
-    const nextRun = applyActiveHoursWindow(calculateNextRun(automation.cronConfig), automation);
+    const nextRun = applyActiveHoursWindow(calculateNextRun(automation.cronConfig, new Date(), automation.timezone), automation);
     await execute(`
       UPDATE automations
       SET next_run_at = CASE WHEN enabled = false THEN NULL ELSE $1::timestamptz END,
@@ -1043,7 +1010,7 @@ export async function createFromTemplate(
     name: overrides?.name || template.nameKo,
     description: template.descriptionKo,
     prompt: overrides?.prompt || template.promptTemplate,
-    model: overrides?.model || getModelDefaults().session,
+    model: overrides?.model || 'preset/core',
     workflow: templateId,
     mode: overrides?.mode || template.defaultMode,
     targetId: overrides?.targetId,

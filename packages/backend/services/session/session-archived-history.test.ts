@@ -45,6 +45,7 @@ function sessionRow(overrides: Record<string, any> = {}) {
     claude_session_id: null,
     pi_session_file: null,
     name: 'My archived session',
+    archived: 1,
     cwd: '/home/tower/workspace/projects/tower',
     tags: '[]',
     total_cost: 0,
@@ -96,10 +97,14 @@ describe('getArchivedSessions', () => {
       expect.stringContaining('AND s.user_id = $1'),
       [10],
     );
+    // History ordering follows the archive moment, falling back to legacy
+    // updated_at for rows archived before archived_at existed.
+    expect(queryMock.mock.calls[0][0]).toContain('ORDER BY COALESCE(s.archived_at, s.updated_at) DESC');
     expect(getAccessibleProjectIdsMock).toHaveBeenCalledWith(10, 'admin');
     expect(sessions).toHaveLength(1);
     expect(sessions[0].id).toBe('session-own');
     expect(sessions[0].favorite).toBe(true);
+    expect(sessions[0].archived).toBe(true);
   });
 
   it('preserves the no-auth/dev archived history fallback without user scoping', async () => {

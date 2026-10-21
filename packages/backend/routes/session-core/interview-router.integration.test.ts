@@ -1,0 +1,12 @@
+import {it,expect,vi} from 'vitest';import express from 'express';
+import {authMiddleware,generateToken} from '../../services/auth/auth.js';
+import {config} from '../../config.js';
+vi.mock('../../db/pg-repo.js',()=>({queryOne:async(sql:string)=>sql.includes('FROM users')?{disabled:false,approval_status:'active',role:'member',auth_epoch:0,password_changed_at:null}:null,execute:vi.fn(),query:async()=>[]}));
+vi.mock('../../services/session/session-manager.js',()=>({getSession:async()=>({id:'s',projectId:'p'}),createSession:vi.fn(),getPanelSessions:vi.fn(),getSessionByKey:vi.fn(),getSessionPanelSessions:vi.fn(),getSessions:vi.fn(),updateSession:vi.fn()}));
+vi.mock('../../services/pm/project-manager.js',()=>({getProject:async()=>({id:'p',rootPath:'/fixture'})}));
+vi.mock('../../services/pm/project-access.js',()=>({canSendSessionMessage:async(_:string,u:number)=>({allowed:u===1,status:403,message:'denied'}),canAccessSession:async()=>({allowed:true}),canAccessRoom:vi.fn(),canCreateInProject:vi.fn(),canInspectSessionMetadata:vi.fn()}));
+vi.mock('../../services/agents/durable-interview.js',()=>({readDurableInterview:async()=>({status:'awaiting',question_id:'q',question:'질문'}),answerDurableInterview:async(p:string,s:string,q:string)=>{if(q!=='q')throw new Error();return {status:'answered'};}}));
+vi.mock('../ws-handler.js',()=>({broadcastToAll:vi.fn(),broadcastToUser:vi.fn()}));
+vi.mock('./administrator-participation-router.js',async()=>({default:express.Router()}));vi.mock('./session-trash-router.js',async()=>({default:express.Router()}));
+import router from './session-core-router.js';
+it('actual router rejects unauthorized writes and wrong question, accepts authorized explicit reply',async()=>{const app=express();app.use(express.json());config.authEnabled=true;app.use(authMiddleware);app.use(router);const server=app.listen(0,'127.0.0.1');await new Promise<void>(r=>server.once('listening',r));const base=`http://127.0.0.1:${(server.address() as any).port}`;try{const post=(u:number,q:string)=>fetch(base+'/sessions/s/initial-interview',{method:'POST',headers:{'Content-Type':'application/json',...(u?{Authorization:'Bearer '+generateToken({userId:u,username:'fixture',role:'member'})}:{})},body:JSON.stringify({questionId:q,answer:'답변'})});expect((await post(2,'q')).status).toBe(403);expect((await post(1,'other')).status).toBe(409);expect((await post(1,'q')).status).toBe(200);expect((await post(0,'q')).status).toBe(401);}finally{server.close();}});

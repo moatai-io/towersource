@@ -27,6 +27,40 @@ afterEach(() => {
 });
 
 describe('skill-registry company sharing', () => {
+  it('exposes explicitly linked developer skills without leaking global fleet skills', async () => {
+    const workspace = makeTempDir();
+    const projectRoot = path.join(workspace, 'projects', 'developer');
+    const native = path.join(projectRoot, 'skills');
+    const system = path.join(workspace, 'system');
+    const names = ['commit-session', 'checkpoint', 'wip', 'ready', 'skill-registry'];
+    fs.mkdirSync(path.join(projectRoot, '.tower', 'skills'), { recursive: true });
+    fs.writeFileSync(path.join(projectRoot, '.tower', 'skills', 'manifest.json'), JSON.stringify({ skills: [] }));
+    for (const name of [...names, 'fleet']) {
+      const source = path.join(system, name);
+      fs.mkdirSync(source, { recursive: true });
+      fs.writeFileSync(path.join(source, 'SKILL.md'), `---\nname: ${name}\ndescription: Developer helper\n---\n# ${name}\n`);
+      if (name === 'fleet') continue;
+      const target = path.join(native, name);
+      fs.mkdirSync(target, { recursive: true });
+      fs.symlinkSync(path.join(source, 'SKILL.md'), path.join(target, 'SKILL.md'));
+    }
+    vi.resetModules();
+    vi.doMock('../../config.js', () => ({ config: { dataDir: path.join(workspace, 'data'), towerRole: 'full' } }));
+    vi.doMock('../../db/pg-repo.js', () => ({ query: vi.fn(async () => []), queryOne: vi.fn(async () => null), execute: vi.fn(async () => undefined) }));
+    vi.doMock('./library-skills.js', () => ({ loadLibrarySkills: () => [], getLibrarySkill: () => null, getLibrarySkillDirs: () => [system], getLibrarySkillsDir: () => system }));
+    const registry = await import('./skill-registry.ts');
+    const visible = await registry.getSkillsForSession(1, null, 'admin', projectRoot);
+    for (const name of names) {
+      expect(visible.map(s => s.name)).toContain(name);
+      await expect(registry.getSkillByName(name, 1, null, 'admin', projectRoot)).resolves.toMatchObject({ scope: 'project', content: expect.stringContaining('# ' + name) });
+    }
+    const commands = await registry.getCommandsForUser(1, null, 'admin', projectRoot);
+    for (const name of names) expect(commands.map(c => c.name)).toContain('/' + name);
+    expect(visible.map(s => s.name)).not.toContain('fleet');
+    expect(registry.getProjectSkillPaths(projectRoot)).toEqual([native]);
+    await expect(registry.getSkillByName('fleet', 1, null, 'admin', projectRoot)).resolves.toBeNull();
+  });
+
   it('creates the filesystem-only teamskills store when no teamskills project has been seeded', async () => {
     const workspace = makeTempDir();
     const projectRoot = path.join(workspace, 'projects', 'authoring');
@@ -261,6 +295,73 @@ description: Fresh local skill
         scope: 'project',
         dispatch: { type: 'skill', target: 'fresh-local' },
       });
+  });
+
+  it('exposes root commands and rejects a project skill with the same slash name', async () => {
+    const dataDir = makeTempDir();
+    const libraryDir = path.join(dataDir, 'library-skills');
+    const projectRoot = makeTempDir();
+    const commandsDir = path.join(projectRoot, 'commands');
+    const skillDir = path.join(projectRoot, 'skills', 'review');
+    fs.mkdirSync(commandsDir, { recursive: true });
+    fs.mkdirSync(skillDir, { recursive: true });
+    fs.writeFileSync(path.join(commandsDir, 'review.command.yaml'), `id: review\ncanonical: /review\ndisplayName: 빠른 리뷰\ndescription: 정해진 리뷰 workflow를 실행합니다.\ndispatch:\n  target: review.run\n`, 'utf-8');
+    fs.writeFileSync(path.join(skillDir, 'SKILL.md'), `---\ndescription: AI가 검토하는 동명 스킬\n---\n# Review\n`, 'utf-8');
+
+    vi.resetModules();
+    vi.doMock('../../config.js', () => ({ config: { dataDir, towerRole: 'full' } }));
+    vi.doMock('./library-skills.js', () => ({
+      loadLibrarySkills: () => [],
+      getLibrarySkill: () => null,
+      getLibrarySkillDirs: () => [libraryDir],
+      getLibrarySkillsDir: () => libraryDir,
+    }));
+    vi.doMock('../../db/pg-repo.js', () => ({
+      query: vi.fn(() => Promise.resolve([])),
+      queryOne: vi.fn(() => Promise.resolve(null)),
+      execute: vi.fn(() => Promise.resolve(undefined)),
+    }));
+    const registry = await import('./skill-registry.ts');
+
+    const commands = await registry.getCommandsForUser(1, 'project-1', 'member', projectRoot);
+    expect(commands.filter((command: any) => command.canonical === '/review')).toHaveLength(1);
+    expect(commands.find((command: any) => command.canonical === '/review')).toMatchObject({
+      kind: 'workflow',
+      source: 'workflow',
+      scope: 'project',
+      dispatch: { type: 'workflow', target: 'review.run' },
+    });
+  });
+
+  it('keeps native slash commands ahead of colliding project definitions', async () => {
+    const dataDir = makeTempDir();
+    const libraryDir = path.join(dataDir, 'library-skills');
+    const projectRoot = makeTempDir();
+    const commandsDir = path.join(projectRoot, 'commands');
+    fs.mkdirSync(commandsDir, { recursive: true });
+    fs.writeFileSync(path.join(commandsDir, 'skills.command.yaml'), `id: local-skills\ncanonical: /skills\ndescription: Native command collision\ndispatch:\n  target: local.skills\n`, 'utf-8');
+
+    vi.resetModules();
+    vi.doMock('../../config.js', () => ({ config: { dataDir, towerRole: 'full' } }));
+    vi.doMock('./library-skills.js', () => ({
+      loadLibrarySkills: () => [],
+      getLibrarySkill: () => null,
+      getLibrarySkillDirs: () => [libraryDir],
+      getLibrarySkillsDir: () => libraryDir,
+    }));
+    vi.doMock('../../db/pg-repo.js', () => ({
+      query: vi.fn(() => Promise.resolve([])),
+      queryOne: vi.fn(() => Promise.resolve(null)),
+      execute: vi.fn(() => Promise.resolve(undefined)),
+    }));
+    const registry = await import('./skill-registry.ts');
+
+    const commands = await registry.getCommandsForUser(1, 'project-1', 'member', projectRoot);
+    expect(commands.filter((command: any) => command.canonical === '/skills')).toHaveLength(1);
+    expect(commands.find((command: any) => command.canonical === '/skills')).toMatchObject({
+      id: 'native:skills',
+      kind: 'native',
+    });
   });
 
   it('uses project skills plus manifest-listed managed skills and blocks legacy/global fallback', async () => {

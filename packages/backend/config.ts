@@ -1,9 +1,11 @@
+import crypto from 'node:crypto';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { execSync } from 'child_process';
 import os from 'os';
 import fs from 'fs';
 import { readTeamskillsSkillset } from './services/skill/teamskills-source.js';
+import { applyDevelopmentGoogleConfig } from './services/auth/development-google-config.js';
 
 // Resolve project root from source file location (not process.cwd())
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -31,6 +33,9 @@ try {
     }
   }
 } catch {}
+
+// Explicit development identity only; production never reads development routing.
+applyDevelopmentGoogleConfig(PROJECT_ROOT, process.env);
 
 function findClaudeExecutable(): string {
   if (process.env.CLAUDE_PATH) return process.env.CLAUDE_PATH;
@@ -124,13 +129,28 @@ export function parseExperimentalWorkbenchToolProjectIds(value: string | undefin
   }
 }
 
+export type ReasoningEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+
 export interface ModelInfo {
   id: string;
   name: string;
   /** Empty string intentionally hides the UI badge. */
   badge: string;
+  /** Preset selection is distinct from a direct provider model. */
+  kind?: 'policy' | 'direct';
+  /** Stable Tower alias label. */
+  policyAlias?: 'core' | 'lite';
+  /** Runtime model selected by a Tower alias. */
+  runtimeModelId?: string;
+  /** Optional provider/catalog owner shown as secondary model metadata. */
+  provider?: string;
+  /** LiteLLM-reported USD per million tokens; absent when unverified. */
+  inputPricePerMillion?: number;
+  outputPricePerMillion?: number;
   /** Optional input context window used by frontend context stat line. */
   contextWindow?: number;
+  /** Product-supported reasoning values for this exact runtime model. */
+  reasoningEfforts?: ReasoningEffort[];
 }
 
 /**
@@ -181,6 +201,20 @@ interface PiModelEntry {
   /** Optional badge; set to "" to intentionally hide provider chips in UI. */
   badge?: string;
   enabled: boolean;
+  /** Hide from selection without unregistering existing-session support. */
+  hidden?: boolean;
+  /** Explicit user-picker allow flag. Direct catalog models require true. */
+  selectable?: boolean;
+  /** Router policy aliases remain distinct from direct models. */
+  modelKind?: 'policy' | 'direct';
+  discoveredAt?: string;
+  lastSeenAt?: string;
+  /** Historical compatibility field. Team-scoped /models is now the visibility authority. */
+  teamVerifiedAt?: string;
+  catalogOwnedBy?: string;
+  /** Prices reported by the Team-scoped LiteLLM /models snapshot (USD/token). */
+  catalogInputCostPerToken?: number;
+  catalogOutputCostPerToken?: number;
   /** Optional Tower roles where this model is visible/registered. Omit = all roles. */
   roles?: Array<'full' | 'managed' | 'standalone'>;
   /** Optional: Pi SDK API channel (defaults to provider). */
@@ -188,17 +222,15 @@ interface PiModelEntry {
   /** Optional: enable reasoning param wiring in Pi SDK (e.g. for thinking models). */
   reasoning?: boolean;
   /** Default Pi thinking level when a run does not provide an explicit effort override. */
-  defaultReasoning?: 'low' | 'medium' | 'high' | 'xhigh';
+  defaultReasoning?: ReasoningEffort;
+  /** Explicit model capability used by UI, API validation, and Pi runtime mapping. */
+  reasoningEfforts?: ReasoningEffort[];
   /** Optional per-million-token rates used by Pi/Tower usage metadata. */
   cost?: { input: number; output: number; cacheRead: number; cacheWrite: number };
   /** Optional: max input context tokens (defaults to 400_000). */
   contextWindow?: number;
   /** Optional: max output tokens (defaults to 128_000). */
   maxTokens?: number;
-  /** Optional: Azure region alias for per-model region routing (e.g. "eastus2").
-   *  When set, the model's baseUrl/apiKey come from AZURE_OPENAI_<ALIAS>_*
-   *  envs instead of the provider default. See pi-engine.ts resolveAzureRegion. */
-  region?: string;
 }
 
 interface ModelsFile {
@@ -208,6 +240,9 @@ interface ModelsFile {
   defaults?: ModelDefaults;
   modelPolicies?: ModelPolicyConfig;
   inferenceProviders?: Record<string, { baseUrl: string; secretName: string; configuredAt: string }>;
+  litellmCatalog?: { syncedAt?: string; syncError?: string };
+  /** One-time onboarding provenance; later operator Core/Lite choices stay mutable. */
+  customerAiBootstrap?: { version: 1; initializedAt: string; coreModel: string; liteModel: string; visibleModelIds: string[] };
 }
 
 /** Exported so pi-engine.ts can register custom models from the same source. */
@@ -225,7 +260,13 @@ export function saveModelsFile(data: ModelsFile): void {
   // Admin writes always create/update the VM-local registry. Packaged defaults
   // remain immutable so upgrades cannot overwrite a self-hosted VM's choices.
   fs.mkdirSync(path.dirname(VM_MODELS_JSON_PATH), { recursive: true });
-  fs.writeFileSync(VM_MODELS_JSON_PATH, JSON.stringify(data, null, 2) + '\n', { encoding: 'utf8', mode: 0o600 });
+  const temporary = `${VM_MODELS_JSON_PATH}.${process.pid}.${crypto.randomUUID()}.tmp`;
+  try {
+    fs.writeFileSync(temporary, JSON.stringify(data, null, 2) + '\n', { encoding: 'utf8', mode: 0o600, flag: 'wx' });
+    fs.renameSync(temporary, VM_MODELS_JSON_PATH);
+  } finally {
+    if (fs.existsSync(temporary)) fs.unlinkSync(temporary);
+  }
 }
 
 export function isAgentFirstEnabledForVm(role: string | undefined, flag: string | undefined): boolean {
@@ -244,44 +285,112 @@ export function isAIServiceEnabledForVm(role: string | undefined, agentFirstEnab
   return role === 'standalone' && flag === 'true';
 }
 
-export type WorkspaceAppsMode = 'local-metadata' | 'frappe-connector-pilot';
-
-/** Internal-only Workspace Apps / DIY ERP Connector beta. Full operator VM defaults on; self-hosted servers stay off unless explicitly enabled. */
-export function isWorkspaceAppsEnabledForVm(role: string | undefined, flag: string | undefined): boolean {
-  if (role === 'full') return flag !== 'false';
-  return flag === 'true';
-}
-
-/** Select which internal 업무 tab implementation to dogfood without deleting the other path. */
-export function resolveWorkspaceAppsMode(value: string | undefined): WorkspaceAppsMode {
-  return value === 'frappe-connector-pilot' ? 'frappe-connector-pilot' : 'local-metadata';
-}
-
 export function isPiModelEntryEnabledForThisVm(m: PiModelEntry): boolean {
-  if (m.enabled === false) return false;
+  // Retired direct providers must not be exposed by a stale VM-local models.json.
+  if (m.enabled === false || !['litellm-responses', 'openrouter'].includes(m.provider)) return false;
+  // A stale VM-local registry must not re-register the retired GPT-5.5 router alias.
+  if (m.provider === 'litellm-responses' && m.modelId === 'gpt55') return false;
   if (!m.roles || m.roles.length === 0) return true;
   const towerRole = (process.env.TOWER_ROLE || 'standalone') as 'full' | 'managed' | 'standalone';
   return m.roles.includes(towerRole);
 }
 
+const CUSTOMER_SELECTABLE_PI_MODELS = new Set<string>();
+// These router IDs were retired from the Team allow-list. Keep registry entries
+// for historical sessions, but never offer them as new choices.
+const RETIRED_ROUTER_MODEL_IDS = new Set(['astra-canary', 'smartest', 'smartest-long', 'sol-fast', 'gpt55']);
+
+function isFullTowerVm(): boolean {
+  return process.env.TOWER_ROLE === 'full';
+}
+
+export function isPiModelEntrySelectableForThisVm(m: PiModelEntry, catalogSyncedAt?: string): boolean {
+  if (!isPiModelEntryEnabledForThisVm(m)) return false;
+  if (m.provider === 'litellm-responses') {
+    // Core/Lite are Tower labels for the two router aliases used as defaults.
+    if (m.modelId === 'mini') return true;
+    if (m.modelId === 'smart' || RETIRED_ROUTER_MODEL_IDS.has(m.modelId)) return false;
+    // The latest Team-scoped /models snapshot is the visibility authority.
+    // Local fields provide metadata only and cannot independently expose a model.
+    return !!catalogSyncedAt && m.lastSeenAt === catalogSyncedAt;
+  }
+  // Explicit Tower direct routes remain local allow-list entries.
+  if (m.provider !== 'openrouter' || m.hidden === true) return false;
+  if (m.selectable === false) return false;
+  if (isFullTowerVm()) return true;
+  return CUSTOMER_SELECTABLE_PI_MODELS.has(`${m.provider}/${m.modelId}`);
+}
+
+/** Validate a user-originated Pi model choice against the current VM allow-list. */
+export function isSelectablePiModelId(model: string | null | undefined): boolean {
+  const normalized = model?.replace(/^pi:/, '');
+  if (!normalized) return false;
+  if (['preset/core', 'preset/lite', 'policy/core', 'policy/lite'].includes(normalized)) {
+    const preset = normalized.split('/')[1];
+    return loadPiModels().some(entry => entry.id === `pi:preset/${preset}`);
+  }
+  const file = loadModelsFile();
+  return file.pi.some(entry =>
+    `${entry.provider}/${entry.modelId}` === normalized && isPiModelEntrySelectableForThisVm(entry, file.litellmCatalog?.syncedAt)
+  );
+}
+
 function loadClaudeModels(): ModelInfo[] {
+  if (!isFullTowerVm()) return [];
   return loadModelsFile().claude
     .filter(m => m.enabled)
     .map(m => ({ id: m.id, name: m.name, badge: m.badge ?? '', contextWindow: m.contextWindow ?? 200_000 }));
 }
 
 function loadPiModels(): ModelInfo[] {
-  return loadModelsFile().pi
-    .filter(isPiModelEntryEnabledForThisVm)
-    .map(m => ({
-      id: `pi:${m.provider}/${m.modelId}`,
-      name: m.name,
-      badge: Object.prototype.hasOwnProperty.call(m, 'badge') ? (m.badge ?? '') : m.provider.toUpperCase().slice(0, 2),
-      contextWindow: m.contextWindow ?? 400_000,
+  const file = loadModelsFile();
+  const defaults = {
+    session: file.defaults?.session || DEFAULT_MODEL_DEFAULTS.session,
+    ai_task: file.defaults?.ai_task || 'litellm-responses/mini',
+  };
+  const byId = new Map(file.pi.map(model => [`${model.provider}/${model.modelId}`, model]));
+  const prices = (model: PiModelEntry | undefined): Pick<ModelInfo, 'inputPricePerMillion' | 'outputPricePerMillion'> => {
+    if (model?.provider !== 'litellm-responses' || model.lastSeenAt !== file.litellmCatalog?.syncedAt) return {};
+    if (model.catalogInputCostPerToken === undefined || model.catalogOutputCostPerToken === undefined) return {};
+    return {
+      inputPricePerMillion: model.catalogInputCostPerToken * 1_000_000,
+      outputPricePerMillion: model.catalogOutputCostPerToken * 1_000_000,
+    };
+  };
+  const alias = (policyAlias: 'core' | 'lite', modelId: string): ModelInfo => {
+    const model = byId.get(modelId);
+    // Keep the selection slot visible even if its VM mapping is missing or
+    // disabled. Validation at the execution boundary must reject that mapping.
+    return {
+      id: `pi:preset/${policyAlias}`,
+      name: policyAlias,
+      badge: '',
+      kind: 'policy',
+      policyAlias,
+      runtimeModelId: modelId,
+      ...prices(model),
+      contextWindow: model?.contextWindow ?? 400_000,
+      reasoningEfforts: model?.reasoningEfforts,
+    };
+  };
+  const catalogModels = file.pi
+    .filter(model => isPiModelEntrySelectableForThisVm(model, file.litellmCatalog?.syncedAt))
+    .filter(model => !['smartest', 'mini'].includes(model.modelId))
+    .map(model => ({
+      id: `pi:${model.provider}/${model.modelId}`,
+      name: model.name,
+      badge: Object.prototype.hasOwnProperty.call(model, 'badge') ? (model.badge ?? '') : model.provider.toUpperCase().slice(0, 2),
+      kind: 'direct' as const,
+      provider: model.catalogOwnedBy ?? model.provider,
+      ...prices(model),
+      contextWindow: model.contextWindow ?? 400_000,
+      reasoningEfforts: model.reasoningEfforts,
     }));
+  return [alias('core', defaults.session), alias('lite', defaults.ai_task), ...catalogModels];
 }
 
 function loadLocalModels(): ModelInfo[] {
+  if (!isFullTowerVm()) return [];
   return (loadModelsFile().local || [])
     .filter(m => m.enabled)
     .map(m => ({
@@ -294,17 +403,18 @@ function loadLocalModels(): ModelInfo[] {
 
 export let availableModels: ModelInfo[] = loadClaudeModels();
 
-export const DEFAULT_PI_MODEL_ID = 'litellm-responses/smartest';
+// Session choice, not a physical Router ID. Resolve the current Core mapping at run time.
+export const DEFAULT_PI_MODEL_ID = 'preset/core';
 export const DEFAULT_CLAUDE_MODEL_ID = 'claude-sonnet-4-6';
 
 /**
- * Claude Code models that should be lazily moved to Pi Smartest on the next
+ * Claude Code models that should be lazily moved to Pi Core on the next
  * chat turn, even if Claude itself remains enabled on the VM.
  *
  * Opus 4.8 was a Claude Code subscription-era sticky session model. When the
  * account/model path becomes unusable, leaving existing sessions on
  * `engine=claude` + `model_used=claude-opus-4-8` surfaces a model/account error
- * instead of using Tower's current session default (`litellm-responses/smartest`).
+ * instead of selecting Tower's Core preset.
  */
 export const RETIRED_CLAUDE_SESSION_MODEL_IDS = new Set([
   'claude-opus-4-8',
@@ -317,7 +427,7 @@ export const RETIRED_CLAUDE_SESSION_MODEL_IDS = new Set([
  * Pi model IDs that should not be inherited/resumed as sticky per-session defaults.
  *
  * These were valid during the Codex/Codex-LB transition, but the session default is
- * now the LiteLLM Responses route (`litellm-responses/smartest`). Keeping old rows
+ * now the Core preset. Keeping old rows
  * in `sessions.model_used` makes ordinary follow-up turns silently re-enter direct
  * Codex/OAuth paths and surface auth/fallback noise.
  */
@@ -334,14 +444,15 @@ export const RETIRED_PI_SESSION_MODEL_IDS = new Set([
   'litellm/codex-lb-gpt-5.5',
   'litellm/smartest',
   'litellm/smart',
-  // Utility/emergency routes must never become sticky ordinary chat defaults.
-  'litellm-responses/mini',
+  // Any direct Azure/Codex namespace is retired; historical IDs remain data only.
   'azure-openai-responses/gpt-5.4',
   'azure-openai-responses-eastus2/gpt-5.5',
+  'litellm-responses/gpt55',
+  'litellm-responses/smartest',
 ]);
 
 const DEFAULT_MODEL_DEFAULTS: ModelDefaults = {
-  session: DEFAULT_PI_MODEL_ID,
+  session: '', // Missing admin Core mapping must fail readiness, never assume a Router alias
   ai_reply: 'litellm-responses/mini',
   ai_task: 'litellm-responses/mini',
 };
@@ -357,8 +468,9 @@ function isClaudeModelId(id: string | undefined): boolean {
 /** Get admin-configured default models per context, constrained to enabled engines. */
 export function getModelDefaults(): ModelDefaults {
   const file = loadModelsFile();
-  const rawDefaults = file.defaults ?? DEFAULT_MODEL_DEFAULTS;
-  const result = { ...rawDefaults };
+  const result = { ...DEFAULT_MODEL_DEFAULTS, ...file.defaults };
+  // Keep VM-scoped router aliases intact. Provider model IDs are not
+  // interchangeable with Team-authorized router IDs.
 
   // Customer/self-hosted VMs are Claude-first unless Pi is explicitly enabled.
   // models.json may carry Pi defaults from the operator VM, so never leak those
@@ -371,17 +483,21 @@ export function getModelDefaults(): ModelDefaults {
     if (isPiModelId(result.ai_task)) result.ai_task = fallbackClaudeModel;
   }
 
-  // Pi-only deployments still work: if Claude is disabled and defaults point to
-  // Claude, replace them with the first enabled Pi model.
-  const piModels = loadPiModels();
-  if (!config.claudeEnabled && piModels.length > 0) {
-    const fallbackPiModel = piModels[0].id.replace(/^pi:/, '');
-    if (isClaudeModelId(result.session)) result.session = fallbackPiModel;
-    if (isClaudeModelId(result.ai_reply)) result.ai_reply = fallbackPiModel;
-    if (isClaudeModelId(result.ai_task)) result.ai_task = fallbackPiModel;
+  // Pi-only deployments with a stale Claude mapping leave Core unavailable.
+  // Do not invent a physical Router alias or put a preset into provider defaults.
+  if (!config.claudeEnabled) {
+    if (isClaudeModelId(result.session)) result.session = DEFAULT_MODEL_DEFAULTS.session;
+    if (isClaudeModelId(result.ai_task)) result.ai_task = DEFAULT_MODEL_DEFAULTS.ai_task;
+    if (isClaudeModelId(result.ai_reply)) result.ai_reply = result.ai_task || DEFAULT_MODEL_DEFAULTS.ai_reply;
   }
 
   return result;
+}
+
+export function resolveLegacyPiModelId(model: string): string {
+  // Preserve allowed router and Kimi selections. A retired direct provider is
+  // never translated at the execution boundary; it must fail closed instead.
+  return model;
 }
 
 export function isRetiredClaudeSessionModelId(model: string | null | undefined): boolean {
@@ -407,14 +523,18 @@ const ALLOWED_OPENROUTER_EMERGENCY_PI_SESSION_MODELS = new Set([
 export function isRetiredPiSessionModelId(model: string | null | undefined): boolean {
   if (!model) return false;
   return model.startsWith('claude-')
-    || (model.startsWith('openrouter/') && !ALLOWED_OPENROUTER_EMERGENCY_PI_SESSION_MODELS.has(model))
+    || (!model.startsWith('litellm-responses/') && !ALLOWED_OPENROUTER_EMERGENCY_PI_SESSION_MODELS.has(model))
     || RETIRED_PI_SESSION_MODEL_IDS.has(model);
 }
 
 /** Return a safe sticky model for a Pi session, migrating retired/null IDs to the configured default. */
 export function normalizePiSessionModelId(model: string | null | undefined): string {
-  const piDefault = getModelDefaults().session;
+  const piDefault = DEFAULT_PI_MODEL_ID;
   const normalized = model?.replace(/^pi:/, '');
+  if (normalized === 'policy/core' || normalized === 'preset/core') return 'preset/core';
+  if (normalized === 'policy/lite' || normalized === 'preset/lite') return 'preset/lite';
+  // Preserve explicit direct model choices; an ID equal to Core's current
+  // mapping does not imply a preset selection.
   if (!normalized || !normalized.includes('/') || isRetiredPiSessionModelId(normalized)) return piDefault;
   return normalized;
 }
@@ -497,12 +617,6 @@ export const config = {
   get aiServicesEnabled(): boolean {
     return isAIServiceEnabledForVm(process.env.TOWER_ROLE, this.agentFirstEnabled, process.env.TOWER_AI_SERVICES_ENABLED);
   },
-  get workspaceAppsEnabled(): boolean {
-    return isWorkspaceAppsEnabledForVm(process.env.TOWER_ROLE, process.env.TOWER_WORKSPACE_APPS_ENABLED);
-  },
-  get workspaceAppsMode(): WorkspaceAppsMode {
-    return resolveWorkspaceAppsMode(process.env.TOWER_WORKSPACE_APPS_MODE);
-  },
 
   // Internal-only managed Workbench tool revision PoC. Disabled by default.
   experimentalWorkbenchTools: Object.freeze({
@@ -536,9 +650,10 @@ export const config = {
   // implicit fallback.
   defaultEngine: process.env.DEFAULT_ENGINE || 'pi',
 
-  // AI token budget dashboard (admin-only). The backend SSHs into the central
-  // AI router and reads safe /key/info fields from customer key files;
-  // key plaintext never leaves the router process stdout.
+  // AI token budget dashboard (admin-only). Budget and usage identity come
+  // from this VM's active LiteLLM virtual key. Router-admin SpendLogs are used
+  // only when explicitly configured; otherwise local usage is bounded by the
+  // current key's created_at so previous shared-key turns are not misattributed.
   litellmRouterSshTarget: process.env.LITELLM_ROUTER_SSH_TARGET || '',
   litellmRouterDir: process.env.LITELLM_ROUTER_DIR || '/opt/tower-llm-router',
   claudeEnabled: process.env.TOWER_ENABLE_ARCHIVED_CLAUDE_ENGINE === 'true' && process.env.CLAUDE_ENABLED === 'true',
@@ -560,6 +675,8 @@ export const config = {
   // If not set, share links use window.location.origin (fallback, can be wrong domain)
   publicUrl: resolvedPublicUrl,
   sharePublicUrl: resolvedSharePublicUrl,
+  // Explicit separate-origin path Publishing. Unset preserves legacy subdomain URLs.
+  publishingBaseUrl: process.env.TOWER_PUBLISHING_BASE_URL || undefined,
 
   // Browser/PWA Web Push. VAPID keys are required for real OS-level push;
   // without them the API reports configured=false and the UI stays disabled.
@@ -601,7 +718,7 @@ export const config = {
   sandbox: {
     enabled: process.env.ENABLE_SANDBOX === 'true',
     vmHost: process.env.EXECUTION_VM_HOST || '',         // ssh config alias or IP
-    vmUser: process.env.EXECUTION_VM_USER || 'toweradmin',
+    vmUser: process.env.EXECUTION_VM_USER || 'tower-user',
     vmKeyPath: process.env.EXECUTION_VM_KEY_PATH || '',  // empty → ssh-agent / default key
     sshTimeoutSec: parseInt(process.env.EXECUTION_VM_SSH_TIMEOUT || '15', 10),
     // 멀티유저 보호 (2026-05-03):
@@ -624,8 +741,12 @@ export const config = {
   //
   // Decision: workspace/decisions/2026-06-02-project-runtime-box-product-framing.md
   //
-  // ENABLE_PROJECT_RUNTIME_BOX=true      → mount Pi native tools (project_shell / service_*)
-  //                                        for project sessions. Default: false (safe).
+  // ENABLE_PROJECT_RUNTIME_BOX=true      → mount Project execution tools for project sessions.
+  //                                        This legacy-named master switch covers Worker-first and
+  //                                        Runtime Box compatibility execution. Default: false (safe).
+  // ENABLE_RUNTIME_BOX_COMPATIBILITY=false → keep Worker-first execution but refuse local Runtime Box
+  //                                        fallback for unbound Projects. Defaults to the master switch
+  //                                        for backward compatibility when unset.
   // RUNTIME_BOX_EXCLUDED_PROJECTS        → comma-separated project IDs or names that
   //                                        must NOT get Runtime Box tools mounted.
   //                                        Example: tower,_team,admin
@@ -638,6 +759,9 @@ export const config = {
   //                                        Default 5.
   runtimeBox: {
     enabled: process.env.ENABLE_PROJECT_RUNTIME_BOX === 'true',
+    compatibilityEnabled: process.env.ENABLE_RUNTIME_BOX_COMPATIBILITY === undefined
+      ? process.env.ENABLE_PROJECT_RUNTIME_BOX === 'true'
+      : process.env.ENABLE_RUNTIME_BOX_COMPATIBILITY === 'true',
     excludedProjects: (process.env.RUNTIME_BOX_EXCLUDED_PROJECTS || '')
       .split(',').map(s => s.trim().toLowerCase()).filter(Boolean),
     defaultMemoryMb: parseInt(process.env.RUNTIME_BOX_DEFAULT_MEMORY_MB || '3072', 10),

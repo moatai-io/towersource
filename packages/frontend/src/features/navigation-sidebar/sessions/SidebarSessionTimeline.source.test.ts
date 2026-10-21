@@ -9,7 +9,9 @@ describe('Sidebar Session timeline presentation boundary', () => {
     expect(source).toContain('data-new-date-group={run.dateKey}');
     expect(source).toContain('data-new-agent-run={run.project.id}');
     expect(source).toContain('run.project.agent?.displayName || run.project.name');
-    expect(source).toContain('border-l border-surface-700/35');
+    expect(source).toContain('sidebar-timeline-project');
+    expect(source).toContain('border-l border-surface-700/25');
+    expect(source).not.toContain('sidebar-timeline-date sticky');
   });
 
   it('Session interaction을 전달받은 callback으로만 위임한다', () => {
@@ -25,5 +27,6 @@ describe('Sidebar Session timeline presentation boundary', () => {
   it('최근 목록 전용 숨김 표현을 유지한다', () => {
     expect(source).toContain('deleteActionLabel={hideFromLatestLabel}');
     expect(source).toContain('deleteActionIcon="down"');
+    expect(source).toContain('recentInbox');
   });
 });

@@ -27,10 +27,26 @@ const EXPIRES_MAP: Record<string, number> = {
   '7d':  7 * 24 * 60 * 60 * 1000,
 };
 
+/** Live shares never bypass invite-only Agent membership or private ownership. */
+async function assertShareableSession(sessionId: string, ownerId: number, targetUserId?: number): Promise<void> {
+  const row = await queryOne<{ user_id: number | null; project_id: string | null; visibility: string | null; room_id: string | null }>(
+    'SELECT user_id, project_id, visibility, room_id FROM sessions WHERE id = $1', [sessionId],
+  );
+  if (!row || row.user_id !== ownerId) throw new Error('Only session owner can share this conversation');
+  if (row.visibility !== 'project' || !row.project_id || row.room_id) {
+    throw new Error('Change this conversation to Agent-shared before sharing it');
+  }
+  if (targetUserId !== undefined) {
+    const member = await queryOne('SELECT 1 FROM project_members pm JOIN users u ON u.id = pm.user_id AND u.disabled = 0 WHERE pm.project_id = $1 AND pm.user_id = $2', [row.project_id, targetUserId]);
+    if (!member) throw new Error('Invite this user to the Agent before sharing the conversation');
+  }
+}
+
 /** Create internal share (logged-in user to another logged-in user) */
 export async function createInternalSessionShare(
   sessionId: string, ownerId: number, targetUserId: number,
 ): Promise<SessionShare> {
+  await assertShareableSession(sessionId, ownerId, targetUserId);
   const id = randomUUID();
   await execute(`
     INSERT INTO session_shares (id, session_id, owner_id, share_type, target_user_id)
@@ -43,6 +59,7 @@ export async function createInternalSessionShare(
 export async function createExternalSessionShare(
   sessionId: string, ownerId: number, expiresIn: string,
 ): Promise<SessionShare & { token: string }> {
+  await assertShareableSession(sessionId, ownerId);
   const id = randomUUID();
   const token = randomUUID().replace(/-/g, '');
   const ms = EXPIRES_MAP[expiresIn] ?? EXPIRES_MAP['24h'];

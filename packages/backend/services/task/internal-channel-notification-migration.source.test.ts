@@ -13,6 +13,14 @@ const notificationTypes = fs.readFileSync(path.resolve(taskDir, '../notification
 const wsHandler = fs.readFileSync(path.resolve(taskDir, '../../routes/ws-handler.ts'), 'utf8');
 
 describe('internal channel reports migrate to Notification Hub', () => {
+  it('keeps automation-owned spawn Tasks silent so only the Run owner reports completion', () => {
+    const spawn = runners.slice(runners.indexOf("if (mode === 'spawn')"), runners.indexOf("if (mode === 'inject')"));
+    expect(spawn).toMatch(/createTask\([\s\S]*?'silent'/);
+    expect(spawn).toContain('getTask(task.id)');
+    expect(taskRunner).toContain('if (!routeSeverity(severity).notifyInApp || !task.userId) return;');
+    expect(scheduler).toContain('!executionResult?.replayedOccurrence');
+    expect(scheduler).toContain('runId: terminalSession?.runId');
+  });
   it('provides one shared Task/Automation terminal report helper', () => {
     expect(notificationHub).toContain('export async function notifyExecutionReport');
     expect(notificationHub).toContain("const type = `${input.kind}.${input.status}`");
@@ -37,7 +45,7 @@ describe('internal channel reports migrate to Notification Hub', () => {
     expect(runners).toContain("legacyMode: 'channel'");
     expect(runners).toContain('suppressCompletionNotification: true');
     expect(runners).not.toContain('{ reportRoomId, automationId: automation.id }');
-    expect(scheduler).toContain("legacyMode: 'channel'");
+    expect(scheduler).toContain("legacyMode: schedule.mode === 'channel' ? 'channel' : undefined");
     expect(scheduler).not.toContain('channel mode requires target_id (room_id)');
   });
 

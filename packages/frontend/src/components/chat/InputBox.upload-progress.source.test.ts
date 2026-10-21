@@ -7,7 +7,7 @@ const chipSource = fs.readFileSync(path.resolve(import.meta.dirname, '../common/
 
 describe('InputBox compact upload progress contract', () => {
   it('keeps upload progress in the attachment chip row instead of a full-width card', () => {
-    expect(source).toContain('Upload progress and attachment chips');
+    expect(source).toContain('Upload progress, file attachments, and source references');
     expect(source).toContain('<UploadProgressChip progress={uploadProgress} />');
     expect(chipSource).toContain('inline-flex h-9 max-w-[220px]');
     expect(chipSource).toContain("progress.phase === 'processing' ? t('uploadProgress.saving')");

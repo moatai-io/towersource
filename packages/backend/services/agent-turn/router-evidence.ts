@@ -1,7 +1,7 @@
 // Owns: diagnostic Router/provider evidence attached to a durable root turn.
 // Public API: recordAgentTurnRouterEvidence, decideRouterReconciliation. See README.md.
 
-import { queryOne } from '../../db/pg-repo.js';
+import { execute, queryOne } from '../../db/pg-repo.js';
 
 export type RouterTerminalType =
   | 'response.completed'
@@ -59,6 +59,37 @@ export async function recordAgentTurnRouterEvidence(input: AgentTurnRouterEviden
       JSON.stringify(input.evidence ?? {}),
     ],
   );
+
+  // Router evidence is captured from a cloned stream and can finish just after
+  // Tower emits turn_done. Reconcile the append-only usage row in either order
+  // without treating router success as execution authority.
+  await execute(
+    `UPDATE ai_usage_events
+        SET router_model = COALESCE(router_model, $2),
+            provider_model = COALESCE(provider_model, NULLIF($3, '')),
+            provider = COALESCE(provider, NULLIF($4, '')),
+            router_request_id = COALESCE(router_request_id, $5),
+            provider_response_id = COALESCE(provider_response_id, $6),
+            metadata = metadata || jsonb_strip_nulls(jsonb_build_object(
+              'router_terminal_type', $7::text,
+              'service_tier', $8::text,
+              'router_observed_at', NOW()
+            ))
+      WHERE root_turn_id = $1`,
+    [
+      input.rootTurnId,
+      input.model ?? null,
+      String(input.evidence?.provider_model ?? input.evidence?.response_model ?? ''),
+      String(input.evidence?.provider ?? ''),
+      input.requestId ?? null,
+      input.responseId ?? null,
+      input.terminalType ?? null,
+      input.serviceTier ?? null,
+    ],
+  ).catch((error: any) => {
+    // Migration skew during rolling upgrades must not break router evidence.
+    if (error?.code !== '42P01') throw error;
+  });
 }
 
 export type RouterReconciliationDecision =

@@ -2,7 +2,7 @@
 title: Tower Handbook — 사용자·발표·설명서용 통합 안내서
 audience: 워크스페이스 사용자 / 발표 자료 작성자 / 외부 설명용 / 새로 합류한 팀원
 status: live (수동 갱신 + `/skill-architect refine tower-intro` 보조)
-last_updated: 2026-06-26
+last_updated: 2026-10-19
 owner: Tower maintainers (organization overrides may replace this seed)
 source_of_truth:
   - docs/tower-guide/ (공개 제품·개발 가이드)
@@ -25,7 +25,7 @@ Tower 는 **AI를 쓰는 회사를 넘어, AI가 함께 일할 수 있는 회사
 
 - **AX 비유**: 대부분의 회사는 AI를 안 쓰는 것이 아니라, AI가 들어올 수 있는 업무 구조가 부족합니다. Tower는 문서·데이터·결정·협업·실행환경을 프로젝트 안에 묶어 실제 업무를 AI와 함께 처리하게 만듭니다.
 - **사무실 비유**: ChatGPT/Claude 가 *개인 노트북* 이라면, Tower 는 *팀 전용 AI 사무실* 입니다. 같은 공간, 공유 책상, 같은 캐비닛, 누가 뭘 시켰는지 보이는 협업 환경입니다.
-- **기술 비유**: 프로젝트가 작업 경계이자 Runtime Box 배포 단위입니다. 각 프로젝트는 멤버, 파일, 채널, 세션, 스킬, Credential Vault grant, 실행 권한을 함께 가집니다.
+- **기술 비유**: 프로젝트가 파일·ACL·연결·실행의 작업 경계이고, Project Environment가 그 프로젝트의 workspace와 필요한 executor를 해석합니다. 각 프로젝트는 멤버, 파일, 채널, 세션, 스킬, Credential Vault grant, 실행 권한을 함께 가집니다.
 - **차별 요약**: 데이터는 고객/회사 서버에 남고, 권한·감사·격리가 기본이며, AI는 단순 대화가 아니라 파일을 만들고, 도구를 호출하고, 반복 가능한 스킬과 결정 기록을 회사 자산으로 남깁니다.
 
 한 문장: **"회사 일이 AI가 함께 일할 수 있는 형태로 바뀌고, 그 흔적이 회사 자산으로 쌓이는 팀 Agent OS."**
@@ -48,13 +48,13 @@ Tower 는 **AI를 쓰는 회사를 넘어, AI가 함께 일할 수 있는 회사
 | 항목 | ChatGPT/Claude 개인 | Tower |
 |---|---|---|
 | 사용 단위 | 개인 계정 | 팀 / 프로젝트 / 조직 skillset |
-| 대화 위치 | 개인 채팅창 | 공용 워크스페이스 + 프로젝트 + 채널 + 세션 |
+| 대화 위치 | 개인 채팅창 | AI 팀원 작업공간 + 프로젝트 + 세션 |
 | 업무 구조 | 사람이 복사·붙여넣기 | AI가 프로젝트 파일·결정·스킬·credential grant 안에서 작업 |
 | 결과물 보관 | 채팅 안에 묻힘 | 프로젝트 폴더, published site, 결정문서, git/audit 로그에 남음 |
 | 권한 | 개인 계정 중심 | 역할 + 프로젝트 멤버십 + capability + credential grant |
 | 감사 | 제한적 | DB + git trailer + provenance + decisions/progress + sandbox run 기록 |
 | 데이터 위치 | 외부 서비스 클라우드 | 고객/회사 Tower 서버 중심, 외부 전송은 AI/API 호출로 제한 |
-| 실행 | 대체로 답변 생성 | Runtime Box/Sandbox, PDF/Excel/CAD/Publish, 장기 worker, schedule까지 수행 |
+| 실행 | 대체로 답변 생성 | Project Environment와 sandboxed executor를 통해 PDF/Excel/CAD/Publish, 장기 worker, schedule까지 수행 |
 | 스킬 | 개인 prompt 재사용 | 조직/프로젝트 skill source + materialized runtime copy + 검증/배포 흐름 |
 
 ### 1-3. "그래서 누가 이걸 만들었어요?"
@@ -62,7 +62,7 @@ Tower 는 **AI를 쓰는 회사를 넘어, AI가 함께 일할 수 있는 회사
 - **배포 모델**: 조직이 직접 운영하는 self-hosted Agent OS입니다.
 - **프로필**: 독립 운영은 `standalone`, 조직 gateway에 명시적으로 연결한 노드는 `managed`, 조직 control plane은 `full`을 사용합니다.
 - **데이터 경계**: 각 운영자가 자기 서버·워크스페이스·credential 정책을 소유합니다.
-- **기반 기술**: Tower AI runtime, React + Express + PostgreSQL, Project Runtime Box/Sandbox, Credential Vault, Tower-managed skill system.
+- **기반 기술**: Tower AI runtime, React + Express + PostgreSQL, Project Environment와 Worker/Sandbox 실행, Credential Vault, Tower-managed skill system.
 
 ---
 
@@ -86,7 +86,7 @@ Tower 의 권한은 이제 단순한 "서버 역할" 하나가 아니라 **역�
 같은 member라도 "재무 프로젝트 멤버"와 "고객지원 프로젝트 멤버"는 서로 다른 데이터에 접근합니다. 프로젝트가 Tower의 1차 작업 경계입니다.
 
 - 프로젝트에 초대받지 않으면 **그 프로젝트 폴더와 세션 자체가 보이지 않거나 접근이 차단**됩니다.
-- 프로젝트는 파일·채널·세션·AGENTS.md·결정문서·스킬·Runtime Box 설정·credential grant를 함께 묶습니다.
+- 프로젝트는 파일·세션·AGENTS.md·결정문서·스킬·Project Environment 설정·credential grant를 함께 묶습니다.
 - 새 프로젝트 폴더를 직접 `mkdir` 하면 DB row와 권한 메타가 없는 ghost project가 됩니다. 새 프로젝트는 UI `+`, 공식 CLI/API 같은 정식 진입점으로 만듭니다.
 - admin/operator도 일반 작업은 프로젝트 안에서 합니다. 루트·공용 폴더·다른 프로젝트에 영향을 주는 변경은 운영 작업으로 취급합니다.
 
@@ -97,11 +97,11 @@ Tower 의 권한은 이제 단순한 "서버 역할" 하나가 아니라 **역�
 | 축 | 의미 | 예 |
 |---|---|---|
 | **Capability grant** | 어떤 고위험/운영 행동을 할 수 있는가 | `fleet:deploy`, `skill:materialize-project`, `credential:grant-project` |
-| **Credential grant** | 어떤 secret 이름을 Runtime Box에 주입할 수 있는가 | `OPENAI_API_KEY`, `APIFY_TOKEN`, `NAVER_CLIENT_SECRET`, `TIRO_KEY` |
+| **Credential grant** | 어떤 secret 이름을 해당 Project run에 materialize할 수 있는가 | `OPENAI_API_KEY`, `APIFY_TOKEN`, `NAVER_CLIENT_SECRET`, `TIRO_KEY` |
 | **명시 의도** | 배포·전송·삭제·공개 같은 위험 행동을 사용자가 지금 원했는가 | "새 버전을 배포", "공개 URL로 publish" |
 | **감사 가능성** | 누가 언제 어떤 권한으로 실행했는가 | session id, run id, audit log, decision |
 
-Credential 값은 AI가 보지 않습니다. 스킬과 Runtime Box는 `secrets: ["NAME"]`처럼 **이름만** 요구하고, Tower Credential Orchestrator가 허용된 대상에만 값을 주입합니다.
+Credential 값은 AI가 보지 않습니다. 스킬과 실행 요청은 `secrets: ["NAME"]`처럼 **이름만** 요구하고, Tower Credential Orchestrator가 허용된 Project run의 선택된 executor에만 값을 materialize합니다.
 
 ### 2-4. AI 자율 실행의 강도 (Permission Mode)
 
@@ -119,32 +119,27 @@ Credential 값은 AI가 보지 않습니다. 스킬과 Runtime Box는 `secrets: 
 
 Tower 가 사용자에게 주는 능력은 이제 "AI 채팅"보다 넓습니다. **프로젝트 안에서 AI가 읽고, 쓰고, 실행하고, 기억하고, 다시 불러올 수 있는 업무 운영체제**입니다.
 
-### 3-1. AI 와 일하는 네 가지 경로
+### 3-1. AI와 일하는 현재 경로
 
-| 경로 | 트리거 | 누가 보나 | 언제 쓰나 |
-|---|---|---|---|
-| **Session** | 좌측 사이드바 새 세션 또는 기존 세션 | 기본은 본인, 필요 시 프로젝트/공유 | 집중 작업 — "이 보고서 다듬어줘" |
-| **Channel AI** | 채널에서 `@ai 질문` | 채널 멤버 | 팀 대화 중 빠른 AI 호출 — "@ai 어제 결정 요약" |
-| **Task / Schedule** | `@task`, 스케줄 UI, 반복 실행 | 프로젝트 채널 또는 설정된 리포트 대상 | 백그라운드·정기 작업 — "매일 9시 뉴스 변화만 알려줘" |
-| **Agent Worker** | subagent / persistent worker / goal loop | 부모 세션 또는 Agent UI | 독립 조사·리뷰·장기 steward — "QA 리뷰어 붙여" |
+| 경로 | 요청 방법 | 접근과 용도 |
+|---|---|---|
+| **Session** | 담당 AI 팀원의 작업공간에서 새 대화 또는 기존 대화 | 소유·공유·프로젝트와 대상 독자에 따른 접근 규칙 적용. 집중 작업과 후속 요청 |
+| **Automations** | 예약 요청 또는 자동화 화면 | 시각·주기·시간대·결과 위치를 확인하고 승인 후 등록 |
+| **지원 AI** | 주 담당 AI에게 상당한 독립 업무 위임 요청 | 지속 Agent Session에서 조사·구현 등을 담당. 진행자가 근거 확인과 통합 책임 |
+| **AI 서비스** | 접근이 허용된 서비스 채널 | 외부 독자를 위한 제한된 대화 서비스. 내부 Agent 전체 권한을 그대로 공개하지 않음 |
 
-**기억 포인트**:
-- Session 은 사람이 옆에서 보며 이끄는 작업 공간입니다.
-- Channel AI 는 팀 채널에 붙은 공유 AI입니다. 룸/프로젝트 문맥을 따라갑니다.
-- Task/Schedule 은 반복·예약 실행입니다. 기본 리포트 정책은 "중요할 때만" 말하도록 가는 중입니다.
-- Agent Worker 는 독립 역할을 가진 보조 AI입니다. 일회성 subagent도, 계속 부를 수 있는 persistent worker도 모두 Agent Session 모델로 통합됩니다.
+내부 Channels UI와 `@ai`·`@task` 실행 경로는 종료되었습니다. 과거 채널 주소는 현재 작업 경로를 안내하며, 내부 채널과 외부 AI 서비스의 채널은 구분합니다. 세션 링크만으로 접근 권한이 생기지 않습니다.
 
-상세 비교: `tower/docs/tower-guide/ai-execution-paths.md`, 결정: `2026-06-13-agent-control-plane-unification.md`, `2026-06-14-unify-agent-sessions.md`, `2026-06-20-task-schedule-reporting-and-run-context.md`.
+사용자 안내의 기준은 `docs/help/ko/`와 `docs/help/en/`입니다. 화면·역할·설정별 제공 조건을 현재 코드와 함께 확인합니다.
 
-### 3-2. 프로젝트 (Project-Centric + Runtime Box Architecture)
+### 3-2. 프로젝트 (Project-Centric + Project Environment Architecture)
 
 **"프로젝트가 모든 것의 중심"** — 한 프로젝트 안에 다음이 묶입니다.
 
-- 채널 (팀 채팅)
 - 세션 (AI 작업, 개인/공유/agent)
 - 파일 (프로젝트 폴더 = 공유 드라이브)
 - AI 컨텍스트 (`AGENTS.md` + `.project/decisions/` + `.project/progress.md`)
-- Project Runtime Box 설정
+- Project Environment 설정과 workspace authority
 - 프로젝트 스킬 (`skills/<skill>/`) 과 materialized managed 스킬 (`.tower/skills/<skill>/`)
 - Credential Vault grant와 capability grant
 
@@ -163,7 +158,7 @@ workspace/projects/<project>/
 └── uploads/                   ← 첨부·업로드
 ```
 
-2026-06 이후의 핵심 변화는 **프로젝트를 preconfigured Runbox deployment unit으로 본다**는 점입니다. 서버가 full/managed인지보다, 프로젝트·역할·capability·credential grant가 실제 실행 권한을 정합니다.
+현재 핵심 모델은 **프로젝트가 파일·ACL·연결·실행 범위의 권위 경계이고, Project Environment가 canonical workspace와 필요한 capability를 실행 전에 해석한다**는 것입니다. Worker는 명령·Job·Service를 수행하는 내부 executor이며 프로젝트 권위나 파일 정본이 아닙니다. Runtime Box는 일부 기존 설치의 명시적인 legacy compatibility일 뿐 일반 fallback이 아닙니다.
 
 ### 3-3. 글 자산 — Decisions / Progress / AGENTS.md / Memory
 
@@ -179,7 +174,7 @@ Tower 의 기억은 채팅 로그만이 아니라 **문서와 요약 카드**로
 
 다섯 원칙: 써라, 왜를 남겨라, 찾을 수 있게 해라, 작은 것부터, 주기적으로 돌아봐라, 제자리에 놓아라.
 
-### 3-4. 스킬 시스템 (조직 기본 29개 + 프로젝트 local skills)
+### 3-4. 스킬 시스템 (조직 기본 목록 + 프로젝트 local skills)
 
 스킬 = *재사용 가능한 AI 워크플로*. 2026-06 이후 정본 구조가 정리됐습니다.
 
@@ -187,34 +182,34 @@ Tower 의 기억은 채팅 로그만이 아니라 **문서와 요약 카드**로
 |---|---|---|
 | 프로젝트 local skill | `workspace/projects/<project>/skills/<skill>/SKILL.md` | 특정 프로젝트가 직접 만든 스킬 |
 | 조직 공용 skill source | `workspace/projects/teamskills/skills/<skill>/` | 회사/조직 여러 프로젝트에 공유되는 정본 |
-| 조직 기본 skillset | `workspace/projects/teamskills/skillset.json` | 기본 materialize 목록 (현재 29개) |
+| 조직 기본 skillset | `workspace/projects/teamskills/skillset.json` | 기본 materialize 목록 (현재 registry로 확인) |
 | Tower seed/reference | `tower/skills/managed/<skill>/` | 제품 기본 제공 seed/reference. ordinary org SSOT 아님 |
-| 프로젝트 runtime copy | `workspace/projects/<project>/.tower/skills/<skill>/` / Runtime Box `/workspace/.tower/skills/<skill>/` | Tower가 생성한 실행용 copy. 직접 편집 금지 |
+| 프로젝트 runtime copy | `workspace/projects/<project>/.tower/skills/<skill>/` | Tower가 생성한 Project-visible copy. 직접 편집 금지. 명시적인 legacy Runtime Box consumer가 있으면 `/workspace/.tower/skills/<skill>/`에도 materialize될 수 있음 |
 
 **역할별 진입점**:
 - **새 스킬 body 만들기/개선**: `/skill-architect` — intent, sample, eval, validate, distill, trigger tune.
 - **프로젝트 스킬을 조직 공용으로 공유**: `/share-skill` — diff-first로 `teamskills`에 반영.
 - **자체 호스팅 서버/프로젝트에 조직 스킬 반영**: `/managed-skill-rollout` 또는 `/fleet skills` — materialize와 runtime 검증.
-- **Credential 상태 확인**: `/runtime-box-credentials` / `/customer-credentials`.
+- **Credential 상태 확인**: `/project-credentials` / `/customer-credentials`.
 - **legacy registry 진단**: `/skill-registry` — 일반 공유/배포의 주 진입점은 아님.
 
 **기본 skillset 예시** (`teamskills/skillset.json`): agents-md, cta, design-explore, design-md, frontend-design, gws, goal, html-slide, ideate, image-slide-gen, issue, md-docx-publisher, mermaid-pdf, naver-search, plan-refine, pdf2pptx, pptx-review, pptx-template, search, session-rename, skill-architect, soul, svg, task-schedule, tiro, tower-intro, web-capture, wiki-compile, youtube-transcript.
 
-### 3-5. Runtime Box / Sandbox 실행 — 코드와 실행의 분리
+### 3-5. Project Environment / Sandbox 실행 — 권위와 executor의 분리
 
-> **사용자 작업 코드는 프로젝트 안에 두고, 실행은 Runtime Box/Sandbox에서 한다.**
+> **사용자 작업 코드는 canonical Project workspace에 두고, Tower가 Project Environment를 해석해 필요한 executor에서 실행합니다.**
 
-| 원칙 | 의미 |
+| 개념 | 의미 |
 |---|---|
-| 코드 저장 | `workspace/projects/<p>/...` 아래. `/tmp` 산출물 인계 금지 |
-| 단발 실행 | `sandbox.run` / `mcp__sandbox__run` — 인라인 또는 workspace 파일 entrypoint |
-| 장기 운영 | `sandbox.tool_start` — 며칠 도는 미니 백엔드·워커 |
-| Runtime Box | 프로젝트별 `/workspace` 마운트, `.tower/skills`, credential grant, tool baseline |
-| 네트워크 | 기본 차단. 필요한 whitelist만 허용 |
-| 시크릿 | 값이 아니라 secret 이름만 주입 요청 |
-| 본체 VM 직접 실행 | 일반 사용자 코드 실행은 금지. Tower 자체 dev/prod 운영은 예외 |
+| 코드·파일 정본 | `workspace/projects/<p>/...` 아래. Worker-local 경로나 `/tmp` 산출물을 정본으로 인계하지 않음 |
+| Project Environment | 현재 사용자·Agent 권한, Project lifecycle, canonical root, environment mode와 필요한 capability를 실행 전에 해석하는 Backend 계약 |
+| Worker / executor | 명령·Job·Service·로그·cleanup과 resource limit를 담당하는 내부 실행자. Project membership이나 파일 정본의 권위자가 아님 |
+| Sandbox | 선택된 executor 안에서 파일·프로세스·네트워크 접근을 제한하는 격리 메커니즘 |
+| Credential | 값이 아니라 secret 이름을 요청하고, 허용된 Project run에만 run-scoped materialization |
+| Runtime Box | 동일 host Docker 실행에서 출발한 legacy compatibility. 명시적으로 확인된 기존 Project에서만 사용하며 Worker 장애 시 일반 fallback이 아님 |
+| Operator host | admin/operator와 활성 Agent 정책이 함께 허용한 별도 운영 분기. 일반 Project executor의 fallback이 아님 |
 
-Runtime Box는 단순 보안 장치가 아니라 **프로젝트별 실행환경**입니다. project + role + capability + credential grant가 모여 "이 프로젝트에서 이 AI가 무엇을 할 수 있는가"를 정합니다.
+신규 Project의 기본은 `canonical-project-workspace`입니다. 기존 Worker-local authoritative storage는 `legacy-worker-workspace`로 명시해 보존하며 자동 이관하지 않습니다. 실행환경을 사용할 수 없으면 명시적으로 실패하고 Runtime Box나 Operator host로 조용히 우회하지 않습니다.
 
 ### 3-6. Publishing — 워크스페이스 → 웹
 
@@ -222,23 +217,24 @@ Runtime Box는 단순 보안 장치가 아니라 **프로젝트별 실행환경*
 
 **핵심 규칙**:
 - 기본은 **unlisted** 링크. 사용자가 공개/SEO/짧은 URL을 명시할 때만 public.
-- 권장 URL은 wildcard subdomain: `https://<slug>.<server>/`. 이 서버는 `https://<slug>.tower.tower.example.com/`.
+- 권장 URL은 wildcard subdomain: `https://<slug>.<server>/`. 설치별 실제 URL은 게시 도구가 반환한 값을 사용합니다. unlisted는 인증 기반 비밀 보관이 아닙니다.
 - AI는 `/api/deploy`를 curl로 직접 호출하거나 `TOWER_API_TOKEN`을 요구하지 않습니다.
 - 프로젝트 컨텍스트에서는 먼저 `workspace/projects/<p>/published/<name>/` 또는 `dist/` 같은 프로젝트 내부 폴더에 만들고, `publish_site`가 공용 published 영역에 반영합니다.
 - PDF가 필요하면 print-stable HTML을 만들고 `pdf_export`로 실제 PDF를 내보낸 뒤 verification image를 확인합니다.
 
-### 3-7. Agent Sessions — subagent / persistent worker / spawn
+### 3-7. 지원 AI — 지속 Agent Session과 별도 대화
 
-Tower의 보조 AI 실행은 **Agent Session** 모델로 통합되고 있습니다.
+지원 AI는 모두 지속 Agent Session을 사용합니다. 일회성 업무도 별도 ephemeral 실행 유형을 만들지 않고, 완료 후 재사용하지 않을 수 있습니다.
 
-| 개념 | 뜻 | 언제 쓰나 |
-|---|---|---|
-| **Ephemeral run** | 한 번 실행하고 다시 부르지 않는 subagent run | 짧은 독립 조사·리뷰 |
-| **Persistent worker** | backing session을 가진 재사용 가능한 작업자 | QA steward, 릴리즈 리뷰어, 장기 모니터 |
-| **Spawned session** | 사용자가 사이드바에서 직접 볼 수 있는 별도 세션 | 사용자가 명시적으로 "별도 세션"을 원할 때 |
-| **State card** | 긴 agent 세션의 현재 상태 요약 | 운영 화면·supervisor가 빠르게 판단 |
+- 기본은 직접 처리합니다. 상당하고 독립적인 업무만 `persistent_agent_create`로 위임하고 맥락이 이어지면 `persistent_agent_send`로 다시 맡깁니다.
+- 브리프에는 전체 목표·로드맵·현재 단계·판단 책임·전문성·정본·가정·입출력·선행 결과·수정 소유권·금지 행동·검증·막힘 조건·통합 위치를 담습니다.
+- 입력이 확정되고 서로의 결과 없이 유효한 기여를 할 수 있을 때만 병렬화합니다. 조사→결정→구현→검증처럼 결과 의존성이 있으면 선행 결과를 수용한 뒤 순차 실행합니다.
+- 보고는 요청한 진행자에게 돌아가고 작업을 재개합니다. 진행자는 diff·출처·테스트 등 실제 근거를 확인해 통합합니다.
+- 사람이 지원 AI 세션에 참여해도 Agent 분류와 기존 제어 관계는 자동으로 없어지지 않습니다. 별도 세션이 파일·OS 격리를 보장하지 않습니다.
+- 일시정지는 후속 요청을 막습니다. 보관은 등록 항목을 보관하고 세션을 보존합니다. 둘 다 실행 중 작업의 즉시 취소를 보장하지 않으며 주 담당 세션 Stop만으로 모든 지원 AI가 멈춘다고 가정하지 않습니다.
+- 사람이 독립적으로 이어갈 사이드바 대화가 필요하면 별도 세션을 명시적으로 요청합니다. session spawn/send는 사용자 요청 또는 활성 스킬이 정한 흐름에서만 사용합니다.
 
-정책상 AI가 자기 편의로 sidebar spawn을 만들지는 않습니다. 일반적인 위임은 agent-worker 기반 subagent/persistent worker를 쓰고, 사용자가 명시적으로 별도 세션을 원할 때만 spawn을 씁니다. 기본 보고 계약은 **report-and-resume(wake)** 입니다. 작업자가 끝나면 부모 세션에 결과를 보고하고, 부모가 검증 후 사용자에게 종합합니다.
+자세한 사용자 안내: `docs/help/ko/10-support-ai.md`.
 
 ### 3-8. Hooks — 자동 동작
 
@@ -265,11 +261,15 @@ AI tool 호출 lifecycle에 자동으로 반응하는 콜백입니다. Tower는 
 Tower는 외부 secret manager를 기본 의존성으로 삼지 않고, 내장 **Credential Orchestrator**를 중심으로 갑니다.
 
 - secret 값은 Tower `secret_store`에 암호화 저장합니다.
-- 스킬·Runtime Box·GitHub Actions·Azure·GWS·자체 호스팅 서버 같은 target은 credential을 **이름과 grant**로만 받습니다.
+- Project run·선택된 executor·GitHub Actions·Azure·GWS·자체 호스팅 서버 같은 target은 credential을 **이름과 grant**로만 받습니다.
 - AI는 값을 보지 않고, presence/status만 확인합니다.
 - 프로젝트별 grant, user/account binding, audit log가 핵심입니다.
 
 예: gws는 Google Workspace credential, youtube-transcript는 `APIFY_TOKEN`, image-slide-gen은 이미지 전용 `OPENAI_IMAGE_API_KEY`(전환기에는 `OPENAI_API_KEY` fallback), tiro는 `TIRO_KEY`가 필요할 수 있습니다.
+
+### 3-10a. 개인 업무·비서실·대시보드
+
+내 할 일은 사용자의 개인 체크리스트, 진행 단계는 현재 AI 실행의 단계, 내 작업은 업무 기록, 자동화는 예약 실행입니다. 개인 공간과 프로젝트 저장소도 구분합니다. 비서실은 개인 제안함이며 제안 열람이 실행·외부 발송 승인을 뜻하지 않습니다. 관제실 대시보드는 접근 가능한 프로젝트에 명시적으로 등록한 항목만 모으며 계산기 생성만으로 자동 등록되지 않습니다. 음성 입력·답변 읽기·알림음은 별도 제공 조건을 따르고 Voice Lab이 일반 실시간 음성 제공을 보장하지 않습니다. 자세한 안내: `docs/help/ko/11-personal-and-services.md`.
 
 ### 3-11. UI Action Bus (계획/초기 방향)
 
@@ -305,29 +305,20 @@ AI가 임의 JavaScript나 DOM selector를 실행하는 방식은 금지입니�
 3. 사용자가 "발표 자료로"라고 하면 html-slide, image-slide-gen, pptx-template 등으로 이어감
 ```
 
-### 4-2. 워크플로 B — 채널에서 빠른 AI 호출
+### 4-2. 워크플로 B — 세션에서 이전 결정 찾기
 
-```
-1. 채팅 채널에서 사용자가: "@ai 어제 결정한 이슈가 뭐였더라?"
-2. Channel AI가 답:
-   - 채널의 프로젝트 문맥을 기준으로 동작
-   - 채널 페르소나 + 프로젝트명이 system prompt overlay
-3. 답은 채널과 backing session에 남아 팀 자산이 됨
-4. 다른 멤버가 이어서 @ai를 부르면 문맥이 이어짐
-```
+1. 사용자가 담당 AI 팀원의 세션에서 “지난번 결정한 이슈를 찾아줘”라고 요청합니다.
+2. AI가 접근 가능한 대화·요약과 프로젝트 정본을 검색합니다.
+3. 요약을 단서로 사용하고 실제 대화나 정본에서 중요한 결정을 확인합니다.
+4. 출처와 미확인 사항을 구분해 답합니다. 검색한 세션을 자동 재개하거나 메시지를 보내지 않습니다.
 
-### 4-3. 워크플로 C — 스케줄/태스크 자동화
+### 4-3. 워크플로 C — 예약·반복 업무
 
-```
-1. 사용자: "매일 9시에 키움 관련 뉴스 변화가 있으면 townhall에 알려줘"
-2. task-schedule 흐름이:
-   a. 프로젝트와 보고 채널을 정함 (기본은 프로젝트 townhall)
-   b. report policy를 정함 (기본은 auto: 중요할 때만)
-   c. run context를 정함 (기본은 auto: 이어갈지 fresh run일지 판단)
-   d. schedule-owned session 또는 fresh run으로 실행
-3. 결과가 중요하면 채널에 요약, 변화 없으면 조용히 기록만 남김
-4. 실패하면 on_error 정책에 따라 보고
-```
+1. “매일 오전 9시에 지정한 주제의 뉴스 변화를 정리해줘”라고 요청합니다.
+2. 목적·프로젝트·시각·주기·시간대·결과 위치를 확인합니다.
+3. 사용자가 예약 요약을 확인한 뒤 등록합니다.
+4. 자동화 화면에서 상태·다음 실행·최근 실행과 실패 기록을 확인합니다.
+5. 생성, 활성화, 실행 성공, 결과 전달 성공을 구분합니다. 과거 townhall 채널을 기본 보고 대상으로 가정하지 않습니다.
 
 ### 4-4. 워크플로 D — 새 스킬 도입·공유
 
@@ -340,8 +331,9 @@ AI가 임의 JavaScript나 DOM selector를 실행하는 방식은 금지입니�
    - copy/merge/rename 방향 확인
    - skill.yaml/version metadata 반영
 5. 필요한 프로젝트에 materialize:
-   - .tower/skills/<skill>/ runtime copy 생성
-   - Runtime Box에서 실제 trigger/secret/스크립트 검증
+   - `.tower/skills/<skill>/` Project-visible runtime copy 생성
+   - 실제 Project `bash`와 선택된 executor에서 trigger/credential/스크립트 검증
+   - 명시적인 legacy Runtime Box consumer가 있을 때만 그 compatibility copy를 별도 확인
 6. 자체 호스팅 서버 전파는 별도 명시 요청 시 /managed-skill-rollout 또는 /fleet
 ```
 
@@ -354,7 +346,7 @@ AI가 임의 JavaScript나 DOM selector를 실행하는 방식은 금지입니�
 3. worker는 backing Agent Session에 맥락을 누적하며 실행
 4. 완료/막힘/리스크가 생기면 부모 세션에 report-and-resume으로 보고
 5. 부모는 실제 diff/test/log/render evidence를 확인한 뒤 사용자에게 종합
-6. 더 필요 없으면 archive/pause, 계속 필요하면 후속 지시
+6. 후속 요청을 막으려면 pause, 정리하려면 archive. 현재 실행 중단은 별도로 상태를 확인하고 처리
 ```
 
 ---
@@ -399,7 +391,7 @@ AI가 임의 JavaScript나 DOM selector를 실행하는 방식은 금지입니�
 ├── packages/
 │   ├── backend/services/
 │   │   ├── system-prompt.ts   ← 시스템 프롬프트 (모든 세션 영향)
-│   │   ├── ai/                ← AI runtime adapters, @ai, 보조 에이전트
+│   │   ├── ai/                ← AI runtime adapters, 지원 AI
 │   │   ├── session/           ← AI 세션 라이프사이클
 │   │   ├── task/              ← 작업·스케줄·자동화
 │   │   ├── publishing/        ← 사이트 배포 / 매니페스트
@@ -442,11 +434,11 @@ AI가 임의 JavaScript나 DOM selector를 실행하는 방식은 금지입니�
 | DB | PostgreSQL (기본 production) / SQLite 옵션 (경량·개발 환경) |
 | AI | Tower AI runtime, provider routing, Local 옵션 |
 | 외부 API | Anthropic, OpenRouter, Azure/OpenAI, Google/Naver/Tiro 등 grant 기반 통합 |
-| 인증 | JWT + AES-256-GCM, httpOnly 쿠키 |
+| 인증과 비밀정보 보호 | 로그인·세션 인증과 Credential 암호화는 별도 계층입니다. 클라이언트 토큰 저장·쿠키 정책은 현재 인증 계약과 설치 설정을 확인합니다. |
 | 프로세스 | PM2 (prod), tsx watch (dev) |
 | 리버스 프록시 | Nginx + LE wildcard cert |
 | 배포 자동화 | 공개 installer/upgrade 흐름 또는 운영자가 선택한 CI/CD |
-| 격리 실행 | Project Runtime Box + Docker sandbox (in-process MCP, 형제 execution VM) |
+| 격리 실행 | Project Environment + Worker executor + sandbox policy. Runtime Box는 legacy Docker compatibility |
 
 ### 6-2. 배포 프로필
 
@@ -461,7 +453,7 @@ AI가 임의 JavaScript나 DOM selector를 실행하는 방식은 금지입니�
 - 새 설치는 `TOWER_ROLE=standalone`으로 시작합니다.
 - `managed`는 조직 gateway URL과 인증을 운영자가 명시적으로 제공한 경우에만 선택합니다.
 - `full`은 일반 self-host의 상위 버전이 아니라, 여러 설치를 책임지는 조직 control plane 프로필입니다.
-- Runtime Box는 같은 호스트 또는 운영자가 선택한 별도 실행면에서 구성할 수 있으며, 실제 주소와 credential은 저장소 밖 설정으로 관리합니다.
+- canonical Project workspace가 파일 정본이며, Tower가 필요한 capability와 health를 기준으로 executor를 선택합니다. Runtime Box compatibility를 유지하는 기존 설치의 주소와 credential은 저장소 밖 설정으로 관리합니다.
 
 ### 6-4. 배포 흐름
 
@@ -474,16 +466,11 @@ AI가 임의 JavaScript나 DOM selector를 실행하는 방식은 금지입니�
 
 ## 7. 보안 / 격리 / 감사
 
-### 7-1. 데이터 흐름
+### 7-1. 데이터 흐름과 외부 전송
 
-```
-[사용자 브라우저] ─HTTPS─▶ [Nginx] ─내부─▶ [Tower 서버] ─┬─▶ [Postgres]
-                                                    └─▶ [workspace/ 파일]
-                                                    └─HTTPS─▶ [api.anthropic.com] (AI API 만 외부)
-```
+브라우저의 요청은 Tower 서버와 저장소에서 처리됩니다. 선택한 모델·검색·문서 변환·이미지 생성·Google Workspace 등 도구에 따라 필요한 요청 내용과 자료가 해당 외부 서비스로 전송될 수 있습니다.
 
-**외부로 나가는 것**: AI 에게 보내는 프롬프트 + 첨부 내용 *뿐*.
-**외부 저장**: 없음 (Anthropic 기업 약관 하에 미보관).
+외부 전송 대상·보관·학습 이용 정책은 제공자와 계약·설정에 따라 다릅니다. “AI API만 외부로 나간다”거나 “외부 저장이 없다”고 일괄 보장하지 않습니다. 민감 자료는 승인된 연결과 서비스 약관·조직 정책을 먼저 확인합니다.
 
 ### 7-2. 격리 매트릭스
 
@@ -491,8 +478,8 @@ AI가 임의 JavaScript나 DOM selector를 실행하는 방식은 금지입니�
 |---|---|
 | 프로젝트 간 | AI 세션의 cwd 가 `workspace/projects/<p>/` 로 제한. ACL 가드가 다른 프로젝트 read/write 차단 |
 | 멤버 vs admin | workspace 루트는 admin/operator territory. docs/decisions는 정책에 따라 member write 가능 영역도 있음 |
-| 코드 vs 실행 | 본체에서 사용자 코드 직접 실행 금지. Runtime Box/Sandbox로 실행 |
-| Runtime Box / Sandbox 컨테이너 간 | Docker network 차단 + 사용자별 컨테이너 cap + 프로젝트별 credential grant |
+| 코드 vs 실행 | canonical Project workspace가 파일 정본이고, 실행은 Project Environment가 승인한 executor와 sandbox policy를 통과 |
+| Executor / Sandbox 간 | root confinement + network policy + resource limit + 프로젝트별 credential grant. Runtime Box container 규칙은 legacy compatibility에만 적용 |
 | 외부 통합 | claude.ai connector 차단 (multi-tenant 안전 문제), gws CLI와 Tower in-process 통합 우선 |
 | Secret / Credential | Credential Vault grant 기반. AI는 secret 값을 보지 않고 이름·상태만 다룸 |
 
@@ -501,7 +488,7 @@ AI가 임의 JavaScript나 DOM selector를 실행하는 방식은 금지입니�
 | 자산 | 위치 | 내용 |
 |---|---|---|
 | AI 대화 | Postgres `session_messages` | 누가 언제 무슨 대화 |
-| 파일 변경 | git 자동 커밋 (`Tower-Session: <id>` trailer) | 모든 변경의 diff + 누구 세션 |
+| 파일 변경 | 명시적으로 실행한 git 커밋과 diff | 커밋된 변경의 diff와 관련 세션 |
 | 작업 흔적 | `workspace/.audit/provenance.jsonl` | PostToolUse hook 이 자동 누적 (어떤 도구가 어떤 파일을) |
 | 결정 | `decisions/` (immutable) | 정책·구조 변경 |
 | 진행 | `<project>/.project/progress.md` | 일상 작업 로그 |
@@ -512,13 +499,13 @@ AI가 임의 JavaScript나 DOM selector를 실행하는 방식은 금지입니�
 | 요건 | Tower 대응 |
 |---|---|
 | 데이터 국내 저장 | On-premise, 고객사 서버 |
-| 외부 전송 통제 | AI API 만 외부 |
+| 외부 전송 통제 | 모델·도구·연결별 전송 대상과 정책 확인 |
 | 접근 권한 관리 | 역할 + 프로젝트 ACL + capability grant + credential grant |
 | 감사 로그 | DB / git / provenance / decisions / schedule·agent run 기록 |
 | 암호화 | AES-256-GCM + TLS 1.2+ |
 | 망분리 | 폐쇄망 설치 가능 (Tier 1 화이트리스트 + 로컬 LLM 옵션) |
 | AI 행동 통제 | Permission Mode (plan / acceptEdits / bypassPermissions) |
-| 데이터 격리 | 프로젝트·Runtime Box·Credential grant 단위 격리 |
+| 데이터 격리 | 프로젝트 ACL·canonical workspace·sandbox policy·Credential grant 단위 격리 |
 
 추가 옵션 (요청 시): SSO (SAML/OIDC), IP whitelisting, 2FA (TOTP), 로컬 LLM, VLAN 분리.
 
@@ -539,7 +526,7 @@ AI가 임의 JavaScript나 DOM selector를 실행하는 방식은 금지입니�
 3. **차별** — 개인 AI vs Tower — §1-2 표
 4. **축적** — 문서·결정·스킬·산출물이 회사 자산으로 남음
 5. **보안** — 데이터 흐름 + Credential Vault + 감사 트레일 — §7
-6. **도입 시나리오** — 프로젝트 단위로 작은 업무부터 Runtime Box/스킬화
+6. **도입 시나리오** — 프로젝트 단위로 작은 업무부터 Project Environment/스킬화
 7. **검증 근거** — 합성 데모와 공개 가능한 운영 지표
 8. **비용** — 개인 구독이 아니라 조직 실행력·감사·재사용성 관점
 
@@ -550,12 +537,12 @@ AI가 임의 JavaScript나 DOM selector를 실행하는 방식은 금지입니�
 핵심 슬라이드 8장:
 
 1. **사무실 비유** — §1-1
-2. **세 가지 대화** (Session / @ai / @task) — §3-1
+2. **현재 업무 경로** (Session / Automations / 지원 AI / AI 서비스) — §3-1
 3. **프로젝트가 중심** — §3-2 + 폴더 구조
 4. **워크플로 예시 1** — 분석 보고서 자동 작성 — §4-1
-5. **워크플로 예시 2** — 채널 @ai — §4-2
-6. **워크플로 예시 3** — @task 자율 작업 — §4-3
-7. **스킬 카탈로그** — §3-4 조직 기본 29개 + project-local skills
+5. **워크플로 예시 2** — 이전 결정 찾기 — §4-2
+6. **워크플로 예시 3** — 예약·반복 업무 — §4-3
+7. **스킬 카탈로그** — §3-4 조직 기본 목록 + project-local skills
 8. **파일 어디 가나** — §5-1 워크스페이스 지도 + 산출물 절대경로 규칙
 
 ### 8-3. 톤 C — IT/보안 담당자용
@@ -568,7 +555,7 @@ AI가 임의 JavaScript나 DOM selector를 실행하는 방식은 금지입니�
 2. **역할 + 프로젝트 ACL + capability/credential grant** — §2 + §7-2
 3. **AI 행동 통제 (Permission Mode)** — §2-4
 4. **감사 트레일** — DB / git / provenance / decisions / run 기록 — §7-3
-5. **Runtime Box / Sandbox 격리** — §3-5
+5. **Project Environment / Sandbox 격리** — §3-5
 6. **은행권 체크리스트** — §7-4 + 추가 강화 옵션
 
 ### 8-4. 톤 D — 개발자용 (사내 엔지니어링 공유)
@@ -579,12 +566,12 @@ AI가 임의 JavaScript나 DOM selector를 실행하는 방식은 금지입니�
 
 1. **스택 + 환경 매트릭스** — §6
 2. **AI 컨텍스트 5-레이어** — §5-3 + `architecture.md`
-3. **세 가지 실행 경로** (Session / Channel AI / Task) — §3-1 + `ai-execution-paths.md`
+3. **현재 업무 경로** — §3-1 + 현재 실행 계약
 4. **시스템 프롬프트 + DB policy + Runtime context** — `architecture.md` §1
 5. **스킬 SSOT와 materialization** — §3-4 + `skills.md`
 6. **Agent Control Plane** — §3-7 + agent decisions
 7. **Hooks (SDK Options.hooks)** — §3-8
-8. **Runtime Box / Sandbox / Credential Vault** — §3-5 + §3-10
+8. **Project Environment / Worker / Sandbox / Credential Vault** — §3-5 + §3-10
 
 ### 8-5. 공통 — 시각화 추천
 
@@ -604,13 +591,13 @@ AI가 임의 JavaScript나 DOM selector를 실행하는 방식은 금지입니�
 ## 9. 자주 묻는 질문 (FAQ)
 
 **Q. ChatGPT Team 이랑 뭐가 달라요?**
-A. ChatGPT Team 은 개인/팀용 AI 채팅에 가깝습니다. Tower 는 프로젝트, 파일, 권한, Credential Vault, Runtime Box, 스킬, 스케줄, Agent Worker가 묶인 회사용 Agent OS입니다. 핵심 차이는 "답변"보다 "회사 업무 구조와 실행 흔적이 남는다"는 점입니다. §1-2 표.
+A. ChatGPT Team 은 개인/팀용 AI 채팅에 가깝습니다. Tower 는 프로젝트, 파일, 권한, Credential Vault, Project Environment, 스킬, 스케줄, Agent Worker가 묶인 회사용 Agent OS입니다. 핵심 차이는 "답변"보다 "회사 업무 구조와 실행 흔적이 남는다"는 점입니다. §1-2 표.
 
 **Q. 인터넷 안 되는 환경에서도 써요?**
-A. 부분적 가능. AI API 호출만 외부 (Anthropic) — 폐쇄망에서는 VPN/프록시 또는 로컬 LLM (향후) 옵션. 그 외 모든 기능은 사내에서 동작. 조직의 네트워크 정책과 `INSTALL.md`를 함께 검토해야 합니다.
+A. 설치한 모델과 도구의 네트워크 의존성에 따라 다릅니다. 외부 검색·문서 변환·연결 서비스도 통신이 필요할 수 있습니다. 폐쇄망 지원 범위는 실제 설정과 `INSTALL.md`, 조직 정책을 함께 검토해야 합니다.
 
 **Q. AI 가 잘못된 파일 지우면 어떡해요?**
-A. (1) Permission Mode 로 사전 통제, (2) git 자동 커밋으로 복구, (3) damage-control 가드가 위험 명령 차단, (4) sandbox VM 으로 격리 실행, (5) decisions/ 는 immutable. §7.
+A. 삭제 전 대상과 승인을 확인하고 최소 권한을 사용합니다. 복구 가능 여부는 실제 백업·버전 관리 상태에 달려 있습니다. Stop이나 별도 세션이 완료된 삭제를 되돌리거나 OS 격리를 보장하지 않습니다. §7.
 
 **Q. 우리만의 스킬 만들 수 있어요?**
 A. 네. 프로젝트 안 `skills/<skill>/`에서 `/skill-architect`로 만들고 검증합니다. 여러 프로젝트가 함께 쓸 수준이면 `/share-skill`로 `teamskills` 조직 정본에 diff-first 반영하고, 필요한 프로젝트에 materialize합니다. 자체 호스팅 서버 전파는 별도 명시 요청으로 `/managed-skill-rollout` 또는 `/fleet`가 처리합니다.
@@ -647,7 +634,7 @@ A. 의사결정자용은 §8-1의 AX/Agent OS 흐름을 쓰고, 보안 담당자
 - `/skill-architect` — 새 스킬 만들기·검증·정제·트리거 튜닝·bloat audit
 - `/share-skill` — 프로젝트 local skill을 조직 공용 `teamskills`로 공유
 - `/managed-skill-rollout` / `/materialize-managed-skills` — 자체 호스팅 서버·프로젝트 runtime copy 반영과 검증
-- `/runtime-box-credentials` / `/customer-credentials` — Credential Vault grant·주입 상태 진단
+- `/project-credentials` / `/customer-credentials` — Credential Vault grant·주입 상태 진단
 - `/fleet` — 자체 호스팅 서버 서버 운영·Tower 코드 배포·스킬 sync
 - `/task-schedule` — 예약/반복 실행과 리포트 정책
 - `/search` + `memory_search` — 과거 세션 원문/요약 검색
@@ -670,15 +657,18 @@ A. 의사결정자용은 §8-1의 AX/Agent OS 흐름을 쓰고, 보안 담당자
 | 용어 | 한 줄 |
 |---|---|
 | **워크스페이스 (Workspace)** | 팀이 공유하는 파일 영역. `~/workspace/`. |
-| **프로젝트 (Project)** | 채널·세션·파일·AI 컨텍스트를 묶는 1차 단위. `workspace/projects/<name>/`. |
+| **프로젝트 (Project)** | 세션·파일·AI 컨텍스트를 묶는 1차 단위. `workspace/projects/<name>/`. |
 | **세션 (Session)** | AI 와의 1:1 대화 단위. |
-| **채널 (Channel) / 룸 (Room)** | 사용자 간 채팅 공간. `@ai` 호출 가능. |
+| **이전 내부 채널** | 종료된 팀 채팅 UI. 외부 AI 서비스 채널과 구분. |
 | **태스크 / 스케줄** | AI가 자율·예약·반복 실행하는 작업. report policy와 run context를 가짐. |
 | **스킬 (Skill)** | 재사용 가능한 AI 워크플로. 프로젝트 local source, teamskills 조직 source, `.tower/skills` runtime copy로 나뉨. |
 | **결정문서 (Decision)** | 정책·구조 변경의 영구 기록. `decisions/YYYY-MM-DD-title.md`. |
 | **AGENTS.md** | 프로젝트별 AI 컨텍스트. `<project>/AGENTS.md`. |
 | **Permission Mode** | AI 자율 실행 강도. plan / acceptEdits / bypassPermissions. |
-| **Runtime Box / Sandbox** | 프로젝트 코드를 격리 실행하는 컨테이너/실행면. `.tower/skills`와 credential grant를 사용. |
+| **Project Environment** | Project 권한, canonical workspace, environment mode와 필요한 capability를 실행 전에 해석하는 계약. |
+| **Worker / executor** | 명령·Job·Service를 실행하는 내부 실행자. Project 권위나 파일 정본은 아님. |
+| **Sandbox** | 선택된 executor에서 파일·프로세스·네트워크 접근을 제한하는 격리 메커니즘. |
+| **Runtime Box** | 기존 Docker 실행의 legacy compatibility. 일반 Project의 자동 fallback이 아님. |
 | **Publishing** | 워크스페이스 폴더를 웹으로 노출. `published/sites/<slug>/`. |
 | **Agent Worker / Spawn** | 보조 AI 실행 모델. worker는 재사용 가능한 Agent Session, spawn은 사용자-visible 별도 세션. |
 | **Hook** | AI tool lifecycle 의 자동 콜백. SDK Options.hooks. |
@@ -700,6 +690,8 @@ A. 의사결정자용은 §8-1의 AX/Agent OS 흐름을 쓰고, 보안 담당자
 | 2026-05-12 | 사용자 진입은 모두 스킬 호출(`/tower-intro`)로 일원화. 파일 경로는 사용자에게 직접 안내하지 않는다. | Tower maintainers |
 | 2026-05-13 | 운영자 유지보수 흐름은 `tower-intro` 핸드북 갱신으로 정리. 현재 정본은 managed bundle source `skills/managed/tower-intro/handbook.md`. | Tower maintainers |
 | 2026-06-26 | AX/Agent OS 포지셔닝, Project Runtime Box, teamskills SSOT, Credential Orchestrator, Agent Session 통합, task/schedule 리포트 정책, UI Action Bus 방향 반영. | Tower maintainers |
+| 2026-10-19 | 종료 채널·지원 AI·예약·개인 업무 안내를 현재 도움말과 정합화하고 외부 전송·복구의 과도한 보장을 제거. 소스 검토이며 배포·실화면 검증과 구분. | Tower maintainers |
+| 2026-09-19 | Project Environment와 canonical Project workspace를 현재 실행 정본으로 반영하고 Runtime Box를 legacy compatibility로 제한. | Tower maintainers |
 
 ---
 
@@ -723,7 +715,7 @@ A. 의사결정자용은 §8-1의 AX/Agent OS 흐름을 쓰고, 보안 담당자
 /skill-architect refine tower-intro
 ```
 
-스킬이 자동으로:
+검토·승인된 범위에서 수행할 단계:
 1. 최근 결정문서 신규 (`workspace/decisions/` git log) 검토
 2. `tower/docs/tower-guide/` 의 갱신일 비교
 3. `teamskills/skillset.json` 과 `config/skills/managed-skills.yaml` 정합성 확인

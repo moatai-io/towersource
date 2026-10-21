@@ -1,10 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { getPersistedWorkbenchWorker } from './workbench-worker-repository.js';
+import { getPersistedWorkbenchWorker } from '../execution/worker/worker-repository.js';
 import { requestProjectWorkerAssignment } from './workbench-project-worker-assignment.js';
 import { requestAutomaticProjectWorkerAssignment } from './workbench-project-worker-auto-request.js';
 
 vi.mock('../../config.js', () => ({ config: { workspaceRoot: '/workspace' } }));
-vi.mock('./workbench-worker-repository.js', () => ({ getPersistedWorkbenchWorker: vi.fn() }));
+vi.mock('../execution/worker/worker-repository.js', () => ({ getPersistedWorkbenchWorker: vi.fn() }));
 vi.mock('./workbench-project-worker-assignment.js', () => ({ requestProjectWorkerAssignment: vi.fn() }));
 
 const worker = {
@@ -21,9 +21,9 @@ beforeEach(() => {
 
 describe('automatic Project Worker assignment request', () => {
   it('queues one standard production Project after creation', async () => {
-    await expect(requestAutomaticProjectWorkerAssignment({ projectId: 'p1', rootPath: '/workspace/projects/p1', userId: 7, env: { NODE_ENV: 'production' } }))
+    await expect(requestAutomaticProjectWorkerAssignment({ projectId: 'p1', rootPath: '/workspace/projects/p1', userId: 7, env: { NODE_ENV: 'production', TOWER_PRIMARY_WORKER_ID: 'tower-projects-local-01' } }))
       .resolves.toBe('queued');
-    expect(requestProjectWorkerAssignment).toHaveBeenCalledWith(expect.objectContaining({ projectId: 'p1', deploymentId: 'production', workerId: 'tower-prod-local-01' }));
+    expect(requestProjectWorkerAssignment).toHaveBeenCalledWith(expect.objectContaining({ projectId: 'p1', deploymentId: 'production', workerId: 'tower-projects-local-01' }));
   });
 
   it.each([
@@ -37,6 +37,11 @@ describe('automatic Project Worker assignment request', () => {
 
   it('skips an unhealthy or draining primary without failing Project creation', async () => {
     vi.mocked(getPersistedWorkbenchWorker).mockResolvedValue({ ...worker, draining: true } as any);
+    await expect(requestAutomaticProjectWorkerAssignment({ projectId: 'p1', rootPath: '/workspace/projects/p1', env: { NODE_ENV: 'production', TOWER_PRIMARY_WORKER_ID: 'tower-projects-local-01' } })).resolves.toBe('skipped');
+  });
+
+  it('skips when this VM has no explicitly configured shared primary Worker', async () => {
     await expect(requestAutomaticProjectWorkerAssignment({ projectId: 'p1', rootPath: '/workspace/projects/p1', env: { NODE_ENV: 'production' } })).resolves.toBe('skipped');
+    expect(getPersistedWorkbenchWorker).not.toHaveBeenCalled();
   });
 });

@@ -2,7 +2,9 @@
 // It resolves project paths and session attachment references, probes bytes once, and
 // returns one policy decision. Specialized tools own parsing, never source authority.
 
+import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
+import { constants as fsConstants } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
@@ -11,9 +13,9 @@ import {
   decideAttachmentRepresentation,
   type AttachmentRepresentationDecision,
 } from './attachment-representation-policy.js';
-import { resolveSessionAttachment } from '../session-attachments/session-attachment-store.js';
+import { resolveAuthorizedSessionAttachment } from '../session-attachments/session-attachment-store.js';
 
-const DEFAULT_PROBE_BYTES = 64 * 1024;
+export const DEFAULT_PROBE_BYTES = 64 * 1024;
 const MAX_IMAGE_PIXELS = 40_000_000;
 const MAX_IMAGE_DIMENSION = 4096;
 const execFileAsync = promisify(execFile);
@@ -42,11 +44,21 @@ function imageDimensions(bytes: Buffer, mimeType: string): { width: number; heig
   return null;
 }
 
+export interface FileRepresentationSource {
+  /** Fixed Project authority must own both metadata and byte reads. Never fall back to host fs after a denial. */
+  stat: (absolutePath: string) => Promise<{ isFile(): boolean; size: number }>;
+  readProbe: (absolutePath: string, maxBytes: number) => Promise<Buffer>;
+  /** Required by text Read. The source enforces maxBytes and its own no-follow confinement. */
+  readFile: (absolutePath: string, maxBytes: number) => Promise<Buffer>;
+}
+
 export interface FileRepresentationContext {
   cwd: string;
   projectRoot?: string;
   sessionId?: string;
   userId?: number;
+  /** Installed, already-authorized source for Project files. Requires projectRoot; attachments stay local. */
+  projectSource?: FileRepresentationSource;
 }
 
 export interface PreparedFileRepresentation {
@@ -57,6 +69,9 @@ export interface PreparedFileRepresentation {
   temporary: boolean;
   decision: AttachmentRepresentationDecision;
 }
+
+// Internal source capability; never serialize actor context or host paths as durable authority.
+const attachmentContexts = new WeakMap<PreparedFileRepresentation, FileRepresentationContext>();
 
 function isInside(parent: string, candidate: string): boolean {
   const resolvedParent = path.resolve(parent);
@@ -77,8 +92,9 @@ function resolvePathSource(source: string, ctx: FileRepresentationContext): stri
 }
 
 async function readProbe(filePath: string, maxBytes = DEFAULT_PROBE_BYTES): Promise<Buffer> {
-  const handle = await fs.open(filePath, 'r');
+  const handle = await fs.open(filePath, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
   try {
+    if (!(await handle.stat()).isFile()) throw new Error('FILE_SOURCE_NOT_REGULAR');
     const buffer = Buffer.alloc(maxBytes);
     const { bytesRead } = await handle.read(buffer, 0, maxBytes, 0);
     return buffer.subarray(0, bytesRead);
@@ -97,7 +113,7 @@ export async function prepareFileRepresentation(
 
   if (source.startsWith('session://attachments/')) {
     if (!ctx.userId || !ctx.sessionId) throw new Error('Authenticated session context is required for session attachments.');
-    const resolved = await resolveSessionAttachment(ctx.userId, ctx.sessionId, source);
+    const resolved = await resolveAuthorizedSessionAttachment(ctx.userId, ctx.sessionId, source);
     filePath = resolved.path;
     name = resolved.document.name;
     temporary = true;
@@ -106,9 +122,16 @@ export async function prepareFileRepresentation(
     name = path.basename(filePath);
   }
 
-  const [stat, probe] = await Promise.all([fs.stat(filePath), readProbe(filePath)]);
+  if (!temporary && ctx.projectSource && (!ctx.projectRoot || !isInside(ctx.projectRoot, filePath))) {
+    throw new Error('PROJECT_FILE_SOURCE_OUTSIDE_ROOT');
+  }
+  const projectSource = temporary ? undefined : ctx.projectSource;
+  const [stat, probe] = await Promise.all([
+    projectSource ? projectSource.stat(filePath) : fs.stat(filePath),
+    projectSource ? projectSource.readProbe(filePath, DEFAULT_PROBE_BYTES) : readProbe(filePath),
+  ]);
   if (!stat.isFile()) throw new Error(`Not a regular file: ${source}`);
-  return {
+  const prepared: PreparedFileRepresentation = {
     source,
     path: filePath,
     name,
@@ -116,6 +139,68 @@ export async function prepareFileRepresentation(
     temporary,
     decision: decideAttachmentRepresentation({ name, bytes: probe }),
   };
+  if (temporary) attachmentContexts.set(prepared, { ...ctx });
+  return prepared;
+}
+
+async function reauthorizePreparedAttachment(prepared: PreparedFileRepresentation): Promise<void> {
+  if (!prepared.temporary) return;
+  const ctx = attachmentContexts.get(prepared);
+  if (!ctx?.userId || !ctx.sessionId || !prepared.source.startsWith('session://attachments/')) {
+    throw new Error('SESSION_ATTACHMENT_CAPABILITY_REQUIRED');
+  }
+  const resolved = await resolveAuthorizedSessionAttachment(ctx.userId, ctx.sessionId, prepared.source);
+  if (resolved.path !== prepared.path) throw new Error('SESSION_ATTACHMENT_SOURCE_CHANGED');
+}
+
+/** One byte source contract for every format, without Project fallback for attachments. */
+export async function readPreparedFileBytes(prepared: PreparedFileRepresentation, source: FileRepresentationSource | undefined, maxBytes: number): Promise<Buffer> {
+  if (!Number.isSafeInteger(maxBytes) || maxBytes <= 0) throw new Error('FILE_SOURCE_LIMIT_INVALID');
+  if (prepared.sizeBytes > maxBytes) throw new Error(`Source exceeds ${maxBytes}-byte limit.`);
+  if (!prepared.temporary && source) {
+    const bytes = await source.readFile(prepared.path, maxBytes);
+    if (bytes.length > maxBytes) throw new Error('FILE_SOURCE_LIMIT_EXCEEDED');
+    return bytes;
+  }
+  await reauthorizePreparedAttachment(prepared);
+  const handle = await fs.open(prepared.path, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
+  try {
+    const stat = await handle.stat();
+    if (!stat.isFile()) throw new Error('FILE_SOURCE_NOT_REGULAR');
+    if (stat.size > maxBytes) throw new Error('FILE_SOURCE_LIMIT_EXCEEDED');
+    if (prepared.temporary && stat.size !== prepared.sizeBytes) throw new Error('FILE_SOURCE_CHANGED_DURING_READ');
+    const bytes = Buffer.alloc(Math.min(stat.size + 1, maxBytes + 1));
+    let offset = 0;
+    while (offset < bytes.length) {
+      const result = await handle.read(bytes, offset, bytes.length - offset, offset);
+      if (!result.bytesRead) break;
+      offset += result.bytesRead;
+    }
+    if (offset > maxBytes) throw new Error('FILE_SOURCE_LIMIT_EXCEEDED');
+    if (offset !== stat.size) throw new Error('FILE_SOURCE_CHANGED_DURING_READ');
+    return bytes.subarray(0, offset);
+  } finally { await handle.close(); }
+}
+
+export async function withPreparedLocalFile<T>(
+  prepared: PreparedFileRepresentation,
+  source: FileRepresentationSource | undefined,
+  maxBytes: number,
+  use: (localPath: string, metadata: { sha256?: string }) => Promise<T>,
+): Promise<T> {
+  if (!Number.isSafeInteger(maxBytes) || maxBytes <= 0) throw new Error('PROJECT_FILE_STAGE_LIMIT_INVALID');
+  if (prepared.sizeBytes > maxBytes) throw new Error(`Source exceeds the ${maxBytes}-byte staging budget.`);
+  if (!source && !prepared.temporary) return use(prepared.path, {});
+  const bytes = await readPreparedFileBytes(prepared, source, maxBytes);
+  if (bytes.length > maxBytes || bytes.length !== prepared.sizeBytes) throw new Error('FILE_SOURCE_STAGE_SIZE_MISMATCH');
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'tower-project-file-stage-'));
+  const localPath = path.join(tempDir, path.basename(prepared.name));
+  try {
+    await fs.writeFile(localPath, bytes, { flag: 'wx', mode: 0o600 });
+    return await use(localPath, { sha256: crypto.createHash('sha256').update(bytes).digest('hex') });
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
 }
 
 export function requireDetectedMime(
@@ -157,7 +242,7 @@ async function normalizeVisionImage(prepared: PreparedFileRepresentation): Promi
   }
 }
 
-export async function readPreparedVisionImage(prepared: PreparedFileRepresentation) {
+export async function readPreparedVisionImage(prepared: PreparedFileRepresentation, source?: FileRepresentationSource) {
   if (prepared.decision.modelMode !== 'vision' || !prepared.decision.detectedMimeType?.startsWith('image/')) {
     return null;
   }
@@ -165,18 +250,22 @@ export async function readPreparedVisionImage(prepared: PreparedFileRepresentati
   if (maxBytes !== undefined && prepared.sizeBytes > maxBytes) {
     throw new Error(`Image exceeds the ${maxBytes}-byte model representation budget.`);
   }
-  const source = await fs.readFile(prepared.path);
-  const dimensions = imageDimensions(source.subarray(0, DEFAULT_PROBE_BYTES), prepared.decision.detectedMimeType);
-  if (dimensions && (dimensions.width <= 0 || dimensions.height <= 0 || dimensions.width * dimensions.height > MAX_IMAGE_PIXELS)) {
-    throw new Error(`Image dimensions exceed the ${MAX_IMAGE_PIXELS}-pixel model representation budget.`);
-  }
-  const normalized = await normalizeVisionImage(prepared);
-  if (maxBytes !== undefined && normalized.data.length > maxBytes) {
-    throw new Error(`Normalized image exceeds the ${maxBytes}-byte model representation budget.`);
-  }
-  return {
-    type: 'image' as const,
-    data: normalized.data.toString('base64'),
-    mimeType: normalized.mimeType,
-  };
+  return withPreparedLocalFile(prepared, source, maxBytes ?? 20 * 1024 * 1024, async localPath => {
+    // Parser-local capability: not a session source and never handed to Project tools.
+    const localPrepared = localPath === prepared.path ? prepared : { ...prepared, path: localPath };
+    const bytes = await fs.readFile(localPath);
+    const dimensions = imageDimensions(bytes.subarray(0, DEFAULT_PROBE_BYTES), prepared.decision.detectedMimeType!);
+    if (dimensions && (dimensions.width <= 0 || dimensions.height <= 0 || dimensions.width * dimensions.height > MAX_IMAGE_PIXELS)) {
+      throw new Error(`Image dimensions exceed the ${MAX_IMAGE_PIXELS}-pixel model representation budget.`);
+    }
+    const normalized = await normalizeVisionImage(localPrepared);
+    if (maxBytes !== undefined && normalized.data.length > maxBytes) {
+      throw new Error(`Normalized image exceeds the ${maxBytes}-byte model representation budget.`);
+    }
+    return {
+      type: 'image' as const,
+      data: normalized.data.toString('base64'),
+      mimeType: normalized.mimeType,
+    };
+  });
 }

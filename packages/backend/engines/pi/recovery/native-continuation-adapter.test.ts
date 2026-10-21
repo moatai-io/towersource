@@ -15,11 +15,13 @@ describe('Pi native continuation adapter', () => {
       _emitAgentSettled: emitAgentSettled,
       _flushPendingBashMessages: flushPendingBashMessages,
       _systemPromptOverride: 'temporary',
+      _agentRunAbortRequested: true,
     };
 
     await continuePiNativeLifecycle(session, 'test');
 
     expect(agentContinue).toHaveBeenCalledTimes(2);
+    expect(session._agentRunAbortRequested).toBe(false);
     expect(handlePostAgentRun).toHaveBeenCalledTimes(2);
     expect(session._isAgentRunActive).toBe(true);
     expect(session._systemPromptOverride).toBeUndefined();

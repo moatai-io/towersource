@@ -103,6 +103,7 @@ function TourOverlay({
   nextStep,
   previousStep,
 }: Pick<TourContextValue, 'activeTour' | 'activeStep' | 'stepIndex' | 'endTour' | 'nextStep' | 'previousStep'>) {
+  const { t } = useTranslation('layout');
   const rect = useTargetRect(activeStep);
   if (!activeTour || !activeStep || !rect) return null;
 
@@ -133,7 +134,6 @@ function TourOverlay({
     cardTop = clamp(cardTop, 16, window.innerHeight - 210);
   }
 
-  const { t } = useTranslation('layout');
   const isFirst = stepIndex === 0;
   const isLast = stepIndex >= activeTour.steps.length - 1;
 

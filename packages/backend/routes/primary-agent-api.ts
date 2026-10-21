@@ -30,7 +30,23 @@ const bootstrapPreviewSchema=z.object({sourceProjectId:z.string().min(1),name:z.
 const bootstrapCommandSchema=z.object({sourceProjectId:z.string().min(1),name:z.string().min(1).max(120),face:z.string().min(1).max(120),expertiseIntent:z.string().min(1).max(1000).optional(),expectedExpertise:z.string().min(1).max(1000).optional()}).superRefine((value,ctx)=>{if(!value.expertiseIntent&&!value.expectedExpertise)ctx.addIssue({code:'custom',message:'expertiseIntent is required',path:['expertiseIntent']})});
 
 function actor(req:any){const userId=req.user?.userId,role=String(req.user?.role||'member');if(!Number.isInteger(userId))throw new Error('auth required');return{userId,role}}
-function fail(res:any,error:any){const message=error?.message||'Primary Agent creation failed';const status=message==='auth required'?401:/restricted|cannot create|intent required|hash does not match|unavailable/i.test(message)?403:/Idempotency key|unused server-approved/i.test(message)?409:error?.name==='ZodError'?400:500;if(status===500)console.error('[primary-agent-api]',error);res.status(status).json({error:message,details:error?.details})}
+function fail(res:any,error:any){
+  const message=error?.message||'Primary Agent creation failed';
+  const code=message==='auth required'?'AUTH_REQUIRED'
+    :/accessible source Project/i.test(message)?'SOURCE_PROJECT_ACCESS_DENIED'
+    :/Published Harness binding not found|Harness capability mismatch|Default Primary Agent Harness/i.test(message)?'DEFAULT_HARNESS_UNAVAILABLE'
+    :/SKILL_SOURCE_INCOMPLETE/i.test(message)?'SKILL_SOURCE_INCOMPLETE'
+    :error?.name==='ZodError'?'INVALID_CREATION_REQUEST'
+    :/Idempotency key|unused server-approved/i.test(message)?'CREATION_CONFLICT'
+    :'PRIMARY_AGENT_CREATION_FAILED';
+  const status=code==='AUTH_REQUIRED'?401
+    :code==='SOURCE_PROJECT_ACCESS_DENIED'?403
+    :code==='INVALID_CREATION_REQUEST'?400
+    :code==='CREATION_CONFLICT'?409
+    :/AGENT_EXECUTION_AUTHORITY_RESERVED|restricted|cannot create|intent required|hash does not match|unavailable/i.test(message)?403:500;
+  if(status===500)console.error('[primary-agent-api]',error);
+  res.status(status).json({error:message,code,details:error?.details});
+}
 
 router.post('/bootstrap-preview-intents',async(req,res)=>{try{
   if(!config.agentFirstEnabled)return res.status(404).json({error:'Agent-first feature is not enabled'});

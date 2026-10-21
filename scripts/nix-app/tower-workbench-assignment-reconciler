@@ -5,5 +5,47 @@ fail(){ printf 'tower-workbench-assignment-reconciler: %s\n' "$*" >&2; exit 1; }
 app_root="${TOWER_APP_ROOT:-$(dirname "$(dirname "$(realpath "$0")")")}"; app_root="$(realpath "$app_root")"
 entrypoint="$app_root/lib/tower/dist/backend/packages/backend/scripts/reconcile-primary-worker-assignment.js"
 [[ -f "$entrypoint" ]] || fail "missing assignment reconciler entrypoint: $entrypoint"
-export TOWER_ASSIGNMENT_WORKER_INSTALLER="${TOWER_ASSIGNMENT_WORKER_INSTALLER:-$app_root/bin/install-local-workbench-worker-units}"
+case "${TOWER_ASSIGNMENT_SERVICE_MANAGER:-user}" in
+  system) default_installer="$app_root/bin/install-system-workbench-worker-units" ;;
+  user) default_installer="$app_root/bin/install-local-workbench-worker-units" ;;
+  *) fail 'invalid assignment service manager' ;;
+esac
+export TOWER_APP_ROOT="$app_root"
+export TOWER_ASSIGNMENT_WORKER_INSTALLER="${TOWER_ASSIGNMENT_WORKER_INSTALLER:-$default_installer}"
+# Renew even when no assignment is queued or routing delegates to the scope
+# coordinator. EX serializes identity-file changes with deployment/scope work.
+if [[ -n "${TOWER_ASSIGNMENT_WORKER_IDENTITY:-}" ]]; then
+  renewal_entry="$app_root/lib/tower/dist/backend/packages/backend/scripts/renew-local-worker-identity.js"
+  [[ -f "$renewal_entry" ]] || fail 'identity renewal entrypoint missing'
+  [[ -f /var/lib/tower-worker-maintenance/deployment.lock ]] || fail 'identity renewal requires deployment lock'
+  # Cutover holds SH while synchronously starting this unit. Waiting for EX
+  # here cannot succeed until that caller returns. Defer only lock contention;
+  # an acquired-lock renewal failure must never be mistaken for contention.
+  renewal_status=0
+  (
+    exec 196</var/lib/tower-worker-maintenance/deployment.lock
+    flock -x -n -E 75 196 || exit "$?"
+    node "$renewal_entry" || exit 1
+  ) || renewal_status=$?
+  case "$renewal_status" in
+    0) ;;
+    75) printf '{"status":"deferred","operation":"identity-renewal","reason":"deployment-lock-busy"}\n' ;;
+    *) fail 'identity renewal failed; operator inspection required' ;;
+  esac
+fi
+# Route read-only BEFORE opening SH. Dedicated scope timer runs in its own
+# root coordinator unit and acquires EX in lifecycle, never nested under SH.
+route_entry="$app_root/lib/tower/dist/backend/packages/backend/scripts/worker-scope-assignment-routing.js"
+[[ -f "$route_entry" ]] || fail 'scope routing entrypoint missing'
+route_status=0
+node "$route_entry" || route_status=$?
+case "$route_status" in
+  0) ;; # signed/prepared path: retain normal legacy verify + activation
+  21) exit 0 ;; # pending missing scope belongs to separately installed scope timer
+  *) fail 'assignment route blocked; no installer fallback' ;;
+esac
+if [[ -f /var/lib/tower-worker-maintenance/deployment.lock ]]; then
+  exec 197</var/lib/tower-worker-maintenance/deployment.lock
+  flock -s -n 197 || fail 'Worker maintenance owns deployment lock'
+fi
 exec node "$entrypoint"

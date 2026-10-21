@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 
 const panel = fs.readFileSync(path.resolve(import.meta.dirname, './FavoritesPanel.tsx'), 'utf8');
 const app = fs.readFileSync(path.resolve(import.meta.dirname, '../../App.tsx'), 'utf8');
+const viewer = fs.readFileSync(path.resolve(import.meta.dirname, '../layout/ViewerPane.tsx'), 'utf8');
 const header = fs.readFileSync(path.resolve(import.meta.dirname, '../layout/Header.tsx'), 'utf8');
 
 describe('Favorites hub', () => {
@@ -18,19 +19,18 @@ describe('Favorites hub', () => {
     expect(panel).not.toContain("project.pinned");
   });
 
-  it('opens from the hamburger menu in the main pane', () => {
-    expect(header).toContain("label={t('favorites')}");
-    expect(app).toContain("useSessionStore.getState().setActiveView('favorites')");
-    expect(app).toContain("activeView === 'favorites'");
-    expect(app).toContain('<FavoritesPanel');
+  it('keeps the durable favorites hub out of the hamburger menu', () => {
+    expect(header).not.toContain("label={t('favorites')}");
+    expect(header).not.toContain('testId="global-nav-favorites"');
+    expect(app).not.toContain("onPinsClick={() =>");
   });
 
   it('offers favorite and path-copy actions from the Viewer tab context menu', () => {
-    expect(app).toContain("? t('layout:removeFromFavorites') : t('layout:addToFavorites')");
-    expect(app).toContain('void handlePinFile(tab.path)');
-    expect(app).toContain('void handleUnpinFile(favorite.id)');
-    expect(app).toContain('await navigator.clipboard.writeText(tab.path)');
-    expect(app).toContain("toastQuiet(t('layout:pathCopied'))");
-    expect(app).toContain("{t('layout:copyPath')}");
+    expect(viewer).toContain("favorite ? t('removeFromFavorites') : t('addToFavorites')");
+    expect(viewer).toContain('tab ? onPinFile(tab.path)');
+    expect(viewer).toContain('onUnpinFile(favorite.id)');
+    expect(viewer).toContain('await navigator.clipboard.writeText(tab.path)');
+    expect(viewer).toContain("toastQuiet(t('pathCopied'))");
+    expect(viewer).toContain("{t('copyPath')}");
   });
 });

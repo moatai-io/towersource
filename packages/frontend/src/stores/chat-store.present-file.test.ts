@@ -146,3 +146,20 @@ describe('chat-store present_file dispatch', () => {
     window.removeEventListener('tower-present-file', listener as EventListener);
   });
 });
+
+for (const name of ['create_markdown_artifact', 'update_markdown_artifact']) {
+  it(`replays ${name} through the shared Viewer file event`, () => {
+    const listener = vi.fn();
+    window.addEventListener('tower-present-file', listener as EventListener);
+    useChatStore.getState().setMessages([{ role: 'assistant', content: [{
+      type: 'tool_use', toolUse: { id: name, name, result: JSON.stringify({
+        ok: true, action: 'present_file', artifact: 'markdown', presentation: 'viewer',
+        path: '/workspace/doc.md', focus: false,
+      }) },
+    }] }] as any, { replayPresentFile: true });
+    vi.runOnlyPendingTimers();
+    expect(listener).toHaveBeenCalledTimes(1);
+    expect(listener.mock.calls[0][0].detail).toMatchObject({ path: '/workspace/doc.md', focus: false });
+    window.removeEventListener('tower-present-file', listener as EventListener);
+  });
+}

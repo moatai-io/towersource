@@ -9,6 +9,8 @@ import { Type } from '@sinclair/typebox';
 import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
 import { getMessagesPaginated, type StoredMessage } from '../services/message-store.js';
 import { canAccessSession } from '../services/pm/project-access.js';
+import { getSessionByKey } from '../services/session/session-manager.js';
+import { isShortCode } from '../services/session/short-code.js';
 
 export interface SessionTranscriptReadToolContext {
   userId?: number;
@@ -85,7 +87,7 @@ export function fitTranscriptToContext(
 }
 
 const SessionTranscriptReadParams = Type.Object({
-  session_id: Type.String({ minLength: 1, description: 'Tower session UUID or id to read.' }),
+  session_id: Type.String({ minLength: 1, description: 'Tower session UUID, id, or 8-character short code to read.' }),
   roles: Type.Optional(Type.Array(Type.Union([
     Type.Literal('user'),
     Type.Literal('assistant'),
@@ -111,6 +113,11 @@ function visibleText(message: StoredMessage): string {
 
   return blocks
     .flatMap((block: any) => {
+      if (block?.type === 'artifact_markdown' && typeof block.text === 'string') return [block.text.trim()];
+      if (block?.type === 'tool_use' && ['create_markdown_artifact', 'update_markdown_artifact'].includes(block.name || block.toolUse?.name)) {
+        const body = (block.input || block.toolUse?.input)?.body;
+        return typeof body === 'string' ? [body.trim()] : [];
+      }
       if (block?.type === 'text' && typeof block.text === 'string') return [block.text.trim()];
       if (block?.type === 'commentary' && block.visibility === 'progress' && typeof block.text === 'string') {
         const text = block.text.trim();
@@ -134,7 +141,8 @@ export function createSessionTranscriptReadTool(ctx: SessionTranscriptReadToolCo
     description: [
       'Read persisted, human-visible user and assistant messages from a Tower session without sending a message or resuming it.',
       'Returns only text displayed as conversation; tool calls, tool results, reasoning, hidden commentary, and hidden system messages are excluded. User-visible commentary is included as assistant text.',
-      'Admin/operator may read any session; other users must pass the normal Tower session-access check.',
+      'Platform admins have a session-read exception. Operators do not have blanket access: operators and other non-admin users must pass the normal Tower session-access check (ownership, explicit internal sharing, or applicable project/channel audience).',
+      'An internal session link does not grant access. For Tower /s/<session-id> links, pass the session ID to this tool instead of using WebFetch; distinguish access denied (403), session not found (404), and read failures.',
     ].join(' '),
     parameters: SessionTranscriptReadParams,
     async execute(_toolCallId: string, params: {
@@ -151,12 +159,21 @@ export function createSessionTranscriptReadTool(ctx: SessionTranscriptReadToolCo
         };
       }
 
-      const sessionId = params.session_id.trim();
+      const sessionKey = params.session_id.trim();
+      const resolvedSession = isShortCode(sessionKey) ? await getSessionByKey(sessionKey, ctx.userId) : null;
+      if (isShortCode(sessionKey) && !resolvedSession) {
+        return {
+          content: [{ type: 'text' as const, text: `session_transcript_read failed: session not found for short code ${sessionKey}` }],
+          details: { sessionKey },
+          isError: true,
+        };
+      }
+      const sessionId = resolvedSession?.id || sessionKey;
       const access = await canAccessSession(sessionId, ctx.userId, ctx.userRole || 'member');
       if (!access.allowed) {
         return {
           content: [{ type: 'text' as const, text: `session_transcript_read denied (${access.status}): ${access.message}` }],
-          details: { sessionId },
+          details: { sessionId, sessionKey },
           isError: true,
         };
       }
@@ -196,6 +213,7 @@ export function createSessionTranscriptReadTool(ctx: SessionTranscriptReadToolCo
           content: [{ type: 'text' as const, text: lines.join('\n').trim() }],
           details: {
             sessionId,
+            sessionKey,
             visibleMessageCount: messages.length,
             returnedMessageCount: Math.max(0, messages.length - fitted.omittedMessages),
             truncated: fitted.truncated,
@@ -208,7 +226,7 @@ export function createSessionTranscriptReadTool(ctx: SessionTranscriptReadToolCo
       } catch (err: any) {
         return {
           content: [{ type: 'text' as const, text: `session_transcript_read failed: ${String(err?.message || err || 'unknown error')}` }],
-          details: { sessionId },
+          details: { sessionId, sessionKey },
           isError: true,
         };
       }

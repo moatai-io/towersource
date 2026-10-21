@@ -4,101 +4,17 @@ import fs from 'fs';
 import path from 'path';
 import { getAccessibleProjectIds, addProjectMember, autoSeedProjectMembers } from './project-membership-manager.js';
 import { config, DEFAULT_RUNTIME_BOX_MATERIALIZED_SKILLS } from '../../config.js';
-import { materializeProjectRegistrySkills } from '../skill/project-skill-materializer.js';
+import { seedProjectDefaultSkills } from './project-default-skills.js';
 import { readTeamskillsSkillset } from '../skill/teamskills-source.js';
+import { withNewProjectStorage } from './new-project-storage-policy.js';
+import { provisionCanonicalProjectWorkspace } from '../project-environment/project-workspace-authority.js';
+import { resolveProjectEnvironmentDeploymentId } from '../project-environment/project-environment-deployment.js';
+import { ensureProjectAgentInstruction } from './project-agent-instruction.js';
+import { INTRODUCTION_INSTRUCTION, seedIntroductionGuides } from './introduction-guide.js';
 
 const WORKSPACE_ROOT = process.env.WORKSPACE_ROOT || path.join(process.env.HOME || '/tmp', 'workspace');
 const PROJECT_SLUG_RE = /^[a-z0-9](?:[a-z0-9-]{0,78}[a-z0-9])?$/;
 const RESERVED_SYSTEM_PROJECT_SLUGS = new Set(['teamskills']);
-
-async function applyNewProjectConnectionDefaults(projectId: string, actorUserId?: number): Promise<void> {
-  const templateMatchSql = `(
-    d.default_mode IN ('all_projects', 'new_projects')
-    OR (
-      d.default_mode = 'project_template'
-      AND d.project_template IS NOT NULL
-      AND lower(d.project_template) IN (
-        lower(prj.name),
-        lower(coalesce(prj.space_slug, '')),
-        lower(regexp_replace(coalesce(prj.root_path, ''), '^.*/', ''))
-      )
-    )
-  )`;
-
-  await execute(
-    `INSERT INTO project_credential_policies
-       (project_id, credential_id, mode, target_env_name, metadata, created_by, updated_by)
-     SELECT $1,
-            replace(connection_id, 'credential:', ''),
-            'allow',
-            COALESCE(c.default_env_name, c.secret_name),
-            jsonb_build_object('source', 'workspace_connection_defaults', 'default_mode', d.default_mode, 'project_template', d.project_template),
-            $2,
-            $2
-       FROM workspace_connection_defaults d
-       JOIN workspace_credentials c ON d.connection_id = 'credential:' || c.id
-       JOIN (
-         SELECT p.*, s.slug AS space_slug
-           FROM projects p LEFT JOIN spaces s ON s.id = p.space_id
-          WHERE p.id = $1
-       ) prj ON true
-      WHERE d.enabled = true
-        AND ${templateMatchSql}
-        AND c.enabled = true
-     ON CONFLICT (project_id, credential_id) DO NOTHING`,
-    [projectId, actorUserId ?? null],
-  );
-
-  await execute(
-    `INSERT INTO project_credential_profile_policies
-       (project_id, profile_id, mode, metadata, created_by, updated_by)
-     SELECT $1,
-            replace(connection_id, 'profile:', ''),
-            'allow',
-            jsonb_build_object('source', 'workspace_connection_defaults', 'default_mode', d.default_mode),
-            $2,
-            $2
-       FROM workspace_connection_defaults d
-       JOIN credential_profiles cp ON d.connection_id = 'profile:' || cp.id
-       JOIN (
-         SELECT p.*, s.slug AS space_slug
-           FROM projects p LEFT JOIN spaces s ON s.id = p.space_id
-          WHERE p.id = $1
-       ) prj ON true
-      WHERE d.enabled = true
-        AND ${templateMatchSql}
-        AND cp.enabled = true
-     ON CONFLICT (project_id, profile_id) DO NOTHING`,
-    [projectId, actorUserId ?? null],
-  );
-
-  await execute(
-    `INSERT INTO project_credential_policies
-       (project_id, credential_id, mode, target_env_name, metadata, created_by, updated_by)
-     SELECT $1,
-            value::text,
-            'allow',
-            key,
-            jsonb_build_object('source', 'workspace_connection_defaults_profile_ref', 'profile_id', cp.id, 'default_mode', d.default_mode),
-            $2,
-            $2
-       FROM workspace_connection_defaults d
-       JOIN credential_profiles cp ON d.connection_id = 'profile:' || cp.id
-       CROSS JOIN LATERAL jsonb_each_text(cp.secret_refs) refs(key, value)
-       JOIN workspace_credentials c ON c.id = value::text
-       JOIN (
-         SELECT p.*, s.slug AS space_slug
-           FROM projects p LEFT JOIN spaces s ON s.id = p.space_id
-          WHERE p.id = $1
-       ) prj ON true
-      WHERE d.enabled = true
-        AND ${templateMatchSql}
-        AND cp.enabled = true
-        AND c.enabled = true
-     ON CONFLICT (project_id, credential_id) DO NOTHING`,
-    [projectId, actorUserId ?? null],
-  );
-}
 
 const KOREAN_PROJECT_WORDS: Array<[RegExp, string]> = [
   [/한투|한국투자|한국투자신탁|한국투자신탁운용/gi, 'hantoo'],
@@ -206,6 +122,14 @@ export function renderProjectAgentsMd(name: string, description: string): string
     '<!-- tower-default-agents-template:v2 -->',
     '',
     description,
+    '',
+    '## 정확한 판단과 안전한 실행',
+    '',
+    '비개발자도 판단할 수 있는 말로 사실·가정·대안·장단점·추천 이유를 설명합니다. 필요한 정보가 없을 때만 가장 중요한 질문 하나를 묻고 이미 받은 정보는 다시 묻지 않습니다.',
+    '자동화 문제에는 전문적이고 친절하게 대응합니다. 원인을 조사하고 권한 안에서 안전하게 복구한 뒤 실제 결과를 검증하며, 확인하지 못한 부분은 명확하게 알립니다.',
+    '공통 목적은 initiative, 완료 조건이 있는 업무는 project로 필요할 때만 나눕니다. 작은 업무에 빈 폴더를 강제하지 않고 기존 코드 구조를 유지합니다.',
+    '생각·근거·제안 문헌을 저장했다고 승인된 것은 아닙니다. decisions.md와 decisions/에는 채택된 정책과 판단만 기록합니다. 조사 요청만으로 accepted 결정을 만들지 않습니다.',
+    'DB 프로필은 현재 승인된 정체성·역할·권한의 정본입니다. character.md는 생성 당시 기대의 참조 기록이며 기존 SOUL.md와 중복 정본을 만들지 않습니다. 초기 가설은 확인된 사실과 분리하고 승인된 역할·권한을 임의로 바꾸지 않습니다.',
     '',
     '## 역할',
     '',
@@ -633,6 +557,7 @@ const PROJECTS_BASE_QUERY = `
   LEFT JOIN project_agent_profiles pap ON pap.project_id = p.id
   WHERE (p.archived IS NULL OR p.archived = 0)
     AND COALESCE(p.lifecycle_status, 'active') = 'active'
+    AND p.id = ANY($1::text[])
   ORDER BY p.sort_order, p.created_at
 `;
 
@@ -651,32 +576,48 @@ async function applyUserProjectPins(projects: Project[], userId?: number): Promi
   });
 }
 
-export async function getProjects(userId?: number, role?: string): Promise<Project[]> {
-  let projects: Project[];
-  if (userId && role) {
-    const accessibleIds = await getAccessibleProjectIds(userId, role);
-    if (accessibleIds !== null) {
-      // Non-admin: show only projects user is a member of or created
-      const allRows = await query(PROJECTS_BASE_QUERY);
-      projects = allRows.filter(r => accessibleIds.includes(r.id)).map(rowToProject);
-      return applyUserProjectPins(projects, userId);
-    }
-  }
+export async function searchAccessibleProjects(userId: number, role: string, rawQuery: string, limit = 50): Promise<Project[]> {
+  const search = rawQuery.trim();
+  if (search.length < 2) return [];
+  if (!Number.isSafeInteger(userId) || userId <= 0) return [];
+  const accessibleIds = await getAccessibleProjectIds(userId, role);
+  if (accessibleIds.length === 0) return [];
+  const rows = await query<any>(`
+    SELECT p.*, s.name as space_name, s.slug as space_slug,
+           ${PROJECT_AGENT_PROFILE_SELECT}
+    FROM projects p
+    LEFT JOIN spaces s ON p.space_id = s.id
+    LEFT JOIN project_agent_profiles pap ON pap.project_id = p.id
+    WHERE p.id = ANY($2::text[])
+      AND p.system_key IS NULL
+      AND (
+        p.name ILIKE $1
+        OR COALESCE(p.description, '') ILIKE $1
+        OR COALESCE(pap.display_name, '') ILIKE $1
+        OR COALESCE(pap.tagline, '') ILIKE $1
+        OR COALESCE(pap.role, '') ILIKE $1
+      )
+    ORDER BY (p.archived IS NULL OR p.archived = 0) DESC, p.updated_at DESC NULLS LAST, p.created_at DESC
+    LIMIT $3
+  `, [`%${search}%`, accessibleIds, Math.max(1, Math.min(limit, 100))]);
+  return applyUserProjectPins(rows.map(rowToProject), userId);
+}
 
-  // admin or no auth: show all non-archived projects
-  const rows = await query(PROJECTS_BASE_QUERY);
-  projects = rows.map(rowToProject);
-  return applyUserProjectPins(projects, userId);
+export async function getProjects(userId?: number, role?: string): Promise<Project[]> {
+  // Missing authentication is not a request for every project's content.
+  if (!userId || !Number.isSafeInteger(userId) || userId <= 0) return [];
+  const accessibleIds = await getAccessibleProjectIds(userId, role ?? '');
+  if (accessibleIds.length === 0) return [];
+  const rows = await query(PROJECTS_BASE_QUERY, [accessibleIds]);
+  return applyUserProjectPins(rows.filter(row => accessibleIds.includes(row.id)).map(rowToProject), userId);
 }
 
 export async function saveUserProjectPins(userId: number, role: string | undefined, projectIds: string[]): Promise<void> {
   const uniqueIds = [...new Set(projectIds.filter((id): id is string => typeof id === 'string' && id.length > 0))];
   const accessibleIds = await getAccessibleProjectIds(userId, role || '');
-  if (accessibleIds !== null) {
-    const allowed = new Set(accessibleIds);
-    for (const projectId of uniqueIds) {
-      if (!allowed.has(projectId)) throw new Error('cannot pin inaccessible project');
-    }
+  const allowed = new Set(accessibleIds);
+  for (const projectId of uniqueIds) {
+    if (!allowed.has(projectId)) throw new Error('cannot pin inaccessible project');
   }
 
   await transaction(async (client) => {
@@ -709,8 +650,16 @@ export async function getProject(id: string): Promise<Project | null> {
  * committed — if this throws, the caller rolls back the DB row and
  * best-effort removes any partial folder.
  */
-export function scaffoldProjectFolderForCreate(finalDir: string, name: string, description: string | undefined): void {
-  fs.mkdirSync(finalDir, { recursive: true });
+export function scaffoldProjectFolderForCreate(finalDir: string, name: string, description: string | undefined, requireNew = false): void {
+  withNewProjectStorage(finalDir, () => seedProjectFolder(finalDir, name, description), { requireNew });
+}
+
+function seedProjectFolder(finalDir: string, name: string, description: string | undefined): void {
+  // Inherit the provisioned parent's setgid/default ACL and process umask.
+  // Never infer a shared Worker from a directory's group or widen an existing
+  // ACL mask with chmod: isolated Workers and adopted roots need their own
+  // policy. Opt-in same-VM assignment can verify two-way access before activation;
+  // missing inheritance requires explicit provisioning, not automatic repair.
 
   // AGENTS.md is the canonical project instruction file. Do not create a
   // CLAUDE.md compatibility symlink for new projects; legacy projects may still
@@ -731,18 +680,7 @@ export function scaffoldProjectFolderForCreate(finalDir: string, name: string, d
   // Seed managed skill manifest for new projects. Project-owned `skills/` stays
   // the override layer; `.tower/skills/manifest.json` supplies the default
   // managed bundle and blocks host-global legacy skill discovery.
-  try {
-    const result = materializeProjectRegistrySkills({
-      projectRootPath: finalDir,
-      skillNames: readTeamskillsSkillset(DEFAULT_RUNTIME_BOX_MATERIALIZED_SKILLS),
-      storageMode: 'bind-ro',
-    });
-    if (!result.ok) {
-      console.warn(`[project-manager] managed skill manifest seeded with skipped skills for ${finalDir}: ${result.skipped.map((s) => `${s.name}:${s.reason}`).join(', ')}`);
-    }
-  } catch (err: any) {
-    console.warn(`[project-manager] managed skill manifest seed failed for ${finalDir}: ${err?.message ?? err}`);
-  }
+  seedProjectDefaultSkills(finalDir, readTeamskillsSkillset(DEFAULT_RUNTIME_BOX_MATERIALIZED_SKILLS));
 }
 
 export async function createProject(
@@ -821,7 +759,7 @@ export async function createProject(
 
   // 1. DB INSERT first — if this fails, nothing was created on disk.
   await execute(
-    `INSERT INTO projects (id, name, description, root_path, color, sort_order, user_id, space_id, creation_command_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+    `INSERT INTO projects (id, name, description, root_path, color, sort_order, user_id, space_id, creation_command_id, directory_visibility) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'unlisted')`,
     [id, name, opts?.description ?? null, rootPath, opts?.color ?? '#f59e0b', maxOrder + 1, userId ?? null, opts?.spaceId ?? null, opts?.creationCommandId ?? null]
   );
 
@@ -829,7 +767,7 @@ export async function createProject(
   //    partial folder so the system is indistinguishable from pre-create state.
   if (managedDir) {
     try {
-      scaffoldProjectFolderForCreate(managedDir, name, opts?.description);
+      scaffoldProjectFolderForCreate(managedDir, name, opts?.description, true);
     } catch (err: any) {
       console.error(`[project-manager] scaffold failed for ${id} (${managedDir}): ${err?.message ?? err} — rolling back DB`);
       // Best-effort DB rollback
@@ -838,53 +776,50 @@ export async function createProject(
       } catch (rollbackErr: any) {
         console.error(`[project-manager] DB rollback also failed for ${id}: ${rollbackErr?.message ?? rollbackErr}`);
       }
-      // Best-effort filesystem cleanup — managedDir was guaranteed non-existent
-      // before scaffold (collision check picks a unique id-prefixed path), so
-      // rmSync here only removes what we just (partially) created.
-      try {
-        if (fs.existsSync(managedDir)) {
-          fs.rmSync(managedDir, { recursive: true, force: true });
-        }
-      } catch (cleanupErr: any) {
-        console.error(`[project-manager] partial folder cleanup failed for ${managedDir}: ${cleanupErr?.message ?? cleanupErr}`);
-      }
+      // The scaffold wrapper owns exclusive final mkdir and inode-checked
+      // cleanup. Never delete managedDir here: a concurrent creator may own it.
       throw err;
     }
   }
 
-  // 3. Auto-add creator as project owner (post-atomic side effect).
+  // 3. Record the new Project's canonical host workspace before exposing it to
+  //    execution or file routing. This is part of provisioning, not best-effort:
+  //    a new Project must never inherit legacy Worker storage by absence.
+  try {
+    await provisionCanonicalProjectWorkspace({ projectId: id, deploymentId: resolveProjectEnvironmentDeploymentId() });
+  } catch (err: any) {
+    console.error(`[project-manager] canonical storage provisioning failed for ${id}: ${err?.message ?? err}`);
+    try { await execute('DELETE FROM projects WHERE id = $1', [id]); } catch (rollbackErr: any) {
+      console.error(`[project-manager] storage rollback also failed for ${id}: ${rollbackErr?.message ?? rollbackErr}`);
+    }
+    if (managedDir) {
+      try { fs.rmSync(managedDir, { recursive: true, force: true }); } catch (cleanupErr: any) {
+        console.error(`[project-manager] storage rollback folder cleanup failed for ${id}: ${cleanupErr?.message ?? cleanupErr}`);
+      }
+    }
+    throw err;
+  }
+
+  // 4. Auto-add creator as project owner (post-provisioning side effect).
   if (userId) {
     await addProjectMember(id, userId, 'owner');
   }
 
-  // 4. (auto-seed 폐기 — 2026-05-04-five-role-model.md, section E)
+  // 5. (auto-seed 폐기 — 2026-05-04-five-role-model.md, section E)
   //    이전엔 모든 active non-viewer 사용자를 자동 시드했지만, operator 의
   //    인력 배치 권한과 충돌해서 폐기. 새 프로젝트는 owner 만으로 시작하고,
   //    멤버 추가는 invite 다이얼로그에서 명시적으로.
   //    autoSeedProjectMembers 함수 자체는 group-manager 에 남아 있음 (admin/
   //    operator 가 향후 "팀 전체 일괄 가입" 같은 명시 UI 액션으로 호출 가능).
 
-  // 5. Apply visible default-on credential connections for new projects.
-  //    This makes `workspace_connection_defaults.default_mode = new_projects`
-  //    effective at project birth time, while existing projects continue to rely
-  //    on explicit policy rows or legacy all-project inheritance.
-  try {
-    await applyNewProjectConnectionDefaults(id, userId);
-  } catch (err: any) {
-    console.error(`[project-manager] default connection application failed for ${id}: ${err?.message ?? err}`);
-  }
+  // 6. VM-team workspace Credentials are automatically visible to every Project;
+  //    no per-Project default policy rows are created.
 
-  // 6. Queue production Worker assignment only after Project DB, filesystem,
-  //    owner membership, and default Connections have succeeded. This is
-  //    best-effort: Worker reconciliation must never roll back Project creation.
-  try {
-    const { requestAutomaticProjectWorkerAssignment } = await import('../runtime-box/workbench-project-worker-auto-request.js');
-    await requestAutomaticProjectWorkerAssignment({ projectId: id, rootPath, userId, systemKey: null });
-  } catch (err: any) {
-    console.warn(`[project-manager] automatic Worker assignment request failed for ${id}: ${err?.message ?? err}`);
-  }
+  // 7. New Projects are not assigned a Worker or static Worker Project scope.
+  //    The Project Environment resolver selects a compatible internal executor
+  //    at run time. Legacy assignment remains an explicit recovery/migration tool.
 
-  // 7. (Auto-init memkraft memory/ — 폐기됨, 2026-05-09)
+  // 8. (Auto-init memkraft memory/ — 폐기됨, 2026-05-09)
   //    이전엔 모든 신규 프로젝트에 memory/ 자동 init 했지만, 9일 운영 후
   //    78개 중 64개(82%)가 빈 채로 남고 사용자가 분산 MD 를 직접 읽지 않음을
   //    확인. 자동 init 의 약속(사람-가독성 + 자연 누적)이 검증 안 됨.
@@ -908,7 +843,7 @@ export interface DefaultProjectDefinition {
   description: string;
   /** Backfill existing users into this system project on startup. */
   autoSeedExistingMembers?: DefaultProjectAutoSeedMode;
-  /** Add newly created users to this project via auth auto-join. Defaults to all non-viewer/guest users for legacy defaults. */
+  /** Add newly created users to this project via auth auto-join. Only explicit public system keys may auto-join. */
   autoJoinNewUsers?: DefaultProjectAutoJoinMode;
   /** Only include this seed when the internal Agent-first flag is enabled. */
   requiresAgentFirst?: boolean;
@@ -920,7 +855,28 @@ export function defaultProjectsForVm(agentFirstEnabled = config.agentFirstEnable
 
 export const DEFAULT_PROJECTS: DefaultProjectDefinition[] = [
   { slug: 'general', name: 'General', color: '#3b82f6', description: 'Team-wide shared project for general work' },
+  { slug: 'introduction', name: 'Introduction', color: '#6d7fe8', description: 'A friendly guide to getting started with Tower', requiresAgentFirst: true, autoSeedExistingMembers: 'all_non_viewer_guest' },
 ];
+
+async function ensureIntroductionProfile(projectId: string, rootPath: string): Promise<void> {
+  const result = await execute(`INSERT INTO project_agent_profiles
+    (project_id, display_name, face, tagline, role, promise, instruction, instruction_source, onboarding_state)
+    VALUES ($1, 'Introduction', '👋', 'Tower를 처음 사용하는 분을 위한 친절한 안내자',
+      '새 멤버의 첫 사용 안내', '사용자가 자신의 첫 작업을 시작할 수 있도록 돕습니다.', $2, 'system-seed', 'ready')
+    ON CONFLICT (project_id) DO NOTHING`, [projectId, INTRODUCTION_INSTRUCTION]);
+  // Repair a missing managed block after an interrupted seed, without overwriting
+  // an administrator's subsequently edited profile or AGENTS.md.
+  const agentsPath = path.join(rootPath, 'AGENTS.md');
+  if (result.changes > 0 || (fs.existsSync(agentsPath) && !fs.readFileSync(agentsPath, 'utf8').includes('<!-- tower-primary-agent-profile -->')
+    && (await queryOne<{ instruction_source: string }>('SELECT instruction_source FROM project_agent_profiles WHERE project_id = $1', [projectId]))?.instruction_source === 'system-seed')) {
+    ensureProjectAgentInstruction(rootPath, {
+      displayName: 'Introduction', face: '👋', tagline: 'Tower를 처음 사용하는 분을 위한 친절한 안내자',
+      role: '새 멤버의 첫 사용 안내', promise: '사용자가 자신의 첫 작업을 시작할 수 있도록 돕습니다.',
+      instruction: INTRODUCTION_INSTRUCTION,
+    });
+  }
+  seedIntroductionGuides(rootPath);
+}
 
 const ORGANIZATION_SKILL_SOURCE_DECISION = '~/workspace/decisions/2026-06-26-skills-external-repo-and-no-managed-seed.md';
 
@@ -1153,6 +1109,9 @@ async function autoSeedDefaultProjectMembers(projectId: string, mode: DefaultPro
       SELECT $1, u.id, 'member'
       FROM users u
       WHERE u.disabled = 0 AND u.role IN ('admin', 'operator')
+        AND EXISTS (SELECT 1 FROM projects p WHERE p.id = $1 AND p.user_id IS NULL
+          AND p.system_key IN ('general', 'introduction')
+          AND COALESCE(p.archived, 0) = 0 AND COALESCE(p.lifecycle_status, 'active') = 'active')
       ON CONFLICT DO NOTHING
     `, [projectId]).then((result) => result.changes);
   }
@@ -1160,9 +1119,10 @@ async function autoSeedDefaultProjectMembers(projectId: string, mode: DefaultPro
 }
 
 function shouldAutoJoinDefaultProject(def: DefaultProjectDefinition, role: string): boolean {
+  if (!def.systemKey || !['general', 'introduction'].includes(def.systemKey)) return false;
   const mode = def.autoJoinNewUsers ?? 'all_non_viewer_guest';
   if (mode === false) return false;
-  if (role === 'viewer' || role === 'guest') return false;
+  if (!['admin', 'operator', 'member'].includes(role)) return false;
   if (mode === 'admin_operator') return role === 'admin' || role === 'operator';
   return true;
 }
@@ -1180,6 +1140,11 @@ export async function seedDefaultProjects(): Promise<string[]> {
     if (existing) {
       ids.push(existing.id);
       if (def.systemKey) await execute('UPDATE projects SET system_key = $1 WHERE id = $2 AND system_key IS DISTINCT FROM $1', [def.systemKey, existing.id]);
+      if (def.slug === 'introduction') {
+        await ensureIntroductionProfile(existing.id, existing.root_path ?? rootPath);
+        // Preserve explicit directory choices on an existing Project. A fresh
+        // seed uses the hidden creation default.
+      }
       if (def.slug === 'shared') ensureSharedProjectScaffold(existing.root_path ?? rootPath);
       if (def.slug === 'teamskills') ensureTeamskillsSystemStore(existing.root_path ?? rootPath);
       if (def.autoSeedExistingMembers) {
@@ -1209,6 +1174,7 @@ export async function seedDefaultProjects(): Promise<string[]> {
       }
     }
     if (def.systemKey) await execute('UPDATE projects SET system_key = $1 WHERE id = $2', [def.systemKey, project.id]);
+    if (def.slug === 'introduction') await ensureIntroductionProfile(project.id, project.rootPath || rootPath);
     if (def.slug === 'shared') ensureSharedProjectScaffold(rootPath);
     if (def.slug === 'teamskills') ensureTeamskillsSystemStore(rootPath);
     if (def.autoSeedExistingMembers) {
@@ -1232,7 +1198,11 @@ export async function getDefaultProjectIds(role = 'member'): Promise<string[]> {
     if (!shouldAutoJoinDefaultProject(def, role)) continue;
     const rootPath = path.join(WORKSPACE_ROOT, 'projects', def.slug);
     const row = await findExistingDefaultProject(def);
-    if (row) ids.push(row.id);
+    if (row && (await queryOne<{ id: string }>(
+      `SELECT id FROM projects WHERE id = $1 AND system_key = $2 AND user_id IS NULL
+        AND COALESCE(archived, 0) = 0 AND COALESCE(lifecycle_status, 'active') = 'active'`,
+      [row.id, def.systemKey],
+    ))) ids.push(row.id);
   }
   return ids;
 }

@@ -27,6 +27,23 @@ describe('Pi read attachment representation boundary', () => {
     expect(result.details.attachmentRepresentation).toMatchObject({ classification: 'text', modelMode: 'bounded-text' });
   });
 
+  it('reads bounded Project text through the installed source, never Backend filesystem fallback', async () => {
+    const { root, file } = await fixture('protected.md', '# backend must not read this');
+    const data = Buffer.from('# worker-owned\nprivate text');
+    const calls: string[] = [];
+    const tool = createPdfAwareReadTool({ cwd: root, projectRoot: root, sessionId: 's1', userId: 1, userRole: 'member', projectSource: {
+      async stat(target) { calls.push(`stat:${target}`); return { isFile: () => true, size: data.length }; },
+      async readProbe(target, max) { calls.push(`probe:${target}:${max}`); return data.subarray(0, max); },
+      async readFile(target, max) { calls.push(`read:${target}:${max}`); return data; },
+    } });
+    const result = await tool.execute('t1', { path: file }, undefined, undefined);
+    expect(result.content[0].text).toContain('worker-owned');
+    expect(result.content[0].text).not.toContain('backend must not read');
+    expect(calls).toContain(`read:${file}:52428800`);
+    await expect(tool.execute('t2', { path: path.join(root, '..', 'different-project', 'secret.md') }, undefined, undefined)).rejects.toThrow('PROJECT_FILE_SOURCE_OUTSIDE_ROOT');
+    expect(calls.every(call => call.includes(file))).toBe(true);
+  });
+
   it('does not inline a base64-heavy Markdown file', async () => {
     const { root, file } = await fixture('bomb.md', `# Bomb\n${'Q'.repeat(16 * 1024)}`);
     const tool = createPdfAwareReadTool({ cwd: root, sessionId: 's1', userId: 1, userRole: 'member' });

@@ -7,11 +7,13 @@ git *작업* (git-manager), git *격리 트리* (worktree-manager), AI *커밋 �
 ## 왜 worktree 가 default 가 아닌가
 
 워크스페이스에 단일 git tree 유지 = 사용자 직관 (파일 탐색기 / VSCode 가 보는 그대로). worktree 격리는 "진짜 충돌 안 되는" 옵션이지만:
-- 새 worktree 마다 cwd 다름 → 사용자 혼란
-- AI 작업 중간 결과 보려면 worktree 위치 알아야 함
-- specific paths commit (commit-session 패턴) 으로 90% 충돌 방지 가능
+- 새 worktree마다 cwd가 달라져 사용자와 공용 dev server가 실제 변경을 보기 어렵다.
+- 오래된 worktree가 장기 생존하면 과거 patch가 늦게 통합될 수 있다.
+- Tower의 실제 작업 단위는 Session별 파일이 아니라 여러 Session이 함께 만든 통합 dev 상태다.
 
-대안 우선 → worktree 는 명시적 사용자 요청 시만.
+따라서 자동 worktree 생성을 금지하고, 다른 Session이 쓰지 않는 안전 지점에 `/checkpoint`로 전체 dirty 상태를 검토·검증해 commit한다. Worktree는 사용자가 명시적으로 요청한 예외에만 허용한다.
+
+근거: `workspace/decisions/2026-08-28-shared-development-checkpoint-and-pr-workflow.md`
 근거: `workspace/decisions/2026-05-03-multi-session-safety.md`
 
 ## 왜 auto-commit-message 가 engines/ 추상화를 안 거치나

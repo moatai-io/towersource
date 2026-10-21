@@ -19,7 +19,7 @@ function projectPinOrder(project: Project): number {
 
 function groupActivityMs(group: SidebarAgentRailGroup): number {
   return Math.max(
-    sidebarSessionTimestampMs(group.project.createdAt),
+    sidebarSessionTimestampMs(group.project.lastSessionAt || group.project.createdAt),
     ...group.sessions.map((session) => sidebarSessionTimestampMs(session.updatedAt)),
   );
 }
@@ -34,8 +34,12 @@ export function buildSidebarAgentRailModel(input: BuildSidebarAgentRailModelInpu
     sessionsByProject.set(session.projectId, projectSessions);
   }
 
+  // Every active non-system Project is a Primary Agent workcell. Legacy Projects
+  // may still have an implicit profile, so the navigation rail must not require
+  // agent.explicit; doing so would silently shrink a 90-project directory to the
+  // subset already backfilled into project_agent_profiles.
   const groups = input.projects
-    .filter((project) => project.agent?.explicit === true && project.systemKey !== 'ai-talent-team' && !project.archived)
+    .filter((project) => !project.systemKey && !project.archived)
     .map((project) => ({
     project,
     sessions: [...(sessionsByProject.get(project.id) ?? [])].sort(

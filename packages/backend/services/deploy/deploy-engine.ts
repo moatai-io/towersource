@@ -1,3 +1,5 @@
+import { copyStaticPublication } from './static-publish-files.js';
+import { atDeployStage } from './deploy-error.js';
 /**
  * Deploy Engine — Cloudflare Pages + Azure Container Apps
  *
@@ -12,6 +14,7 @@ import path from 'path';
 import http from 'http';
 import crypto from 'crypto';
 import { config } from '../../config.js';
+import {publishedSiteUrl} from '../publishing/published-url.js';
 import { generatePublishThumbnailInBackground, thumbnailUrlForSlug, type ThumbnailStatus, type ThumbnailResult } from '../publishing/thumbnail-generator.js';
 
 const execFileAsync = promisify(execFile);
@@ -386,13 +389,7 @@ function randomHexSuffix(): string {
 }
 
 function localPublishedUrl(slug: string): string | undefined {
-  if (!config.publicUrl) return undefined;
-  const u = new URL(config.publicUrl);
-  // Wildcard subdomains are the canonical Publishing URL across Tower servers.
-  // `/sites/<slug>/` remains a compatibility path on some full/standalone VMs,
-  // but self-hosted VMs may route that path to the Tower SPA, so never emit it as
-  // the primary URL. Decision: workspace/decisions/2026-04-29-publishing-local-first.md
-  return `${u.protocol}//${slug}.${u.host}/`;
+  return publishedSiteUrl(slug, config.publicUrl, config.publishingBaseUrl);
 }
 
 function normalizeAccess(requested: string | undefined): Access {
@@ -447,23 +444,7 @@ async function resolveDeploySlug(opts: DeployOptions, access: Access): Promise<s
 }
 
 async function copyDirectoryContents(srcDir: string, destDir: string): Promise<void> {
-  const resolvedSrc = path.resolve(srcDir);
-  const resolvedDest = path.resolve(destDir);
-  if (resolvedSrc === resolvedDest) return;
-  if (resolvedDest.startsWith(resolvedSrc + path.sep)) {
-    throw new Error('Cannot publish a directory into one of its own subdirectories');
-  }
-
-  await fs.rm(resolvedDest, { recursive: true, force: true });
-  await fs.mkdir(resolvedDest, { recursive: true });
-  await fs.cp(resolvedSrc, resolvedDest, {
-    recursive: true,
-    dereference: true,
-    filter: (src) => {
-      const base = path.basename(src);
-      return base !== '.git' && base !== 'node_modules';
-    },
-  });
+  await copyStaticPublication(srcDir, destDir);
 }
 
 async function publishStaticLocally(opts: DeployOptions, slug: string): Promise<void> {
@@ -753,7 +734,7 @@ export async function deploy(opts: DeployOptions): Promise<DeployResult> {
   }
 
   // Detect code type
-  const detectedType = await detectCodeType(opts.sourceDir);
+  const detectedType = await atDeployStage('detect', () => detectCodeType(opts.sourceDir));
 
   // Determine target — Phase 3 (i): default static → 'local' (was 'cloudflare-pages').
   // Sites land on disk and nginx serves them via the wildcard subdomain URL.
@@ -772,8 +753,8 @@ export async function deploy(opts: DeployOptions): Promise<DeployResult> {
     // need direct permissions to create shared symlinks or write published/.
     const start = Date.now();
     const access = normalizeAccess(opts.access);
-    const slug = await resolveDeploySlug(opts, access);
-    await publishStaticLocally({ ...opts, slug, access }, slug);
+    const slug = await atDeployStage('prepare', () => resolveDeploySlug(opts, access));
+    await atDeployStage('copy', () => publishStaticLocally({ ...opts, slug, access }, slug));
     result = {
       success: true,
       target: 'local',
@@ -784,14 +765,14 @@ export async function deploy(opts: DeployOptions): Promise<DeployResult> {
     };
     opts = { ...opts, slug, access };
   } else if (target === 'cloudflare-pages') {
-    result = await deployCloudflarPages(opts);
+    result = await atDeployStage('provider', () => deployCloudflarPages(opts));
   } else {
-    result = await deployAzureContainerApps(opts);
+    result = await atDeployStage('provider', () => deployAzureContainerApps(opts));
   }
 
   // Update manifest on success
   if (result.success) {
-    await updateManifestAfterDeploy(opts, result);
+    await atDeployStage('manifest', () => updateManifestAfterDeploy(opts, result));
     if (result.target === 'local' && result.detectedType === 'static' && result.slug && result.url) {
       generatePublishThumbnailInBackground({ slug: result.slug, url: result.url }, (thumbnail) => updateManifestThumbnail(result.slug!, thumbnail));
     }
@@ -1037,7 +1018,8 @@ async function getMergedSites(): Promise<ManifestSite[]> {
   for (const s of merged) {
     if (!s.deploy_target || s.deploy_target === 'local') {
       const slug = s.slug || s.name;
-      s.external_url = localPublishedUrl(slug);
+      // Explicit new mode must not silently replace previously published links.
+      if (!config.publishingBaseUrl || !s.external_url) s.external_url = localPublishedUrl(slug);
       if (s.thumbnail_url || s.thumbnail_status === 'ready') {
         s.thumbnail_url = thumbnailUrlForSlug(slug);
       }

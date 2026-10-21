@@ -6,12 +6,14 @@ const headerSource = readFileSync(new URL('../layout/Header.tsx', import.meta.ur
 const appSource = readFileSync(new URL('../../App.tsx', import.meta.url), 'utf8');
 
 describe('AdminPanel usage integration', () => {
-  it('keeps VM-wide usage inside the admin-only panel', () => {
+  it('keeps VM-wide usage in the admin/operator panel', () => {
     expect(adminSource).toContain("type AdminTab = 'users' | 'agents' | 'usage' | 'ai' | 'runtime' | 'credentials' | 'system'");
     expect(adminSource).not.toContain("renderTab('prompts'");
     expect(adminSource).toContain("renderTab('usage', t('navigation.usage'))");
     expect(adminSource).toContain("tab === 'usage' && <UsagePanel embedded />");
-    expect(adminSource).toContain("const OPERATOR_ALLOWED_TABS: ReadonlySet<AdminTab> = new Set(['users', 'agents', 'runtime', 'credentials'])");
+    expect(adminSource).toContain("const OPERATOR_ALLOWED_TABS: ReadonlySet<AdminTab> = new Set(['users', 'agents', 'usage', 'ai', 'credentials', 'system'])");
+    expect(adminSource).toContain("const isAdmin = role === 'admin'");
+    expect(adminSource).toContain('{isAdmin && (');
   });
 
   it('uses the wider admin modal and removes the old global usage entry', () => {

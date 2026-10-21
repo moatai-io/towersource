@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { classifyCommand } from './command-classifier.js';
+import { classifyCommand } from '../execution/command-classifier.js';
 
 describe('Docker command classification', () => {
   it.each([

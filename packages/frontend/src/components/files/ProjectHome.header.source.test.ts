@@ -24,13 +24,19 @@ describe("Project Home integrated header", () => {
     expect(source).toContain("overflow-x-auto lg:order-none lg:w-auto");
     expect(source).toContain("hidden min-w-0 max-w-[260px]");
   });
-  it("uses theme-safe inactive tabs and one compact file viewport offset", () => {
+  it("uses theme-safe inactive tabs and lets the app shell own viewport height", () => {
     expect(source).toContain(
       "'text-surface-400 hover:bg-surface-800 hover:text-surface-100'",
     );
-    expect(source).toContain("h-[calc(100vh-58px)]");
-    expect(source).not.toContain("h-[calc(100vh-106px)]");
+    expect(source).toContain('className="h-full min-h-0"');
+    expect(source).not.toContain('calc(100vh-');
   });
+  it("exposes Agent settings directly beside the identity on mobile and desktop", () => {
+    expect(source).toContain('onClick={editTeammate}');
+    expect(source).toContain("t('projectHome.agentSettings')");
+    expect(source).toContain('min-h-9 shrink-0 touch-manipulation');
+  });
+
   it("exposes Connection management from the Agent Home without adding a separate Files shortcut to the team list", () => {
     expect(source).toContain("import { AgentCredentialsModal } from '../layout/AgentCredentialsModal'");
     expect(source).toContain("className={homeTabClass(managingConnections)}");
@@ -46,6 +52,18 @@ describe("Project Home integrated header", () => {
     );
     expect(source).toContain(
       "rememberAgentWorkspaceLocation(project.id, 'home')",
+    );
+  });
+
+  it("applies repeated navigation when the same Project Home stays mounted", () => {
+    expect(source).toContain("AGENT_WORKSPACE_LOCATION_EVENT");
+    expect(source).toContain("detail?.projectId !== project.id");
+    expect(source).toContain("setHomeTab(detail.location)");
+    expect(source).toContain(
+      "window.addEventListener(AGENT_WORKSPACE_LOCATION_EVENT, applyRequestedLocation)",
+    );
+    expect(source).toContain(
+      "window.removeEventListener(AGENT_WORKSPACE_LOCATION_EVENT, applyRequestedLocation)",
     );
   });
 });

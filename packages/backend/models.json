@@ -3,26 +3,67 @@
   "pi": [
     {
       "provider": "litellm-responses",
-      "modelId": "smartest",
-      "name": "Smartest",
-      "badge": "",
+      "modelId": "astra-canary",
+      "name": "Astra (시험)",
+      "badge": "TEST",
       "enabled": true,
+      "hidden": true,
       "api": "openai-responses",
       "reasoning": true,
-      "defaultReasoning": "medium",
+      "defaultReasoning": "low",
       "cost": {
-        "input": 5,
-        "output": 30,
-        "cacheRead": 0.5,
-        "cacheWrite": 6.25
+        "input": 10,
+        "output": 50,
+        "cacheRead": 1,
+        "cacheWrite": 12.5
       },
       "contextWindow": 353400,
       "maxTokens": 128000,
-      "_note": "Main premium route. On moat-llm-router, LiteLLM routes Smartest to Codex-LB gpt-5.6-sol. Codex-LB catalog reports 372000 input context for gpt-5.6-sol; Tower uses a 95% effective window (372000*0.95=353400) so compaction/output clamps leave headroom. GPT-5.5 remains available temporarily as litellm-responses/gpt55 for rollback/comparison.",
+      "_note": "Experimental manual route. LiteLLM routes astra-canary to an inactive Codex-LB canary running gpt-6-astra. Basic Responses calls are verified, but advanced tool continuity, steering, long-context pricing, and upstream max-output metadata remain provisional. This entry is intentionally listed above Smartest but is not the default. Cost uses OpenAI standard short-context API pricing.",
       "roles": [
         "full",
         "managed",
         "standalone"
+      ],
+      "reasoningEfforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ]
+    },
+    {
+      "provider": "litellm-responses",
+      "modelId": "smartest",
+      "name": "Smartest",
+      "badge": "",
+      "enabled": false,
+      "api": "openai-responses",
+      "reasoning": true,
+      "defaultReasoning": "low",
+      "cost": {
+        "input": 4,
+        "output": 20,
+        "cacheRead": 0.4,
+        "cacheWrite": 5
+      },
+      "contextWindow": 353400,
+      "maxTokens": 128000,
+      "_note": "Main premium alias routes to gpt-5.6-sol through the active Codex-LB service. Effective context remains 353400. Cost uses OpenAI standard short-context API promotional pricing available at least through 2026-11-21; requests billed in OpenAI's long-context tier cost more than this static estimate.",
+      "roles": [
+        "full",
+        "managed",
+        "standalone"
+      ],
+      "hidden": true,
+      "selectable": false,
+      "reasoningEfforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
       ]
     },
     {
@@ -31,14 +72,15 @@
       "name": "Smartest Long Context",
       "badge": "LONG",
       "enabled": true,
+      "hidden": true,
       "api": "openai-responses",
       "reasoning": true,
       "defaultReasoning": "low",
       "cost": {
-        "input": 5,
+        "input": 8,
         "output": 30,
-        "cacheRead": 0.5,
-        "cacheWrite": 6.25
+        "cacheRead": 0.8,
+        "cacheWrite": 10
       },
       "contextWindow": 760000,
       "maxTokens": 128000,
@@ -47,6 +89,13 @@
         "full",
         "managed",
         "standalone"
+      ],
+      "reasoningEfforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
       ]
     },
     {
@@ -58,10 +107,10 @@
       "api": "openai-responses",
       "reasoning": true,
       "cost": {
-        "input": 2.5,
-        "output": 15,
-        "cacheRead": 0.25,
-        "cacheWrite": 3.125
+        "input": 2,
+        "output": 12,
+        "cacheRead": 0.2,
+        "cacheWrite": 2.5
       },
       "contextWindow": 353400,
       "maxTokens": 128000,
@@ -70,52 +119,15 @@
         "full",
         "managed",
         "standalone"
-      ]
-    },
-    {
-      "provider": "litellm-responses",
-      "modelId": "gpt55",
-      "name": "GPT-5.5 Legacy",
-      "badge": "5.5",
-      "enabled": true,
-      "api": "openai-responses",
-      "reasoning": true,
-      "cost": {
-        "input": 5,
-        "output": 30,
-        "cacheRead": 0.5,
-        "cacheWrite": 0
-      },
-      "contextWindow": 258400,
-      "maxTokens": 128000,
-      "_note": "Temporary compatibility/rollback route. On moat-llm-router, LiteLLM routes gpt55 to Codex-LB gpt-5.5. Codex-LB registry reports 272000 input for gpt-5.5; Tower uses 272000*0.95=258400 effective window.",
-      "roles": [
-        "full",
-        "managed",
-        "standalone"
-      ]
-    },
-    {
-      "provider": "litellm-responses",
-      "modelId": "mini",
-      "name": "Mini",
-      "badge": "",
-      "enabled": true,
-      "api": "openai-responses",
-      "reasoning": false,
-      "cost": {
-        "input": 0.75,
-        "output": 4.5,
-        "cacheRead": 0.075,
-        "cacheWrite": 0
-      },
-      "contextWindow": 258400,
-      "maxTokens": 32000,
-      "_note": "Fast GPT utility alias. On moat-llm-router, LiteLLM routes mini to Codex-LB gpt-5.6-luna. Tower uses the Codex effective input window (272000*0.95=258400) and the Responses API path (litellm-responses/mini) for title generation, summaries, @ai quick replies, and background utility work where Smartest is overkill.",
-      "roles": [
-        "full",
-        "managed",
-        "standalone"
+      ],
+      "hidden": true,
+      "selectable": false,
+      "reasoningEfforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
       ]
     },
     {
@@ -161,15 +173,84 @@
       ]
     },
     {
-      "provider": "azure-openai-responses-eastus2",
-      "modelId": "gpt-5.5",
-      "name": "Azure GPT-5.5 Emergency",
-      "badge": "EMERG",
+      "provider": "litellm-responses",
+      "modelId": "gpt-6.1-sol",
+      "name": "gpt-6.1-sol",
+      "badge": "SOL",
       "enabled": true,
-      "api": "azure-openai-responses",
-      "_note": "Manual full-VM emergency route only. Azure GPT-5.5 may remain available for operator debugging, but it is not the default and should not be used as automatic customer fallback. Current session default is litellm-responses/smartest. 근거: workspace/decisions/2026-05-17-azure-multi-region-provider-namespace.md",
+      "selectable": false,
+      "modelKind": "direct",
+      "api": "openai-responses",
+      "reasoning": true,
+      "defaultReasoning": "low",
+      "contextWindow": 353400,
+      "maxTokens": 128000,
       "roles": [
-        "full"
+        "full",
+        "managed",
+        "standalone"
+      ],
+      "hidden": true,
+      "reasoningEfforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ]
+    },
+    {
+      "provider": "litellm-responses",
+      "modelId": "gpt-5.6-sol",
+      "name": "gpt-5.6-sol",
+      "badge": "SOL",
+      "enabled": true,
+      "selectable": false,
+      "modelKind": "direct",
+      "api": "openai-responses",
+      "reasoning": true,
+      "defaultReasoning": "low",
+      "contextWindow": 353400,
+      "maxTokens": 128000,
+      "roles": [
+        "full",
+        "managed",
+        "standalone"
+      ],
+      "hidden": true,
+      "reasoningEfforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ]
+    },
+    {
+      "provider": "litellm-responses",
+      "modelId": "gpt-5.6-terra",
+      "name": "gpt-5.6-terra",
+      "badge": "TERRA",
+      "enabled": true,
+      "selectable": false,
+      "modelKind": "direct",
+      "api": "openai-responses",
+      "reasoning": true,
+      "defaultReasoning": "low",
+      "contextWindow": 353400,
+      "maxTokens": 128000,
+      "roles": [
+        "full",
+        "managed",
+        "standalone"
+      ],
+      "hidden": true,
+      "reasoningEfforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
       ]
     }
   ],
@@ -182,36 +263,36 @@
     }
   ],
   "defaults": {
-    "session": "litellm-responses/smartest",
+    "session": "litellm-responses/gpt-6.1-sol",
     "ai_reply": "litellm-responses/mini",
     "ai_task": "litellm-responses/mini"
   },
   "modelPolicies": {
-    "revision": 1,
+    "revision": 3,
     "policies": {
       "low": {
-        "model": "litellm-responses/smart",
+        "model": "litellm-responses/mini",
         "effort": "low"
       },
       "medium": {
-        "model": "litellm-responses/smartest",
+        "model": "litellm-responses/gpt-6.1-sol",
         "effort": "medium"
       },
       "high": {
-        "model": "litellm-responses/smartest",
+        "model": "litellm-responses/gpt-6.1-sol",
         "effort": "high"
       },
       "extra-high": {
-        "model": "litellm-responses/smartest",
+        "model": "litellm-responses/gpt-6.1-sol",
         "effort": "xhigh"
       },
       "max": {
-        "model": "litellm-responses/smartest",
+        "model": "litellm-responses/gpt-6.1-sol",
         "effort": "max",
         "description": "Highest available single-agent policy; Pi currently executes it as xhigh with downgrade provenance."
       },
       "ultra": {
-        "model": "litellm-responses/smartest",
+        "model": "litellm-responses/gpt-6.1-sol",
         "effort": "max",
         "enabled": false,
         "description": "Reserved for future multi-agent orchestration."
@@ -225,7 +306,7 @@
         "effort": "low"
       },
       "background": {
-        "model": "litellm-responses/mini",
+        "model": "litellm-responses/gpt-6.1-sol",
         "effort": "medium"
       }
     }

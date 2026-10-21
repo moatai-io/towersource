@@ -104,7 +104,8 @@ export function buildLanguagePolicyBlock(language: string): string {
     `- The configured response language is **${nativeName} (${englishName} / ${code})**.`,
     `- Respond in ${englishName} by default, regardless of the language used in conversation history, memory summaries, project files, or prior assistant messages.`,
     nativeInstruction,
-    '- An explicit language request in the current user message takes precedence for that response. Otherwise, do not infer the response language from historical context.',
+    '- This language policy applies to every user-visible assistant message: commentary, progress updates, pre-tool explanations, recovery notices, and final answers. Continue using the configured language after tool calls, retries, and conversation compaction; do not switch languages merely because work resumes.',
+    '- Use only the language explicitly requested by the user, or the configured language if none is requested; do not switch or mix languages without a request. Necessary quotations, translations, code, and proper nouns are exceptions. Do not infer the response language from historical context.',
     '- Code identifiers, file paths, and command snippets stay as-is; translate the prose around them.',
     '- When writing Markdown bold emphasis, never put spaces inside the markers: use `**text**`, not `** text **`. For Korean/CJK, use `**텍스트**`, not `** 텍스트 **`, because some web Markdown renderers expose the raw `**` when inner spaces are present.',
   ].join('\n');
@@ -124,24 +125,14 @@ function normalize(value: string | null | undefined): string | null {
 function nativeInstructionFor(code: string): string {
   switch (code) {
     case 'ko':
-      return '- 모든 답변은 기본적으로 한국어로 작성하십시오. 사용자가 다른 언어로 질문하거나 명시적으로 다른 언어를 요청할 때만 해당 언어로 전환합니다.';
-    case 'ja':
-      return '- 既定の応答は日本語で作成してください。ユーザーが他の言語で質問したり、明示的に他の言語を要求した場合のみ切り替えます。';
-    case 'zh':
-      return '- 默认使用中文回答。仅当用户使用其他语言提问或明确要求时才切换。';
-    case 'es':
-      return '- Responde en español de forma predeterminada. Cambia de idioma solo si el usuario lo pide o escribe en otro.';
-    case 'fr':
-      return '- Réponds en français par défaut. Ne change de langue que si l\'utilisateur le demande explicitement ou écrit dans une autre langue.';
-    case 'de':
-      return '- Antworte standardmäßig auf Deutsch. Wechsle nur die Sprache, wenn der Benutzer dies ausdrücklich verlangt oder in einer anderen Sprache schreibt.';
-    case 'en':
-      // English is already covered by the default-language line above; keep a
-      // no-op bullet so the block's shape stays consistent across languages.
-      return '- Keep responses in English unless the user writes in a different language.';
+      // Korean clarity rules are adapted from the ideas in snflkd/fluent-korean
+      // (MIT): https://github.com/snflkd/fluent-korean. Tower keeps a compact,
+      // product-wide subset here instead of installing the Claude Code plugin.
+      return [
+        '- 한국어로 설명할 때는 번역투·명사 나열·모호한 내부 은어를 피하고, 주체와 행동이 드러나도록 필요한 조사와 서술어를 갖춰 쓰십시오.',
+        '- 본문은 자연스러운 완결 문장으로 쓰되, 제목·짧은 목록·표·UI 문구는 용도에 맞게 간결하게 작성하십시오.',
+      ].join('\n');
     default:
-      // Unknown code — stick with English guidance. resolveLanguage() should
-      // rarely pass anything exotic, but be robust.
-      return '- Match the language above for all prose; switch only when the user does.';
+      return ''; // The shared policy covers all languages without competing switch rules.
   }
 }

@@ -2,7 +2,7 @@ import { query, queryOne, execute, transaction, withClient } from '../../db/pg-r
 import { v4 as uuidv4 } from 'uuid';
 import { getAccessibleProjectIds } from '../pm/project-membership-manager.js';
 import { findProjectByPath } from '../pm/project-access.js';
-import { getModelDefaults } from '../../config.js';
+import { getModelDefaults, resolveLegacyPiModelId } from '../../config.js';
 export type { WorkflowMode, TaskMeta, TaskReportPolicy } from '@tower/shared';
 import type { TaskMeta, WorkflowMode, TaskReportPolicy } from '@tower/shared';
 
@@ -38,9 +38,9 @@ function mapRow(row: any): TaskMeta {
     description: row.description || '',
     cwd: row.cwd,
     // Engine column added 2026-05-17. If legacy rows have no engine/model,
-    // derive both from the configured task default (Pi GPT by default).
-    engine: (row.engine || inferEngineFromModel(row.model || getModelDefaults().ai_task)) as 'claude' | 'pi' | 'local',
-    model: row.model || getModelDefaults().ai_task,
+    // derive both from the admin-configured Core mapping.
+    engine: (row.engine || inferEngineFromModel(row.model || getModelDefaults().session)) as 'claude' | 'pi' | 'local',
+    model: row.model || getModelDefaults().session,
     status: row.status,
     sessionId: row.session_id,
     sortOrder: row.sort_order,
@@ -73,38 +73,49 @@ export async function resolveProjectFromCwd(cwd: string): Promise<string | null>
   return findProjectByPath(cwd);
 }
 
+export const SYSTEM_PROJECT_SENTINEL_ID = '00000000-0000-0000-0000-000000000000';
+
+export function normalizeTaskProjectId(projectId: string | null | undefined): string | null | undefined {
+  return projectId === SYSTEM_PROJECT_SENTINEL_ID ? null : projectId;
+}
+
 export async function createTask(
   title: string,
   description: string,
   cwd: string,
   userId?: number,
   model?: string,
-  schedule?: { scheduledAt?: string | null; scheduleCron?: string | null; scheduleEnabled?: boolean },
+  _legacySchedule?: { scheduledAt?: string | null; scheduleCron?: string | null; scheduleEnabled?: boolean },
   workflow?: WorkflowMode,
   parentTaskId?: string,
-  projectId?: string,
+  projectId?: string | null,
   roomInfo?: { roomId: string; triggeredBy?: number | null; roomMessageId?: string | null },
   reportPolicy?: TaskReportPolicy,
   /**
    * Engine that runs this task (column added 2026-05-17, migration 058).
-   * Default follows Admin → AI Settings → Task execution (Pi GPT by default).
+   * Default follows Admin → AI Settings → Core mapping.
    * 'pi' routes through PiEngine. Caller should match model accordingly
-   * (e.g. engine='pi' + model='litellm-responses/mini').
+   * (e.g. engine='pi' with the configured Core Router ID).
    */
   engine?: 'claude' | 'pi' | 'local',
 ): Promise<TaskMeta> {
   const id = uuidv4();
   const maxOrder = await queryOne<any>('SELECT MAX(sort_order) as max_order FROM tasks WHERE status = $1', ['todo']);
   const sortOrder = (maxOrder?.max_order ?? -1) + 1;
-  // Task creation defaults now follow Admin → AI Settings → “Task execution”.
+  // Task creation defaults now follow Admin → AI Settings → Core (session default).
   // If a caller provides only a model, infer the engine from the model id so
-  // provider/model Pi defaults (e.g. litellm-responses/mini) do not accidentally
+  // provider/model Pi defaults do not accidentally
   // run through Claude.
-  const resolvedModel = model || getModelDefaults().ai_task;
+  const requestedModel = model || getModelDefaults().session;
+  const resolvedModel = resolveLegacyPiModelId(requestedModel);
   const resolvedEngine = engine || inferEngineFromModel(resolvedModel);
 
-  // Auto-resolve project from cwd if not explicitly provided
-  const resolvedProjectId = projectId ?? await resolveProjectFromCwd(cwd);
+  // Auto-resolve only when the caller omitted projectId. Explicit null means
+  // system/personal scope and must not be rebound from cwd.
+  const normalizedProjectId = normalizeTaskProjectId(projectId);
+  const resolvedProjectId = normalizedProjectId === undefined
+    ? await resolveProjectFromCwd(cwd)
+    : normalizedProjectId;
 
   // New tasks may write only current policies. Legacy channel/kakao/all/default
   // values remain readable for existing rows but cannot create new dependencies.
@@ -115,9 +126,9 @@ export async function createTask(
     VALUES ($1, $2, $3, $4, $5, $6, 'todo', $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
   `, [
     id, title, description, cwd, resolvedEngine, resolvedModel, sortOrder, userId ?? null,
-    schedule?.scheduledAt ?? null,
-    schedule?.scheduleCron ?? null,
-    schedule?.scheduleEnabled ? 1 : 0,
+    null,
+    null,
+    0,
     workflow || 'auto',
     parentTaskId ?? null,
     resolvedProjectId,
@@ -164,7 +175,7 @@ export async function getTask(id: string): Promise<TaskMeta | null> {
   return row ? mapRow(row) : null;
 }
 
-export async function updateTask(id: string, updates: Partial<Pick<TaskMeta, 'title' | 'description' | 'cwd' | 'engine' | 'model' | 'status' | 'sessionId' | 'sortOrder' | 'progressSummary' | 'todoSnapshot' | 'completedAt' | 'scheduledAt' | 'scheduleCron' | 'scheduleEnabled' | 'workflow' | 'parentTaskId' | 'worktreePath' | 'projectId' | 'roomId' | 'triggeredBy' | 'roomMessageId' | 'reportPolicy'>>): Promise<TaskMeta | null> {
+export async function updateTask(id: string, updates: Partial<Pick<TaskMeta, 'title' | 'description' | 'cwd' | 'engine' | 'model' | 'status' | 'sessionId' | 'sortOrder' | 'progressSummary' | 'todoSnapshot' | 'completedAt' | 'workflow' | 'parentTaskId' | 'worktreePath' | 'projectId' | 'roomId' | 'triggeredBy' | 'roomMessageId' | 'reportPolicy'>>): Promise<TaskMeta | null> {
   const fields: string[] = [];
   const values: any[] = [];
   let paramIndex = 1;
@@ -180,9 +191,6 @@ export async function updateTask(id: string, updates: Partial<Pick<TaskMeta, 'ti
   if (updates.progressSummary !== undefined) { fields.push(`progress_summary = $${paramIndex++}`); values.push(JSON.stringify(updates.progressSummary)); }
   if (updates.todoSnapshot !== undefined) { fields.push(`todo_snapshot = $${paramIndex++}`); values.push(updates.todoSnapshot ? JSON.stringify(updates.todoSnapshot) : null); }
   if (updates.completedAt !== undefined) { fields.push(`completed_at = $${paramIndex++}`); values.push(updates.completedAt); }
-  if (updates.scheduledAt !== undefined) { fields.push(`scheduled_at = $${paramIndex++}`); values.push(updates.scheduledAt); }
-  if (updates.scheduleCron !== undefined) { fields.push(`schedule_cron = $${paramIndex++}`); values.push(updates.scheduleCron); }
-  if (updates.scheduleEnabled !== undefined) { fields.push(`schedule_enabled = $${paramIndex++}`); values.push(updates.scheduleEnabled ? 1 : 0); }
   if (updates.workflow !== undefined) { fields.push(`workflow = $${paramIndex++}`); values.push(updates.workflow); }
   if (updates.parentTaskId !== undefined) { fields.push(`parent_task_id = $${paramIndex++}`); values.push(updates.parentTaskId); }
   if (updates.worktreePath !== undefined) { fields.push(`worktree_path = $${paramIndex++}`); values.push(updates.worktreePath); }

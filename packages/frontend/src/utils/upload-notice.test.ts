@@ -1,35 +1,29 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+vi.mock('./toast', () => ({ toastSuccess: vi.fn(), toastError: vi.fn() }));
+import { toastError, toastSuccess } from './toast';
 import i18n from '../i18n';
 import { notifyUploadResult } from './upload-notice';
-import { toastError, toastSuccess } from './toast';
-
-vi.mock('./toast', () => ({
-  toastError: vi.fn(),
-  toastSuccess: vi.fn(),
-}));
-
-describe('notifyUploadResult', () => {
-  beforeEach(async () => {
-    vi.clearAllMocks();
-    await i18n.changeLanguage('en');
-  });
-  it('emits one success notice for an all-success batch', () => {
-    notifyUploadResult({ ok: 3, fail: 0 }, 'Documents/');
+import { useFileOperationFeedback } from '../features/file-operation-feedback/feedback';
+beforeEach(async () => {
+  vi.clearAllMocks(); useFileOperationFeedback.setState({ notices: {} }); await i18n.changeLanguage('en');
+});
+describe('upload notice policy', () => {
+  it('preserves success notifications and clears old scoped errors', () => {
+    notifyUploadResult({ ok: 0, fail: 1 }, undefined, 'upload:a');
+    notifyUploadResult({ ok: 3, fail: 0 }, 'target', 'upload:a');
     expect(toastSuccess).toHaveBeenCalledOnce();
-    expect(toastSuccess).toHaveBeenCalledWith('Uploaded 3 file(s) · Documents/');
-    expect(toastError).not.toHaveBeenCalled();
+    expect(useFileOperationFeedback.getState().notices['upload:a']).toBeUndefined();
   });
-
-  it('emits one combined error notice for a partial failure', () => {
-    notifyUploadResult({ ok: 2, fail: 1 });
-    expect(toastError).toHaveBeenCalledOnce();
-    expect(toastError).toHaveBeenCalledWith('File upload result: 2 succeeded, 1 failed');
+  it.each(['EACCES', 'EPERM', 'ENOSPC', 'EDQUOT', 'unknown-private-detail'])('renders safe inline failure for %s', error => {
+    notifyUploadResult({ ok: 2, fail: 1, results: [{ error }] }, 'target', 'upload:a');
+    const notice = useFileOperationFeedback.getState().notices['upload:a'];
+    expect(notice.status).toBe('failed');
+    expect(notice.message).not.toContain(error);
+    expect(toastError).not.toHaveBeenCalled();
     expect(toastSuccess).not.toHaveBeenCalled();
   });
-
-  it('follows the active Korean language', async () => {
-    await i18n.changeLanguage('ko');
-    notifyUploadResult({ ok: 1, fail: 0 });
-    expect(toastSuccess).toHaveBeenCalledWith('파일 1개를 올렸어요');
+  it('is silent for an empty result', () => {
+    notifyUploadResult({ ok: 0, fail: 0 });
+    expect(toastSuccess).not.toHaveBeenCalled(); expect(toastError).not.toHaveBeenCalled();
   });
 });

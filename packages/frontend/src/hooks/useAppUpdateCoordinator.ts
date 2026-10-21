@@ -28,13 +28,33 @@ import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { registerSW } from 'virtual:pwa-register';
 import { useSettingsStore } from '../stores/settings-store';
 import { useChatStore } from '../stores/chat-store';
-import { normalizeVersion, reloadOnce } from '../utils/app-version';
+import { isAllowedDevHost } from '../config/dev-hosts';
+import { normalizeVersion, reloadForUserUpdate } from '../utils/app-version';
 import {
   shouldAutoApplyDeferredUpdate,
   evaluateBuildIdChange,
   type ReloadSafetySnapshot,
   type BuildIdEvaluation,
 } from '../utils/update-coordinator';
+
+const BUILD_CHECK_INTERVAL_MS = 60_000;
+
+function frontendSourceRev(): string {
+  return typeof __TOWER_FRONTEND_SOURCE_REV__ === 'string' ? __TOWER_FRONTEND_SOURCE_REV__ : '';
+}
+
+function isFrontendSourceMismatch(sourceRev: unknown): boolean {
+  const frontend = normalizeVersion(frontendSourceRev());
+  const backend = normalizeVersion(sourceRev);
+  // The backend boot id is not a frontend version: it changes on every restart.
+  // Without two comparable source revisions, only the SW can report an update.
+  return !!frontend && !!backend && frontend !== backend;
+}
+
+function shouldMonitorDeployedBuild(): boolean {
+  if (typeof window === 'undefined') return false;
+  return !isAllowedDevHost(window.location.hostname);
+}
 
 export interface UpdateCoordinator {
   /** True iff the settings-store says a new version is ready to apply. */
@@ -47,9 +67,8 @@ export interface UpdateCoordinator {
   /**
    * Apply the update right now.
    *
-   * Prefers the service worker `updateServiceWorker(true)` path if available
-   * (which swaps the SW and reloads). Falls back to the reload-once guard,
-   * and ultimately to a plain `window.location.reload()`.
+   * A user-initiated update always navigates to a fresh document, even when
+   * the service worker has no waiting worker to activate.
    */
   requestReload: () => void;
 
@@ -70,7 +89,7 @@ export interface UpdateCoordinator {
    * Returns the evaluation result so the caller can decide whether to
    * short-circuit (e.g. when an auto-reload was triggered).
    */
-  evaluateConfigPayload: (data: { buildId?: string; version?: string } | null | undefined) => BuildIdEvaluation | null;
+  evaluateConfigPayload: (data: { buildId?: string; version?: string; sourceRev?: string } | null | undefined) => BuildIdEvaluation | null;
 }
 
 /**
@@ -113,16 +132,21 @@ export function useAppUpdateCoordinator(): UpdateCoordinator {
   );
 
   // --- service worker registration ----------------------------------------
-  // The ref holds the `updateServiceWorker` function returned by registerSW.
-  // It's only set once, in the mount effect below.
-  const swUpdateRef = useRef<((reloadPage?: boolean) => Promise<void>) | null>(null);
+  // A real SW update can arrive independently of /api/config's source revision.
+  const swNeedsRefreshRef = useRef(false);
 
   useEffect(() => {
-    const updateSW = registerSW({
+    // Vite development hosts use HMR and deliberately unregister stale service
+    // workers during bootstrap. Registering another SW here races that cleanup
+    // and can turn ordinary source edits into full-page reloads.
+    if (!shouldMonitorDeployedBuild()) return;
+
+    registerSW({
       immediate: true,
       onNeedRefresh() {
         // Never reload a healthy tab just because a deploy completed. Surface
         // the non-blocking banner and let the user choose when to apply it.
+        swNeedsRefreshRef.current = true;
         const buildId = useSettingsStore.getState().serverConfig?.buildId || null;
         useSettingsStore.getState().setUpdateAvailable(true, buildId);
       },
@@ -130,34 +154,45 @@ export function useAppUpdateCoordinator(): UpdateCoordinator {
         // OfflineBanner already covers the connectivity story; nothing to do.
       },
     });
-    swUpdateRef.current = updateSW;
   }, []);
 
   // A tab can stay alive across many deploys without re-fetching /api/config.
-  // Check once when it becomes visible again, but do not auto-reload: a
-  // healthy screen must never flash or discard draft UI state unexpectedly.
+  // Check on mount, when the window regains focus, when a hidden tab becomes
+  // visible, and at a low frequency while it remains visible. Never auto-
+  // reload a healthy screen: surface the banner and let the user choose.
   // Broken chunk/bootstrap paths have their own one-shot recovery guards.
   useEffect(() => {
+    // A development build id changes as source files are edited; it does not
+    // represent a deployed application update. Vite HMR owns dev freshness.
+    if (!shouldMonitorDeployedBuild()) return;
+
     let checkInFlight = false;
+    let disposed = false;
 
     const checkForNewBuild = async () => {
-      if (document.visibilityState !== 'visible' || checkInFlight) return;
-      const currentBuildId = normalizeVersion(
-        useSettingsStore.getState().serverConfig?.buildId
-          || useSettingsStore.getState().serverConfig?.version,
-      );
-      if (!currentBuildId) return;
+      if (disposed || document.visibilityState !== 'visible' || checkInFlight) return;
+      // /api/config might not have finished yet; the embedded frontend
+      // revision is sufficient to compare against /api/health.
+      if (!frontendSourceRev()) return;
 
       checkInFlight = true;
       try {
         const response = await fetch('/api/health', { cache: 'no-store' });
         if (!response.ok) return;
-        const data = await response.json() as { buildId?: string; version?: string };
+        const data = await response.json() as { buildId?: string; version?: string; sourceRev?: string };
+        if (disposed) return;
         const nextBuildId = normalizeVersion(data.buildId || data.version);
-        if (nextBuildId && nextBuildId !== currentBuildId) {
-          useSettingsStore.getState().setUpdateAvailable(true, nextBuildId);
+        const mismatch = isFrontendSourceMismatch(data.sourceRev);
+        const settings = useSettingsStore.getState();
+        if (
+          mismatch
+          && (!settings.updateAvailable || settings.latestBuildId !== nextBuildId)
+        ) {
+          settings.setUpdateAvailable(true, nextBuildId);
           const registration = await navigator.serviceWorker?.getRegistration?.('/');
           void registration?.update().catch(() => undefined);
+        } else if (!mismatch && data.sourceRev && frontendSourceRev() && settings.updateAvailable && !swNeedsRefreshRef.current) {
+          settings.setUpdateAvailable(false, nextBuildId || null);
         }
       } catch {
         // Connectivity failures are handled elsewhere; update detection is
@@ -167,25 +202,33 @@ export function useAppUpdateCoordinator(): UpdateCoordinator {
       }
     };
 
-    const onVisibilityChange = () => {
+    const checkIfVisible = () => {
       if (document.visibilityState === 'visible') void checkForNewBuild();
     };
-    document.addEventListener('visibilitychange', onVisibilityChange);
-    return () => document.removeEventListener('visibilitychange', onVisibilityChange);
+
+    void checkForNewBuild();
+    window.addEventListener('focus', checkIfVisible);
+    document.addEventListener('visibilitychange', checkIfVisible);
+    const intervalId = window.setInterval(checkIfVisible, BUILD_CHECK_INTERVAL_MS);
+
+    return () => {
+      disposed = true;
+      window.removeEventListener('focus', checkIfVisible);
+      document.removeEventListener('visibilitychange', checkIfVisible);
+      window.clearInterval(intervalId);
+    };
   }, []);
 
   // --- action callbacks ---------------------------------------------------
   const requestReload = useCallback(() => {
-    if (swUpdateRef.current) {
-      void swUpdateRef.current(true);
-      return;
-    }
-    if (updateAvailable) {
-      reloadOnce('manual-update-banner');
+    // registerSW(autoUpdate) may have already activated the worker. In that
+    // case updateSW(true) is a no-op, so always navigate for an explicit click.
+    if (useSettingsStore.getState().updateAvailable) {
+      void reloadForUserUpdate();
       return;
     }
     window.location.reload();
-  }, [updateAvailable]);
+  }, []);
 
   const deferReload = useCallback(() => {
     useSettingsStore.getState().setDeferredUpdateRequested(true);
@@ -218,19 +261,30 @@ export function useAppUpdateCoordinator(): UpdateCoordinator {
     const currentBuildId = normalizeVersion(
       settings.serverConfig?.buildId || settings.serverConfig?.version,
     );
-    const evaluation = evaluateBuildIdChange(currentBuildId, nextBuildId, readReloadSafetySnapshot());
-
+    // Compare the executing JS with the server's source revision. A backend
+    // restart changes buildId but does not ship a new frontend bundle.
+    const mismatch = isFrontendSourceMismatch(data.sourceRev);
+    const sourceEvaluation = mismatch
+      ? evaluateBuildIdChange(frontendSourceRev(), normalizeVersion(data.sourceRev), readReloadSafetySnapshot())
+      : null;
+    const evaluation: BuildIdEvaluation = sourceEvaluation?.kind === 'changed-busy'
+      ? { kind: 'changed-busy', latestBuildId: nextBuildId }
+      : sourceEvaluation?.kind === 'changed-available'
+        ? { kind: 'changed-available', latestBuildId: nextBuildId }
+        : { kind: 'no-change', latestBuildId: nextBuildId || currentBuildId || null };
+    // /api/config may already come from the new backend on first load. Compare
+    // against the source identity embedded in the executing JS, not only the
+    // backend's own boot ID (which would match /api/health).
     switch (evaluation.kind) {
       case 'changed-available':
       case 'changed-busy':
         // A healthy tab must not flash or lose draft UI state after a deploy.
         // Show the banner so the user chooses when to apply the update.
-        settings.setUpdateAvailable(true, evaluation.latestBuildId);
+        settings.setUpdateAvailable(true, nextBuildId || null);
         return evaluation;
-      case 'first-seen':
       case 'no-change':
         // Track latestBuildId but don't surface anything.
-        settings.setUpdateAvailable(false, evaluation.latestBuildId);
+        if (!swNeedsRefreshRef.current) settings.setUpdateAvailable(false, nextBuildId || null);
         return evaluation;
     }
   }, []);

@@ -13,17 +13,17 @@ function readSource(file = DEPLOY_ENGINE_PATH): string {
 describe('deploy-engine — local publishing source contracts', () => {
   it('uses slug, not logical name, as the local static folder identity', () => {
     const src = readSource();
-    expect(src).toMatch(/const slug = await resolveDeploySlug/);
-    expect(src).toMatch(/await publishStaticLocally\(\{ \.\.\.opts, slug, access \}, slug\)/);
+    expect(src).toMatch(/const slug = await atDeployStage\('prepare', \(\) => resolveDeploySlug/);
+    expect(src).toMatch(/atDeployStage\('copy', \(\) => publishStaticLocally\(\{ \.\.\.opts, slug, access \}, slug\)/);
     expect(src).toMatch(/url: localPublishedUrl\(slug\)/);
     expect(src).toMatch(/checkSiteExists\(s\.slug \|\| s\.name\)/);
   });
 
-  it('emits wildcard subdomain URLs as the canonical local publishing URL', () => {
+  it('delegates local publishing URL to explicit path mode or legacy subdomain generator', () => {
     const src = readSource();
-    expect(src).toMatch(/return `\$\{u\.protocol\}\/\/\$\{slug\}\.\$\{u\.host\}\/`/);
+    expect(src).toContain('publishedSiteUrl(slug, config.publicUrl, config.publishingBaseUrl)');
     expect(src).toMatch(/const slug = s\.slug \|\| s\.name/);
-    expect(src).toMatch(/s\.external_url = localPublishedUrl\(slug\)/);
+    expect(src).toContain('if (!config.publishingBaseUrl || !s.external_url)');
     expect(src).not.toMatch(/return `\$\{u\.protocol\}\/\/\$\{u\.host\}\/sites\/\$\{slug\}\//);
   });
 
@@ -38,7 +38,7 @@ describe('deploy-engine — local publishing source contracts', () => {
     expect(projectDisplay).toMatch(/export async function loadProjectFolderKeyMap/);
     expect(api).toMatch(/loadProjectFolderKeyMap/);
     expect(api).toMatch(/membershipProjectIds\.map\(\(id\) => folderById\[id\] \|\| id\)/);
-    expect(api).toMatch(/allowed\.has\(s\.project\)/);
+    expect(api).toMatch(/allowed\.has\(site\.project\)/);
   });
 
   it('generates Publishing Hub thumbnails from the published page path', () => {

@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 const surface = fs.readFileSync(path.resolve(import.meta.dirname, './FileExchangeSurface.tsx'), 'utf8');
 const materials = fs.readFileSync(path.resolve(import.meta.dirname, '../../components/personal-space/PersonalMaterialsView.tsx'), 'utf8');
 const input = fs.readFileSync(path.resolve(import.meta.dirname, '../../components/chat/InputBox.tsx'), 'utf8');
+const sessionDrop = fs.readFileSync(path.resolve(import.meta.dirname, './fileExchangeSessionDrop.ts'), 'utf8');
 
 describe('File Exchange UI integration', () => {
   it('keeps project collections stable so an empty Personal folder does not refetch on every render', () => {
@@ -24,8 +25,8 @@ describe('File Exchange UI integration', () => {
   it('uses the opaque drag contract and imports into the active session', () => {
     expect(surface).toContain('FILE_EXCHANGE_DRAG_TYPE');
     expect(input).toContain("application/x-tower-file-exchange");
-    expect(input).toContain('decodeExchangeDrag');
-    expect(input).toContain("{ scope: 'session', sessionId }");
+    expect(input).toContain('transferSessionDrop');
+    expect(sessionDrop).toContain("{ scope: 'session', sessionId }");
   });
 
   it('lets the personal file table collapse without a fixed 640px floor', () => {

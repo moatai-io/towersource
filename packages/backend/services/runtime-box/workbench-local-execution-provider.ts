@@ -5,7 +5,7 @@
 
 import { ensureRunning, execInBox, getOrCreateBox } from './runtime-box-manager.js';
 import { registerService, startServiceProcess } from './service-registry.js';
-import type { WorkbenchExecutionProvider } from './workbench-execution-broker.js';
+import type { WorkbenchExecutionProvider } from '../execution/execution-broker.js';
 import { enqueueLocalWorkbenchJob } from './workbench-job-runner.js';
 
 /** Reuse existing Runtime Box command and Service primitives behind one provider seam. */

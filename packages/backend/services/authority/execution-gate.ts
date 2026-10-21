@@ -1,3 +1,9 @@
+import {
+  AUTHORIZATION_POLICY_ID,
+  authorizeTowerAction,
+  type AuthorityCapability,
+} from './authorization-policy.js';
+
 /**
  * Owns: project-context execution policy decisions for Runbox/operator workflows.
  * Public API: evaluateExecutionGate, isHighImpactExecutionAction.
@@ -7,7 +13,6 @@
 export type ExecutionRole =
   | 'admin'
   | 'operator'
-  | 'customer_manager'
   | 'member'
   | 'viewer'
   | 'guest'
@@ -48,7 +53,7 @@ export type ExecutionDecision = 'allow' | 'deny' | 'needs_setup' | 'needs_confir
 export interface ExecutionPolicy {
   /**
    * normal: ordinary project package; ops: intentionally trusted operational workbench;
-   * restricted: execute observe-only/read actions unless elevated by admin/operator.
+   * restricted: observe-only/read actions for every requester, including admin/operator.
    */
   trustLevel?: ExecutionTrustLevel;
   /** Allow using project-provided credentials for external targets. */
@@ -63,7 +68,7 @@ export interface ExecutionPolicy {
   allowDeploy?: boolean;
   /** Allow host/global admin actions from this project context. */
   allowHostAdmin?: boolean;
-  /** Secret value reveal is intentionally stricter than secret use. Default: admin/operator only. */
+  /** Trusted internal Runtime secret visibility. Deployed/restricted profiles must set admin_only or deny the capability entirely. */
   secretValueVisibility?: 'admin_only' | 'owner_admin' | 'project_members';
 }
 
@@ -72,6 +77,8 @@ export interface ExecutionGateInput {
   userRole?: ExecutionRole | null;
   projectId?: string | null;
   projectMember?: boolean;
+  /** Server-resolved write access; false must not be upgraded by membership. */
+  projectWritable?: boolean;
   projectRole?: 'owner' | 'member' | string | null;
   actionClass: ExecutionActionClass;
   target?: { type: string; id?: string; summary?: string; operation?: ExecutionOperationKind } | null;
@@ -87,7 +94,9 @@ export interface ExecutionGateInput {
 export interface ExecutionGateResult {
   decision: ExecutionDecision;
   allowed: boolean;
+  policyId: typeof AUTHORIZATION_POLICY_ID;
   reason: string;
+  requiredCapability: AuthorityCapability;
   requirements: string[];
   auditRequired: boolean;
   highImpact: boolean;
@@ -107,33 +116,54 @@ export function isHighImpactExecutionAction(actionClass: ExecutionActionClass): 
   return HIGH_IMPACT_ACTIONS.has(actionClass);
 }
 
-function isAdminOrOperator(role: ExecutionRole | null | undefined): boolean {
-  return role === 'admin' || role === 'operator';
-}
-
-function isProjectParticipant(input: ExecutionGateInput): boolean {
-  if (isAdminOrOperator(input.userRole)) return true;
-  return input.projectMember === true || input.projectRole === 'owner' || input.projectRole === 'member';
-}
-
 function isObserveOnlyOperation(operation: ExecutionOperationKind | undefined): boolean {
   return operation === 'status' || operation === 'logs' || operation === 'list' || operation === 'inspect';
 }
 
-function allow(reason: string, requirements: string[] = [], highImpact = false): ExecutionGateResult {
-  return { decision: 'allow', allowed: true, reason, requirements, auditRequired: highImpact, highImpact };
+function executionCapability(actionClass: ExecutionActionClass): AuthorityCapability {
+  if (actionClass === 'secret-read') return 'credential:reveal';
+  if (actionClass === 'credential-admin') return 'credential:admin';
+  if (actionClass === 'credential-use') return 'credential:execute';
+  if (actionClass === 'read') return 'worker:read';
+  if (actionClass === 'host-admin') return 'system:admin';
+  return 'worker:execute';
 }
 
-function deny(reason: string, requirements: string[] = [], highImpact = false): ExecutionGateResult {
-  return { decision: 'deny', allowed: false, reason, requirements, auditRequired: highImpact, highImpact };
+function gateResult(
+  decision: ExecutionDecision,
+  allowed: boolean,
+  actionClass: ExecutionActionClass,
+  reason: string,
+  requirements: string[],
+  highImpact: boolean,
+  auditRequired = highImpact,
+): ExecutionGateResult {
+  return {
+    decision,
+    allowed,
+    policyId: AUTHORIZATION_POLICY_ID,
+    reason,
+    requiredCapability: executionCapability(actionClass),
+    requirements,
+    auditRequired,
+    highImpact,
+  };
 }
 
-function needsSetup(reason: string, requirements: string[], highImpact = false): ExecutionGateResult {
-  return { decision: 'needs_setup', allowed: false, reason, requirements, auditRequired: highImpact, highImpact };
+function allow(actionClass: ExecutionActionClass, reason: string, requirements: string[] = [], highImpact = false): ExecutionGateResult {
+  return gateResult('allow', true, actionClass, reason, requirements, highImpact);
 }
 
-function needsConfirmation(reason: string, requirements: string[], highImpact = true): ExecutionGateResult {
-  return { decision: 'needs_confirmation', allowed: false, reason, requirements, auditRequired: true, highImpact };
+function deny(actionClass: ExecutionActionClass, reason: string, requirements: string[] = [], highImpact = false): ExecutionGateResult {
+  return gateResult('deny', false, actionClass, reason, requirements, highImpact);
+}
+
+function needsSetup(actionClass: ExecutionActionClass, reason: string, requirements: string[], highImpact = false): ExecutionGateResult {
+  return gateResult('needs_setup', false, actionClass, reason, requirements, highImpact);
+}
+
+function needsConfirmation(actionClass: ExecutionActionClass, reason: string, requirements: string[], highImpact = true): ExecutionGateResult {
+  return gateResult('needs_confirmation', false, actionClass, reason, requirements, highImpact, true);
 }
 
 /**
@@ -143,112 +173,151 @@ function needsConfirmation(reason: string, requirements: string[], highImpact = 
  * - project members may execute project-packaged read/write/install/credential-use actions;
  * - project owners/admins control membership and credential attachment outside this function;
  * - ops-level projects may run cross-project/customer/container/deploy actions when setup exists;
- * - secret value reveal and host-global mutation remain admin/operator-oriented.
+ * - trusted internal project members may reveal attached values; restricted/deployed profiles deny that capability.
  */
 export function evaluateExecutionGate(input: ExecutionGateInput): ExecutionGateResult {
   const policy = input.policy ?? {};
   const trustLevel = policy.trustLevel ?? 'normal';
   const highImpact = isHighImpactExecutionAction(input.actionClass);
 
-  if (!input.userId && !isAdminOrOperator(input.userRole)) {
-    return deny('Authenticated user context is required', ['userId'], highImpact);
+  if (!Number.isSafeInteger(input.userId) || Number(input.userId) <= 0) {
+    return deny(input.actionClass, 'Authenticated user context is required', ['userId'], highImpact);
   }
 
-  if (!isProjectParticipant(input)) {
-    return deny('User is not a member of the project execution context', ['project_membership'], highImpact);
+  // Human role is used only at the entrance. A successful entrance never
+  // adds cross-Project/host/deploy capabilities to the Agent policy below.
+  const entrance = authorizeTowerAction({
+    role: input.userRole,
+    resource: input.actionClass === 'host-admin' ? 'system' : input.actionClass === 'read' ? 'project' : 'worker',
+    action: input.actionClass === 'host-admin' ? 'admin' : input.actionClass === 'read' ? 'read' : 'execute',
+    facts: {
+      projectMember: input.projectMember === true || input.projectRole === 'member',
+      projectOwner: input.projectRole === 'owner',
+      projectWritable: input.projectWritable,
+    },
+  });
+  const explicitOperatorHost = input.actionClass === 'host-admin' && input.userRole === 'operator'
+    && policy.allowHostAdmin === true;
+  if (!entrance.allowed && !explicitOperatorHost) {
+    return deny(input.actionClass, 'User does not have access to the project execution context', [entrance.requiredCapability], highImpact);
   }
 
-  if (trustLevel === 'restricted' && !isAdminOrOperator(input.userRole) && input.actionClass !== 'read') {
-    return deny('Restricted projects allow only read actions for non-admin users', ['admin_or_operator'], highImpact);
+  if (trustLevel === 'restricted' && input.actionClass !== 'read') {
+    return deny(input.actionClass, 'Restricted Agents allow only read actions for every requester', ['agent_execution_capability'], highImpact);
   }
 
   if (input.toolAvailable === false) {
-    return needsSetup('Required tool is not available in this Runbox/project environment', ['install_or_select_runbox_profile'], highImpact);
+    return needsSetup(input.actionClass, 'Required tool is not available in this Runbox/project environment', ['install_or_select_runbox_profile'], highImpact);
   }
 
   switch (input.actionClass) {
     case 'read':
     case 'write':
     case 'install-tool':
-      return allow('Project members may execute normal project-packaged actions', [], highImpact);
+      return allow(input.actionClass, 'Project members may execute normal project-packaged actions', [], highImpact);
 
     case 'credential-use':
       if (input.credentialAvailable === false) {
-        return needsSetup('Required credential is not available to this project execution context', ['credential_grant_or_direct_credential'], highImpact);
+        return needsSetup(input.actionClass, 'Required credential is not available to this project execution context', ['credential_grant_or_direct_credential'], highImpact);
       }
       if (policy.allowDirectCredentials === false) {
-        return deny('Direct credential use is disabled by this project policy', ['central_vault_grant_or_policy_change'], highImpact);
+        return deny(input.actionClass, 'Direct credential use is disabled by this project policy', ['central_vault_grant_or_policy_change'], highImpact);
       }
-      return allow('Project members may use credentials already attached to the project execution context', [], highImpact);
+      return allow(input.actionClass, 'Project members may use credentials already attached to the project execution context', [], highImpact);
 
     case 'secret-read': {
-      const visibility = policy.secretValueVisibility ?? 'admin_only';
-      if (visibility === 'project_members') return allow('Project policy allows project members to reveal secret values', [], highImpact);
-      if (visibility === 'owner_admin' && (input.projectRole === 'owner' || isAdminOrOperator(input.userRole))) {
-        return allow('Project owner/admin may reveal secret values under project policy', [], highImpact);
+      if (trustLevel === 'restricted') {
+        return deny(input.actionClass, 'Restricted or deployed Agents cannot reveal secret values', ['trusted_internal_runtime'], highImpact);
       }
-      if (isAdminOrOperator(input.userRole)) return allow('Admin/operator may reveal secret values when explicitly required', [], highImpact);
-      return deny('Secret values are not visible to ordinary project members', ['admin_or_owner_secret_visibility'], highImpact);
+      const visibility = policy.secretValueVisibility ?? 'project_members';
+      if (input.auditAvailable === false) {
+        return deny(input.actionClass, 'Credential reveal requires available audit persistence', ['audit_persistence'], highImpact);
+      }
+      if (visibility === 'project_members') {
+        return allow(input.actionClass, 'Trusted internal Project members may reveal Credentials available to this Agent', [], highImpact);
+      }
+      // The explicit admin_only profile must not widen when shared credential
+      // management policy permits operator/member reveal at the product layer.
+      if (input.userRole === 'admin' || (visibility === 'owner_admin' && input.projectRole === 'owner')) {
+        return allow(input.actionClass, 'Credential reveal is allowed by the configured trusted Runtime visibility', [], highImpact);
+      }
+      return deny(input.actionClass, 'Credential reveal is not allowed by this Runtime profile', ['credential_reveal_visibility'], highImpact);
     }
 
-    case 'credential-admin':
-      if (!isAdminOrOperator(input.userRole) && input.projectRole !== 'owner') {
-        return deny('Credential grant/admin changes require project owner or admin/operator', ['project_owner_or_admin'], highImpact);
+    case 'credential-admin': {
+      const authority = authorizeTowerAction({
+        role: input.userRole,
+        resource: 'credential',
+        action: 'admin',
+        facts: {
+          projectMember: input.projectMember === true || input.projectRole === 'member',
+          projectWritable: input.projectWritable,
+          projectOwner: input.projectRole === 'owner',
+          scope: 'project',
+        },
+      });
+      if (!authority.allowed) {
+        return deny(input.actionClass, 'Credential administration requires scoped project management authority', [authority.requiredCapability], highImpact);
       }
-      return allow('Project owner/admin may manage project credential attachment', [], highImpact);
+      return allow(input.actionClass, 'Authorized project connection managers may manage project credential attachment', [], highImpact);
+    }
 
     case 'cross-project':
-      if (policy.allowCrossProject || trustLevel === 'ops' || isAdminOrOperator(input.userRole)) {
-        return allow('Cross-project execution is permitted by policy or elevated role', [], highImpact);
+      if (policy.allowCrossProject ?? trustLevel === 'ops') {
+        return allow(input.actionClass, 'Cross-project execution is permitted by Agent policy', [], highImpact);
       }
-      return deny('Cross-project execution is not enabled for this project', ['allowCrossProject_or_ops_project'], highImpact);
+      return deny(input.actionClass, 'Cross-project execution is not enabled for this project', ['allowCrossProject_or_ops_project'], highImpact);
 
     case 'self-hosted-server':
       if (input.credentialAvailable === false) {
-        return needsSetup('Self-hosted server operation requires an attached/direct customer credential', ['customer_vm_credential'], highImpact);
+        return needsSetup(input.actionClass, 'Self-hosted server operation requires an attached/direct customer credential', ['customer_vm_credential'], highImpact);
       }
-      if (!(policy.allowCustomerVmOps || trustLevel === 'ops' || isAdminOrOperator(input.userRole))) {
-        return deny('Self-hosted server operations are not enabled for this project', ['allowCustomerVmOps_or_ops_project'], highImpact);
+      if (!(policy.allowCustomerVmOps ?? trustLevel === 'ops')) {
+        return deny(input.actionClass, 'Self-hosted server operations are not enabled for this project', ['allowCustomerVmOps_or_ops_project'], highImpact);
       }
       if (isObserveOnlyOperation(input.target?.operation)) {
-        return allow('Self-hosted server observe-only operation allowed by project policy/elevated role', [], highImpact);
+        return allow(input.actionClass, 'Self-hosted server observe-only operation allowed by Agent policy', [], highImpact);
       }
       if (!input.explicitConfirmation) {
-        return needsConfirmation('Self-hosted server operations are high impact and require explicit confirmation', ['explicit_confirmation'], highImpact);
+        return needsConfirmation(input.actionClass, 'Self-hosted server operations are high impact and require explicit confirmation', ['explicit_confirmation'], highImpact);
       }
-      return allow('Self-hosted server operation allowed by project policy and confirmation', [], highImpact);
+      return allow(input.actionClass, 'Self-hosted server operation allowed by project policy and confirmation', [], highImpact);
 
     case 'container':
-      if (!(policy.allowContainerOps || trustLevel === 'ops' || isAdminOrOperator(input.userRole))) {
-        return deny('Container operations are not enabled for this project', ['allowContainerOps_or_ops_project'], highImpact);
+      if (!(policy.allowContainerOps ?? trustLevel === 'ops')) {
+        return deny(input.actionClass, 'Container operations are not enabled for this project', ['allowContainerOps_or_ops_project'], highImpact);
       }
       if (isObserveOnlyOperation(input.target?.operation)) {
-        return allow('Container observe-only operation allowed by project policy/elevated role', [], highImpact);
+        return allow(input.actionClass, 'Container observe-only operation allowed by Agent policy', [], highImpact);
       }
       if (!input.explicitConfirmation) {
-        return needsConfirmation('Container operations can affect shared runtime state and require explicit confirmation', ['explicit_confirmation'], highImpact);
+        return needsConfirmation(input.actionClass, 'Container operations can affect shared runtime state and require explicit confirmation', ['explicit_confirmation'], highImpact);
       }
-      return allow('Container operation allowed by project policy and confirmation', [], highImpact);
+      return allow(input.actionClass, 'Container operation allowed by project policy and confirmation', [], highImpact);
 
     case 'deploy':
-      if (!(policy.allowDeploy || trustLevel === 'ops' || isAdminOrOperator(input.userRole))) {
-        return deny('Deploy/release operations are not enabled for this project', ['allowDeploy_or_ops_project'], highImpact);
+      if (!(policy.allowDeploy ?? trustLevel === 'ops')) {
+        return deny(input.actionClass, 'Deploy/release operations are not enabled for this project', ['allowDeploy_or_ops_project'], highImpact);
       }
       if (!input.explicitConfirmation) {
-        return needsConfirmation('Deploy/release operations require explicit confirmation and preflight checks', ['explicit_confirmation', 'preflight_checks'], highImpact);
+        return needsConfirmation(input.actionClass, 'Deploy/release operations require explicit confirmation and preflight checks', ['explicit_confirmation', 'preflight_checks'], highImpact);
       }
-      return allow('Deploy/release operation allowed by policy and confirmation', ['preflight_checks'], highImpact);
+      return allow(input.actionClass, 'Deploy/release operation allowed by policy and confirmation', ['preflight_checks'], highImpact);
 
-    case 'host-admin':
-      if (!isAdminOrOperator(input.userRole) && !policy.allowHostAdmin) {
-        return deny('Host/global admin actions require admin/operator or explicit project policy', ['admin_or_operator_or_allowHostAdmin'], highImpact);
+    case 'host-admin': {
+      if (policy.allowHostAdmin !== true) {
+        return deny(input.actionClass, 'Host/global administration is not enabled for this Agent', ['allowHostAdmin'], highImpact);
+      }
+      if (!['admin', 'operator'].includes(input.userRole || '')) {
+        return deny(input.actionClass, 'Host execution requires admin or operator', ['system:admin'], highImpact);
       }
       if (!input.explicitConfirmation) {
-        return needsConfirmation('Host/global admin actions require explicit confirmation', ['explicit_confirmation'], highImpact);
+        return needsConfirmation(input.actionClass, 'Host/global admin actions require explicit confirmation', ['explicit_confirmation'], highImpact);
       }
-      return allow('Host/global admin action allowed by elevated role/policy and confirmation', [], highImpact);
+      return allow(input.actionClass, 'Host/global admin action allowed by Agent capability, platform authority and confirmation', [], highImpact);
+    }
 
     default:
-      return deny(`Unsupported project execution action class: ${input.actionClass}`, ['supported_action_class'], highImpact);
+      return deny(input.actionClass, `Unsupported project execution action class: ${input.actionClass}`, ['supported_action_class'], highImpact);
   }
 }

@@ -11,6 +11,7 @@
  */
 
 import path from 'path';
+import { assertSessionAllowsSharedArtifactWrite } from '../services/session/session-artifact-privacy.js';
 import os from 'os';
 import { spawn } from 'child_process';
 import { promises as fs } from 'fs';
@@ -21,6 +22,7 @@ import { Type } from '@sinclair/typebox';
 import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
 import type { AgentToolResult } from '@earendil-works/pi-coding-agent';
 import { renderPdfToCachedImages, pdfViewResultContent } from './pi-pdf-view-tool.js';
+import { fitVisualImage } from './pi/fit-visual-image.js';
 
 export interface PdfExportContext {
   cwd: string;
@@ -53,6 +55,31 @@ export function resolvePdfExportRendererConfig(env: NodeJS.ProcessEnv = process.
     mode,
     nixRendererBin: configuredBin && path.isAbsolute(configuredBin) ? configuredBin : null,
   };
+}
+
+// The full-resolution verification renders remain in the internal cache. Only
+// the automatic model-visible preview is bounded; the model can explicitly
+// pdf_view a page again when the small preview is insufficient.
+export const PDF_EXPORT_INLINE_PREVIEW_BYTES = 128 * 1024;
+
+export async function compactPdfExportPreview(content: AgentToolResult<any>['content']): Promise<AgentToolResult<any>['content']> {
+  let remaining = PDF_EXPORT_INLINE_PREVIEW_BYTES;
+  const result: AgentToolResult<any>['content'] = [];
+  for (const part of content) {
+    if (part.type !== 'image' || typeof part.data !== 'string') {
+      result.push(part);
+      continue;
+    }
+    const bytes = Buffer.from(part.data, 'base64').length;
+    const fitted = bytes <= remaining ? part : await fitVisualImage(part, remaining);
+    if (fitted && Buffer.from(fitted.data, 'base64').length <= remaining) {
+      result.push({ type: 'image', data: fitted.data, mimeType: fitted.mimeType });
+      remaining -= Buffer.from(fitted.data, 'base64').length;
+    } else {
+      result.push({ type: 'text', text: '[Automatic PDF preview omitted to keep the next request small. Use pdf_view on the output PDF with a specific page and lower DPI for detailed visual inspection.]' });
+    }
+  }
+  return result;
 }
 
 const PdfExportParams = Type.Object({
@@ -743,6 +770,7 @@ export function createPdfExportTool(ctx: PdfExportContext): ToolDefinition {
       'Use this when the user asks for a PDF artifact, not as a “maybe” fallback.',
       'Supports document PDFs with selectable text and image PDFs that prioritize matching the final preview.',
       'After export, the tool renders verification pages through internal cache and returns them to LLM vision.',
+      'Reuse returned verification images; do not request the same unchanged PDF pages again at the same resolution unless the images were omitted or are no longer available.',
     ].join(' '),
     promptSnippet: 'Export print-ready HTML to document/image PDF with Chromium and return visual verification pages.',
     promptGuidelines: [
@@ -751,6 +779,7 @@ export function createPdfExportTool(ctx: PdfExportContext): ToolDefinition {
       'Do not downgrade a PDF request to HTML-only; use this harness contract or report the concrete export failure.',
       'Use mode="document" by default; use mode="image" when visual fidelity matters more than selectable text.',
       'After pdf_export, inspect returned verification image(s) before reporting success, especially checking that Mermaid/chart/dynamic content rendered instead of leaving raw code visible.',
+      'Reuse the returned verification images instead of calling pdf_view again for the same unchanged PDF pages at the same resolution. Request another view only when images were omitted or are no longer available, the PDF changed, or additional pages or higher resolution are needed.',
       'For detailed print-ready HTML, preflight, mode, and verification-loop rules, use runtime_guide_read with name="pdf-export".',
     ],
     parameters: PdfExportParams,
@@ -770,6 +799,7 @@ export function createPdfExportTool(ctx: PdfExportContext): ToolDefinition {
       const previewOutputDir = params.preview_output_dir ? resolvePdfExportPath(params.preview_output_dir, ctx.cwd, ctx.projectRoot) : undefined;
 
       try {
+        await assertSessionAllowsSharedArtifactWrite(ctx.sessionId);
         if (!inputPath.toLowerCase().endsWith('.html') && !inputPath.toLowerCase().endsWith('.htm')) {
           throw new Error('pdf_export currently accepts print-ready HTML files (.html/.htm).');
         }
@@ -842,7 +872,7 @@ export function createPdfExportTool(ctx: PdfExportContext): ToolDefinition {
             ...fontLines,
             ...previewLines,
           ].join('\n'),
-        } as any, ...(await pdfViewResultContent(rendered))];
+        } as any, ...(await compactPdfExportPreview(await pdfViewResultContent(rendered)))];
 
         return {
           content,

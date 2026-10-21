@@ -1,3 +1,4 @@
+import { DOWNLOAD_TIMEOUT_MAX_SEC, isManagedDownloadCommand } from '../execution/downloads/download-contract.js';
 /**
  * runtime-box-manager.ts — Project Runtime Box 생명주기 관리.
  *
@@ -27,8 +28,8 @@ import { spawn } from 'child_process';
 import { query, queryOne, execute, transaction, withClient } from '../../db/pg-repo.js';
 import { queryBoxOne, queryBoxes } from './runtime-box-row-repository.js';
 import { getPgPool } from '../../db/pg.js';
-import { getSecret, SecretAccessDeniedError } from '../secret/secret-store.js';
-import { oauthManager } from '../auth/oauth-manager-instance.js';
+
+
 import { getProject } from '../pm/project-manager.js';
 import { config } from '../../config.js';
 import { getLiveRuntimeBoxCapacity } from './runtime-box-capacity.js';
@@ -45,9 +46,10 @@ import {
   resolveProjectCredentialSecretValue,
   resolveRuntimeBoxApiKeyEnv,
   resolveRuntimeBoxCredentialFileMaterialization,
-  resolveRuntimeBoxCredentialProfileEnv,
 } from '../credential-vault/credential-vault-service.js';
-import { shouldSuppressCredentialEnv } from './command-classifier.js';
+import { shouldSuppressCredentialEnv } from '../execution/command-classifier.js';
+import { decodeAgentGwsBundle } from './agent-gws-credential-selection.js';
+import { requestedCredentialEnvNames } from './workbench-credential-scope.js';
 import {
   formatUserRuntimeBoxBudgetError,
   listUserRuntimeBoxOccupancy,
@@ -376,6 +378,7 @@ async function spawnCmd(
   args: string[],
   opts: {
     timeoutMs?: number;
+    preserveStdoutTail?: boolean;
     onStdout?: (chunk: string) => void;
     onStderr?: (chunk: string) => void;
     signal?: AbortSignal;
@@ -402,7 +405,10 @@ async function spawnCmd(
 
     proc.stdout?.on('data', (chunk: Buffer) => {
       opts.onStdout?.(chunk.toString('utf8'));
-      if (stdoutLen < MAX_OUTPUT) {
+      if (opts.preserveStdoutTail) {
+        stdoutChunks.push(chunk); stdoutLen += chunk.length;
+        while (stdoutLen > MAX_OUTPUT && stdoutChunks.length > 1) stdoutLen -= stdoutChunks.shift()!.length;
+      } else if (stdoutLen < MAX_OUTPUT) {
         stdoutChunks.push(chunk);
         stdoutLen += chunk.length;
       }
@@ -456,7 +462,7 @@ async function spawnCmd(
       if (timer) clearTimeout(timer);
       resolve({
         stdout: stdoutChunks.length > 0
-          ? Buffer.concat(stdoutChunks).toString('utf8').slice(0, MAX_OUTPUT) : '',
+          ? opts.preserveStdoutTail ? Buffer.concat(stdoutChunks).toString('utf8').slice(-MAX_OUTPUT) : Buffer.concat(stdoutChunks).toString('utf8').slice(0, MAX_OUTPUT) : '',
         stderr: stderrChunks.length > 0
           ? Buffer.concat(stderrChunks).toString('utf8').slice(0, MAX_OUTPUT) : '',
         exitCode: code ?? -1,
@@ -470,6 +476,7 @@ async function spawnDockerCmd(
   args: string[],
   opts: {
     timeoutMs?: number;
+    preserveStdoutTail?: boolean;
     onStdout?: (chunk: string) => void;
     onStderr?: (chunk: string) => void;
     signal?: AbortSignal;
@@ -497,8 +504,7 @@ interface ProjectConnections {
 
 const GWS_LEGACY_DEFAULT_CREDENTIAL_ID = 'gws-default-config';
 const GWS_SHARED_FINANCE_CREDENTIAL_ID = 'gws-demo-org-finance';
-const GWS_PERSONAL_CONFIG_SECRET_NAME = 'GWS_PERSONAL_CONFIG_B64';
-const HOST_GWS_CLIENT_SECRET_PATH = path.join(process.env.HOME || '/home/tower', '.config', 'gws', 'client_secret.json');
+
 
 function commandNeedsGitHubIdentity(cmd: string): boolean {
   // project_shell commands are often multi-line, env-prefixed, or git-option-prefixed, e.g.
@@ -530,30 +536,17 @@ async function readProjectConnections(projectRoot: string): Promise<ProjectConne
   }
 }
 
-async function userMayUseTrustedCredentialPool(userId: number, connections: ProjectConnections): Promise<boolean> {
-  if (connections.trusted_internal_project !== true) return false;
-  const row = await queryOne<{ role: string }>('SELECT role FROM users WHERE id = $1', [userId]);
-  const role = row?.role;
-  if (!role || role === 'guest' || role === 'viewer') return false;
-  const allowed = connections.allow_roles ?? ['member', 'operator', 'admin'];
-  return allowed.includes(role);
+async function userMayUseTrustedCredentialPool(_userId: number, _connections: ProjectConnections): Promise<boolean> {
+  // Project-editable declarations and requester roles are not grants to the
+  // platform's gh/Azure accounts. Use an explicit Agent Vault connection.
+  // Keep the bridge signature during migration, but never copy host credentials.
+  return false;
 }
 
-async function getHostGitHubTokenForProject(identity: ProjectGitHubIdentity): Promise<string | undefined> {
-  if (identity.mode !== 'project-user') return undefined;
-  if (identity.credential_policy?.store_token_in_runbox === true) return undefined;
-
-  const tokenResult = await spawnCmd('gh', ['auth', 'token'], { timeoutMs: 5_000 });
-  if (tokenResult.exitCode !== 0) return undefined;
-
-  // Best-effort account guard: do not use host gh token if it is clearly for a different account.
-  const expectedLogin = identity.account?.login;
-  if (expectedLogin) {
-    const userResult = await spawnCmd('gh', ['api', 'user', '--jq', '.login'], { timeoutMs: 5_000 });
-    if (userResult.exitCode !== 0 || userResult.stdout.trim() !== expectedLogin) return undefined;
-  }
-
-  return tokenResult.stdout.trim() || undefined;
+async function getHostGitHubTokenForProject(_identity: ProjectGitHubIdentity): Promise<string | undefined> {
+  // A project-owned github.json cannot authorize the platform user's gh token.
+  // Explicit Agent connections are injected before this compatibility hook.
+  return undefined;
 }
 
 async function withProjectGitHubIdentityEnv(
@@ -589,7 +582,7 @@ async function withProjectGitHubIdentityEnv(
   };
 }
 
-function commandNeedsTool(cmd: string, tool: 'gh' | 'az' | 'gws'): boolean {
+function commandNeedsTool(cmd: string, tool: 'gh' | 'az' | 'gws' | 'higgsfield'): boolean {
   return new RegExp(`\\b${tool}\\s+`).test(cmd);
 }
 
@@ -709,36 +702,45 @@ async function writeContainerFileFromString(
   });
 }
 
-async function projectExplicitlyAllowsCredential(projectId: string, credentialId: string): Promise<boolean> {
-  const row = await queryOne<{ mode: string }>(
-    `SELECT mode FROM project_credential_policies WHERE project_id = $1 AND credential_id = $2`,
-    [projectId, credentialId],
+async function projectCanUseCredential(projectId: string, credentialId: string): Promise<boolean> {
+  const row = await queryOne<{ id: string }>(
+    `SELECT id FROM workspace_credentials
+      WHERE id = $1 AND enabled = true
+        AND (scope = 'workspace' OR (scope = 'project' AND project_id = $2))`,
+    [credentialId, projectId],
   );
-  return row?.mode === 'allow';
+  return Boolean(row);
 }
 
 interface AllowedGwsConnection {
   id: string;
   displayName: string;
   isProjectDefault: boolean;
+  credentialTypeId?: string;
+  googleAccount?: string;
 }
 
 export async function listAllowedProjectGwsConnections(projectId: string): Promise<AllowedGwsConnection[]> {
-  const rows = await query<{ id: string; display_name: string; is_project_default: boolean }>(
-    `SELECT c.id,
-            c.display_name,
-            COALESCE((p.metadata->>'runtime_default')::boolean, false) AS is_project_default
+  const rows = await query<{ id: string; display_name: string; scope: string; metadata: Record<string, unknown> | null }>(
+    `SELECT c.id, c.display_name, c.scope, c.metadata
        FROM workspace_credentials c
-       JOIN project_credential_policies p
-         ON p.credential_id = c.id AND p.project_id = $1
       WHERE c.enabled = true
         AND c.kind = 'gws'
         AND c.provider = 'google'
-        AND p.mode IN ('allow', 'override', 'inherit')
-      ORDER BY lower(c.display_name), c.id`,
+        AND (c.scope = 'workspace' OR (c.scope = 'project' AND c.project_id = $1))
+      ORDER BY CASE c.scope WHEN 'project' THEN 0 ELSE 1 END, lower(c.display_name), c.id`,
     [projectId],
   );
-  return rows.map(row => ({ id: row.id, displayName: row.display_name, isProjectDefault: row.is_project_default }));
+  const projectRows = rows.filter(row => row.scope === 'project');
+  return rows.map(row => ({
+    id: row.id,
+    displayName: row.display_name,
+    // A project credential is an implicit default only when it is the sole
+    // project-owned Google Connection. Row ordering must never pick an identity.
+    isProjectDefault: row.scope === 'project' && projectRows.length === 1,
+    credentialTypeId: typeof row.metadata?.credential_type_id === 'string' ? row.metadata.credential_type_id : 'google_unknown',
+    googleAccount: typeof row.metadata?.google_account === 'string' ? row.metadata.google_account : '',
+  }));
 }
 
 export async function selectProjectGwsConnection(input: { projectId: string; requestedCredentialId?: string | null }): Promise<AllowedGwsConnection> {
@@ -761,31 +763,20 @@ export async function selectProjectGwsConnection(input: { projectId: string; req
   if (candidates.length === 0) {
     throw new RuntimeBoxError('PROJECT_GWS_CREDENTIAL_NOT_AVAILABLE: This Agent has no allowed Google Workspace Connection. Connect one in Agent Credential management.');
   }
-  const choices = candidates.map(candidate => `${candidate.id} (${candidate.displayName})`).join(', ');
-  throw new RuntimeBoxError(`AMBIGUOUS_GWS_CONNECTION: This Agent has multiple Google Workspace Connections and no compatible default. Select one with GWS_CONNECTION_ID=<id>. Available: ${choices}`);
+  const choices = candidates.map(candidate => {
+    const account = candidate.googleAccount ? `; account=${candidate.googleAccount}` : '';
+    return `${candidate.id} (${candidate.displayName}; auth=${candidate.credentialTypeId || 'google_unknown'}${account})`;
+  }).join(', ');
+  throw new RuntimeBoxError(`AMBIGUOUS_GWS_CONNECTION: This Agent has multiple Google Workspace Connections and no compatible default. Ask the user which account or purpose to use, then select it with GWS_CONNECTION_ID=<id>. Available: ${choices}`);
 }
 
-/**
- * Adapts legacy single-user gws bundles to the current user-scoped gws path.
- *
- * This is deliberately a project-policy-only compatibility shim: callers should
- * run it only after a gws config was resolved through project_credential_policies.
- * It never overwrites an existing user-scoped credential file.
- */
-export function runtimeBoxLegacyGwsCredentialCompatScript(gwsConfigDir: string, userId: number, ownerUserSpec?: string): string {
-  const legacyCredentialsPath = `${gwsConfigDir}/credentials.json`;
-  const userCredentialsDir = `${gwsConfigDir}/users/${userId}`;
-  const userCredentialsPath = `${userCredentialsDir}/credentials.json`;
-  const chown = ownerUserSpec ? `  chown ${shellQuote(ownerUserSpec)} ${shellQuote(userCredentialsPath)}` : '';
-
+/** Applies Agent runtime file ownership, never requester-specific credential paths. */
+export function runtimeBoxAgentGwsCredentialPermissionsScript(gwsConfigDir: string, ownerUserSpec?: string): string {
   return [
-    `if [ -f ${shellQuote(legacyCredentialsPath)} ] && [ ! -f ${shellQuote(userCredentialsPath)} ]; then`,
-    `  mkdir -p ${shellQuote(userCredentialsDir)}`,
-    `  cp ${shellQuote(legacyCredentialsPath)} ${shellQuote(userCredentialsPath)}`,
-    `  chmod 0600 ${shellQuote(userCredentialsPath)}`,
-    chown,
-    'fi',
-  ].filter(Boolean).join('\n');
+    `chmod 0700 ${shellQuote(gwsConfigDir)}`,
+    `find ${shellQuote(gwsConfigDir)} -type f -exec chmod 0600 {} +`,
+    ...(ownerUserSpec ? [`chown -R ${shellQuote(ownerUserSpec)} ${shellQuote(gwsConfigDir)}`] : []),
+  ].join(' && ');
 }
 
 async function materializeGwsConfigFromVault(opts: {
@@ -802,19 +793,13 @@ async function materializeGwsConfigFromVault(opts: {
 
   let encodedConfig: string | null = null;
   let credentialId = GWS_LEGACY_DEFAULT_CREDENTIAL_ID;
-  let resolvedViaProjectCredentialPolicy = false;
 
   if (wantsPersonal || isAuthLogin) {
-    try {
-      encodedConfig = await getSecret(GWS_PERSONAL_CONFIG_SECRET_NAME, opts.userId);
-      credentialId = 'gws-personal-config';
-    } catch (err) {
-      if (!(err instanceof SecretAccessDeniedError)) throw err;
-    }
+    throw new RuntimeBoxError('AGENT_GWS_CONNECTION_REQUIRED: Requester-personal Google credentials and host OAuth login are not Agent connections. Connect Google to this Agent explicitly before running this command.');
   }
 
   if (!encodedConfig && wantsFinance && !isAuthLogin) {
-    const financeSecret = await projectExplicitlyAllowsCredential(opts.box.project_id, GWS_SHARED_FINANCE_CREDENTIAL_ID)
+    const financeSecret = await projectCanUseCredential(opts.box.project_id, GWS_SHARED_FINANCE_CREDENTIAL_ID)
       ? await resolveProjectCredentialSecretValue({
         projectId: opts.box.project_id,
         userId: opts.userId,
@@ -829,7 +814,6 @@ async function materializeGwsConfigFromVault(opts: {
     }
     encodedConfig = financeSecret.value;
     credentialId = financeSecret.credentialId;
-    resolvedViaProjectCredentialPolicy = true;
   }
 
   if (!encodedConfig && !wantsPersonal && !wantsFinance && !isAuthLogin) {
@@ -850,65 +834,31 @@ async function materializeGwsConfigFromVault(opts: {
     }
     encodedConfig = projectSecret.value;
     credentialId = projectSecret.credentialId;
-    resolvedViaProjectCredentialPolicy = true;
   }
 
-  if (wantsPersonal && !encodedConfig) {
-    throw new RuntimeBoxError('PERSONAL_CREDENTIAL_NOT_AVAILABLE: Personal Google Workspace credential is not connected for this user. Open Personal Credentials and connect Google, then retry with GWS_PROFILE=personal.');
-  }
-
-
+  if (!encodedConfig) return { injected: [] };
+  // Validate the entire archive before any container write. No tar extraction,
+  // requester path, token discovery, or personal-bundle promotion is permitted.
+  const files = decodeAgentGwsBundle(encodedConfig);
   const containerRef = opts.box.container_id || `tower-box-${opts.box.id}`;
   const homeDir = `${opts.credentialRoot}/home`;
   const gwsConfigDir = `${homeDir}/.config/gws`;
-
-  await dockerExecShell(containerRef, `rm -rf ${shellQuote(homeDir)} && mkdir -p ${shellQuote(gwsConfigDir)} ${shellQuote(opts.credentialRoot)}`, 10_000);
-
-  if (encodedConfig) {
-    const encodedPath = `${opts.credentialRoot}/gws-config.tar.gz.b64`;
-    await writeContainerFileFromString(containerRef, encodedPath, encodedConfig, 30_000);
-    const unpack = await dockerExecShell(
-      containerRef,
-      `base64 -d ${shellQuote(encodedPath)} | tar -xzf - -C ${shellQuote(homeDir)}/.config && rm -f ${shellQuote(encodedPath)}`,
-      30_000,
-    );
-    if (unpack.exitCode !== 0) {
-      throw new RuntimeBoxError(`failed to materialize gws config from Credential Vault: ${unpack.stderr || unpack.stdout || `exit ${unpack.exitCode}`}`);
-    }
-    if (resolvedViaProjectCredentialPolicy) {
-      const ownerUserSpec = await projectOwnerUserSpec(opts.box);
-      const compat = await dockerExecShell(containerRef, runtimeBoxLegacyGwsCredentialCompatScript(gwsConfigDir, opts.userId, ownerUserSpec), 10_000);
-      if (compat.exitCode !== 0) {
-        throw new RuntimeBoxError(`failed to apply legacy gws credential compatibility shim: ${compat.stderr || compat.stdout || `exit ${compat.exitCode}`}`);
-      }
-    }
-  } else if (isAuthLogin) {
-    try {
-      const clientSecret = await fs.readFile(HOST_GWS_CLIENT_SECRET_PATH, 'utf-8');
-      await writeContainerFileFromString(containerRef, `${gwsConfigDir}/client_secret.json`, clientSecret, 10_000);
-      credentialId = 'gws-oauth-client-config';
-    } catch (err) {
-      throw new RuntimeBoxError(`GWS OAuth client config not available on host: ${(err as Error).message}`);
-    }
-  } else {
-    return { injected: [] };
+  const prepared = await dockerExecShell(containerRef, `umask 077; rm -rf ${shellQuote(homeDir)} && mkdir -p ${shellQuote(gwsConfigDir)} ${shellQuote(opts.credentialRoot)}`, 10_000);
+  if (prepared.exitCode !== 0) throw new RuntimeBoxError('failed to prepare Agent GWS credential directory');
+  for (const file of files) {
+    await writeContainerFileFromString(containerRef, `${gwsConfigDir}/${file.name}`, file.content.toString('utf8'), 30_000);
   }
+  const ownerUserSpec = await projectOwnerUserSpec(opts.box);
+  const permissions = await dockerExecShell(containerRef, runtimeBoxAgentGwsCredentialPermissionsScript(gwsConfigDir, ownerUserSpec), 10_000);
+  if (permissions.exitCode !== 0) throw new RuntimeBoxError('failed to apply Agent GWS credential permissions');
 
   opts.env.HOME = homeDir;
   opts.env.XDG_CONFIG_HOME = `${homeDir}/.config`;
   opts.env.GWS_CONFIG_HOME = gwsConfigDir;
   opts.env.GOOGLE_WORKSPACE_CLI_CONFIG_DIR = gwsConfigDir;
-  opts.env.GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE = `${gwsConfigDir}/users/${opts.userId}/credentials.json`;
+  opts.env.GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE = `${gwsConfigDir}/credentials.json`;
   opts.env.GWS_REDIRECT_URI = `${config.publicUrl || 'https://tower.tower.example.com'}/api/oauth/google/callback`;
   const injected: RuntimeCredentialEnvItem[] = [{ credentialId, envName: 'GWS_CONFIG_HOME' }];
-  if (credentialId === 'gws-personal-config') {
-    try {
-      opts.env.GOOGLE_WORKSPACE_CLI_TOKEN = await oauthManager.getValidToken(opts.userId, 'google');
-      injected.push({ credentialId, envName: 'GOOGLE_WORKSPACE_CLI_TOKEN' });
-    } catch (err) {
-      // Keep file-based credentials as a fallback and let gws report the auth error.
-    }
-  }
   return { injected };
 }
 
@@ -1021,6 +971,35 @@ async function ensureRuntimeBoxTool(box: BoxRow, tool: 'gh' | 'az' | 'gws'): Pro
   }
 }
 
+async function prepareHiggsfieldPersistentSession(opts: {
+  box: BoxRow;
+  env: Record<string, string>;
+}): Promise<{ injected: RuntimeCredentialEnvItem[] }> {
+  const containerRef = opts.box.container_id || `tower-box-${opts.box.id}`;
+  const configuredPath = String(opts.env.HIGGSFIELD_CLI_CREDENTIALS_FILE || '').trim();
+  const credentialsPath = configuredPath || '/workspace/.tower/service-home/higgsfield/.config/higgsfield/credentials.json';
+  const configDir = credentialsPath.slice(0, credentialsPath.lastIndexOf('/'));
+  const homeDir = configuredPath
+    ? String(opts.env.HOME || '/workspace')
+    : '/workspace/.tower/service-home/higgsfield';
+  const ownerUserSpec = await projectOwnerUserSpec(opts.box);
+  const ownership = ownerUserSpec ? ` && chown -R ${shellQuote(ownerUserSpec)} ${shellQuote(configDir)}` : '';
+
+  // Higgsfield owns this persistent session. Its CLI may rotate refresh tokens or
+  // update workspace selection in credentials.json, so Tower must not recreate or
+  // delete the file after each command. Users can override the exact file path by
+  // setting HIGGSFIELD_CLI_CREDENTIALS_FILE in the project command environment.
+  await dockerExecShell(
+    containerRef,
+    `mkdir -p ${shellQuote(configDir)} && chmod 700 ${shellQuote(homeDir)} ${shellQuote(configDir)}${ownership}`,
+    10_000,
+  );
+  opts.env.HOME = homeDir;
+  opts.env.XDG_CONFIG_HOME = `${homeDir}/.config`;
+  opts.env.HIGGSFIELD_CLI_CREDENTIALS_FILE = credentialsPath;
+  return { injected: [{ credentialId: 'project-managed:higgsfield-session', envName: 'HIGGSFIELD_CLI_CREDENTIALS_FILE' }] };
+}
+
 async function materializeRuntimeCredentialFiles(opts: {
   box: BoxRow;
   credentialRoot: string;
@@ -1056,7 +1035,8 @@ async function prepareCliCredentialEnv(
   const needsGh = commandNeedsTool(req.cmd, 'gh');
   const needsAz = commandNeedsTool(req.cmd, 'az');
   const needsGws = commandNeedsTool(req.cmd, 'gws');
-  if (!needsGh && !needsAz && !needsGws) return { req };
+  const needsHiggsfield = commandNeedsTool(req.cmd, 'higgsfield');
+  if (!needsGh && !needsAz && !needsGws && !needsHiggsfield) return { req };
 
   const containerRef = box.container_id || `tower-box-${box.id}`;
   const localCredentialRoot = credentialRoot ?? `/tmp/tower-credentials/${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -1086,6 +1066,11 @@ async function prepareCliCredentialEnv(
     await ensureRuntimeBoxTool(box, 'gws');
     const gws = await materializeGwsConfigFromVault({ box, userId: req.userId, credentialRoot: localCredentialRoot, env, command: req.cmd });
     injected.push(...gws.injected);
+  }
+
+  if (needsHiggsfield) {
+    const higgsfield = await prepareHiggsfieldPersistentSession({ box, env });
+    injected.push(...higgsfield.injected);
   }
 
   return {
@@ -1338,7 +1323,9 @@ async function execDockerCommand(
 ): Promise<{ exit_code: number; stdout: string; stderr: string; duration_ms: number; timed_out: boolean; oom_killed: boolean }> {
   // container_id 가 있으면 사용 (more reliable). 없으면 이름으로 fallback.
   const containerRef = box.container_id || `tower-box-${box.id}`;
-  const timeoutMs = clampRuntimeBoxExecTimeoutMs(req.timeout_sec);
+  const timeoutMs = isManagedDownloadCommand(req.cmd)
+    ? Math.max(1, Math.min(DOWNLOAD_TIMEOUT_MAX_SEC, req.timeout_sec ?? DOWNLOAD_TIMEOUT_MAX_SEC)) * 1000
+    : clampRuntimeBoxExecTimeoutMs(req.timeout_sec);
   const started = Date.now();
 
   const runAsRoot = shouldRunRuntimeBoxCommandAsRoot(req.cmd);
@@ -1409,6 +1396,7 @@ async function execDockerCommand(
     ['exec', ...userArgs, '-w', cwd, ...envArgs, containerRef, 'sh', '-c', boundedCommand],
     {
       timeoutMs,
+      preserveStdoutTail: isManagedDownloadCommand(req.cmd),
       onStdout: req.onStdout,
       onStderr: req.onStderr,
       signal: req.signal,
@@ -1922,6 +1910,7 @@ async function execInBoxWithActivityLock(
   const credentialSuppression = req.credentialMode === 'none'
     ? { suppress: true, reason: 'explicit internal credential-free execution policy' }
     : shouldSuppressCredentialEnv(req.cmd);
+  const requestedCredentialScope = requestedCredentialEnvNames(req.cmd);
 
   // Resolve every credential immediately before this docker exec. The running
   // container never owns credential state, so grants, revocations, and rotations
@@ -1950,35 +1939,28 @@ async function execInBoxWithActivityLock(
           projectId: runningBox.project_id,
           userId: req.userId,
           existingEnv: prepared.req.env,
+          requestedEnvNames: requestedCredentialScope,
         });
-      const profileEnv = credentialSuppression.suppress
-        ? { env: vaultEnv.env, injected: [], skippedExisting: [], skipped: [], materializeFiles: [], profiles: [] }
-        : await resolveRuntimeBoxCredentialProfileEnv({
-          projectId: runningBox.project_id,
-          userId: req.userId,
-          existingEnv: vaultEnv.env,
-        });
-      const profileFileCredentialIds = profileEnv.materializeFiles.map(file => file.credentialId);
       const fileResolution = credentialSuppression.suppress
         ? { materialize: [], skipped: [] }
         : await resolveRuntimeBoxCredentialFileMaterialization({
           projectId: runningBox.project_id,
           userId: req.userId,
-          existingEnv: profileEnv.env,
-          excludeCredentialIds: profileFileCredentialIds,
+          existingEnv: vaultEnv.env,
+          requestedEnvNames: requestedCredentialScope,
         });
       const materializedFiles = credentialSuppression.suppress
         ? []
         : await materializeRuntimeCredentialFiles({
           box: runningBox,
           credentialRoot,
-          env: profileEnv.env,
-          files: [...profileEnv.materializeFiles, ...fileResolution.materialize],
+          env: vaultEnv.env,
+          files: fileResolution.materialize,
           ownerUserSpec: await projectOwnerUserSpec(runningBox),
         });
-      const finalReq = { ...prepared.req, env: profileEnv.env };
+      const finalReq = { ...prepared.req, env: vaultEnv.env };
       const execResult = await execDockerCommand(runningBox, finalReq, cwd);
-      return { execResult, prepared, vaultEnv, profileEnv, fileResolution, materializedFiles };
+      return { execResult, prepared, vaultEnv, fileResolution, materializedFiles };
     } finally {
       await preparedCleanup?.();
       if (!credentialSuppression.suppress) {
@@ -1986,7 +1968,7 @@ async function execInBoxWithActivityLock(
       }
     }
   })();
-  const { execResult, prepared, vaultEnv, profileEnv, fileResolution, materializedFiles } = execution;
+  const { execResult, prepared, vaultEnv, fileResolution, materializedFiles } = execution;
 
   // last_active_at 갱신 (idle stop 기준) — exec 후 갱신
   await execute(
@@ -2003,10 +1985,10 @@ async function execInBoxWithActivityLock(
 
   const credentialEnvSummary = {
     ...summarizeCredentialEnvForRuntimeContext({
-      injected: [...(prepared.injected ?? []), ...vaultEnv.injected, ...profileEnv.injected],
+      injected: [...(prepared.injected ?? []), ...vaultEnv.injected],
       materializedFiles,
-      skippedExisting: [...vaultEnv.skippedExisting, ...profileEnv.skippedExisting],
-      skipped: [...vaultEnv.skipped, ...profileEnv.skipped, ...fileResolution.skipped],
+      skippedExisting: vaultEnv.skippedExisting,
+      skipped: [...vaultEnv.skipped, ...fileResolution.skipped],
     }),
     ...(credentialSuppression.suppress ? {
       suppressed: true,
@@ -2030,14 +2012,6 @@ async function execInBoxWithActivityLock(
       cpu: parseFloat(runningBox.cpu_limit),
       idle_stop_minutes: runningBox.idle_stop_minutes,
     },
-    credential_profiles: profileEnv.profiles.map(p => ({
-      profile_id: p.profileId,
-      display_name: p.displayName,
-      env_names: p.envNames,
-      secret_env_names: p.secretEnvNames,
-      file_env_names: p.fileEnvNames,
-      skipped_existing: p.skippedExisting,
-    })),
     credential_env: credentialEnvSummary,
     readiness: {
       baseline: 'tower-like-tooling',

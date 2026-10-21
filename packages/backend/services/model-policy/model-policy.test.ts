@@ -1,12 +1,48 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import * as configuration from '../../config.js';
+import { getModelDefaults, loadModelsFile } from '../../config.js';
 import { resolveAgentExecutionPolicy, resolveModelPolicy } from './model-policy.js';
 
 describe('model policy', () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it('routes background work to Core even when a legacy config still maps it to Lite', () => {
+    const defaults = getModelDefaults();
+    const file = loadModelsFile();
+    vi.spyOn(configuration, 'loadModelsFile').mockReturnValue({
+      ...file,
+      modelPolicies: { revision: 42, policies: {
+        background: { model: defaults.ai_task, effort: 'high' },
+      } },
+    });
+    expect(resolveModelPolicy('background')).toMatchObject({
+      revision: 42, requestedModel: defaults.session,
+      effectiveModel: defaults.session, effectiveEffort: 'high',
+    });
+    // Lite utilities are unchanged, and explicit Agent model overrides remain explicit.
+    expect(resolveModelPolicy('title').effectiveModel).toBe(defaults.ai_reply);
+    expect(resolveModelPolicy('summary').effectiveModel).toBe(defaults.ai_reply);
+    expect(resolveAgentExecutionPolicy({ modelPolicy: 'background', model: defaults.ai_task }).effectiveModel).toBe(defaults.ai_task);
+  });
+
+  it('uses Core for an unconfigured background policy without changing the effort', () => {
+    const file = loadModelsFile();
+    vi.spyOn(configuration, 'loadModelsFile').mockReturnValue({ ...file, modelPolicies: undefined });
+    expect(resolveModelPolicy('background')).toMatchObject({ effectiveModel: getModelDefaults().session, effectiveEffort: 'medium' });
+  });
+
+  it('does not revive a disabled background policy', () => {
+    const file = loadModelsFile();
+    vi.spyOn(configuration, 'loadModelsFile').mockReturnValue({ ...file, modelPolicies: {
+      revision: 42, policies: { background: { model: getModelDefaults().ai_task, effort: 'medium', enabled: false } },
+    } });
+    expect(() => resolveModelPolicy('background')).toThrow('MODEL_POLICY_DISABLED: background');
+  });
   it('preserves medium as the default provider execution policy', () => {
     expect(resolveModelPolicy('medium')).toMatchObject({
       id: 'medium',
-      revision: 1,
-      effectiveModel: 'litellm-responses/smartest',
+      revision: loadModelsFile().modelPolicies?.revision,
+      effectiveModel: getModelDefaults().session,
       requestedEffort: 'medium',
       effectiveEffort: 'medium',
       effortDowngraded: false,
@@ -15,7 +51,7 @@ describe('model policy', () => {
 
   it('routes title work to the configured default provider', () => {
     expect(resolveModelPolicy('title')).toMatchObject({
-      effectiveModel: 'litellm-responses/mini',
+      effectiveModel: getModelDefaults().ai_reply,
       effectiveEffort: 'low',
     });
   });

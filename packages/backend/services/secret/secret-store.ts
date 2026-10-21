@@ -24,6 +24,7 @@ import {
 } from 'crypto';
 import { config } from '../../config.js';
 import { getPgPool } from '../../db/pg.js';
+import { normalizeApprovedLegacyGwsBundle } from '../runtime-box/agent-gws-credential-selection.js';
 
 const ALGO = 'aes-256-gcm';
 const NONCE_LEN = 12;
@@ -211,6 +212,34 @@ export async function getSecretForProjectBinding(name: string, ownerUserId?: num
   );
   if (rows.length === 0) throw new SecretAccessDeniedError(`'${name}' not found for Project binding owner`);
   return decrypt(rows[0].value_encrypted);
+}
+
+/** Explicit legacy GWS bridge only. Never choose the requester's personal account.
+ * The approved exact secret identity and frozen audience are rechecked together
+ * with current grants/account state before decrypting. No global fallback.
+ */
+export async function getSecretForLegacyGwsBinding(credentialId: string, userId: number): Promise<string | null> {
+  const { rows } = await getPgPool().query<{ allowed: boolean; value_encrypted: Buffer | null; bundle_sha256: string; credential_path: string }>(
+    `SELECT (s.id IS NOT NULL) AS allowed, s.value_encrypted, b.bundle_sha256, b.credential_path
+       FROM legacy_gws_runtime_bindings b
+       LEFT JOIN secret_store s ON s.id = b.secret_id
+         AND b.enabled = true AND $2 = ANY(b.allowed_user_ids)
+         AND EXISTS (SELECT 1 FROM users u WHERE u.id = $2 AND u.disabled = 0
+                     AND u.role IN ('admin', 'operator', 'member'))
+         AND (s.owner_user_id = $2 OR EXISTS (
+           SELECT 1 FROM secret_grants g WHERE g.secret_id = s.id AND g.user_id = $2))
+         AND EXISTS (SELECT 1 FROM workspace_credentials c WHERE c.id = b.credential_id
+                     AND c.enabled = true AND c.provider = 'google' AND c.kind = 'gws'
+                     AND c.secret_name = s.name
+                     AND NOT (COALESCE(c.metadata, '{}'::jsonb) ? 'legacy_personal_owner_user_id'))
+      WHERE b.credential_id = $1`,
+    [credentialId, userId],
+  );
+  if (rows.length === 0) return null;
+  if (!rows[0].allowed || !rows[0].value_encrypted) throw new SecretAccessDeniedError('Legacy GWS binding unavailable for this requester');
+  return normalizeApprovedLegacyGwsBundle(decrypt(rows[0].value_encrypted), {
+    bundleSha256: rows[0].bundle_sha256, credentialPath: rows[0].credential_path,
+  });
 }
 
 export interface SetSecretOptions {

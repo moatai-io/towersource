@@ -5,7 +5,7 @@
  * schedules — then keep controls/logs in a shared detail pane.
  */
 
-import { useCallback, useEffect, useMemo, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import i18n from '../../i18n';
 import type { Automation as SharedAutomation, AutomationCronConfig, AutomationRun, AutomationTrigger, ProcessMap, ProcessNodeStatus } from '@tower/shared';
@@ -15,6 +15,8 @@ import { useSessionStore } from '../../stores/session-store';
 import { useAiPanelStore } from '../../stores/ai-panel-store';
 import { useConfirm } from '../../hooks/useDialog';
 import { normalizeTowerFilePath, openTowerFile } from '../../utils/file-path-links';
+import { AutomationResultsPanel, type AutomationResultItem, resultStatus, resultStatusLabel } from './AutomationResultsPanel';
+import { AutomationCreatePanel } from './AutomationCreatePanel';
 
 const API = '/api/automations';
 type Automation = SharedAutomation & {
@@ -22,36 +24,11 @@ type Automation = SharedAutomation & {
   configUpdatedByUserId?: number | null;
   runtimeStateJson?: Record<string, unknown>;
 };
-type ViewMode = 'upcoming' | 'registered';
+type ViewMode = 'upcoming' | 'registered' | 'results';
 const SCHEDULE_LIST_WIDTH_KEY = 'tower.schedule.listWidth';
 const MIN_SCHEDULE_LIST_WIDTH = 420;
 const MAX_SCHEDULE_LIST_WIDTH = 760;
 type IntervalCronConfig = AutomationCronConfig & { minutes?: number; hours?: number };
-type EditForm = {
-  name: string;
-  description: string;
-  prompt: string;
-  triggerType: AutomationTrigger;
-  cronType: AutomationCronConfig['type'];
-  hour: string;
-  minute: string;
-  day: string;
-  intervalMinutes: string;
-  onceAt: string;
-  timeoutSeconds: string;
-};
-
-type CreateForm = EditForm & {
-  projectId: string;
-};
-
-type ScheduleSample = {
-  id: string;
-  title: string;
-  description: string;
-  form: Partial<CreateForm>;
-};
-
 type ScheduleOverviewProps = {
   jobs: Automation[];
   allJobs: Automation[];
@@ -63,6 +40,7 @@ type ScheduleOverviewProps = {
   onSelect: (job: Automation) => void;
   onOpenAiThread: (job: Automation) => void;
   onCreate: () => void;
+  latestResult: React.ComponentProps<typeof AutomationResultsPanel>;
   t: (key: string, opts?: any) => string;
 };
 
@@ -152,7 +130,12 @@ function timeLabel(dateStr: string | null, t: (key: string, opts?: any) => strin
   };
 }
 
+function isCreationDraft(job: Automation): boolean {
+  return (job.definitionJson?.creationPlan as { status?: string } | undefined)?.status === 'draft';
+}
+
 function statusBadge(a: Automation, t: (key: string, opts?: any) => string): { text: string; cls: string } {
+  if (isCreationDraft(a)) return { text: t('draftReview'), cls: 'tone-muted' };
   if (!a.enabled) return { text: t('statusOff'), cls: 'tone-muted' };
   if (a.status === 'running') return { text: t('statusRunning'), cls: 'tone-info' };
   if (a.lastStatus === 'failed' || a.status === 'failed') return { text: t('statusFailed'), cls: 'tone-danger' };
@@ -184,7 +167,7 @@ function extractRelatedFiles(job: Automation, projectRoot?: string | null): stri
   return Array.from(new Set(files)).slice(0, 6);
 }
 
-function ScheduleOverview({ jobs, allJobs, upcomingJobs, registeredJobs, projectById, selectedProjectFilter, onProjectFilterChange, onSelect, onOpenAiThread, onCreate, t }: ScheduleOverviewProps) {
+function ScheduleOverview({ jobs, allJobs, upcomingJobs, registeredJobs, projectById, selectedProjectFilter, onProjectFilterChange, onSelect, onOpenAiThread, onCreate, latestResult, t }: ScheduleOverviewProps) {
   const failedJobs = jobs.filter((job) => job.enabled && (job.lastStatus === 'failed' || job.status === 'failed'));
   const runningJobs = jobs.filter((job) => job.status === 'running');
   const enabledJobs = jobs.filter((job) => job.enabled);
@@ -249,6 +232,8 @@ function ScheduleOverview({ jobs, allJobs, upcomingJobs, registeredJobs, project
           </div>
         </div>
       </div>
+
+      <div className="rounded-2xl border border-surface-800 bg-surface-900/50 p-4"><AutomationResultsPanel {...latestResult} compact /></div>
 
       <div className="grid gap-3 2xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
         <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-surface-800 dark:bg-surface-900/50">
@@ -418,202 +403,12 @@ export function duration(run: AutomationRun): string {
   return `${(run.durationMs / 1000).toFixed(1)}s`;
 }
 
-function toLocalDateTimeInput(value: string | null): string {
-  if (!value) return '';
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return '';
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
-
-function defaultCreateForm(projectId = 'system'): CreateForm {
-  return {
-    projectId,
-    name: '',
-    description: '',
-    prompt: '',
-    triggerType: 'cron',
-    cronType: 'daily',
-    hour: '9',
-    minute: '0',
-    day: '1',
-    intervalMinutes: '60',
-    onceAt: '',
-    timeoutSeconds: '',
-  };
-}
-
-function editFormFromJob(job: Automation): EditForm {
-  const cron = job.cronConfig as IntervalCronConfig | null;
-  const minutes = cron?.minutes ?? (cron?.hours ? cron.hours * 60 : 60);
-  return {
-    name: job.name,
-    description: job.description || '',
-    prompt: job.prompt || '',
-    triggerType: job.triggerType,
-    cronType: cron?.type || 'daily',
-    hour: String(cron?.hour ?? 9),
-    minute: String(cron?.minute ?? 0),
-    day: String(cron?.day ?? 1),
-    intervalMinutes: String(minutes),
-    onceAt: toLocalDateTimeInput(job.onceAt),
-    timeoutSeconds: job.timeoutSeconds ? String(job.timeoutSeconds) : '',
-  };
-}
-
-function buildUpdateFromForm(form: EditForm): Partial<Automation> {
-  const triggerType = form.triggerType;
-  let cronConfig: AutomationCronConfig | null = null;
-  let onceAt: string | null = null;
-
-  if (triggerType === 'cron') {
-    if (form.cronType === 'interval') {
-      cronConfig = { type: 'interval', minutes: Math.max(1, Number(form.intervalMinutes) || 60) } as AutomationCronConfig;
-    } else {
-      cronConfig = {
-        type: form.cronType,
-        hour: Math.min(23, Math.max(0, Number(form.hour) || 0)),
-        minute: Math.min(59, Math.max(0, Number(form.minute) || 0)),
-        ...(form.cronType === 'weekly' ? { day: Math.min(6, Math.max(0, Number(form.day) || 1)) } : {}),
-      };
-    }
-  } else if (triggerType === 'once') {
-    onceAt = form.onceAt ? new Date(form.onceAt).toISOString() : null;
-  }
-
-  return {
-    name: form.name.trim(),
-    description: form.description.trim(),
-    prompt: form.prompt,
-    triggerType,
-    cronConfig,
-    onceAt,
-    timeoutSeconds: form.timeoutSeconds ? Math.max(1, Number(form.timeoutSeconds)) : null,
-  };
-}
-
-function parseChatEditRequest(text: string, job: Automation): Partial<Automation> | null {
-  const normalized = text.trim();
-  if (!normalized) return null;
-  const updates: Partial<Automation> = {};
-  const cron: IntervalCronConfig = { ...(job.cronConfig || { type: 'daily', hour: 9, minute: 0 }) } as IntervalCronConfig;
-
-  if (/주말.*(빼|제외|돌지|실행하지)|평일/.test(normalized)) {
-    updates.triggerType = 'cron';
-    cron.type = 'weekdays';
-  } else if (/매일|매일마다/.test(normalized)) {
-    updates.triggerType = 'cron';
-    cron.type = 'daily';
-  } else if (/매주|주 1회|일주일/.test(normalized)) {
-    updates.triggerType = 'cron';
-    cron.type = 'weekly';
-  }
-
-  const dayMatch = normalized.match(/(일|월|화|수|목|금|토)요일/);
-  if (dayMatch) {
-    updates.triggerType = 'cron';
-    cron.type = 'weekly';
-    cron.day = ['일', '월', '화', '수', '목', '금', '토'].indexOf(dayMatch[1]);
-  }
-
-  const timeMatch = normalized.match(/(오전|오후)?\s*(\d{1,2})\s*시(?:\s*(\d{1,2})\s*분?)?/);
-  if (timeMatch) {
-    updates.triggerType = 'cron';
-    let hour = Number(timeMatch[2]);
-    const minute = Number(timeMatch[3] || 0);
-    if (timeMatch[1] === '오후' && hour < 12) hour += 12;
-    if (timeMatch[1] === '오전' && hour === 12) hour = 0;
-    cron.hour = Math.min(23, Math.max(0, hour));
-    cron.minute = Math.min(59, Math.max(0, minute));
-  }
-
-  const intervalMatch = normalized.match(/(\d+)\s*(분|시간)\s*마다/);
-  if (intervalMatch) {
-    updates.triggerType = 'cron';
-    const amount = Number(intervalMatch[1]);
-    cron.type = 'interval';
-    cron.minutes = intervalMatch[2] === '시간' ? amount * 60 : amount;
-    delete (cron as any).hours;
-  }
-
-  const descMatch = normalized.match(/(?:설명|목적)\s*(?:을|를)?\s*['“\"]?([^'”\"]{3,})['”\"]?\s*(?:로|으로)?\s*(?:바꿔|수정|변경)/);
-  if (descMatch) updates.description = descMatch[1].trim();
-
-  const nameMatch = normalized.match(/(?:이름|제목)\s*(?:을|를)?\s*['“\"]?([^'”\"]{2,})['”\"]?\s*(?:로|으로)?\s*(?:바꿔|수정|변경)/);
-  if (nameMatch) updates.name = nameMatch[1].trim();
-
-  if (updates.triggerType === 'cron' || timeMatch || intervalMatch || dayMatch) {
-    updates.cronConfig = cron;
-    updates.onceAt = null;
-  }
-
-  return Object.keys(updates).length > 0 ? updates : null;
-}
-
-function summarizeUpdate(updates: Partial<Automation>, t: (key: string, opts?: any) => string): string {
-  const parts: string[] = [];
-  if (updates.name) parts.push(t('updateName', { value: updates.name }));
-  if (updates.description) parts.push(t('updateDescription', { value: updates.description }));
-  if (updates.triggerType) {
-    const pseudo = { triggerType: updates.triggerType, cronConfig: updates.cronConfig || null, onceAt: updates.onceAt || null } as Automation;
-    parts.push(t('updateSchedule', { value: triggerLabel(pseudo, t) }));
-  }
-  return parts.join(' · ');
-}
-
-function scheduleSamples(t: (key: string, opts?: any) => string): ScheduleSample[] {
-  return [
-  {
-    id: 'daily-briefing',
-    title: t('sampleDailyTitle'),
-    description: t('sampleDailyDescription'),
-    form: {
-      name: t('sampleDailyTitle'),
-      description: t('sampleDailyDescription'),
-      prompt: t('sampleDailyPrompt'),
-      triggerType: 'cron', cronType: 'weekdays', hour: '9', minute: '0',
-    },
-  },
-  {
-    id: 'weekly-review',
-    title: t('sampleWeeklyTitle'),
-    description: t('sampleWeeklyDescription'),
-    form: {
-      name: t('sampleWeeklyTitle'),
-      description: t('sampleWeeklyDescription'),
-      prompt: t('sampleWeeklyPrompt'),
-      triggerType: 'cron', cronType: 'weekly', day: '5', hour: '17', minute: '0',
-    },
-  },
-  {
-    id: 'decision-index',
-    title: t('sampleDecisionTitle'),
-    description: t('sampleDecisionDescription'),
-    form: {
-      name: t('sampleDecisionTitle'),
-      description: t('sampleDecisionDescription'),
-      prompt: t('sampleDecisionPrompt'),
-      triggerType: 'cron', cronType: 'daily', hour: '3', minute: '0',
-    },
-  },
-  {
-    id: 'health-check',
-    title: t('sampleHealthTitle'),
-    description: t('sampleHealthDescription'),
-    form: {
-      name: t('sampleHealthTitle'),
-      description: t('sampleHealthDescription'),
-      prompt: t('sampleHealthPrompt'),
-      triggerType: 'cron', cronType: 'interval', intervalMinutes: '60',
-    },
-  },
-  ];
-}
-
 export function SchedulePanel() {
   const { t } = useTranslation('schedule');
   const confirm = useConfirm();
   const openSystemTab = useFileStore((s) => s.openSystemTab);
+  const openChatTab = useFileStore((s) => s.openChatTab);
+  const setActiveSessionId = useSessionStore((s) => s.setActiveSessionId);
   const setActiveView = useSessionStore((s) => s.setActiveView);
   const activeSessionId = useSessionStore((s) => s.activeSessionId);
   const addSession = useSessionStore((s) => s.addSession);
@@ -622,7 +417,15 @@ export function SchedulePanel() {
   const generalProject = useMemo(() => projects.find((p) => p.name.toLowerCase() === 'general' || p.rootPath?.endsWith('/general')), [projects]);
 
   const [jobs, setJobs] = useState<Automation[]>([]);
-  const [runs, setRuns] = useState<AutomationRun[]>([]);
+  const [runs, setRuns] = useState<Array<AutomationRun & { outcomeUnverified?: boolean }>>([]);
+  const [runsLoading, setRunsLoading] = useState(false);
+  const [runsError, setRunsError] = useState<string | null>(null);
+  const [selectedResultRunId, setSelectedResultRunId] = useState<string | null>(null);
+  const [results, setResults] = useState<AutomationResultItem[]>([]);
+  const [resultsLoading, setResultsLoading] = useState(true);
+  const [resultsError, setResultsError] = useState<string | null>(null);
+  const resultsRequest = useRef(0);
+  const [resultsRefresh, setResultsRefresh] = useState(0);
   const [processMap, setProcessMap] = useState<ProcessMap | null>(null);
   const [processMapRunId, setProcessMapRunId] = useState<string | null>(null);
   const [processMapLoading, setProcessMapLoading] = useState(false);
@@ -636,17 +439,16 @@ export function SchedulePanel() {
   });
   const [projectFilter, setProjectFilter] = useState('all');
   const [runningNowIds, setRunningNowIds] = useState<Set<string>>(() => new Set());
-  const [editing, setEditing] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [editForm, setEditForm] = useState<EditForm | null>(null);
   const [creating, setCreating] = useState(false);
-  const [createForm, setCreateForm] = useState<CreateForm>(() => defaultCreateForm());
+  const [createProjectId, setCreateProjectId] = useState<string | undefined>();
+  const [createRequest, setCreateRequest] = useState('');
+  const [createKey, setCreateKey] = useState(0);
 
   const load = useCallback(async () => {
     try {
       setLoading(true);
       const data = await fetchJson<Automation[]>(API);
-      const scheduleJobs = data.filter((j) => j.status !== 'archived' && (j.triggerType !== 'manual' || j.runCount > 0));
+      const scheduleJobs = data.filter((j) => j.status !== 'archived');
       setJobs(scheduleJobs);
       setSelectedId((current) => current && scheduleJobs.some((j) => j.id === current) ? current : null);
       setError(null);
@@ -657,7 +459,43 @@ export function SchedulePanel() {
     }
   }, []);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    const request = ++resultsRequest.current;
+    const controller = new AbortController();
+    if (projectFilter === 'all' || projectFilter === 'system') {
+      setResults([]);
+      setResultsError(null);
+      setResultsLoading(false);
+      return () => { controller.abort(); resultsRequest.current++; };
+    }
+    const query = new URLSearchParams({ limit: '50', projectId: projectFilter });
+    setResultsLoading(true);
+    setResults([]);
+    setResultsError(null);
+    void fetchJson<{ items: AutomationResultItem[] }>(`${API}/results?${query}`, { signal: controller.signal })
+      .then((data) => {
+        if (request !== resultsRequest.current || controller.signal.aborted) return;
+        if (!Array.isArray(data.items)) throw new Error(i18n.t('resultsInvalidResponse', { ns: 'schedule' }));
+        setResults(data.items);
+      })
+      .catch((err: Error) => {
+        if (request !== resultsRequest.current || controller.signal.aborted) return;
+        setResultsError(err.message || 'Request failed');
+      })
+      .finally(() => {
+        if (request === resultsRequest.current && !controller.signal.aborted) setResultsLoading(false);
+      });
+    return () => { controller.abort(); resultsRequest.current++; };
+  }, [projectFilter, resultsRefresh]);
+
+  const refreshResults = () => setResultsRefresh((value) => value + 1);
+
+  // Keep unattended executions visible without polling hidden tabs.
+  useEffect(() => {
+    void load();
+    const timer = window.setInterval(() => { if (!document.hidden) { void load(); setResultsRefresh((value) => value + 1); } }, 30_000);
+    return () => window.clearInterval(timer);
+  }, [load]);
 
   const startListResize = useCallback((event: ReactPointerEvent<HTMLButtonElement>) => {
     event.preventDefault();
@@ -688,8 +526,7 @@ export function SchedulePanel() {
     return list;
   }, [jobs, projectFilter]);
 
-  const upcomingJobs = useMemo(() => [...filteredJobs].sort((a, b) => {
-    if (a.enabled !== b.enabled) return a.enabled ? -1 : 1;
+  const upcomingJobs = useMemo(() => filteredJobs.filter((job) => job.enabled && job.nextRunAt).sort((a, b) => {
     const aNext = a.nextRunAt ? new Date(a.nextRunAt).getTime() : Number.MAX_SAFE_INTEGER;
     const bNext = b.nextRunAt ? new Date(b.nextRunAt).getTime() : Number.MAX_SAFE_INTEGER;
     return aNext - bNext || a.name.localeCompare(b.name);
@@ -707,56 +544,67 @@ export function SchedulePanel() {
   );
 
 
+  const runsRequest = useRef<AbortController | null>(null);
+  const processRequest = useRef<AbortController | null>(null);
   const loadRuns = useCallback(async (id: string) => {
+    runsRequest.current?.abort();
+    const controller = new AbortController();
+    runsRequest.current = controller;
+    setRunsLoading(true);
+    setRuns([]);
+    setRunsError(null);
     try {
-      const data = await fetchJson<AutomationRun[]>(`${API}/${id}/runs?limit=5`);
-      setRuns(data);
-    } catch {
-      setRuns([]);
+      const data = await fetchJson<AutomationRun[]>(`${API}/${id}/runs?limit=5`, { signal: controller.signal });
+      if (!controller.signal.aborted) setRuns(data);
+    } catch (err: any) {
+      if (!controller.signal.aborted) setRunsError(err.message);
+    } finally {
+      if (!controller.signal.aborted) setRunsLoading(false);
     }
   }, []);
 
   const loadProcessMap = useCallback(async (jobId: string, runId: string) => {
+    processRequest.current?.abort();
+    const controller = new AbortController();
+    processRequest.current = controller;
     try {
       setProcessMapLoading(true);
       setProcessMapRunId(runId);
-      const data = await fetchJson<ProcessMap>(`${API}/${jobId}/runs/${runId}/process-map`);
-      setProcessMap(data);
+      const data = await fetchJson<ProcessMap>(`${API}/${jobId}/runs/${runId}/process-map`, { signal: controller.signal });
+      if (!controller.signal.aborted) setProcessMap(data);
     } catch {
-      setProcessMap(null);
+      if (!controller.signal.aborted) setProcessMap(null);
     } finally {
-      setProcessMapLoading(false);
+      if (!controller.signal.aborted) setProcessMapLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    if (selectedJob) void loadRuns(selectedJob.id);
+    processRequest.current?.abort();
+    setProcessMapLoading(false);
+    if (selectedJob) {
+      setProcessMap(null);
+      setProcessMapRunId(null);
+      void loadRuns(selectedJob.id);
+    }
     else {
+      runsRequest.current?.abort();
       setRuns([]);
       setProcessMap(null);
       setProcessMapRunId(null);
     }
+    return () => { runsRequest.current?.abort(); processRequest.current?.abort(); };
   }, [selectedJob?.id, loadRuns]);
 
   useEffect(() => {
-    const latestRun = runs[0];
+    const latestRun = selectedResultRunId ? results.find((item) => item.automationId === selectedJob?.id && item.run.id === selectedResultRunId)?.run || runs.find((run) => run.id === selectedResultRunId) : runs[0];
     if (selectedJob && latestRun && processMapRunId !== latestRun.id) {
       void loadProcessMap(selectedJob.id, latestRun.id);
     } else if (!latestRun) {
       setProcessMap(null);
       setProcessMapRunId(null);
     }
-  }, [selectedJob?.id, runs, processMapRunId, loadProcessMap]);
-
-  useEffect(() => {
-    if (!selectedJob) {
-      setEditForm(null);
-      setEditing(false);
-      return;
-    }
-    setEditForm(editFormFromJob(selectedJob));
-    setEditing(false);
-  }, [selectedJob?.id]);
+  }, [selectedJob?.id, selectedResultRunId, runs, results, processMapRunId, loadProcessMap]);
 
   const openJobTab = (job: Automation) => {
     setSelectedId(job.id);
@@ -766,6 +614,13 @@ export function SchedulePanel() {
 
   const openAutomationAiThread = async (job: Automation) => {
     setSelectedId(job.id);
+    if (isCreationDraft(job)) {
+      setCreateProjectId(job.projectId || undefined);
+      setCreateRequest(job.prompt);
+      setCreateKey(k => k + 1);
+      setCreating(true);
+      return;
+    }
     try {
       const r = await fetchJson<{ session: any; created: boolean }>(`${API}/${job.id}/editor-thread`, {
         method: 'POST',
@@ -793,11 +648,26 @@ export function SchedulePanel() {
     }
   };
 
+  const selectResult = (item: AutomationResultItem) => {
+    setSelectedResultRunId(item.run.id);
+    setSelectedId(item.automationId);
+  };
+
+  const openResultSession = (sessionId: string) => {
+    setActiveSessionId(sessionId);
+    openChatTab(sessionId);
+    setActiveView('chat');
+  };
+
+  const resultProps = { items: results, loading: resultsLoading, error: resultsError, projectRequired: projectFilter === 'all' || projectFilter === 'system', onRetry: refreshResults, projectById, onSelect: selectResult, onOpenSession: openResultSession };
+
   const selectJob = (job: Automation) => {
+    setSelectedResultRunId(null);
     setSelectedId(job.id);
   };
 
   const handleToggle = async (job: Automation) => {
+    if (isCreationDraft(job)) return;
     const enabled = !job.enabled;
     const ok = await confirm({ title: enabled ? t('enableConfirmTitle', { ns: 'automation' }) : t('pauseConfirmTitle', { ns: 'automation' }), message: enabled ? t('enableConfirmMessage', { ns: 'automation' }) : t('pauseConfirmMessage', { ns: 'automation' }), confirmLabel: enabled ? t('enableAction', { ns: 'automation' }) : t('pauseAction', { ns: 'automation' }) });
     if (!ok) return;
@@ -808,7 +678,9 @@ export function SchedulePanel() {
   };
 
   const handleRunNow = async (job: Automation) => {
-    if (runningNowIds.has(job.id)) return;
+    if (isCreationDraft(job) || runningNowIds.has(job.id)) return;
+    const ok = await confirm({ title: t('runNowConfirmTitle'), message: t('runNowConfirmMessage', { name: job.name }), confirmLabel: t('runNow') });
+    if (!ok) return;
     if (selectedJob?.id !== job.id) setSelectedId(job.id);
     setRunningNowIds((ids) => new Set(ids).add(job.id));
     try {
@@ -816,6 +688,7 @@ export function SchedulePanel() {
       await fetchJson(`${API}/${job.id}/run-now`, { method: 'POST' });
       await load();
       await loadRuns(job.id);
+      refreshResults();
     } catch (err: any) { setError(err.message); }
     finally {
       setRunningNowIds((ids) => {
@@ -836,36 +709,14 @@ export function SchedulePanel() {
     } catch (err: any) { setError(err.message); }
   };
 
-  const handleSaveEdit = async (_job: Automation) => {
-    setError(t('editRequiresReview'));
-  };
-
   const openCreate = () => {
     const defaultProjectId = projectFilter !== 'all' && projectFilter !== 'system'
       ? projectFilter
-      : (generalProject?.id || projects[0]?.id || 'system');
-    setCreateForm(defaultCreateForm(defaultProjectId));
+      : (generalProject?.id || projects[0]?.id);
+    setCreateProjectId(defaultProjectId);
+    setCreateRequest('');
+    setCreateKey(k => k + 1);
     setCreating(true);
-  };
-
-  const applySample = (sample: ScheduleSample) => {
-    setCreateForm((form) => ({ ...form, ...sample.form }));
-  };
-
-  const handleCreate = async () => {
-    const userRequest = [createForm.name, createForm.description, createForm.prompt].filter(Boolean).join('\n');
-    if (!userRequest.trim()) {
-      setError(t('scheduleRequestRequired'));
-      return;
-    }
-    const projectName = createForm.projectId === 'system'
-      ? t('systemJobs')
-      : projects.find((p) => p.id === createForm.projectId)?.name || createForm.projectId;
-    const prompt = t('scheduleWizardPrompt', { project: projectName, request: userRequest });
-    window.dispatchEvent(new CustomEvent('tower-start-schedule-wizard', {
-      detail: { projectId: createForm.projectId === 'system' ? null : createForm.projectId, prompt, sessionName: t('scheduleWizardSessionName'), label: t('scheduleWizardLabel') },
-    }));
-    setCreating(false);
   };
 
   const currentList = view === 'upcoming' ? upcomingJobs : registeredJobs;
@@ -915,11 +766,12 @@ export function SchedulePanel() {
               onClick={(e) => { e.stopPropagation(); void handleToggle(job); }}
               className={`relative inline-flex h-4 w-7 items-center rounded-full transition ${job.enabled ? 'bg-primary-500' : 'bg-surface-650'}`}
               aria-label={job.enabled ? t('disable') : t('enable')}
+              disabled={isCreationDraft(job)}
               aria-pressed={job.enabled}
             >
               <span className={`inline-block h-3 w-3 rounded-full bg-white transition ${job.enabled ? 'translate-x-3.5' : 'translate-x-0.5'}`} />
             </button>
-            <button disabled={runningNowIds.has(job.id)} onClick={() => handleRunNow(job)} className="min-h-[32px] rounded-lg bg-surface-800 px-2 py-1.5 text-[12px] font-semibold text-surface-200 hover:bg-primary-500 hover:text-white disabled:opacity-50 disabled:cursor-not-allowed">
+            <button disabled={isCreationDraft(job) || runningNowIds.has(job.id)} onClick={() => handleRunNow(job)} className="min-h-[32px] rounded-lg bg-surface-800 px-2 py-1.5 text-[12px] font-semibold text-surface-200 hover:bg-primary-500 hover:text-white disabled:opacity-50 disabled:cursor-not-allowed">
               {runningNowIds.has(job.id) ? t('running') : t('runNow')}
             </button>
             <button onClick={() => void openAutomationAiThread(job)} className="min-h-[32px] rounded-lg border border-teal-300 bg-teal-50 px-2 py-1.5 text-[12px] font-semibold text-teal-800 hover:bg-teal-100 dark:border-primary-500/30 dark:bg-primary-500/10 dark:text-primary-100 dark:hover:bg-primary-500/20">
@@ -968,52 +820,20 @@ export function SchedulePanel() {
         </div>
       )}
 
-      {creating && (
-        <div className="mx-5 mt-4 rounded-2xl border border-primary-500/25 bg-surface-900/95 p-4 shadow-xl shadow-black/20">
-          <div className="flex items-start justify-between gap-3 mb-4">
-            <div>
-              <h2 className="text-base font-bold text-gray-100">{t('createSchedule')}</h2>
-              <p className="mt-1 text-[13px] text-surface-500">{t('createScheduleHelp')}</p>
-            </div>
-            <button onClick={() => setCreating(false)} className="rounded-lg bg-surface-800 px-3 py-1.5 text-[13px] font-semibold text-surface-300 hover:bg-surface-700">{t('closeEdit')}</button>
-          </div>
-
-          <div className="mb-4 grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
-            {scheduleSamples(t).map((sample) => (
-              <button key={sample.id} onClick={() => applySample(sample)} className="rounded-xl border border-surface-750 bg-surface-850/70 p-3 text-left hover:border-primary-500/40 hover:bg-primary-500/10">
-                <div className="text-[14px] font-semibold text-gray-100">{sample.title}</div>
-                <div className="mt-1 line-clamp-2 text-[12px] leading-4 text-surface-500">{sample.description}</div>
-              </button>
-            ))}
-          </div>
-
-          <div className="grid grid-cols-1 gap-3 lg:grid-cols-[240px_1fr]">
-            <label className="block text-[13px] text-surface-400 space-y-1.5">
-              <span>{t('project')}</span>
-              <select value={createForm.projectId} onChange={(e) => setCreateForm({ ...createForm, projectId: e.target.value })} className="w-full bg-surface-950/80 border border-surface-700 rounded-lg px-2 py-2 text-[14px] text-surface-100">
-                <option value="system">{t('systemJobs')}</option>
-                {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-              </select>
-            </label>
-            <label className="block text-[13px] text-surface-400 space-y-1.5">
-              <span>{t('agenticRequest')}</span>
-              <textarea
-                value={[createForm.name, createForm.description, createForm.prompt].filter(Boolean).join('\n')}
-                onChange={(e) => setCreateForm({ ...createForm, name: '', description: '', prompt: e.target.value })}
-                rows={5}
-                placeholder={t('agenticRequestPlaceholder')}
-                className="w-full bg-surface-950/80 border border-surface-700 rounded-lg px-3 py-2 text-[14px] text-surface-100 placeholder:text-surface-600 resize-none"
-              />
-            </label>
-          </div>
-
-          <div className="mt-4 flex justify-end gap-2">
-            <button disabled={saving} onClick={() => setCreating(false)} className="px-3 py-2 rounded-lg bg-surface-800 text-surface-300 text-[13px] font-semibold hover:bg-surface-700">{t('cancel')}</button>
-            <button disabled={saving || ![createForm.name, createForm.description, createForm.prompt].filter(Boolean).join('\n').trim()} onClick={handleCreate} className="px-4 py-2 rounded-lg bg-primary-500 text-white text-[13px] font-semibold hover:bg-primary-400 disabled:opacity-50">{t('startScheduleWizard')}</button>
-          </div>
-        </div>
-      )}
-
+      {creating && <AutomationCreatePanel
+        key={createKey}
+        initialRequest={createRequest}
+        projects={projects}
+        initialProjectId={createProjectId}
+        sourceSessionId={activeSessionId}
+        onCancel={() => setCreating(false)}
+        onCreated={(automation) => {
+          setCreating(false);
+          setSelectedId(automation.id);
+          setView('registered');
+          void load();
+        }}
+      />}
 
       <div className="relative grid flex-1 min-h-0 grid-cols-1 gap-0 lg:grid-cols-[minmax(420px,var(--schedule-list-width))_minmax(0,1fr)]" style={{ '--schedule-list-width': `${listWidth}px` } as CSSProperties}>
         <section className="min-h-0 flex flex-col border-r border-surface-800 max-lg:border-r-0">
@@ -1025,11 +845,12 @@ export function SchedulePanel() {
               <button onClick={() => setView('registered')} className={`px-3 py-1.5 rounded-md text-[13px] font-semibold ${view === 'registered' ? 'bg-surface-700 text-white' : 'text-surface-500 hover:text-surface-200'}`}>
                 {t('recentlyRegistered')}
               </button>
+              <button onClick={() => setView('results')} className={`px-3 py-1.5 rounded-md text-[13px] font-semibold ${view === 'results' ? 'bg-surface-700 text-white' : 'text-surface-500 hover:text-surface-200'}`}>{t('resultsTitle')}</button>
             </div>
           </div>
 
           <div className="flex-1 overflow-y-auto p-4 space-y-5">
-            {loading ? (
+            {view === 'results' ? <AutomationResultsPanel {...resultProps} /> : loading ? (
               <div className="text-center text-surface-500 text-sm py-8">{t('loading')}</div>
             ) : currentList.length === 0 ? (
               <div className="text-center py-12 max-w-sm mx-auto">
@@ -1061,7 +882,9 @@ export function SchedulePanel() {
         </button>
 
         <aside className="min-h-0 overflow-y-auto p-4 bg-surface-925/60">
-          {!selectedJob ? (
+          {!selectedJob && view === 'results' ? (
+            <div className="rounded-xl border border-surface-800 bg-surface-900/50 p-4 text-[13px] text-surface-400">{t('resultSelectForDetails')}</div>
+          ) : !selectedJob ? (
             <ScheduleOverview
               jobs={filteredJobs}
               allJobs={jobs}
@@ -1073,6 +896,7 @@ export function SchedulePanel() {
               onSelect={selectJob}
               onOpenAiThread={openAutomationAiThread}
               onCreate={openCreate}
+              latestResult={resultProps}
               t={t}
             />
           ) : (
@@ -1087,75 +911,18 @@ export function SchedulePanel() {
                   </div>
                   <div className="shrink-0 flex items-center gap-2">
                     <span className={`tone-pill text-[12px] px-1.5 py-0.5 rounded ${statusBadge(selectedJob, t).cls}`}>{statusBadge(selectedJob, t).text}</span>
-                    <button onClick={() => handleToggle(selectedJob)} className={`relative inline-flex h-5 w-9 items-center rounded-full transition ${selectedJob.enabled ? 'bg-primary-500' : 'bg-surface-650'}`} aria-pressed={selectedJob.enabled} aria-label={selectedJob.enabled ? t('disable') : t('enable')}>
+                    <button disabled={isCreationDraft(selectedJob)} onClick={() => handleToggle(selectedJob)} className={`relative inline-flex h-5 w-9 items-center rounded-full transition ${selectedJob.enabled ? 'bg-primary-500' : 'bg-surface-650'}`} aria-pressed={selectedJob.enabled} aria-label={selectedJob.enabled ? t('disable') : t('enable')}>
                       <span className={`inline-block h-4 w-4 rounded-full bg-white transition ${selectedJob.enabled ? 'translate-x-4' : 'translate-x-0.5'}`} />
                     </button>
                   </div>
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                <button disabled={runningNowIds.has(selectedJob.id)} onClick={() => handleRunNow(selectedJob)} className="min-h-[40px] px-2 py-2 text-[14px] font-semibold rounded-lg bg-primary-500 text-white hover:bg-primary-400 disabled:opacity-50 disabled:cursor-not-allowed">{runningNowIds.has(selectedJob.id) ? t('running') : `▶ ${t('runNow')}`}</button>
-                <button onClick={() => setEditing((v) => !v)} className="min-h-[40px] px-2 py-2 text-[14px] font-semibold rounded-lg bg-surface-800 text-surface-200 hover:bg-surface-750">{editing ? t('closeEdit') : t('edit')}</button>
-                <button onClick={() => void openAutomationAiThread(selectedJob)} className="min-h-[40px] px-2 py-2 text-[14px] font-semibold rounded-lg bg-surface-800 text-surface-200 hover:bg-surface-750">{t('adjustByConversation')}</button>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                <button disabled={isCreationDraft(selectedJob) || runningNowIds.has(selectedJob.id)} onClick={() => handleRunNow(selectedJob)} className="min-h-[40px] px-2 py-2 text-[14px] font-semibold rounded-lg bg-primary-500 text-white hover:bg-primary-400 disabled:opacity-50 disabled:cursor-not-allowed">{runningNowIds.has(selectedJob.id) ? t('running') : `▶ ${t('runNow')}`}</button>
+                <button onClick={() => void openAutomationAiThread(selectedJob)} className="min-h-[40px] px-2 py-2 text-[14px] font-semibold rounded-lg bg-surface-800 text-surface-200 hover:bg-surface-750">{t(isCreationDraft(selectedJob) ? 'planDraftResume' : 'reviewChanges')}</button>
                 <button onClick={() => handleDelete(selectedJob)} className="min-h-[40px] px-2 py-2 text-[14px] font-semibold rounded-lg bg-red-500/10 text-red-300 hover:bg-red-500/20">{t('delete')}</button>
               </div>
-
-              {editing && editForm && (
-                <div className="border border-primary-500/30 rounded-xl p-4 bg-primary-500/10 space-y-3">
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="text-[13px] font-semibold text-gray-100">{t('editSettings')}</div>
-                    <button onClick={() => selectedJob && setEditForm(editFormFromJob(selectedJob))} className="text-[12px] text-surface-400 hover:text-white">{t('reset')}</button>
-                  </div>
-                  <label className="block text-[13px] text-surface-400 space-y-1.5">
-                    <span>{t('name')}</span>
-                    <input value={editForm.name} onChange={(e) => setEditForm({ ...editForm, name: e.target.value })} className="w-full bg-surface-950/80 border border-surface-700 rounded-lg px-3 py-2 text-[14px] text-surface-100" />
-                  </label>
-                  <label className="block text-[13px] text-surface-400 space-y-1.5">
-                    <span>{t('description')}</span>
-                    <textarea value={editForm.description} onChange={(e) => setEditForm({ ...editForm, description: e.target.value })} rows={3} className="w-full bg-surface-950/80 border border-surface-700 rounded-lg px-3 py-2 text-[14px] text-surface-100 resize-none" />
-                  </label>
-                  <label className="block text-[13px] text-surface-400 space-y-1.5">
-                    <span>{t('prompt')}</span>
-                    <textarea value={editForm.prompt} onChange={(e) => setEditForm({ ...editForm, prompt: e.target.value })} rows={4} className="w-full bg-surface-950/80 border border-surface-700 rounded-lg px-3 py-2 text-[14px] text-surface-100 resize-none" />
-                  </label>
-                  <div className="grid grid-cols-2 gap-2.5">
-                    <label className="block text-[13px] text-surface-400 space-y-1.5">
-                      <span>{t('trigger')}</span>
-                      <select value={editForm.triggerType} onChange={(e) => setEditForm({ ...editForm, triggerType: e.target.value as AutomationTrigger })} className="w-full bg-surface-950/80 border border-surface-700 rounded-lg px-2 py-2 text-[14px] text-surface-100">
-                        <option value="manual">{t('manual')}</option>
-                        <option value="cron">{t('repeat')}</option>
-                        <option value="once">{t('once')}</option>
-                      </select>
-                    </label>
-                    {editForm.triggerType === 'cron' && (
-                      <label className="block text-[13px] text-surface-400 space-y-1.5">
-                        <span>{t('repeatRule')}</span>
-                        <select value={editForm.cronType} onChange={(e) => setEditForm({ ...editForm, cronType: e.target.value as AutomationCronConfig['type'] })} className="w-full bg-surface-950/80 border border-surface-700 rounded-lg px-2 py-2 text-[14px] text-surface-100">
-                          <option value="daily">{t('daily')}</option>
-                          <option value="weekdays">{t('weekdays')}</option>
-                          <option value="weekly">{t('weekly')}</option>
-                          <option value="interval">{t('interval')}</option>
-                        </select>
-                      </label>
-                    )}
-                  </div>
-                  {editForm.triggerType === 'cron' && editForm.cronType !== 'interval' && (
-                    <div className="grid grid-cols-3 gap-2.5">
-                      {editForm.cronType === 'weekly' && <label className="block text-[13px] text-surface-400 space-y-1.5"><span>{t('day')}</span><select value={editForm.day} onChange={(e) => setEditForm({ ...editForm, day: e.target.value })} className="w-full bg-surface-950/80 border border-surface-700 rounded-lg px-2 py-2 text-[14px] text-surface-100"><option value="0">{t('sun')}</option><option value="1">{t('mon')}</option><option value="2">{t('tue')}</option><option value="3">{t('wed')}</option><option value="4">{t('thu')}</option><option value="5">{t('fri')}</option><option value="6">{t('sat')}</option></select></label>}
-                      <label className="block text-[13px] text-surface-400 space-y-1.5"><span>{t('hour')}</span><input type="number" min="0" max="23" value={editForm.hour} onChange={(e) => setEditForm({ ...editForm, hour: e.target.value })} className="w-full bg-surface-950/80 border border-surface-700 rounded-lg px-2 py-2 text-[14px] text-surface-100" /></label>
-                      <label className="block text-[13px] text-surface-400 space-y-1.5"><span>{t('minute')}</span><input type="number" min="0" max="59" value={editForm.minute} onChange={(e) => setEditForm({ ...editForm, minute: e.target.value })} className="w-full bg-surface-950/80 border border-surface-700 rounded-lg px-2 py-2 text-[14px] text-surface-100" /></label>
-                    </div>
-                  )}
-                  {editForm.triggerType === 'cron' && editForm.cronType === 'interval' && <label className="block text-[13px] text-surface-400 space-y-1.5"><span>{t('intervalMinutes')}</span><input type="number" min="1" value={editForm.intervalMinutes} onChange={(e) => setEditForm({ ...editForm, intervalMinutes: e.target.value })} className="w-full bg-surface-950/80 border border-surface-700 rounded-lg px-2 py-2 text-[14px] text-surface-100" /></label>}
-                  {editForm.triggerType === 'once' && <label className="block text-[13px] text-surface-400 space-y-1.5"><span>{t('onceAt')}</span><input type="datetime-local" value={editForm.onceAt} onChange={(e) => setEditForm({ ...editForm, onceAt: e.target.value })} className="w-full bg-surface-950/80 border border-surface-700 rounded-lg px-2 py-2 text-[14px] text-surface-100" /></label>}
-                  <label className="block text-[13px] text-surface-400 space-y-1.5"><span>{t('timeoutSeconds')}</span><input type="number" min="1" placeholder={t('defaultTimeout')} value={editForm.timeoutSeconds} onChange={(e) => setEditForm({ ...editForm, timeoutSeconds: e.target.value })} className="w-full bg-surface-950/80 border border-surface-700 rounded-lg px-2 py-2 text-[14px] text-surface-100" /></label>
-                  <div className="flex gap-2 pt-1">
-                    <button disabled={saving} onClick={() => handleSaveEdit(selectedJob)} className="flex-1 px-3 py-2 rounded-lg bg-primary-500 text-white text-[13px] font-semibold hover:bg-primary-400 disabled:opacity-50">{saving ? t('saving') : t('save')}</button>
-                    <button disabled={saving} onClick={() => setEditing(false)} className="px-3 py-2 rounded-lg bg-surface-800 text-surface-300 text-[13px] font-semibold hover:bg-surface-700">{t('cancel')}</button>
-                  </div>
-                </div>
-              )}
 
               <div className="grid grid-cols-2 gap-3 max-xl:grid-cols-1">
                 <div className="border border-surface-800 rounded-xl p-3 bg-surface-900/50">
@@ -1199,14 +966,16 @@ export function SchedulePanel() {
 
               <div className="border border-surface-800 rounded-xl p-3 bg-surface-900/50">
                 <div className="text-[12px] uppercase tracking-wider font-bold text-surface-500 mb-2">{t('runLog')}</div>
-                {runs.length === 0 ? <div className="text-[13px] text-surface-500">{t('noRuns')}</div> : (
+                {results.filter((item) => item.automationId === selectedJob.id && (!selectedResultRunId || item.run.id === selectedResultRunId)).slice(0, 1).map((item) => <div key={item.run.id} className="mb-3 border-b border-surface-800 pb-2 text-[13px]"><span className="font-semibold text-surface-200">{resultStatusLabel(resultStatus(item), t)}</span> · {new Date(item.run.ranAt).toLocaleString()}<p className="mt-1 whitespace-pre-wrap break-words text-surface-300">{item.run.summaryText || item.run.error || t('resultNoSummary')}</p>{item.sessionId ? <button type="button" onClick={() => openResultSession(item.sessionId!)} className="mt-1 text-primary-300 hover:underline">{t('resultOpenSession')}</button> : <span className="mt-1 block text-surface-500">{t('resultNoSession')}</span>}</div>)}
+                {runsLoading ? <div role="status" className="text-[13px] text-surface-400">{t('resultsLoading')}</div> : runsError ? <div role="alert" className="text-[13px] text-red-300">{t('resultsLoadFailed')}: {runsError} <button type="button" onClick={() => void loadRuns(selectedJob.id)} className="underline">{t('resultsRetry')}</button></div> : runs.length === 0 ? <div className="text-[13px] text-surface-500">{t('noRuns')}</div> : (
                   <div className="space-y-2">
                     {runs.map((run) => (
                       <div key={run.id} className="text-[13px] border-b border-surface-800 last:border-b-0 pb-2 last:pb-0">
                         <div className="flex items-center justify-between gap-2">
-                          <button type="button" onClick={() => selectedJob && loadProcessMap(selectedJob.id, run.id)} className={`${run.status === 'success' ? 'tone-success tone-text' : 'tone-danger tone-text'} hover:underline`}>{run.status === 'success' ? t('success') : run.status === 'failed' ? t('failed', { ns: 'common' }) : run.status}</button>
+                          <button type="button" onClick={() => { setSelectedResultRunId(run.id); if (selectedJob) void loadProcessMap(selectedJob.id, run.id); }} className={`${run.status === 'success' && !run.outcomeUnverified ? 'tone-success tone-text' : ['failed', 'timeout'].includes(run.status) ? 'tone-danger tone-text' : 'text-surface-300'} hover:underline`}>{resultStatusLabel(resultStatus({ automationId: selectedJob.id, automationName: selectedJob.name, projectId: selectedJob.projectId, run, outcomeUnverified: run.outcomeUnverified }), t)}</button>
                           <span className="text-surface-500">{new Date(run.ranAt).toLocaleString()} · {duration(run)}</span>
                         </div>
+                        {run.summaryText && <p className="mt-1 whitespace-pre-wrap break-words text-surface-300">{run.summaryText}</p>}
                         {run.error && <div className="mt-1 text-red-300">{run.error}</div>}
                       </div>
                     ))}

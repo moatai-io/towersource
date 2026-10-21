@@ -1,3 +1,4 @@
+import { readBrowserAuthToken } from '../features/client-connection/connection';
 /**
  * Auth helpers — single source of truth for the current user's identity.
  *
@@ -37,7 +38,7 @@ function decodeToken(token: string | null): JwtPayload | null {
 
 function readToken(): string | null {
   if (typeof window === 'undefined') return null;
-  return localStorage.getItem('token');
+  return readBrowserAuthToken();
 }
 
 /** Current user's role per JWT, or null if no/invalid token. */

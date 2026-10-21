@@ -1,35 +1,33 @@
+import { describe, expect, it } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
-import { describe, expect, it } from 'vitest';
 
-const chat = fs.readFileSync(path.resolve(import.meta.dirname, './ChatPanel.tsx'), 'utf8');
-const shared = fs.readFileSync(path.resolve(import.meta.dirname, '../../../../shared/index.ts'), 'utf8');
-const sessions = fs.readFileSync(path.resolve(import.meta.dirname, '../../../../backend/services/session/session-manager.ts'), 'utf8');
+const chat = fs.readFileSync(path.resolve(import.meta.dirname, 'ChatPanel.tsx'), 'utf-8');
+const welcome = fs.readFileSync(path.resolve(import.meta.dirname, '../../features/session-welcome/SessionWelcome.tsx'), 'utf-8');
+const ko = JSON.parse(fs.readFileSync(path.resolve(import.meta.dirname, '../../locales/ko/chat.json'), 'utf-8'));
+const en = JSON.parse(fs.readFileSync(path.resolve(import.meta.dirname, '../../locales/en/chat.json'), 'utf-8'));
 
-describe('Primary Agent first-day empty state', () => {
-  it('exposes the creation provenance needed to distinguish the first Session', () => {
-    expect(shared).toContain('agentCreationCommandId?: string | null');
-    expect(sessions).toContain('agentCreationCommandId: creation?.agentCreationCommandId || null');
-    expect(sessions).toContain('agentCreationCommandId: row.agent_creation_command_id || null');
+describe('ChatPanel empty session welcome wiring', () => {
+  it('shows one dialogue welcome for every empty session and connects the real composer', () => {
+    expect(chat).toContain('enabled: renderMessages.length === 0 && !isStreaming && !renderSessionLoading');
+    expect(chat).toContain('<SessionWelcome project={activeProject} content={welcome.content} isLoading={welcome.isLoading} onInteraction={welcome.onInteraction} onStart={onSend} />');
+    expect(chat).toContain('onInteraction={welcome.onInteraction}');
+    expect(chat).not.toContain('function EmptyState');
+    expect(welcome).toContain('AgentIdentityAvatar');
+    expect(welcome).not.toContain('project?.name');
   });
-
-  it('shows a Tower-owned start card only for the provisioned first Session', () => {
-    expect(chat).toContain('session?.agentCreationCommandId && project');
-    expect(chat).toContain("t('emptyState.firstTask')");
-    expect(chat).toContain("t('emptyState.firstTaskHint')");
-    expect(chat).toContain("t('emptyState.agentStarters', { returnObjects: true })");
+  it('retains localized first-day guide labels and small locale choices', () => {
+    for (const locale of [ko, en]) {
+      expect(locale.emptyState.startGuide).toBeTruthy();
+      expect(locale.welcome.choices).toHaveLength(3);
+      expect(locale.welcome.freeInput).toBeTruthy();
+    }
+    expect(welcome).toContain("start('/tower-intro')");
+    expect(welcome).toContain('tower-start-tour');
   });
-
-  it('sends a selected starter as the user message instead of synthesizing an assistant greeting', () => {
-    expect(chat).toContain('onClick={() => onStart(starter)}');
-    expect(chat).toContain('<EmptyState session={activeSession} project={activeProject} onStart={onSend} />');
-    expect(chat).not.toContain('인재팀에서 제가');
-  });
-
-  it('uses the theme-aware primary-300 token for the guide CTA', () => {
-    const guideCtaClass = chat.match(/className="([^"]*bg-primary-500\/10[^"]*text-primary-300[^"]*)"/u)?.[1];
-
-    expect(guideCtaClass).toBeDefined();
-    expect(guideCtaClass).not.toContain('text-primary-200');
+  it('uses the theme-aware guide token and does not bring back the orbit splash', () => {
+    expect(welcome).toContain('text-primary-300');
+    expect(welcome).not.toContain('text-primary-200');
+    expect(chat).not.toContain('tower-empty-visual');
   });
 });

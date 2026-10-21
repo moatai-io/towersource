@@ -77,7 +77,10 @@ export function uploadFileBatchWithProgress({
       const data = xhr.response ?? (() => {
         try { return JSON.parse(xhr.responseText); } catch { return {}; }
       })();
-      if (xhr.status >= 200 && xhr.status < 300) resolve(data);
+      if (xhr.status >= 200 && xhr.status < 300) {
+        if (!Array.isArray(data?.attachments)) reject(new Error('Invalid upload response; please retry'));
+        else resolve(data);
+      }
       else reject(new Error(data?.error || (xhr.status === 413 ? i18n.t('uploadNotice.tooLarge', { ns: 'common' }) : i18n.t('uploadNotice.failedGeneric', { ns: 'common' }))));
     });
     xhr.addEventListener('error', () => reject(new Error(i18n.t('uploadNotice.networkFailed', { ns: 'common' }))));

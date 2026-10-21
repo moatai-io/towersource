@@ -12,7 +12,7 @@ describe('AI team home and ACL', () => {
     expect(app).toContain('<AITeamHome projects={projects}');
     expect(api).toContain('res.json(await getProjects(userId, role))');
     expect(manager).toContain('getAccessibleProjectIds(userId, role)');
-    expect(manager).toContain('accessibleIds.includes(r.id)');
+    expect(manager).toContain('accessibleIds.includes(row.id)');
   });
 
   it('shows teammate role and status management without duplicating work usage', () => {

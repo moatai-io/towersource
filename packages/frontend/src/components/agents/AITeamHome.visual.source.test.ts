@@ -14,8 +14,11 @@ describe('AI teammate management visual contract', () => {
     expect(home).not.toContain('dailyTurns');
   });
 
-  it('uses dedicated teammate cards and a single primary creation action', () => {
+  it('uses compact teammate cards, larger identity images, and a single primary creation action', () => {
     expect(home).toContain('ai-team-member-card');
+    expect(home).toContain('h-20 w-20');
+    expect(home).toContain('grid-cols-[repeat(auto-fit,minmax(min(100%,16rem),1fr))]');
+    expect(home).not.toContain('min-h-52');
     expect(home).toContain('ai-team-primary-action');
     expect(home).not.toContain('ai-team-people-ops');
   });

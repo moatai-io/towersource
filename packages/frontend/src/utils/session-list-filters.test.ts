@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { loadSessionListFilters, matchesSessionListFilters, saveSessionListFilter, SESSION_LIST_FILTERS_UPDATED_EVENT } from './session-list-filters';
+import { isSessionParticipatedByCurrentUser, loadSessionListFilters, matchesSessionListFilters, saveSessionListFilter, SESSION_LIST_FILTERS_UPDATED_EVENT } from './session-list-filters';
 
 const chat = {
   id: 'chat-1',
@@ -34,6 +34,13 @@ const deployment = {
 describe('session list filters', () => {
   beforeEach(() => localStorage.clear());
 
+  it('keeps every participated session in Latest regardless of owner or last speaker', () => {
+    expect(isSessionParticipatedByCurrentUser({ ...chat, currentUserParticipated: true, lastUserUsername: 'other' }, 'admin')).toBe(true);
+    expect(isSessionParticipatedByCurrentUser({ ...chat, ownerUsername: 'other', currentUserParticipated: true, lastUserUsername: 'third' }, 'admin')).toBe(true);
+    expect(isSessionParticipatedByCurrentUser({ ...chat, ownerUsername: 'other', currentUserParticipated: false, lastUserUsername: 'admin' }, 'admin')).toBe(false);
+    expect(isSessionParticipatedByCurrentUser(chat, '')).toBe(true);
+  });
+
   it('defaults to chats so agent backing sessions stay out even after human input', () => {
     const filters = loadSessionListFilters();
     expect(filters.kind).toBe('chats');
@@ -60,12 +67,21 @@ describe('session list filters', () => {
     expect(matchesSessionListFilters(deployment, all, { currentUsername: 'admin', isUnread: false, isStreaming: false })).toBe(true);
   });
 
-  it('applies agents, mine, favorite, and done filters consistently', () => {
+  it('applies agents, participation, favorite, and completed-to-review filters consistently', () => {
     const filters = { kind: 'agents' as const, my: true, favorites: true, done: true };
-    const favoriteAgent = { ...agent, favorite: true };
+    const favoriteAgent = { ...agent, favorite: true, currentUserParticipated: true };
     expect(matchesSessionListFilters(favoriteAgent, filters, { currentUsername: 'admin', isUnread: true, isStreaming: false })).toBe(true);
     expect(matchesSessionListFilters(favoriteAgent, filters, { currentUsername: 'admin', isUnread: true, isStreaming: true })).toBe(false);
-    expect(matchesSessionListFilters({ ...favoriteAgent, ownerUsername: 'other' }, filters, { currentUsername: 'admin', isUnread: true, isStreaming: false })).toBe(false);
+    expect(matchesSessionListFilters({ ...favoriteAgent, currentUserParticipated: false, ownerUsername: 'other' }, filters, { currentUsername: 'admin', isUnread: true, isStreaming: false })).toBe(false);
+  });
+
+  it('supports running and awaiting-user status filters without classifying awaiting as completed', () => {
+    const base = { kind: 'all' as const, my: false, favorites: false, done: false };
+    expect(matchesSessionListFilters(chat, { ...base, running: true }, { isUnread: false, isStreaming: true })).toBe(true);
+    expect(matchesSessionListFilters(chat, { ...base, running: true }, { isUnread: false, isStreaming: false })).toBe(false);
+    expect(matchesSessionListFilters(chat, { ...base, awaiting: true }, { isUnread: false, isStreaming: false, isAwaiting: true })).toBe(true);
+    expect(matchesSessionListFilters(chat, { ...base, awaiting: true }, { isUnread: false, isStreaming: false, isAwaiting: false })).toBe(false);
+    expect(matchesSessionListFilters(chat, { ...base, done: true }, { isUnread: true, isStreaming: false, isAwaiting: true })).toBe(false);
   });
 
   it('notifies mounted Latest views when a sidebar filter changes', () => {

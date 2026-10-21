@@ -24,21 +24,15 @@ Tower 의 nginx 가 `workspace/published/sites/<slug>/` 를 자동으로 서빙�
 - `publish_site`가 성공과 검증된 URL을 반환한 경우에만 외부 URL을 안내하세요. 실패 시 URL을 추측해서 만들지 마세요.
 - publish용 HTML을 새로 만들 때는 가능하면 대표 썸네일 힌트를 넣으세요: 대표 hero 섹션에 `data-tower-thumbnail`을 붙이거나 `<meta property="og:image" ...>` / `<meta name="twitter:image" ...>`를 지정합니다. Tower는 AI 이미지 생성 없이 실제 페이지/대표 이미지 기반 썸네일을 만듭니다.
 
-### 접근 URL — Tower 표준 (2026-04-26 Phase 7 부터 통일)
+### 접근 URL — 서브도메인 단일 정본
 
-모든 Tower 서버는 wildcard DNS + LE wildcard cert 를 갖추도록 표준화됨. **두 URL 패턴 모두 동작**:
-- subdomain 방식: `https://<slug>.<server>/` ← **권장 (사용자 친화적, 짧고 깔끔)**
-- path 방식: `https://<server>/sites/<slug>/` ← 동일하게 동작 (대체 또는 호환용)
+정본 게시 주소는 `https://<slug>.<server>/` 하나입니다. AI 안내·새 게시 응답·복사 버튼에 `/sites/<slug>/`를 사용하지 않습니다. 내부 저장 폴더 `workspace/published/sites/<slug>/`는 URL 정책과 별개로 유지합니다.
 
-아래 Environment 섹션의 `Site URL pattern for this server` 라인이 이 서버에 권장되는 형식을 명시함. 그대로 안내하면 됨.
+서브도메인의 DNS·TLS·실제 콘텐츠와 참조 자산을 검증합니다. 인증서 검증을 끄거나 HTTP 200만으로 성공을 선언하지 않습니다. Tower SPA가 대신 반환되면 실패입니다. 서브도메인이 실패하면 구체적인 장애를 보고하고 `/sites/` 주소를 대안으로 제시하지 않습니다.
 
-**검증** — 안내 전 한 번 curl 로 200 확인 권장 (혹시 마이그레이션 미완 VM 일 수도):
-```bash
-curl -sk -o /dev/null -w "%{http_code}\n" "https://<slug>.<server>/"
-```
-만약 wildcard 가 안 되는 서버 (예: 신규 자체 호스팅 서버 미설정) 면 path 방식으로 안내 + 운영자에게 `~/workspace/scripts/setup-le-wildcard.sh` 실행 알림.
+기존 `/sites/<slug>/` 링크는 운영자가 별도 승인으로 정본 URL로 리다이렉트하는 호환 입구입니다. 하위 경로와 쿼리를 보존하고 미등록 slug는 404로 처리합니다. 이 정책은 각 VM에 이미 적용됐다는 뜻이 아닙니다. 호환 경로 결과는 정본 Publishing 상태와 분리합니다.
 
-### 외부 배포 (Cloudflare Pages / Azure)
-기본은 항상 위의 로컬 디스크. 사용자가 명시적으로 "외부 공개", "SEO", "글로벌 CDN", "*.pages.dev 같은 짧은 외부 URL", "동적 서버 (Python/Node)" 를 요청한 경우에만 `~/workspace/scripts/deploy.sh <name> <폴더>` 사용 (스크립트가 설치되어 있을 때).
+### 외부 배포 (Cloudflare Pages / Azure 등)
+기본 경로는 Tower Publishing Hub의 `publish_site`입니다. 사용자가 외부 CDN, 별도 도메인 또는 동적 서버 배포를 명시적으로 요청하면 해당 provider의 승인된 연결·배포 workflow를 별도로 사용합니다. 이 문서는 host별 `~/workspace/scripts/deploy.sh`의 존재나 권한을 가정하지 않으며, 외부 배포는 `publish_site` 성공으로 간주하지 않습니다.
 
-수정은 파일만 바꾸면 즉시 반영. 삭제는 폴더 삭제 (사용자 확인 후). 팀별/프로젝트별 추가 컨벤션은 워크스페이스/프로젝트 AGENTS.md 에서 확장합니다.
+게시물 수정·보관·삭제도 Publishing Hub 또는 승인된 provider workflow를 사용합니다. 공용 published 폴더를 직접 수정하거나 삭제하지 않습니다. 파괴적 변경은 사용자 확인이 필요하며, 팀별/Project별 추가 규칙은 AGENTS.md에서 확장합니다.

@@ -218,10 +218,15 @@ export function classifyToolExecutionAction(toolName: string, params: any): Tool
   if (name === 'bash') return classifyShellCommand(textParam(params, 'command'));
   if (name === 'project_shell') return classifyShellCommand(textParam(params, 'cmd', 'command'));
   if (name === 'workbench_tool_inspect') return { actionClass: 'read', target: { type: 'workbench-tools', operation: 'inspect' }, reason: 'tool inspects experimental Workbench tool state' };
+  if (name === 'credential_vault_store') return { actionClass: 'credential-admin', target: { type: 'credential-vault', operation: 'write' }, reason: 'tool stores or rotates a Credential in the trusted VM Vault' };
+  if (name === 'credential_vault_access' && params?.action === 'reveal') return { actionClass: 'secret-read', target: { type: 'credential-vault', operation: 'inspect' }, reason: 'tool reveals a Credential value to a trusted internal Agent' };
+  if (name === 'credential_vault_access' && params?.action === 'import') return { actionClass: 'credential-admin', target: { type: 'credential-vault', operation: 'write' }, reason: 'tool copies a Credential into the current Agent Vault scope' };
   if (name === 'workbench_tool_preview_change') return { actionClass: 'write', target: { type: 'workbench-tools', operation: 'write' }, reason: 'tool creates a durable Workbench change intent' };
   if (name === 'workbench_tool_apply_change') return { actionClass: 'install-tool', target: { type: 'workbench-tools', operation: 'write' }, explicitConfirmation: params?.confirmed === true, reason: 'tool mutates the experimental Workbench tool environment' };
+  if (name === 'mcp_search_tools') return { actionClass: 'read', target: { type: 'project-mcp', operation: 'inspect' }, reason: 'tool searches deferred external MCP capability metadata' };
+  if (name === 'mcp_call_tool') return { actionClass: 'write', target: { type: 'project-mcp', summary: textParam(params, 'toolId'), operation: 'exec' }, reason: 'gateway may execute an external MCP action; exact tool risk is not yet classified' };
   if (READ_TOOLS.has(name)) return { actionClass: 'read', reason: `tool ${name} is read/diagnostic` };
-  if (WRITE_TOOLS.has(name)) return { actionClass: 'write', reason: `tool ${name} mutates project artifacts` };
+  if (['create_markdown_artifact', 'update_markdown_artifact'].includes(name) || WRITE_TOOLS.has(name)) return { actionClass: 'write', reason: `tool ${name} mutates project artifacts` };
   if (name === 'publish_site' || name === 'mcp__sandbox__tool_update_visibility') {
     return { actionClass: 'deploy', reason: `tool ${name} publishes or changes external exposure` };
   }

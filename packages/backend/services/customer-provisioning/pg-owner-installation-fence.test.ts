@@ -1,0 +1,11 @@
+import {beforeEach,it,expect,vi} from 'vitest';
+const m=vi.hoisted(()=>({connect:vi.fn()}));vi.mock('../../db/pg.js',()=>({getPgPool:()=>({connect:m.connect})}));
+import {withPgOwnerInstallationFence} from './pg-owner-installation-fence.js';
+const approval={issuer:'https://control.example',customerId:'fixture',instanceId:'fixture',approvalHash:'a'.repeat(64),creationCommandId:'fixture',projectName:'Workspace',identity:{subjectId:'fixture',organizationId:'fixture',instanceId:'fixture',role:'owner' as const,displayName:'Fixture'}};
+const local=async()=>({instanceId:approval.instanceId,approvalHash:approval.approvalHash});
+let c:any;
+beforeEach(()=>{c={query:vi.fn(async(sql:string)=>({rows:sql.startsWith('SELECT')?[{approval}]:[]})),on:vi.fn(),removeListener:vi.fn(),release:vi.fn()};m.connect.mockResolvedValue(c);});
+it('locks before executing and releases on success; escaped authority fails',async()=>{let saved:any;await withPgOwnerInstallationFence(local,approval.approvalHash,async a=>{saved=a;expect(c.query.mock.calls.some((x:any)=>x[0].includes('FOR UPDATE'))).toBe(true);await a.assertCurrent(await a.load());});expect(c.query).toHaveBeenCalledWith('COMMIT');expect(c.release).toHaveBeenCalledTimes(1);await expect(saved.load()).rejects.toThrow('fence_lost');});
+it('failure rolls back lock without replaying installation',async()=>{const run=vi.fn(async()=>{throw Error('partial write');});await expect(withPgOwnerInstallationFence(local,approval.approvalHash,run)).rejects.toThrow('partial write');expect(run).toHaveBeenCalledTimes(1);expect(c.query).toHaveBeenCalledWith('ROLLBACK');expect(c.release).toHaveBeenCalledTimes(1);});
+it('missing approval does not execute callback',async()=>{c.query.mockResolvedValue({rows:[]});const run=vi.fn();await expect(withPgOwnerInstallationFence(local,approval.approvalHash,run)).rejects.toThrow('unavailable');expect(run).not.toHaveBeenCalled();});
+it('connection loss prevents further authority checks and discards client',async()=>{await expect(withPgOwnerInstallationFence(local,approval.approvalHash,async a=>{c.on.mock.calls[0][1]();await a.assertCurrent(approval);})).rejects.toThrow('fence_lost');expect(c.release).toHaveBeenCalledWith(true);});

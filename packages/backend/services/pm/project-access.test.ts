@@ -138,6 +138,20 @@ describe('wrapPiTools security parity', () => {
     expect(result.content[0].text).toBe('diff ok');
   });
 
+  it('blocks viewer from document_parse because it creates a Markdown file', async () => {
+    const guard = buildToolGuard({ role: 'viewer' });
+    const tool = {
+      name: 'document_parse',
+      execute: async () => ({ content: [{ type: 'text', text: 'should not run' }] }),
+    };
+
+    const wrapped = wrapPiTools([tool], guard)[0];
+    const result = await wrapped.execute('t-document-parse', { path: '/tmp/source.pdf', output_path: '/tmp/result.md' });
+
+    expect(result.content[0].text).toContain('[Access Denied]');
+    expect(result.content[0].text).toContain('Viewer role cannot use the DocumentParse tool');
+  });
+
   it('enforces project path restrictions for excel_read path arguments', async () => {
     const guard = buildToolGuard({
       role: 'member',
@@ -434,7 +448,6 @@ describe('buildToolGuard — user-accessible cross-project file writes', () => {
 
 // ─── 2026-06-05 — admin/operator cross-project bypass on every VM ──────────
 // admin/operator 는 self-hosted server 포함 모든 VM 에서 session-write 가드를 통과한다.
-// customer_manager 는 Tower 전역 정책 주체가 아니므로 이 완화에 포함하지 않는다.
 // Runtime Box(project_shell)는 별도: 현재 프로젝트만 mount 하므로 계속 경계 유지.
 //
 // 결정: workspace/decisions/2026-06-05-admin-operator-cross-project-write-on-all-vms.md
@@ -512,22 +525,6 @@ describe('buildToolGuard — admin/operator cross-project bypass (all VMs)', () 
       expect(result.allowed).toBe(true);
     },
   );
-
-  it('customer_manager on full VM → follows user-level ACL instead of session boundary', () => {
-    const guard = buildToolGuard({
-      role: 'customer_manager',
-      accessiblePaths: [
-        '/home/tower/workspace/projects/demo-org',
-        '/home/tower/workspace/projects/tower-ops',
-      ],
-      sessionProjectRoot: sessionRoot,
-    });
-    const result = guard('Write', {
-      file_path: '/home/tower/workspace/projects/tower-ops/runs/x.json',
-      content: 'x',
-    });
-    expect(result.allowed).toBe(true);
-  });
 
   it('admin/operator bypass still cannot create a new ghost project', () => {
     // 가드 완화는 *기존 프로젝트* 사이 자유 이동만. 새 ghost project 생성은
@@ -1003,11 +1000,11 @@ describe('Tower-brain incident regression (ghost project guard)', () => {
 // only. Membership-aware paths (isPathAccessible / isPathWritableByRole) are
 // tested for cases where they don't need DB lookup (admin/operator/dotfile).
 
-describe('isPrivilegedRole — privileged trio (admin/operator/customer_manager)', () => {
-  it('returns true for the trio, false for everyone else', () => {
+describe('isPrivilegedRole — admin/operator workspace roles', () => {
+  it('returns true only for admin and operator', () => {
     expect(isPrivilegedRole('admin')).toBe(true);
     expect(isPrivilegedRole('operator')).toBe(true);
-    expect(isPrivilegedRole('customer_manager')).toBe(true); // 2026-05-27
+    expect(isPrivilegedRole('customer_manager')).toBe(false); // removed legacy role
     expect(isPrivilegedRole('member')).toBe(false);
     expect(isPrivilegedRole('guest')).toBe(false);
     expect(isPrivilegedRole('viewer')).toBe(false);
@@ -1017,11 +1014,11 @@ describe('isPrivilegedRole — privileged trio (admin/operator/customer_manager)
   });
 });
 
-describe('isAdminOrOperator — Tower 전역 관리 권한 (customer_manager 제외)', () => {
+describe('isAdminOrOperator — Tower 전역 운영 권한', () => {
   it('returns true only for admin and operator', () => {
     expect(isAdminOrOperator('admin')).toBe(true);
     expect(isAdminOrOperator('operator')).toBe(true);
-    expect(isAdminOrOperator('customer_manager')).toBe(false); // 자기 담당 customer 만
+    expect(isAdminOrOperator('customer_manager')).toBe(false); // removed legacy role
     expect(isAdminOrOperator('member')).toBe(false);
     expect(isAdminOrOperator('guest')).toBe(false);
     expect(isAdminOrOperator('viewer')).toBe(false);
@@ -1056,16 +1053,16 @@ describe('isPathAccessible — workspace root isolation', () => {
   // branches we exercise here. We use 1.
   const W = process.env.WORKSPACE_ROOT || `${process.env.HOME || '/tmp'}/workspace`;
 
-  it('admin sees everything except dotfiles', async () => {
-    expect(await isPathAccessible(`${W}/principles.md`, 1, 'admin')).toBe(true);
-    expect(await isPathAccessible(`${W}/uploads/contract.pdf`, 1, 'admin')).toBe(true);
+  it('admin has no role-only access to workspace private files', async () => {
+    expect(await isPathAccessible(`${W}/principles.md`, 1, 'admin')).toBe(false);
+    expect(await isPathAccessible(`${W}/uploads/contract.pdf`, 1, 'admin')).toBe(false);
     expect(await isPathAccessible(`${W}/.audit/log.jsonl`, 1, 'admin')).toBe(false); // dotfile blocks even admin
     expect(await isPathAccessible(`${W}/.mcp.json`, 1, 'admin')).toBe(false);
   });
 
-  it('operator has the same access as admin', async () => {
-    expect(await isPathAccessible(`${W}/principles.md`, 1, 'operator')).toBe(true);
-    expect(await isPathAccessible(`${W}/uploads/contract.pdf`, 1, 'operator')).toBe(true);
+  it('operator cannot browse legacy workspace root uploads', async () => {
+    expect(await isPathAccessible(`${W}/principles.md`, 1, 'operator')).toBe(false);
+    expect(await isPathAccessible(`${W}/uploads/contract.pdf`, 1, 'operator')).toBe(false);
     expect(await isPathAccessible(`${W}/.claude/credentials`, 1, 'operator')).toBe(false);
   });
 });
@@ -1073,18 +1070,18 @@ describe('isPathAccessible — workspace root isolation', () => {
 describe('isPathWritableByRole — uploads/published/docs/decisions policy', () => {
   const W = process.env.WORKSPACE_ROOT || `${process.env.HOME || '/tmp'}/workspace`;
 
-  it('admin, operator, customer_manager, and member can write to decisions/docs', async () => {
-    for (const role of ['admin', 'operator', 'customer_manager', 'member'] as const) {
+  it('admin, operator, and member can write to decisions/docs', async () => {
+    for (const role of ['admin', 'operator', 'member'] as const) {
       expect(await isPathWritableByRole(`${W}/decisions/2026-05-02-x.md`, 1, role)).toBe(true);
       expect(await isPathWritableByRole(`${W}/docs/guide.md`, 1, role)).toBe(true);
     }
   });
 
-  it('only privileged roles can write uploads/, published/, and workspace root direct files', async () => {
-    for (const role of ['admin', 'operator', 'customer_manager'] as const) {
-      expect(await isPathWritableByRole(`${W}/uploads/x.txt`, 1, role)).toBe(true);
-      expect(await isPathWritableByRole(`${W}/published/sites/demo/index.html`, 1, role)).toBe(true);
-      expect(await isPathWritableByRole(`${W}/principles.md`, 1, role)).toBe(true);
+  it('no role alone can write uploads/, published/, and workspace root files', async () => {
+    for (const role of ['admin'] as const) {
+      expect(await isPathWritableByRole(`${W}/uploads/x.txt`, 1, role)).toBe(false);
+      expect(await isPathWritableByRole(`${W}/published/sites/demo/index.html`, 1, role)).toBe(false);
+      expect(await isPathWritableByRole(`${W}/principles.md`, 1, role)).toBe(false);
     }
     expect(await isPathWritableByRole(`${W}/uploads/x.txt`, 1, 'member')).toBe(false);
     expect(await isPathWritableByRole(`${W}/published/sites/demo/index.html`, 1, 'member')).toBe(false);
@@ -1410,5 +1407,35 @@ describe('Secret guard — .mcp.json + broader .claude/* (2026-05-02)', () => {
     const result = guard('Read', { file_path: '/home/x/.mcp.json' });
     // Admin policy: log and allow (per damage-control.ts:158-160).
     expect(result.allowed).toBe(true);
+  });
+});
+
+
+describe('Pi Project path normalization parity', () => {
+  const projectRoot = '/home/tower/workspace/projects/alpha';
+  it.each(['work/result.txt', '/workspace/work/result.txt', `${projectRoot}/work/result.txt`])('passes the same normalized target to guard and executor: %s', async supplied => {
+    const inspected: any[] = [];
+    const executed: any[] = [];
+    const args = { path: supplied };
+    const [tool] = wrapPiTools([{ name: 'write', execute: async (_id: string, params: any) => { executed.push(params); return { content: [] }; } }],
+      (_name, input) => { inspected.push(input); return { allowed: true }; }, { projectRoot });
+    await tool.execute('call', args, new AbortController().signal);
+    expect(inspected[0].file_path).toBe(`${projectRoot}/work/result.txt`);
+    expect(executed[0].path).toBe(inspected[0].file_path);
+    expect(args.path).toBe(supplied);
+  });
+  it('keeps attachment URIs intact and does not rewrite bash commands', async () => {
+    const seen: any[] = [];
+    const tools = wrapPiTools(['read', 'bash'].map(name => ({ name, execute: async (_id: string, args: any) => { seen.push(args); return { content: [] }; } })), () => ({ allowed: true }), { projectRoot });
+    await tools[0].execute('r', { path: 'session://attachments/example.pdf' });
+    await tools[1].execute('b', { command: 'cat /workspace/file' });
+    expect(seen).toEqual([{ path: 'session://attachments/example.pdf' }, { command: 'cat /workspace/file' }]);
+  });
+  it('denies traversal before execution', async () => {
+    let executed = false;
+    const [tool] = wrapPiTools([{ name: 'write', execute: async () => { executed = true; } }], buildToolGuard({ role: 'member', accessiblePaths: [projectRoot] }), { projectRoot });
+    const result = await tool.execute('outside', { path: '../beta/file.txt' });
+    expect(result.content[0].text).toContain('Access Denied');
+    expect(executed).toBe(false);
   });
 });

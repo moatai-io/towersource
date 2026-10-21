@@ -108,7 +108,7 @@ async function readRepresentativeUser(databaseUrls) {
     try {
       await client.connect();
       const result = await client.query(`
-        SELECT id, username, role
+        SELECT id, username, role, auth_epoch
           FROM users
          WHERE COALESCE(disabled, 0) = 0
            AND COALESCE(approval_status, 'active') = 'active'
@@ -132,6 +132,7 @@ function buildJwtTokens(secrets, user) {
     userId: Number(user.id),
     username: user.username,
     role: user.role,
+    authEpoch: Number(user.auth_epoch ?? 0),
   }, secret, { expiresIn: '5m' }));
 }
 

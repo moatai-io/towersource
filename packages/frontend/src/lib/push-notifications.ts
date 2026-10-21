@@ -1,11 +1,11 @@
+import { towerHttpUrl, readBrowserAuthToken } from '../features/client-connection/connection';
 import i18n from '../i18n';
 
 type VapidResponse = { configured: boolean; publicKey: string | null };
 
-const API = import.meta.env.VITE_API_URL || '';
 
 function getToken() {
-  return localStorage.getItem('token') || '';
+  return readBrowserAuthToken() || '';
 }
 
 function authHeaders() {
@@ -31,7 +31,7 @@ export function getNotificationPermission(): NotificationPermission | 'unsupport
 }
 
 export async function getVapidInfo(): Promise<VapidResponse> {
-  const res = await fetch(`${API}/api/push/vapid-public-key`, { headers: authHeaders() });
+  const res = await fetch(towerHttpUrl(`/api/push/vapid-public-key`), { headers: authHeaders() });
   if (!res.ok) throw new Error(`push config failed (${res.status})`);
   return res.json();
 }
@@ -48,11 +48,13 @@ function detectPlatform(): string {
 export async function subscribeToWebPush(): Promise<{ ok: true }> {
   if (!isPushSupported()) throw new Error(i18n.t('pushNotification.unsupported', { ns: 'common' }));
 
-  const vapid = await getVapidInfo();
-  if (!vapid.configured || !vapid.publicKey) throw new Error(i18n.t('pushNotification.serverKeyMissing', { ns: 'common' }));
-
+  // iOS requires permission to be requested directly from the user's gesture,
+  // before a network round-trip can consume transient activation.
   const permission = await Notification.requestPermission();
   if (permission !== 'granted') throw new Error(i18n.t('pushNotification.permissionDenied', { ns: 'common' }));
+
+  const vapid = await getVapidInfo();
+  if (!vapid.configured || !vapid.publicKey) throw new Error(i18n.t('pushNotification.serverKeyMissing', { ns: 'common' }));
 
   let registration = await navigator.serviceWorker.getRegistration('/');
   if (!registration) {
@@ -66,7 +68,7 @@ export async function subscribeToWebPush(): Promise<{ ok: true }> {
   });
 
   const json = subscription.toJSON() as any;
-  const res = await fetch(`${API}/api/push/subscribe`, {
+  const res = await fetch(towerHttpUrl(`/api/push/subscribe`), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: JSON.stringify({
@@ -91,7 +93,7 @@ export async function unsubscribeFromWebPush(): Promise<void> {
 
   const endpoint = subscription.endpoint;
   await subscription.unsubscribe().catch(() => {});
-  await fetch(`${API}/api/push/subscribe`, {
+  await fetch(towerHttpUrl(`/api/push/subscribe`), {
     method: 'DELETE',
     headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: JSON.stringify({ endpoint }),
@@ -99,7 +101,14 @@ export async function unsubscribeFromWebPush(): Promise<void> {
 }
 
 export async function sendTestPush(): Promise<{ sent: number; failed: number }> {
-  const res = await fetch(`${API}/api/push/test`, { method: 'POST', headers: authHeaders() });
+  const res = await fetch(towerHttpUrl(`/api/push/test`), { method: 'POST', headers: authHeaders() });
   if (!res.ok) throw new Error(`test push failed (${res.status})`);
   return res.json();
+}
+
+/** Local registration only; provider acceptance and server delivery require a test push. */
+export async function hasLocalPushSubscription(): Promise<boolean> {
+  if (!isPushSupported()) return false;
+  const registration = await navigator.serviceWorker.getRegistration('/');
+  return !!(await registration?.pushManager.getSubscription());
 }

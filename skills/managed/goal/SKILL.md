@@ -1,410 +1,170 @@
 ---
 name: goal
-description: >
-  Manage a clearly defined goal over multiple attempts without losing the user's original intent.
-  Use only when the user explicitly invokes `/goal` or clearly asks Tower to keep working toward
-  a specific, evidence-checkable outcome. Best for goals that are clear enough to verify, likely
-  achievable by AI, but hard enough to need several attempts, inspection, and adjustment. Do not
-  activate from a casual mention of "goal" alone.
-argument-hint: "<clear goal> [--max-turns N<=10] [--check '<command, visual check, or evidence>']"
-version: 0.3.0
-allowed-tools: Read, Glob, Grep, Bash, Edit, Write, Agent
+description: |
+  실현 가능한 목표와 성공 증거를 정하고, 진행자가 실행·측정·경로 수정을 책임져 완료 또는 근거 있는 중단까지 이끈다.
+  Use when: `/goal <목표>`, 목표를 정해 끝까지 실행해줘, 달성할 때까지 측정하며 진행해줘, keep working toward a verifiable outcome처럼 지속 실행을 명시한 요청.
+  NOT for: goal 단순 언급, 작은 일회성 작업, 일반 계획·방향 상담, 할 일·예약 등록, goal 스킬 자체 편집 요청(→ skill-architect).
+argument-hint: "<목표> [--max-turns N<=15] [--check '<command, visual check, or evidence>']"
+version: 0.4.0
+allowed-tools: Read, Glob, Grep, Bash, Edit, Write
 ---
 
-# /goal — 진행자 + subagent 목표 정렬 루프
+# /goal — 목표 달성을 책임지는 실행 루프
 
-`/goal`은 일을 오래 시키는 모드가 아니다. 목표가 명확할 때, 여러 시도와 검증이 필요하더라도 **원래 의도에서 벗어나지 않게** 작업을 관리하는 모드다.
+진행자는 일을 나누는 사람이 아니라 **사용자가 원한 결과를 증거로 확인할 때까지 다음 행동을 선택하는 책임자**다. 기본은 직접 실행이며 서브에이전트는 선택 사항이다. 계획, 코드 작성, 테스트 하나의 통과, 서브에이전트의 완료 선언은 최종 목표 달성과 같지 않다.
 
-현재 assistant는 진행자(supervisor)로 남고, 필요한 실행만 subagent에게 위임한다. 진행자는 subagent 결과를 그대로 믿지 않고 Goal Anchor와 증거 기준으로 관찰·비교·재시도·중단을 결정한다.
+## 1. 시작과 목표 구체화
 
-Tower `/goal`의 핵심은 세 가지다.
+사용자가 지속 실행을 명시했을 때만 시작한다. 모호한 자동 매칭은 한 번 확인한다. `/goal` 자체의 설명·편집 요청을 실행 목표로 오인하지 않는다. 작은 일은 일반 실행으로 처리하며 불필요한 루프를 만들지 않는다.
 
-1. **목표를 고정한다** — 사용자가 진짜 달성하려는 목표, 범위, 제약, 성공 증거를 먼저 정리한다.
-2. **성공 확인 방식을 정한다** — 무엇을 보고 성공/실패/이탈을 판단할지 설계한다. 코드 테스트뿐 아니라 UI, PDF, 스크린샷, 로그, 문서 결과처럼 사람이 직접 봐야 하는 증거도 포함한다.
-3. **오해를 잡고 고친다** — subagent 결과를 매 턴 원래 목표와 비교하고, 방향이 틀어지면 다음 prompt를 더 정확하게 고친다.
+시작할 때 다음을 짧게 알린다.
 
-> `/goal`은 “될 때까지 무작정 반복”이 아니라, “목표가 분명하고 검증 가능할 때, 관찰과 재시도를 설계해 원래 뜻에 맞는 결과에 가까워지는 루프”다.
+> “백그라운드 자동 실행이 아니라 제가 진행자로 남아 최대 N회 실행·검증하겠습니다. 승인된 범위에서는 다음 단계마다 허락을 다시 묻지 않고, 완료 증거가 갖춰질 때까지 진행합니다.”
 
-## Activation
+먼저 기존 파일·결정·진행 기록을 읽고, 목표를 다음 **Goal Anchor**로 고정한다. 이미 알려진 답은 다시 묻지 않는다.
 
-`/goal`은 기본 실행 모드가 아니다. 다음 조건을 모두 만족할 때만 사용한다.
+- **원문·의도:** 사용자 원문과 실제로 달라져야 할 결과를 구분한다.
+- **실현 가능성:** 필요한 데이터·도구·권한·시간을 확인한다. AI가 통제할 수 있는 결과와 외부 결과를 나눈다.
+- **범위·비목표:** 포함할 결과, 제외할 일, 변경 가능한 파일/시스템을 명시한다.
+- **성공 기준:** 필수 기준마다 ID, 현재 상태(baseline), 목표 상태, 검증 방법, 증거 위치를 정한다.
+- **제약·권한:** 품질 하한, 기존 동작 보존, 승인된 외부 행위와 승인 대기 행위를 구분한다.
+- **실행 예산:** 최대 cycle, 필요한 시간·호출·비용 상한, 중단 조건을 정한다. 확인할 수 없는 비용을 숫자로 꾸미지 않는다.
+- **불확실성:** 진행 가능한 가정과 먼저 답이 필요한 질문을 나눈다.
 
-### Use `/goal` when
+목표가 막연하면 바로 포기하거나 임의로 축소하지 않는다. 읽기 전용 조사로 가능한 기준을 제안하고, 결과나 권한을 바꿀 **가장 중요한 질문 하나**를 한다. 예: “매출 증가”는 보장할 수 없으므로 “전환 실험을 실행하고 측정 결과로 다음 결정을 내림”을 제안하되 사용자 동의 없이 대체하지 않는다.
 
-- 사용자가 `/goal <목표>`를 명시했다.
-- 또는 사용자가 “목표 기준으로 계속 관리해줘”, “방향이 틀어지지 않게 잡아줘”, “몇 차례 확인하고 다듬으면서 끝까지 맞춰줘”, “하위 작업이 의도를 벗어나지 않게 봐줘”처럼 **계속 상태를 보며 목표에 맞춰 가는 방식**을 분명히 요청했다.
-- 목표가 충분히 정의 가능하다.
-  - 무엇이 완료인지 말할 수 있다.
-  - 성공/실패를 증거로 확인할 수 있다.
-  - AI가 달성할 가능성이 꽤 있다.
-- 단순히 한 번에 풀기 어렵고, 여러 시도·검증·관찰·재정리가 도움이 된다.
-- 진행자가 실행 결과를 직접 보고, 육안/테스트/로그/문서 증거로 원래 목표와 비교하는 것이 실제로 도움이 된다.
+성공 기준은 관찰 가능해야 한다. 정량 지표가 적합하지 않으면 예/아니오 판정 가능한 체크리스트·대표 사례·품질 rubric을 쓴다. 전체 baseline은 비용이 크면 필요한 부분부터 측정하고, 미측정은 `unknown`으로 남긴다.
 
-### Do not use `/goal` when
+## 코드 기반 도구가 제공되는 환경
 
-- 사용자가 “goal”이라는 단어를 가볍게 언급했을 뿐이다.
-- 한 파일의 작은 수정, 단순 요약, 검색, 문구 수정, tool call 1-2개로 끝날 일이다.
-- 목표 자체가 아직 너무 막연해서 성공 기준을 잡을 수 없다.
-- 사용자의 진짜 의도가 전략/방향/우선순위 선택인데, 먼저 의사결정 질문이 필요한 상태다.
-- subagent 분리가 필요 없고 drift 위험도 낮다.
+현재 실행에 `goal_step`과 `goal_status`가 모두 실제로 노출된 경우에만 코드 기반 경로를 사용한다. 스킬을 읽었다는 이유만으로 도구가 설치됐다고 가정하지 않는다.
 
-### If activation is ambiguous
+1. `goal_status`로 현재 요청의 상태와 버전을 확인한다. 새 목표만 `goal_step`의 `start`로 등록한다.
+2. 각 단계는 `inspect → change → check` 순서로 기록한다. `expectedVersion`은 최신 조회/응답 버전이며, 동일 요청 재시도에는 같은 requestId와 동일 내용을 사용한다.
+3. `change` 기록은 실제 변경 수행을 대신하지 않는다. 승인된 도구로 변경하고 그 결과를 기록한다. `check`에는 서버에서 실제로 발급한 증거 ID만 넣고 임의의 증거·해시·통과 결과를 만들지 않는다.
+4. 권한 대기나 중단은 `stop`으로 기록한다. 버전 충돌이면 상태를 다시 읽고 이미 수행된 외부 행위를 반복하지 않는다. 증거 검증이 거부되면 완료라고 말하지 않는다.
+5. 도구가 없거나 서버 검증기가 준비되지 않았으면 코드 루프가 실행 중이라고 주장하지 않는다. 필요한 경우 아래 지침에 따라 직접 수행하되, 지침 기반 실행임을 구분한다.
 
-사용자가 `/goal`을 명시하지 않았지만 여러 차례 점검하며 맞춰 가려는 의도가 있어 보이면, 바로 시작하지 말고 한 문장으로 확인한다.
+## 2. 작업 흐름과 기록
 
-> “이 작업은 한 번에 끝내기보다, 제가 목표와 확인 기준을 잡고 몇 차례 점검하며 맞춰 가는 `/goal` 방식이 더 잘 맞아 보입니다. 그렇게 진행할까요?”
+목표를 3–7개의 결과 중심 작업으로 나누고 의존성을 표시한다. 각 작업에는 연결된 성공 기준, 완료 증거, 다음 작업이 있어야 한다. 독립 작업은 순서를 바꿀 수 있지만 승인 대기 작업을 우회해서는 안 된다.
 
-단, 사용자가 이미 “이걸 goal로 돌려봐”, “끝까지 드리프트 잡아줘”처럼 분명히 말했으면 묻지 않고 진행한다.
+- 상태는 `pending → in_progress → verifying → done`이며, 막히면 이유와 함께 `blocked`로 둔다.
+- 동시에 진행 중인 주 작업은 하나다. 진행 UI가 `verifying/blocked`를 지원하지 않으면 본문에 표시하고 지원되는 상태로 매핑한다.
+- 증거를 확인한 직후 작업 상태를 갱신하고 다음 실행 가능한 작업을 선택한다.
+- live 진행 도구가 있으면 사용한다. 이것은 AI 작업 진행표이지 사용자의 개인 할 일이 아니다.
+- 작업 수를 늘리거나 체크박스를 채우는 것이 진전은 아니다. 필수 성공 기준의 현재 증거가 진전이다.
 
-## Operating mode
+### Output path
 
-현재 v0.3은 별도 daemon이 아니라 현재 assistant가 진행자(supervisor) 역할을 하는 supervised subagent loop다.
+현재 프로젝트의 AGENTS.md·기존 기록 구조를 우선한다. 기존 goal 기록이 있으면 이어 쓰고, 없으면 `work/goals/<descriptive-slug>.md` 한 파일에 Anchor, 작업 상태, 증거 표, cycle 기록, 재개 지점을 둔다. `/tmp`, 스킬 폴더, 다른 프로젝트에 실행 기록을 만들지 않는다. 작은 실행에는 거대한 기록 체계를 만들지 않는다.
 
-역할 분리는 다음과 같다.
-
-- **진행자(supervisor / current assistant)**
-  - Goal Anchor와 Goal Anchor Digest를 유지한다.
-  - 성공 확인 방식과 Observation Plan을 세운다.
-  - subagent 결과를 원래 의도와 비교한다.
-  - 범위/방향/증거/제약 이탈을 잡고 drift 유형을 분류한다.
-  - 다음 subagent prompt를 더 정확하게 고친다.
-  - 사람이 봐야 하는 산출물은 직접 열어보고 판단한다.
-  - 완료/중단/재시도 결정권을 가진다.
-- **Subagent**
-  - 조사, 수정, 분석, 테스트, 산출물 생성 같은 bounded execution을 맡는다.
-  - 목표를 재정의하거나 goal loop를 소유하지 않는다.
-  - 진행자가 요청한 evidence bundle과 다음 제안을 반환한다.
-  - “완료”라고 말할 수는 있지만, 진행자가 관찰하기 전까지 완료가 아니다.
-
-### Subagent primitive
-
-Tower에서 보조 에이전트는 제품 언어로 모두 **subagent**라고 부른다.
-
-- subagent 요청의 기본 실행 경로는 persistent worker-backed Agent Session이다.
-- run-once Agent Session은 일회성 preset일 뿐이며, backing session은 persistent worker와 같은 구조다.
-- persistent Agent Session은 같은 subagent에게 맥락을 이어서 맡길 필요가 있을 때 재사용한다.
-- 새 관점, 오염된 맥락, 독립 검토가 필요하면 새 persistent worker-backed subagent를 만든다.
-- legacy Pi `agent` custom tool은 `/goal`의 기본 위임 경로가 아니다. 빠른 내부 fallback이 필요해도 사용자-facing subagent로 설명하지 않는다.
-- `/goal`의 통제권은 항상 진행자에게 있다. subagent가 자동으로 다음 턴을 시작하거나 다른 subagent를 만들지 않는다.
-- 사용자가 별도 세션/sidebar/autonomous orchestration을 명시하지 않는 한, `/goal`은 현재 세션 안의 supervised subagent loop로 운영한다.
-
-### Turn limits
-
-- 기본 목표: 3턴 안에 수렴한다.
-- 보통 최대: 5턴.
-- **Hard max: 10턴. 어떤 경우에도 10번의 진행자→subagent 위임 cycle을 넘기지 않는다.**
-- 사용자가 `--max-turns`에 10보다 큰 값을 주면 10으로 clamp하거나 거절한다.
-- 진행자→subagent 위임 1회가 1턴이다. prompt critique/refinement를 핑계로 숨은 subagent cycle을 추가하지 않는다.
-- 10턴 이후 “한 번만 더”는 없다. 수렴하지 않으면 goal 정의, 접근법, 권한, 도구, 또는 사람 판단이 부족한 것으로 보고 멈춘다.
-
-### Subagent delegation and concurrency limits
-
-- 기본은 subagent 1개다.
-- 동시 subagent hard cap은 2개다. 사용자가 더 많이 원해도 2개를 넘기지 않는다.
-- 병렬 subagent는 사용자가 명시적으로 병렬 분석/비교를 원했거나, 독립 관점 리뷰처럼 이익이 분명할 때만 쓴다.
-- 병렬 subagent는 독립적이고 bounded이며 대부분 read-only인 작업에 한정한다.
-- 같은 repo/파일을 여러 edit-capable subagent가 동시에 수정하게 하지 않는다. 진행자가 단일 writer이자 승인 보유자로 남는다.
-- 재귀적 subagent/spawn은 금지한다. subagent에게 다시 subagent를 만들라고 지시하지 않는다.
-- run-once와 persistent는 다른 종족이 아니다. run-once는 새 persistent worker-backed Agent Session을 한 번 호출하는 preset이고, 재사용하면 같은 subagent로 이어진다.
-- 사이드바 노이즈가 우려되면 새 subagent를 줄이고 기존 subagent 재사용, background visibility, Agents 필터, 나중의 archive 정책으로 관리한다.
-- 자동 ping-pong, 무기한 loop, background orchestration은 하지 않는다.
-
-## Self-hosted VM Safety Mode
-
-자체 호스팅 서버 또는 공유 프로젝트에서는 항상 다음을 따른다.
-
-### Allowed by default
-
-- 현재 명명된 프로젝트/repo 경계 안의 파일 읽기/수정.
-- read-only 조사.
-- bounded, non-interactive check.
-- 관련 테스트나 lint처럼 범위가 좁고 timeout이 있는 검증.
-- UI/PDF/이미지/문서 산출물의 시각적 확인.
-- 고객/member 프로젝트 세션에서는 Project Runtime Box / `project_shell` 같은 프로젝트 격리 실행면을 우선한다. host bash나 global path를 정상 실행면으로 가정하지 않는다.
-
-### Stop and ask before
-
-명시 승인 없이 다음을 실행하지 않는다.
-
-- deploy, `/fleet`, self-hosted server rollout.
-- SSH 접속 또는 원격 명령.
-- PM2 restart, service restart, process kill.
-- DB migration, schema 변경, production 데이터 변경.
-- `git push`, release, tag, PR merge.
-- package install, system package 변경, Docker image/build/push.
-- customer-wide bulk edit, 권한 변경, credential/policy 변경.
-- 삭제, overwrite, force, irreversible action.
-
-사용자가 운영 작업을 명시적으로 요청한 경우에도, 승인된 범위와 정식 진입점을 Goal Anchor에 적고 그 범위 밖으로 나가지 않는다. 예: Tower 자체 호스팅 서버 deploy는 `/fleet` 규칙을 따르고, 임의의 `ssh + git pull + pm2 restart` 조합으로 대체하지 않는다.
-
-### Command/tool safety
-
-- 모든 command/check는 non-interactive, bounded in scope, bounded in time, bounded in output size여야 한다.
-- watcher, dev server, `npm run dev`, `vite`, `tsx watch`, `tail -f`, `journalctl -f`, REPL, interactive command, 무기한 background job을 시작하지 않는다.
-- `pm2 logs`처럼 길어질 수 있는 로그는 bounded lines/filter/redaction 없이 실행하지 않는다.
-- command는 가능하면 구체 파일/구체 테스트로 좁힌다.
-- repo-wide/full-suite command가 필요하면 먼저 이유를 설명하고, timeout 또는 대체 검증을 둔다.
-- 같은 실패 명령을 반복하지 않는다. 실패 원인을 prompt 개선 재료로 쓴다.
-
-### Secrets and tenant isolation
-
-- 기본 경계는 현재 명명된 프로젝트/repo다. 이 경계 밖의 sibling customer workspace, shared home dir, `~/.claude`, shared logs, backups, mounted storage를 읽거나 검색하거나 수정하지 않는다.
-- 승인된 프로젝트 경계보다 위에서 broad `find`/`grep`을 실행하지 않는다.
-- 한 tenant/project의 artifact, 로그, 문맥을 다른 tenant/project로 복사하지 않는다.
-- `.env`, API key, OAuth token, SSH key, credential 파일을 읽거나 출력하지 않는다.
-- `env`, `printenv`, `set`, `ps e`, raw process dump처럼 secret을 덤프할 수 있는 명령을 실행하지 않는다.
-- credential 존재 확인이 필요하면 값이 아니라 `present/missing`만 확인한다.
-- raw logs, test output, headers, cookies, screenshots, generated artifacts에 secret/customer data가 섞일 수 있으면 필요한 최소 범위만 보고 redaction/summarization한다.
-- subagent prompt, 보고서, 로그 요약에 secret 값을 넣지 않는다.
-- 고객/프로젝트/사용자 범위가 애매하면 멈추고 확인한다.
-
-## Core objective
-
-모든 prompt 전략은 이 질문으로 평가한다.
-
-> 이 프롬프트가 subagent로 하여금, 이 context 안에서 사용자의 목표·범위·제약·성공 기준을 우리와 같은 방식으로 이해하게 만드는가?
-
-## Goal Anchor
-
-`/goal` 시작 시 바로 실행하지 말고, 먼저 목표 요약(Goal Anchor)을 만든다. 사용자가 명확히 말한 경우에는 묻지 말고 가볍게 가정하고 진행한다. 중대한 ambiguity가 있으면 질문은 하나만 한다.
-
-Goal Anchor는 다음을 포함한다.
-
-```yaml
-user_goal: "사용자가 말한 목표 원문"
-intent: "진짜 달성하려는 것"
-why_it_matters: "큰 방향 또는 mission"
-fit_reason: "왜 /goal이 필요한지: 명확한 목표 + 여러 시도/관찰 필요"
-scope:
-  include: ["이번 goal에 포함되는 것"]
-  exclude: ["하지 말아야 할 것"]
-constraints: ["안전, 스타일, 프로젝트 규칙, 금지 행동"]
-abstraction_level: "제품/정책/코드/테스트/문서/운영 중 어느 층 문제인가"
-success_criteria: ["완료 증거"]
-observation_plan:
-  inspect: ["진행자가 직접 봐야 할 파일, 화면, PDF, 로그, diff, 테스트 결과"]
-  checks: ["실행할 bounded check 또는 사람이 볼 증거"]
-known_context: ["이미 확인된 사실"]
-open_questions: ["아직 불확실하지만 진행 가능한 점"]
-max_turns: "기본 3-5, hard max 10"
-```
-
-중요: Goal Anchor는 매 턴 길어지는 것이 아니라 **더 정확해져야** 한다. 원래 목표를 바꾸는 것이 아니라, 확인된 사실로 선명하게 만든다.
-
-### Goal Anchor Digest
-
-긴 loop에서는 매 턴 다음 5줄 digest를 유지한다.
-
-- Original intent:
-- Non-negotiable constraints:
-- Current narrowed understanding:
-- Latest confirmed facts:
-- Biggest remaining intent gap:
-
-이 digest는 subagent prompt 상단에 반복해서 붙인다. 목적은 context를 많이 주는 것이 아니라, 원래 의도를 오래 잃지 않게 하는 것이다.
-
-## Observation Plan
-
-`/goal`은 성공 확인 방식 설계가 핵심이다. 진행자는 매 턴 subagent가 “완료했다”고 말한 것을 그대로 믿지 않고, 목표에 맞는 증거를 직접 확인한다.
-
-Observation Plan은 다음 중 필요한 것을 고른다.
-
-- **Diff inspection** — 변경 파일이 목표 범위 안에 있는가?
-- **Targeted test** — 실패하던 케이스가 통과했는가?
-- **Visual inspection** — UI, PDF, 슬라이드, 이미지, CAD, 표가 실제로 눈으로 봤을 때 맞는가?
-- **Behavior check** — 기능 흐름이 요구한 방식으로 동작하는가?
-- **Policy check** — Tower/customer/shared-environment 규칙을 어기지 않았는가?
-- **Evidence check** — 완료 증거가 subagent 선언이 아니라 재현 가능한 결과인가?
-
-시각/레이아웃 품질이 중요한 작업에서는 screenshot, PDF render, file preview 같은 관찰 단계를 subagent에게만 맡기지 말고 진행자가 직접 확인한다.
-
-## Loop
-
-각 턴은 다음 순서를 따른다.
-
-1. **Delegate** — subagent에게 현재 Goal Anchor와 이번 턴의 좁은 목표를 준다.
-2. **Observe** — subagent 결과, tool 로그, test/check/visual evidence를 본다.
-3. **Infer Understanding** — subagent 결과를 통해 subagent가 목표·범위·제약·완료 기준을 어떻게 이해하고 있는지 추정한다.
-4. **Compare** — 그 이해와 결과를 Goal Anchor와 비교한다.
-5. **Detect Drift** — 남은 intent gap을 분류한다.
-6. **Refine Prompt** — gap을 줄이는 다음 prompt를 만든다.
-7. **Critique Prompt** — 그 prompt가 다시 drift를 유발하지 않을지 짧게 점검한다.
-8. **Repeat or Stop** — success criteria가 증거로 충족되면 완료, hard max/위험/불명확성에 닿으면 멈춘다.
-
-## Drift taxonomy
-
-결과 평가 시 “실패했다”로 뭉개지 말고 drift/gap 유형을 분류한다.
-
-| Drift | 뜻 | 대응 |
-|---|---|---|
-| Scope Drift | 범위가 커지거나 엉뚱해짐 | 포함/제외 범위를 재명시한다 |
-| Direction Drift | 원래 방향과 다른 목표로 이동 | why/mission을 다시 붙인다 |
-| Abstraction Drift | 문제 수준을 잘못 잡음 | 제품/정책/코드/테스트/운영 층을 재지정한다 |
-| Evidence Drift | 검증 없이 완료로 착각 | 완료 증거를 요구하고 직접 확인한다 |
-| Context Drift | 이전 턴에서 배운 것을 잊음 | 확인된 사실과 실패 이력을 압축해 준다 |
-| Constraint Drift | 하지 말아야 할 것을 침범 | 금지 행동과 승인 경계를 명시한다 |
-| Semantic Drift | 핵심 단어를 다르게 해석 | 용어 의미를 예시와 반례로 고정한다 |
-| Tool Drift | command/test/search 사용이 엉뚱함 | 구체 명령, timeout 회피, 범위 축소를 지시한다 |
-| Observation Drift | 봐야 할 증거를 안 보고 판단함 | Observation Plan을 다시 세우고 직접 확인한다 |
-
-## Watch signals
-
-특히 command/tool 막힘은 빠르게 감지한다.
-
-| Signal | Interpretation | Next prompt strategy |
-|---|---|---|
-| command timeout | 명령 범위가 너무 크거나 hang | 더 좁은 command, file-specific test, timeout-aware plan |
-| no output for long time | interactive/watcher 가능성 | non-interactive command만 사용하게 지시 |
-| same command repeated | 전략 반복 | 다른 접근으로 전환 |
-| file not found | context/location gap | find/grep 같은 좁은 탐색 우선 |
-| broad test suite too slow | scope too broad | 관련 테스트 하나로 축소 |
-| permission/env error | environment issue | 코드 수정 중단, 환경 문제 분류 |
-| subagent response empty | subagent result failure | 성공 증거로 쓰지 않고, 범위를 줄여 재시도하거나 해당 관점을 생략 |
-| subagent stuck/streaming mismatch | lifecycle/state mismatch | 같은 subagent 재호출을 반복하지 말고 상태 확인 후 새 subagent 또는 수동 관찰로 전환 |
-| subagent says done but no evidence | evidence drift | 완료 선언 무시, 검증 증거 요구 |
-| visual artifact not inspected | observation drift | render/preview/screenshot 등 직접 관찰 추가 |
-
-## Meta prompts
-
-### 1. Intent extraction
+기록은 숨은 사고 과정이 아니라 확인 가능한 사실만 담는다. 긴 출력은 필요한 증거 위치와 요약으로 대체하며 비밀값을 넣지 않는다. 각 cycle 경계와 승인 대기·종료 전에 갱신한다.
 
 ```text
-사용자의 목표를 Goal Anchor로 정리하라.
-명시된 것과 암묵적인 것을 구분하라.
-이 목표가 /goal에 적합한지 판단하라:
-- 목표가 충분히 명확한가?
-- 성공 증거를 정의할 수 있는가?
-- AI가 달성할 가능성이 꽤 있는가?
-- 여러 시도/검증/관찰 설계가 실제로 도움이 되는가?
-불확실하지만 진행 가능한 부분은 assumption으로 표시하라.
-중대한 ambiguity가 있으면 단 하나의 질문만 제안하라.
+Cycle N / budget:
+연결 기준 / 이번 가설:
+행동 / 실행 결과:
+관찰 증거 / baseline 대비 변화:
+남은 gap / 막힘:
+결정: continue | change_strategy | needs_input | stopped | completed
+다음 행동 / 재개 조건:
 ```
 
-### 2. Observation planning
+## 3. Inspect → Change → Check
 
-```text
-이 goal의 성공 여부를 무엇으로 확인할지 설계하라.
-subagent가 말로 완료했다고 할 때 믿지 말고, 진행자가 직접 볼 증거를 정하라.
-필요하면 diff, targeted test, visual inspection, rendered artifact, logs, table checks, policy checks를 포함하라.
-각 증거가 어떤 success criterion을 검증하는지 연결하라.
-```
+기본 예산은 **최대 5 cycle**, hard max는 **15 cycle**이다. `--max-turns`는 1–15 정수만 허용하고, 15 초과는 15로 제한해 알린다. 0·음수·비정수는 바로잡아 달라고 요청한다. 이 상한은 성공을 보장하는 약속이 아니라 한 번의 실행 예산이다.
 
-### 3. Result evaluation
+한 cycle은 **Inspect → Change → Check 한 묶음으로, 하나의 좁은 가설/작업을 실행하고 결과에 따라 다음 결정을 내리는 단위**다. 필요한 읽기·편집·검증 도구 호출은 한 cycle 안에 묶을 수 있지만, 실패 후 새 가설로 재시도하면 다음 cycle이다. 위임 1회도 최소 1 cycle을 소비한다. 병렬 위임은 각각 센다. compaction, 작업 분할, 하위 shell loop로 예산을 숨기지 않는다.
 
-```text
-subagent 결과를 Goal Anchor와 Observation Plan에 비교하라.
-완료 여부를 subagent의 선언이 아니라 증거로 판단하라.
-결과 자체의 부족함만 보지 말고, 그 결과를 낳은 subagent의 현재 이해 모델을 추정하라.
-즉, subagent가 무엇을 중요하게 보고 있고, 무엇을 덜 중요하게 보며, 어떤 완료 기준을 믿고 있는지 적어라.
-남은 gap을 drift taxonomy 중 하나 이상으로 분류하라.
-이번 턴에서 새로 확인된 사실과 버려야 할 가정을 구분하라.
-```
+매 cycle은 다음 세 단계로 진행한다. 도구 호출을 세 번 하라는 뜻이 아니라, 증거가 다음 행동을 결정하게 만드는 제어 순서다.
 
-### 4. Prompt refinement
+1. **Inspect — 지금 무엇이 달성을 막는가?** 원래 의도, 최신 산출물, 직전 Check, 실패 이력, 미충족 필수 기준을 확인한다. 초기에는 baseline을 관찰하고, 이후에는 변경된 부분과 남은 gap부터 본다. 이미 확인한 자료를 이유 없이 전부 다시 읽지 않는다. 원인 가설과 그것을 뒤집을 증거를 짧게 정한다. 정보가 부족하면 가장 저렴한 구분 검사부터 수행한다.
+2. **Change — 무엇을 바꾸면 가장 많이 전진하는가?** 효과, 불확실성 해소, 비용·위험, 되돌릴 수 있는 정도를 비교해 가장 작은 유효 변경 하나를 고른다. 변경 전에 예상 결과와 Check 방법을 정한다. 서로 다른 원인에 대한 여러 변경을 섞어 무엇이 효과를 냈는지 모르게 하지 않는다. 단순 도구나 전문 스킬로 직접 실행하며, 변경은 코드뿐 아니라 문서·입력·실험 조건·접근법 수정일 수 있다. 분석만 승인된 목표라면 분석 산출물/검증 가설만 바꾸고 대상 시스템은 수정하지 않는다.
+3. **Check — 실제로 나아졌고 무엇이 남았는가?** 같은 성공 기준으로 변경 전후를 비교하고 회귀·부작용도 본다. 종료 코드뿐 아니라 실제 결과·diff·대상 동작·산출물·로그를 확인한다. 시각 품질은 진행자가 직접 렌더링/스크린샷을 본다. 결과를 `improved / unchanged / regressed / inconclusive`로 분류하고 증거와 다음 결정을 기록한다. improved라도 필수 기준이 남으면 다음 Inspect로 간다. unchanged는 원인 가설을 재검토하고, regressed는 영향을 제한할 안전한 복구를 검토하며 파괴적 복구는 승인 없이 하지 않는다. inconclusive는 통과가 아니라 측정 문제다.
 
-```text
-다음 subagent prompt를 작성하라.
-목표: 남은 intent gap을 줄여 subagent가 사용자의 의도를 더 정확히 이해하게 만드는 것.
-반드시 포함:
-- 현재 Goal Anchor의 핵심 3-5줄
-- Observation Plan 중 이번 턴에 확인할 증거
-- 직전 결과에서 무엇이 원래 의도와 달랐는지
-- 이번 턴의 좁은 목표 하나
-- 하지 말아야 할 것
-- 사용할 구체 탐색/검증 방법, 필요한 경우
-- 완료라고 말하기 위해 제출해야 할 증거
-```
+Inspect에서 이미 기준이 충족됐거나 안전한 변경이 불가능함을 확인하면 억지 Change를 하지 않고 완료 gate 또는 중단 판단으로 간다. Check 전에 다음 변경을 겹치지 않는다. 안전한 다음 행동이 있으면 **같은 실행에서 바로 다음 Inspect로 이어간다**.
 
-### 5. Prompt critique
+### 현실 가능한 도달 수준과 포기 판단
 
-```text
-작성한 다음 prompt를 비판하라.
-- 너무 넓은가?
-- 이전 drift를 실제로 줄이는가?
-- 완료 기준이 증거 기반인가?
-- 관찰해야 할 증거가 빠졌는가?
-- 이 prompt를 받은 subagent가 사용자의 intent / scope / constraints / success criteria를 우리와 같은 방식으로 이해할 가능성이 높아졌는가?
-- 혹시 subagent가 산출물만 맞추고 의도는 계속 오해하게 만드는 prompt인가?
-- subagent가 다른 방향으로 똑똑해질 여지가 있는가?
-- 위험한 행동을 자동으로 시키는가?
-문제가 있으면 prompt를 한 번 더 고쳐라.
-```
+목표 설정 시 **필수 수용 기준과 희망하는 추가 품질**을 나눈다. 사용자가 정한 기준이 없으면 현실적인 기준을 제안하되, 결과의 의미가 달라지는 선택은 확인한다. 필수 기준을 모두 충족하면 추가 품질을 끝없이 추구하지 않는다.
 
-## Subagent prompt shape
+포기는 일시적 도구 오류가 아니라, 남은 gap과 시도한 서로 다른 접근의 결과를 보아 **현재 권한·데이터·예산에서 유망한 안전 경로가 없다는 판단**이다. 새로 배울 것도 없이 같은 변경을 반복하지 않는다. 반대로 안전하고 검증 가능한 다음 접근이 남아 있고 예산도 있으면 중간 보고만 하고 포기하지 않는다.
 
-Subagent에게 보내는 prompt는 다음 구조를 따른다.
+목표를 달성할 수 없다는 증명과 이번 실행에서 달성하지 못했다는 사실은 다르다. 중단 시 후자를 과장하지 말고, 무엇을 시도했고 어느 가정이 깨졌으며 어떤 조건이 달라지면 재개할 가치가 있는지 적는다. 현실성은 성공 기준을 몰래 낮추는 핑계가 아니다.
 
-```markdown
-## Goal Anchor
-- Intent: ...
-- Fit reason: ...
-- Scope: ...
-- Constraints: ...
-- Success evidence: ...
+### 계속할 때와 멈출 때
 
-## Observation Plan
-- Evidence to produce: ...
-- Evidence the supervisor will inspect: ...
+| 관찰 | 다음 행동 |
+|---|---|
+| 필수 기준 미충족, 승인된 안전한 다음 행동 있음 | 계속한다. “원하면 이어 하겠습니다”로 끝내지 않는다. |
+| 개별 작업 완료 | 의존성이 풀린 다음 작업을 선택한다. 계획이나 중간 산출물만 보고 종료하지 않는다. |
+| 모든 필수 기준이 통과한 것으로 보임 | 최종 완료 gate를 수행한다. |
+| 동일 실패 또는 증거 변화 없음이 2 cycle 연속 | 같은 행동 반복을 중지하고 아래의 정체 복구를 수행한다. |
+| 승인·사용자 판단·필수 데이터가 필요 | 해당 작업을 blocked로 기록한다. 안전한 독립 작업은 예산 내 진행하되, 승인 요청을 늦추거나 우회하지 않는다. |
+| 접근법 전환 후에도 진전/새 정보 없음, 안전한 대안 없음 | `stopped`로 종료하고 원인·시도·최소 재개 조건을 남긴다. |
+| 예산 소진 | 미완료로 종료한다. 자동 예산 리셋·새 세션·재귀 호출로 연장하지 않는다. |
 
-## What happened last turn
-- ...
+**진전**은 필수 기준 개선 또는 다음 판단을 바꾸는 새 근거다. 새 근거만 쌓이고 결과가 개선되지 않는 cycle이 3회 이어지면 조사 진전만으로 계속하지 말고 실행 가능한 경로/목표 타당성을 재검토한다. 사용자 목표나 품질 하한을 낮춰 성공을 만들지 않는다.
 
-## Intent gap to close now
-- Drift type: ...
-- Gap: ...
+### 정체 복구와 이탈 방지
 
-## This turn only
-1. ...
-2. ...
+- **같은 오류:** 입력·환경·가설 중 무엇을 바꿀지 정한다. 다른 결과를 기대할 근거 없이 같은 명령을 재실행하지 않는다.
+- **시간 초과:** 더 좁은 대상, 더 작은 재현 사례, 비대화형 검사로 바꾼다. 기다리는 시간을 늘리는 것만으로 해결하지 않는다.
+- **환경/권한 오류:** 제품 코드를 고쳐 숨기지 않는다. 현재 실행 환경과 연결 상태를 확인하고 필요한 승인을 요청한다.
+- **증거 불충분:** 통과로 처리하지 않는다. 대체 검사로 확인할 수 있는 범위와 여전히 확인 못 한 범위를 구분한다.
+- **범위 이탈:** 새 아이디어가 어느 필수 기준을 해결하는지 묻는다. 연결되지 않으면 후속 후보로 분리한다.
+- **방향/의미 이탈:** 사용자 원문·비목표·대표 반례로 돌아간다. 쉬운 대리 지표를 원래 결과로 대체하지 않는다.
+- **맥락 손실:** 기존 기록의 의도, 불변 제약, 최신 사실, 실패한 접근, 가장 큰 gap을 읽고 재개한다. 이미 실패한 접근을 처음부터 반복하지 않는다.
 
-## Do not
-- ...
+고정 횟수의 파일 처리·테스트 같은 단순 반복에는 bounded loop를 써도 된다. 개별 timeout, 최대 횟수, 출력 상한, 실패 시 탈출이 있어야 하며 운영 승인이나 cycle 상한을 우회해서는 안 된다. 무기한 재시도·watcher·daemon·자동 ping-pong은 만들지 않는다.
 
-## Evidence required
-- ...
-```
+## 4. 서브에이전트는 선택 사항
 
-## Stop conditions
+서브에이전트가 없어도 전체 흐름이 성립해야 한다. 독립 검토나 분리 가능한 조사로 증거 품질이 실제로 좋아질 때만 쓴다. 단순 탐색·작은 수정에는 직접 도구를 쓴다.
 
-다음 중 하나면 멈춘다.
+- 기본 0개, 필요하면 1개, 동시 최대 2개다. 현재 환경이 제공하는 승인된 worker 경로를 사용하며 legacy agent나 다른 실행면으로 임의 전환하지 않는다.
+- 별도 사이드바 세션은 사용자 요청 또는 명시적으로 허용된 스킬 흐름에서만 만든다. 이 스킬은 자동 spawn 권한을 주지 않는다.
+- 지시는 `원래 의도 / 불변 제약 / 최신 사실 / 이번 작업 / 제출 증거 / 시간·범위 한도`로 한정한다. 목표 재정의·재귀 위임·배포·삭제·비용 큰 반복은 맡기지 않는다.
+- 진행자가 단일 writer로 남는다. 병렬 작업은 독립적인 read-only 조사·검토에 한정한다.
+- 완료 보고는 주장이다. 진행자가 파일·diff·test·시각 증거를 확인하기 전에는 done이 아니다.
+- 오류·빈 응답·stuck이면 상태를 한 번 확인하고, 자원 사용과 쓰기 활동이 끝났는지 확인한다. 실행 중인 worker와 같은 파일을 동시에 수정하지 않는다.
+- 안전한 경우 직접 수행한다. 검토가 선택 사항이면 검토 생략을 밝히고 진행하되 필수 증거를 생략하지 않는다. 직접 대체가 불가능하면 해당 작업만 blocked로 둔다.
+- 같은 worker 재호출·새 worker 생성으로 오류를 반복하지 않는다. 복구·대체 실행도 동일 예산에 센다.
 
-- success criteria가 증거로 충족됨.
-- hard max 10턴 도달.
-- 목표가 충분히 명확하지 않아 더 이상 안전하게 진행할 수 없음.
-- 성공 증거를 정의할 수 없음.
-- AI가 달성할 가능성이 낮거나, 필요한 권한/도구/데이터가 없음.
-- 미승인 destructive/irreversible/operational action이 필요함.
-- tenant/customer/project 범위가 애매함.
-- secret 또는 민감 정보 노출 위험이 생김.
-- subagent가 같은 drift를 반복하고 strategy shift가 필요하지만 위험도가 높음.
-- subagent 응답이 비어 있거나 stuck 상태라 결과를 관찰할 수 없음.
-- 사이드바/세션 노이즈가 목표 달성보다 커져 새 subagent를 더 만드는 것이 부적절함.
+## 5. 안전·권한 경계
 
-멈출 때는 “더 반복하면 된다”가 아니라, 무엇이 부족해서 멈추는지와 다음 사람/사용자 결정이 무엇인지 말한다.
+“끝까지”는 무제한 권한이나 성공 보장이 아니다. 현재 시스템·프로젝트·전문 스킬의 정책이 우선한다.
 
-## Reporting
+- 답변·분석·리뷰 요청은 읽기와 제안만 허용한다. `/goal`을 붙였다고 구현·배포 권한이 생기지 않는다.
+- 수정 요청에 포함된 로컬 편집과 비파괴 검증은 진행한다. 다른 사람의 미커밋 변경을 보존한다.
+- 배포, SSH/원격 명령, 서비스 재시작, DB/schema 변경, push/release, 설치·시스템 변경, 외부 전송, 구매, 권한·credential 변경, 삭제·파괴적 덮어쓰기는 명시 승인과 정식 도구 절차 없이는 실행하지 않는다.
+- 승인은 대상·행위·영향 범위로 기록한다. 구체적 승인 절차가 필요한 도구는 과거의 포괄적 “진행해”로 대체하지 않는다.
+- 현재 프로젝트 밖의 고객·사용자 파일, 자격증명 파일, 전체 환경 변수·원시 로그를 탐색하거나 출력하지 않는다. 연결 문제는 비밀값 없이 설정·실행 시 주입·provider 수락 단계를 구분한다.
+- 모든 명령은 범위·시간·출력이 제한된 비대화형으로 실행한다. 광범위한 검사에는 이유와 timeout을 둔다. 실패하면 다른 실행면을 임의로 선택하지 않는다.
 
-사용자에게는 내부 용어를 줄이고, 행동 가능한 형태로 보고한다.
+## 6. 최종 완료 gate와 종료 보고
 
-- **Status:** completed / stopped / needs your input
-- **What I accomplished:** 실제 완료한 것
-- **What I checked:** 테스트, diff, visual inspection, 로그 등 확인 증거
-- **원래 요청과 얼마나 맞는지:** 결과가 사용자 의도에 부합하는 정도
-- **중간에 바로잡은 점:** 잡은 이탈 또는 오해
-- **Still missing or risky:** 남은 gap/위험
-- **What I need from you:** 필요한 경우 한 가지 질문 또는 승인
-- **Recommended next step:** 다음 행동
-- **Subagents used:** 새로 만든 subagent와 재사용한 subagent를 구분해서 짧게 보고
-- **Session noise:** 새 subagent를 많이 만들었으면 남겨둘지/archive 대상인지 언급
-- **Files changed:** 있으면 절대경로
+`completed`는 다음을 **모두** 만족할 때만 쓴다.
 
-## Product north star
+1. 필수 성공 기준마다 현재 산출물에 대응하는 증거가 있다. `unknown`, `blocked`, 생략한 필수 검증이 없다.
+2. 마지막 변경 이후 관련 검증을 다시 수행했다. 이전 revision의 통과 결과를 재사용하지 않았다.
+3. 대상 동작/산출물과 보존해야 할 기존 동작을 확인했다. 테스트 명령 자체가 잘못되거나 테스트를 실행하지 않은 성공 종료가 아닌지 확인했다.
+4. diff·범위·권한·비목표를 확인했다. 검증 기준을 몰래 완화하지 않았다.
+5. 산출물 위치·사용 방법·중요 한계를 전달할 수 있다.
 
-`/goal`의 성능은 automation depth가 아니라 **goal fidelity + evidence quality**로 평가한다.
+시각 검증이나 사용자 수락이 필수인데 할 수 없으면 `needs_input` 또는 `stopped`이며, “구현 완료, 전체 검증 미완료”처럼 분리한다. 모든 기준 충족 후 취향 개선을 위해 루프를 늘리지 않는다.
 
-- 목표가 충분히 명확한 경우에만 시작했는가?
-- 성공 증거를 먼저 설계했는가?
-- 얼마나 오래 원래 goal을 keep했는가?
-- drift를 몇 턴 안에 잡았는가?
-- 다음 prompt가 실제로 subagent의 이해를 개선했는가?
-- 완료를 말이 아니라 증거와 육안 확인으로 판단했는가?
+종료 시 기록과 진행표를 실제 상태로 맞추고 간결하게 보고한다.
+
+- **상태:** completed / needs_input / stopped
+- **결과와 증거:** 원래 목표 대비 달성한 것과 검증 방법·범위.
+- **남은 것:** 미충족 기준, 위험, 막힌 이유. 없으면 생략한다.
+- **다음 행동:** 필요한 승인/정보 하나 또는 정확한 재개 지점.
+- **실행:** 사용한 cycle/예산, 서브에이전트 사용 여부, 변경 파일.
+
+중단·연결 종료 후의 자동 재개를 약속하지 않는다. 사용자가 이어 하라고 하면 기존 기록을 읽고 현재 상태를 재검증한 뒤 새 예산을 명시한다. 원래 성공 기준과 누적 시도 이력은 유지한다.
+
+## 유지보수 검증
+
+스킬을 수정할 때 [evals.md](evals.md)의 시나리오로 기존/수정 규칙을 비교한다. 정적 검사·수동 walkthrough와 실제 모델 실행 결과를 구분한다. 문장 존재 검사만으로 실제 목표 달성 성능이 검증됐다고 보고하지 않는다.

@@ -1,0 +1,61 @@
+// @vitest-environment jsdom
+import React from 'react';
+import { render, screen, fireEvent, act, cleanup } from '@testing-library/react';
+import { afterEach, expect, it, vi } from 'vitest';
+vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => key }) }));
+vi.mock('../../hooks/useMobileKeyboardViewport', () => ({ useMobileKeyboardViewport: () => ({}) }));
+import { LoginPage } from './LoginPage';
+afterEach(() => { cleanup(); vi.useRealTimers(); });
+it('unlocks resend after cooldown without input, shows busy and success feedback', async () => {
+  vi.useFakeTimers();
+  let finish!: (value: boolean) => void;
+  const action = vi.fn(() => new Promise<boolean>(resolve => { finish = resolve; }));
+  render(<LoginPage isSetup={false} onLogin={async () => {}} onOtpAction={action} otpChallenge={{ challengeId: 'fixture', maskedEmail: 'u***@example.com', resendAvailableAt: new Date(Date.now()+60000).toISOString() }} />);
+  expect((screen.getByRole('button', { name: '재발송은 발송 후 1분부터 가능합니다' }) as HTMLButtonElement).disabled).toBe(true);
+  expect(screen.getByText(/발송 후 10분간 유효/)).toBeTruthy();
+  act(() => { vi.advanceTimersByTime(10000); });
+  expect(screen.queryByText(/\d+초 후 재발송/)).toBeNull();
+  expect((screen.getByRole('button', { name: '재발송은 발송 후 1분부터 가능합니다' }) as HTMLButtonElement).disabled).toBe(true);
+  act(() => { vi.advanceTimersByTime(50000); });
+  fireEvent.click(screen.getByRole('button', { name: '인증 코드 다시 받기' }));
+  expect(action).toHaveBeenCalledTimes(1);
+  expect((screen.getByRole('button', { name: '재발송 중…' }) as HTMLButtonElement).disabled).toBe(true);
+  await act(async () => { finish(true); });
+  expect(screen.getByRole('status').textContent).toContain('새 인증 코드를 발송했습니다');
+});
+it('does not announce success or clear input on a failed resend', async () => {
+  render(<LoginPage isSetup={false} onLogin={async () => {}} onOtpAction={async () => false} otpChallenge={{ challengeId: 'fixture', maskedEmail: 'u***@example.com', resendAvailableAt: '' }} />);
+  fireEvent.change(screen.getByLabelText('인증 코드'), { target: { value: '123456' } });
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: '인증 코드 다시 받기' })); });
+  expect(screen.queryByRole('status')).toBeNull();
+  expect((screen.getByLabelText('인증 코드') as HTMLInputElement).value).toBe('123456');
+});
+it('collects email before showing enrollment code and never calls ordinary password login',async()=>{
+  const login=vi.fn();const action=vi.fn(async()=>true);
+  const props={isSetup:false,onLogin:login,onEmailEnrollmentAction:action};
+  const view=render(<LoginPage {...props} emailEnrollment={{challengeId:'draft',emailRequired:true,maskedEmail:'',resendAvailableAt:''}}/>);
+  expect(screen.queryByLabelText('인증 코드')).toBeNull();
+  fireEvent.change(screen.getByLabelText('등록할 이메일'),{target:{value:'user@example.com'}});
+  await act(async()=>{fireEvent.click(screen.getByRole('button',{name:'등록 코드 보내기'}));});
+  expect(action).toHaveBeenCalledWith('email','user@example.com');
+  expect(login).not.toHaveBeenCalled();
+  view.rerender(<LoginPage {...props} emailEnrollment={{challengeId:'sent',emailRequired:false,maskedEmail:'u***@example.com',resendAvailableAt:new Date(Date.now()+60000).toISOString()}}/>);
+  expect(screen.queryByLabelText('등록할 이메일')).toBeNull();
+  expect(screen.getByText(/코드는 10분간 유효하며, 만료되면 비밀번호로 다시 로그인/)).toBeTruthy();
+  expect((screen.getByRole('button',{name:'재발송은 발송 후 1분부터 가능합니다'}) as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.change(screen.getByLabelText('등록 코드'),{target:{value:'123456'}});
+  await act(async()=>{fireEvent.click(screen.getByRole('button',{name:'이메일 확인하고 로그인'}));});
+  expect(action).toHaveBeenCalledWith('verify','123456');
+});
+it('enrollment resend timer unlocks, clears code only on success and supports cancel',async()=>{
+  vi.useFakeTimers();const action=vi.fn(async()=>true);
+  render(<LoginPage isSetup={false} onLogin={async()=>{}} onEmailEnrollmentAction={action} emailEnrollment={{challengeId:'sent',emailRequired:false,maskedEmail:'u***@example.com',resendAvailableAt:new Date(Date.now()+60000).toISOString()}}/>);
+  fireEvent.change(screen.getByLabelText('등록 코드'),{target:{value:'123456'}});
+  act(()=>vi.advanceTimersByTime(60000));
+  await act(async()=>{fireEvent.click(screen.getByRole('button',{name:'인증 코드 다시 받기'}));});
+  expect(action).toHaveBeenCalledWith('resend');
+  expect((screen.getByLabelText('등록 코드') as HTMLInputElement).value).toBe('');
+  expect(screen.getByRole('status').textContent).toContain('새 인증 코드를 발송했습니다');
+  await act(async()=>{fireEvent.click(screen.getByRole('button',{name:'로그인으로 돌아가기'}));});
+  expect(action).toHaveBeenCalledWith('cancel');
+});

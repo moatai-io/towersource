@@ -29,15 +29,29 @@ describe('Project Worker assignment desired state', () => {
     expect(sql).not.toContain('project_compute_deployment_bindings');
   });
 
-  it('claims one retryable desire with a bounded lease', async () => {
+  it('claims only pending work for the exact Worker with a bounded lease', async () => {
     const db = { queryOne: vi.fn() };
     vi.mocked(transaction).mockImplementation(async fn => fn({} as any));
     vi.mocked(withClient).mockReturnValue(db as any);
-    db.queryOne.mockResolvedValueOnce(row).mockResolvedValueOnce({ ...row, status: 'preparing', attempt: 1, lease_owner: 'r1' });
-    await expect(claimProjectWorkerAssignment({ deploymentId: 'production', leaseSeconds: 60, owner: 'r1' }))
+    db.queryOne.mockResolvedValueOnce({ locked: true }).mockResolvedValueOnce(row).mockResolvedValueOnce({ ...row, status: 'preparing', attempt: 1, lease_owner: 'r1' });
+    await expect(claimProjectWorkerAssignment({ deploymentId: 'production', workerId: 'tower-prod-local-01', leaseSeconds: 60, owner: 'r1' }))
       .resolves.toMatchObject({ status: 'preparing', lease_owner: 'r1', attempt: 1 });
-    expect(db.queryOne.mock.calls[0][0]).toContain('FOR UPDATE SKIP LOCKED');
-    expect(db.queryOne.mock.calls[0][0]).toContain("status='preparing' AND lease_expires_at<NOW()");
+    expect(db.queryOne.mock.calls[1][0]).toContain('FOR UPDATE SKIP LOCKED');
+    expect(db.queryOne.mock.calls[1][0]).toContain("busy.status IN ('preparing','recovery_required')");
+    expect(db.queryOne.mock.calls[1][0]).toContain('desired_worker_id=$2');
+    expect(db.queryOne.mock.calls[1][0]).not.toContain("status='failed'");
+    expect(db.queryOne.mock.calls[1][1]).toEqual(['production', 'tower-prod-local-01']);
+    expect(db.queryOne.mock.calls[1][0]).not.toContain("lease_expires_at<NOW()");
+  });
+
+
+  it('does not claim when another transaction owns the Worker lock', async () => {
+    const db = { queryOne: vi.fn().mockResolvedValue({ locked: false }) };
+    vi.mocked(transaction).mockImplementation(async fn => fn({} as any));
+    vi.mocked(withClient).mockReturnValue(db as any);
+    await expect(claimProjectWorkerAssignment({ deploymentId: 'production', workerId: 'worker-a' })).resolves.toBeUndefined();
+    expect(db.queryOne).toHaveBeenCalledOnce();
+    expect(db.queryOne.mock.calls[0][0]).toContain('pg_try_advisory_xact_lock');
   });
 
   it('requires exact lease ownership to complete or fail', async () => {

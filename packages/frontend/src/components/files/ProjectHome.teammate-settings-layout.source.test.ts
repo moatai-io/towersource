@@ -33,11 +33,21 @@ describe("AI teammate settings modal layout", () => {
     expect(source).not.toContain("/agent-character/generate`");
   });
 
-  it("updates the project store without reloading the whole page after save", () => {
+  it("updates the project store and confirms Operator access changes without reloading", () => {
     expect(source).toContain(
       "useProjectStore.getState().updateProject(updatedProject.id, updatedProject)",
     );
-    expect(source).toContain("toastSuccess(t('projectHome.teammateSaved'))");
+    expect(source).toContain("projectHome.operatorAccessEnabled");
+    expect(source).toContain("projectHome.operatorAccessDisabled");
+    expect(source).toContain("projectHome.teammateSaved");
     expect(source).not.toContain("window.location.reload()");
+  });
+
+  it("uses execution-environment language instead of exposing Worker or Superuser internals", () => {
+    expect(source).toContain("t('projectHome.operatorAccess')");
+    expect(source).toContain("t('projectHome.operatorAccessDescription')");
+    expect(source).toContain("t('projectHome.operatorAccessBadge')");
+    expect(source).not.toContain('Superuser Agent');
+    expect(source).not.toContain('Operator Workstation');
   });
 });

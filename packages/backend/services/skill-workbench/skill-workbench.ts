@@ -83,9 +83,9 @@ interface BuildPromptInput {
   skillContent?: string | null;
 }
 
-/** Returns true only on Moat internal full VMs. */
+/** Remains private unless a Moat internal full VM explicitly opts in. */
 export function isSkillWorkbenchEnabled(): boolean {
-  return config.towerRole === 'full';
+  return config.towerRole === 'full' && process.env.SKILL_WORKBENCH_ENABLED === 'true';
 }
 
 function ensureStoreDir(): void {
@@ -309,7 +309,7 @@ export async function runSkillWorkbenchComparison(input: SkillWorkbenchRunReques
     throw new Error('prompt is required');
   }
 
-  const model = getModelDefaults().ai_task;
+  const model = getModelDefaults().session;
   const [draftContent, baselineContent] = await Promise.all([
     resolveSkillContent(input, input.draftSkillName),
     resolveSkillContent(input, input.baselineSkillName),

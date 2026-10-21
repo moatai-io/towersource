@@ -29,8 +29,13 @@ worker_pool_memory_max="${TOWER_WORKER_POOL_MEMORY_MAX:-8G}"
 worker_pool_tasks_max="${TOWER_WORKER_POOL_TASKS_MAX:-2048}"
 worker_memory_max="${TOWER_LOCAL_WORKER_MEMORY_MAX:-6G}"
 worker_tasks_max="${TOWER_LOCAL_WORKER_TASKS_MAX:-1024}"
-worker_max_runs="${TOWER_LOCAL_WORKER_MAX_RUNS:-4}"
+worker_max_runs="${TOWER_LOCAL_WORKER_MAX_RUNS:-20}"
+repair_project_permissions="${TOWER_REPAIR_PROJECT_PERMISSIONS:-false}"
 [[ "$worker_max_runs" =~ ^[0-9]+$ && "$worker_max_runs" -ge 3 ]] || fail 'TOWER_LOCAL_WORKER_MAX_RUNS must be at least 3 capacity units'
+[[ "$repair_project_permissions" == "true" || "$repair_project_permissions" == "false" ]] || fail 'TOWER_REPAIR_PROJECT_PERMISSIONS must be true or false'
+if [[ "$repair_project_permissions" == "true" ]]; then
+  fail 'recursive permission repair is retired; use tower-worker-permission-preflight plan and a separately approved ACL repair'
+fi
 
 getent passwd "$execution_user" >/dev/null || fail "execution user does not exist: $execution_user"
 getent group "$execution_group" >/dev/null || fail "execution group does not exist: $execution_group"
@@ -38,10 +43,7 @@ getent group "$execution_group" >/dev/null || fail "execution group does not exi
 [[ -f "$env_file" ]] || fail "Worker transport env missing: $env_file"
 [[ -f "$identity_file" ]] || fail "Worker identity missing: $identity_file"
 [[ -n "$project_ids" ]] || fail 'TOWER_LOCAL_WORKER_PROJECT_IDS is required'
-[[ "$authority_mode" == "project" || "$authority_mode" == "operator-plane" ]] || fail 'TOWER_LOCAL_WORKER_AUTHORITY_MODE must be project or operator-plane'
-if [[ "$authority_mode" == "operator-plane" ]]; then
-  [[ ",$worker_capabilities," == *,operator-plane,* ]] || fail 'Operator Worker capabilities must include operator-plane'
-fi
+[[ "$authority_mode" == "project" ]] || fail 'Worker authority must be project; Operator access uses the native Operator execution environment'
 
 execution_home="$(getent passwd "$execution_user" | cut -d: -f6)"
 [[ -n "$execution_home" && -d "$execution_home" ]] || fail "execution HOME is missing: $execution_home"
@@ -52,33 +54,46 @@ const config = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
 for (const root of Object.values(config.projects || {})) console.log(root);
 NODE
 )
-[[ ${#project_roots[@]} -gt 0 ]] || fail 'Worker config has no Project roots'
-for project_root in "${project_roots[@]}"; do
-  [[ -d "$project_root" ]] || fail "Project root missing: $project_root"
-  runuser -u "$execution_user" -- test -r "$project_root" || fail "execution user cannot read Project root: $project_root"
-  runuser -u "$execution_user" -- test -w "$project_root" || fail "execution user cannot write Project root: $project_root"
-done
-if [[ "$authority_mode" == "operator-plane" ]]; then
-  mapfile -t operator_projections < <(node - "$config_file" <<'NODE'
+managed_skills_root="$(node - "$config_file" <<'NODE'
 const fs = require('node:fs');
 const config = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
-for (const target of ['/workspace/tower', '/workspace/workspace']) {
-  const source = config.projections?.[target];
-  if (!source) process.exit(2);
-  console.log(`${target}\t${source}`);
-}
+process.stdout.write(config.managedSkillsRoot || '');
 NODE
-  ) || fail 'Operator Worker config requires /workspace/tower and /workspace/workspace projections'
-  for projection in "${operator_projections[@]}"; do
-    source="${projection#*$'\t'}"
-    [[ -d "$source" ]] || fail "Operator projection source missing: $source"
-    runuser -u "$execution_user" -- test -r "$source" || fail "execution user cannot read Operator projection: $source"
-    runuser -u "$execution_user" -- test -w "$source" || fail "execution user cannot write Operator projection: $source"
-  done
-fi
+)"
+[[ ${#project_roots[@]} -gt 0 ]] || fail 'Worker config has no Project roots'
+[[ -n "$managed_skills_root" && -d "$managed_skills_root" ]] || fail 'Worker config managedSkillsRoot is missing or invalid'
+runuser -u "$execution_user" -- test -r "$managed_skills_root" || fail "execution user cannot read managed skills root: $managed_skills_root"
+for project_root in "${project_roots[@]}"; do
+  [[ -d "$project_root" ]] || fail "Project root missing: $project_root"
+  # Routine install/update and reconciliation rollback must keep working for
+  # legacy roots without default ACLs. Check actual root access only; do not
+  # recurse, require a preflight helper, or impose a new inheritance policy here.
+  # Migration callers must run the full permission preflight BEFORE mutation.
+  runuser -u "$execution_user" -- test -r "$project_root" || fail "execution user cannot read Project root: $project_root"
+  runuser -u "$execution_user" -- test -w "$project_root" || fail "execution user cannot write Project root: $project_root"
+  runuser -u "$execution_user" -- test -x "$project_root" || fail "execution user cannot traverse Project root: $project_root"
+done
 for protected in "$config_file" "$env_file" "$identity_file"; do
   runuser -u "$execution_user" -- test -r "$protected" || fail "execution user cannot read protected Worker input: $protected"
 done
+
+# Enrollment is opt-in until the dedicated root-only DB environment is configured.
+# Existing enrollment follows every normal approved reinstall/upgrade. Share the
+# VM lock across the complete unit rewrite; never collide with daily maintenance.
+maintenance_root=/var/lib/tower-worker-maintenance
+if [[ -n "${TOWER_WORKER_MAINTENANCE_DATABASE_ENV_FILE:-}" || -n "${TOWER_ASSIGNMENT_ENVIRONMENT_FILE:-}" || -f "$maintenance_root/$worker_id/config.json" ]]; then
+  [[ "$worker_id" =~ ^[A-Za-z0-9_-]{1,100}$ ]] || fail 'invalid maintenance Worker id'
+  install -d -o root -g root -m 0755 "$maintenance_root"
+  [[ -e "$maintenance_root/deployment.lock" ]] || install -o root -g root -m 0644 /dev/null "$maintenance_root/deployment.lock"
+  exec 197<"$maintenance_root/deployment.lock"
+  flock -s -n 197 || fail 'Worker maintenance owns the VM deployment lock'
+  if [[ -f "$maintenance_root/$worker_id/state.json" ]]; then
+    python3 - "$maintenance_root/$worker_id/state.json" <<'PYSTATE'
+import json,sys
+if json.load(open(sys.argv[1])).get('owner'): raise SystemExit('Worker maintenance recovery required')
+PYSTATE
+  fi
+fi
 
 unit_dir=/etc/systemd/system
 slice_unit="$unit_dir/tower-execution.slice"
@@ -108,6 +123,7 @@ Wants=network-online.target
 Type=simple
 User=$execution_user
 Group=$execution_group
+UMask=0002
 WorkingDirectory=$execution_home
 Slice=tower-execution.slice
 MemoryMax=$worker_memory_max
@@ -154,7 +170,10 @@ RestartSec=2
 WantedBy=multi-user.target
 EOF
 
+if [[ -x "$app_root/bin/install-worker-maintenance" ]]; then
+  TOWER_APP_ROOT="$app_root" "$app_root/bin/install-worker-maintenance"
+fi
 systemctl daemon-reload
 systemctl enable "$worker_unit_name" "$heartbeat_unit_name"
-printf '{"status":"installed","executionUser":"%s","workerId":"%s","deploymentId":"%s","authorityMode":"%s","workerUnit":"%s","heartbeatUnit":"%s","slice":"tower-execution.slice","projectRoots":%s,"started":false}\n' \
-  "$execution_user" "$worker_id" "$deployment_id" "$authority_mode" "$worker_unit_name" "$heartbeat_unit_name" "${#project_roots[@]}"
+printf '{"status":"installed","executionUser":"%s","workerId":"%s","deploymentId":"%s","authorityMode":"%s","workerUnit":"%s","heartbeatUnit":"%s","slice":"tower-execution.slice","projectRoots":%s,"permissionRepair":%s,"started":false}\n' \
+  "$execution_user" "$worker_id" "$deployment_id" "$authority_mode" "$worker_unit_name" "$heartbeat_unit_name" "${#project_roots[@]}" "$repair_project_permissions"

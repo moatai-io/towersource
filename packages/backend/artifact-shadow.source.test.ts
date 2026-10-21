@@ -45,7 +45,7 @@ describe('artifact shadow source boundary', () => {
     expect(source).toContain("app.get('/api/health'");
     expect(source).toContain("app.get('/api/config'");
     expect(source).toContain("app.get('/runtime-config.js'");
-    expect(source).toContain("env.TOWER_DEFAULT_LANGUAGE === 'ko'");
+    expect(source).toContain("env.TOWER_DEFAULT_LANGUAGE === 'en'");
     expect(source).toContain("app.all('/api/*'");
     expect(source).toContain('res.status(405)');
     expect(source).toContain("authority: 'none'");

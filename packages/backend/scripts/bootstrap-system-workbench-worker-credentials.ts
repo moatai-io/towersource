@@ -16,8 +16,8 @@ import {
   recordWorkbenchWorkerIdentity,
   rotateWorkbenchWorkerIdentity,
 } from '../services/runtime-box/workbench-worker-identity-repository.js';
-import { upsertWorkbenchWorker } from '../services/runtime-box/workbench-worker-repository.js';
-import { configureWorkbenchWorkerTransportCredential } from '../services/runtime-box/workbench-worker-transport-credentials.js';
+import { upsertWorkbenchWorker } from '../services/execution/worker/worker-repository.js';
+import { configureWorkbenchWorkerTransportCredential } from '../services/execution/worker/worker-transport-credentials.js';
 
 function required(name: string): string {
   const value = process.env[name]?.trim();
@@ -28,21 +28,24 @@ function required(name: string): string {
 const workerId = required('TOWER_BOOTSTRAP_WORKER_ID');
 const projectId = required('TOWER_BOOTSTRAP_PROJECT_ID');
 const projectRoot = path.resolve(required('TOWER_BOOTSTRAP_PROJECT_ROOT'));
+const teamskillsProjectRoot = path.resolve(process.env.TEAMSKILLS_PROJECT_ROOT?.trim() || path.join(path.dirname(projectRoot), 'teamskills'));
+const managedSkillsRoot = path.join(teamskillsProjectRoot, 'skills');
 const stage = path.resolve(required('TOWER_BOOTSTRAP_STAGE_DIR'));
 const deploymentId = process.env.TOWER_BOOTSTRAP_DEPLOYMENT_ID?.trim() || 'development';
 const host = process.env.TOWER_BOOTSTRAP_WORKER_HOST?.trim() || '127.0.0.1';
 const port = Number(required('TOWER_BOOTSTRAP_WORKER_PORT'));
 const actorUserId = Number(required('TOWER_BOOTSTRAP_ACTOR_USER_ID'));
-const maxRuns = Number(process.env.TOWER_BOOTSTRAP_MAX_RUNS?.trim() || '4');
+const maxRuns = Number(process.env.TOWER_BOOTSTRAP_MAX_RUNS?.trim() || '20');
 const authorityMode = process.env.TOWER_BOOTSTRAP_AUTHORITY_MODE?.trim() || 'project';
 if (!Number.isInteger(port) || port < 1024 || port > 65535) throw new Error('TOWER_BOOTSTRAP_WORKER_PORT is invalid');
 if (!Number.isSafeInteger(actorUserId) || actorUserId < 1) throw new Error('TOWER_BOOTSTRAP_ACTOR_USER_ID is invalid');
 if (!Number.isInteger(maxRuns) || maxRuns < 3 || maxRuns > 1000) throw new Error('TOWER_BOOTSTRAP_MAX_RUNS must be between 3 and 1000 capacity units');
-if (!['project', 'operator-plane'].includes(authorityMode)) throw new Error('TOWER_BOOTSTRAP_AUTHORITY_MODE is invalid');
+if (authorityMode !== 'project') throw new Error('Worker authority must be project; Operator access uses the native Operator execution environment');
 const stageStat = fs.statSync(stage);
 if (!stageStat.isDirectory()) throw new Error('TOWER_BOOTSTRAP_STAGE_DIR must be a directory');
+if (!fs.statSync(managedSkillsRoot).isDirectory()) throw new Error('TEAMSKILLS_PROJECT_ROOT/skills must be a directory');
 
-const capabilities = ['job', 'service', 'shell', ...(authorityMode === 'operator-plane' ? ['operator-plane'] : [])];
+const capabilities = ['job', 'service', 'shell'];
 const issued = issueWorkbenchWorkerIdentity({ workerId, projectIds: [projectId], capabilities, expiresIn: '7d' });
 const active = await query<{ jti: string }>(
   `SELECT jti FROM runtime_box_workbench_worker_identities
@@ -77,24 +80,11 @@ await upsertWorkbenchWorker({
 const transport = crypto.randomBytes(48).toString('base64url');
 await configureWorkbenchWorkerTransportCredential({ workerId, token: transport, actorUserId });
 
-const operatorTowerSource = process.env.TOWER_BOOTSTRAP_OPERATOR_TOWER_SOURCE?.trim();
-const operatorWorkspaceRoot = process.env.TOWER_BOOTSTRAP_OPERATOR_WORKSPACE_ROOT?.trim();
-const operatorGitName = process.env.TOWER_BOOTSTRAP_OPERATOR_GIT_AUTHOR_NAME?.trim();
-const operatorGitEmail = process.env.TOWER_BOOTSTRAP_OPERATOR_GIT_AUTHOR_EMAIL?.trim();
-if (authorityMode === 'operator-plane' && (!operatorTowerSource || !operatorWorkspaceRoot)) {
-  throw new Error('Operator Worker requires Tower source and workspace projection roots');
-}
-if ((operatorGitName && !operatorGitEmail) || (!operatorGitName && operatorGitEmail)) {
-  throw new Error('Operator Git identity requires both name and email');
-}
-const config = {
-  workerId, host, port, projects: { [projectId]: projectRoot },
-  ...(authorityMode === 'operator-plane' ? { projections: {
-    '/workspace/tower': path.resolve(operatorTowerSource!),
-    '/workspace/workspace': path.resolve(operatorWorkspaceRoot!),
-  } } : {}),
-  ...(operatorGitName && operatorGitEmail ? { operatorGitIdentity: { name: operatorGitName, email: operatorGitEmail } } : {}),
+const runtimeProvenance = {
+  ...(process.env.TOWER_SOURCE_REV?.trim() ? { sourceRev: process.env.TOWER_SOURCE_REV.trim() } : {}),
+  ...(process.env.TOWER_APP_ROOT?.trim() ? { storePath: path.resolve(process.env.TOWER_APP_ROOT.trim()) } : {}),
 };
+const config = { workerId, host, port, projects: { [projectId]: projectRoot }, managedSkillsRoot, ...(Object.keys(runtimeProvenance).length ? { runtimeProvenance } : {}) };
 fs.writeFileSync(path.join(stage, `${workerId}.json`), `${JSON.stringify(config, null, 2)}\n`, { mode: 0o600 });
 fs.writeFileSync(path.join(stage, `${workerId}.env`), `TOWER_REMOTE_WORKER_TOKEN=${transport}\n`, { mode: 0o600 });
 fs.writeFileSync(path.join(stage, `${workerId}.identity.jwt`), `${issued.token}\n`, { mode: 0o600 });

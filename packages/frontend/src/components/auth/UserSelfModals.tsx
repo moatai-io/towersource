@@ -8,6 +8,7 @@
  */
 import React, { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
+import { authErrorMessage } from '../../utils/auth-error-message';
 
 const API_BASE = '/api';
 
@@ -74,7 +75,7 @@ export function MyProfileModal({
         setSavedNote(t('profileSaved'));
       } else {
         const data = await res.json().catch(() => ({}));
-        setError(data.error || t('profileSaveFailed'));
+        setError(authErrorMessage(data.error, data.code));
       }
     } catch {
       setError(t('profileSaveFailed'));
@@ -176,11 +177,9 @@ export function ChangePasswordModal({
         // backend 가 새 토큰 발급 — 본인은 그 자리에서 invalidate 되지 않음.
         if (data.token) onPasswordChanged(data.token);
         onClose();
-      } else if (res.status === 401) {
-        setError(t('currentPasswordWrong'));
       } else {
         const data = await res.json().catch(() => ({}));
-        setError(data.error || t('passwordChangeFailed'));
+        setError(authErrorMessage(data.error, data.code));
       }
     } catch {
       setError(t('passwordChangeFailed'));

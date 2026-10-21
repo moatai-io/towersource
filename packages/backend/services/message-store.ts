@@ -1,3 +1,4 @@
+import { readSecretarySessionMessages } from './secretariat/personal-session.js';
 import { query, queryOne, execute } from '../db/pg-repo.js';
 import { extractTextFromContent } from '../utils/text.js';
 import { recordMessagePaths } from './workspace/message-path-extractor.js';
@@ -247,6 +248,18 @@ export async function saveMessage(
   // activity too, but they do not change whether the parent session is a Chat.
   await execute(`UPDATE sessions SET updated_at = NOW() WHERE id = $1`, [sessionId]);
 
+  // Only an authenticated human chat message carries a persisted Tower username.
+  // Engine tool-result user rows and automation prompts omit it, so they cannot
+  // accidentally create participation or re-enable a muted subscription.
+  if (msg.role === 'user' && msg.username) {
+    try {
+      const { subscribeSessionParticipantByUsername } = await import('./session/session-user-state.js');
+      await subscribeSessionParticipantByUsername(msg.username, sessionId);
+    } catch (err) {
+      console.warn('[msg-store] participant subscription deferred:', (err as Error).message);
+    }
+  }
+
   // Engine-agnostic working-set capture: extract workspace/tower absolute
   // paths from assistant messages and feed them to session_file_edits. This
   // catches bash/mcp/external-tool deliverables that per-tool hooks miss.
@@ -261,10 +274,31 @@ export async function saveMessage(
   }
 }
 
+/** Same active-message revision as getMessages, without loading historical bodies. */
+export async function getComposerMessageContext(sessionId: string): Promise<{ content: string | null; contextRevision: number }> {
+  const order = await hasMessageSeq() ? 'message_seq DESC' : 'created_at DESC, id DESC';
+  const row = await queryOne<{ content: string | null; context_revision: string | number }>(
+    `SELECT (SELECT content FROM messages
+      WHERE session_id = $1 AND role = 'assistant'
+        AND COALESCE(metadata->>'contextState', 'active') = 'active'
+      ORDER BY ${order} LIMIT 1) AS content,
+      (SELECT count(*) FROM messages WHERE session_id = $1
+        AND COALESCE(metadata->>'contextState', 'active') = 'active') AS context_revision`,
+    [sessionId]
+  );
+  return { content: row?.content ?? null, contextRevision: Number(row?.context_revision ?? 0) };
+}
+
 export async function getMessages(sessionId: string): Promise<StoredMessage[]> {
+  const secretary = await readSecretarySessionMessages(sessionId);
+  if (secretary) return secretary as StoredMessage[];
+
   const order = await hasMessageSeq() ? 'message_seq ASC' : 'created_at ASC, id ASC';
   return await query(
-    `SELECT * FROM messages WHERE session_id = $1 ORDER BY ${order}`,
+    `SELECT * FROM messages
+      WHERE session_id = $1
+        AND COALESCE(metadata->>'contextState', 'active') = 'active'
+      ORDER BY ${order}`,
     [sessionId]
   ) as StoredMessage[];
 }
@@ -279,6 +313,13 @@ export async function getMessagesPaginated(
   opts: { limit?: number; before?: string }
 ): Promise<{ messages: StoredMessage[]; hasMore: boolean; oldestId: string | null }> {
   const limit = Math.min(opts.limit || 100, 500);
+  const secretary = await readSecretarySessionMessages(sessionId);
+  if (secretary) {
+    const cursor = opts.before ? secretary.findIndex(m=>m.id===opts.before) : secretary.length;
+    const eligible = secretary.slice(0, Math.max(0,cursor));
+    const messages = eligible.slice(-limit) as StoredMessage[];
+    return { messages, hasMore: eligible.length > limit, oldestId: messages[0]?.id || null };
+  }
   const useMessageSeq = await hasMessageSeq();
 
   let rows: StoredMessage[];
@@ -297,25 +338,34 @@ export async function getMessagesPaginated(
     if (!cursor) {
       // Invalid cursor — fall back to latest
       rows = await query(
-        `SELECT * FROM messages WHERE session_id = $1 ORDER BY ${useMessageSeq ? 'message_seq DESC' : 'created_at DESC, id DESC'} LIMIT $2`,
+        `SELECT * FROM messages WHERE session_id = $1
+          AND COALESCE(metadata->>'contextState', 'active') = 'active'
+          ORDER BY ${useMessageSeq ? 'message_seq DESC' : 'created_at DESC, id DESC'} LIMIT $2`,
         [sessionId, limit + 1]
       ) as StoredMessage[];
     } else if (useMessageSeq) {
       rows = await query(
-        `SELECT * FROM messages WHERE session_id = $1 AND message_seq < $2 ORDER BY message_seq DESC LIMIT $3`,
+        `SELECT * FROM messages WHERE session_id = $1 AND message_seq < $2
+          AND COALESCE(metadata->>'contextState', 'active') = 'active'
+          ORDER BY message_seq DESC LIMIT $3`,
         [sessionId, (cursor as { message_seq: number }).message_seq, limit + 1]
       ) as StoredMessage[];
     } else {
       const legacyCursor = cursor as { created_at: string; id: string };
       rows = await query(
-        `SELECT * FROM messages WHERE session_id = $1 AND (created_at, id) < ($2, $3) ORDER BY created_at DESC, id DESC LIMIT $4`,
+        `SELECT * FROM messages WHERE session_id = $1 AND (created_at, id) < ($2, $3)
+          AND COALESCE(metadata->>'contextState', 'active') = 'active'
+          ORDER BY created_at DESC, id DESC LIMIT $4`,
         [sessionId, legacyCursor.created_at, legacyCursor.id, limit + 1]
       ) as StoredMessage[];
     }
   } else {
-    // Initial load — most recent messages
+    // Initial load — most recent active-context messages. Superseded rewind tails
+    // stay durable for audit/search but never re-enter the visible/model transcript.
     rows = await query(
-      `SELECT * FROM messages WHERE session_id = $1 ORDER BY ${useMessageSeq ? 'message_seq DESC' : 'created_at DESC, id DESC'} LIMIT $2`,
+      `SELECT * FROM messages WHERE session_id = $1
+        AND COALESCE(metadata->>'contextState', 'active') = 'active'
+        ORDER BY ${useMessageSeq ? 'message_seq DESC' : 'created_at DESC, id DESC'} LIMIT $2`,
       [sessionId, limit + 1]
     ) as StoredMessage[];
   }
@@ -605,21 +655,13 @@ export async function updateMessageMetrics(
     context_window_size?: number;
     /** Internal conservative context/risk estimate; not the user-facing actual CTX. */
     context_estimated_tokens?: number;
+    context_compacted?: boolean;
     /** Outgoing request/body estimate used for preflight diagnostics. */
     next_request_estimated_tokens?: number;
     /** Operational threshold at which Tower/Pi should compact. */
     compact_threshold_tokens?: number;
     /** Shadow-only context contract; not yet consumed by user-facing CTX. */
-    context_snapshot?: {
-      actualTokens?: number;
-      requestTokens?: number;
-      estimatedTokens?: number;
-      windowTokens: number;
-      actualSource: 'provider' | 'cache-reconstructed' | 'none';
-      requestSource: 'sanitized-request' | 'none';
-      capturedAt: string;
-      terminal: boolean;
-    };
+    context_snapshot?: import('../engines/types.js').MessageMetrics['contextSnapshot'];
   }
 ): Promise<void> {
   // Tokens & duration go to dedicated columns; provider-specific usage
@@ -662,6 +704,7 @@ export async function updateMessageMetrics(
              'context_input_tokens', $10::bigint,
              'context_window_size', $11::bigint,
              'context_estimated_tokens', $12::bigint,
+             'context_compacted', $18::boolean,
              'next_request_estimated_tokens', $13::bigint,
              'compact_threshold_tokens', $14::bigint
            ) || CASE
@@ -688,6 +731,7 @@ export async function updateMessageMetrics(
         contextSnapshot ? JSON.stringify(contextSnapshot) : null,
         metrics.finalize_completed_at === true,
         messageId,
+        metrics.context_compacted ?? null,
       ]
     );
   } else {
@@ -726,6 +770,32 @@ export async function updateMessageMetrics(
  *   SELECT date_trunc('day', created_at), count(*)
  *   FROM messages WHERE metadata ? 'compact_boundary_at' GROUP BY 1;
  */
+export async function mergeMessageMetadata(
+  messageId: string,
+  patch: Record<string, unknown>,
+): Promise<void> {
+  await execute(
+    `UPDATE messages SET
+       updated_at = NOW(),
+       metadata = COALESCE(metadata, '{}'::jsonb) || $1::jsonb
+     WHERE id = $2`,
+    [JSON.stringify(patch), messageId],
+  );
+}
+
+export async function markTurnEndShadow(
+  messageId: string,
+  record: object,
+): Promise<void> {
+  await execute(
+    `UPDATE messages SET
+       updated_at = NOW(),
+       metadata = COALESCE(metadata, '{}'::jsonb) || jsonb_build_object('turn_end_shadow', $1::jsonb)
+     WHERE id = $2`,
+    [JSON.stringify(record), messageId],
+  );
+}
+
 export async function markCompactBoundary(
   messageId: string,
   meta: { preservedSegment?: boolean }

@@ -1,7 +1,7 @@
 import type { NextFunction, Request, Response } from 'express';
 import { describe, expect, it, vi } from 'vitest';
 
-vi.mock('../services/runtime-box/workbench-worker-repository.js', () => ({
+vi.mock('../services/execution/worker/worker-repository.js', () => ({
   upsertWorkbenchWorker: vi.fn(), heartbeatPersistedWorkbenchWorker: vi.fn(),
   listPersistedWorkbenchWorkers: vi.fn(), setPersistedWorkbenchWorkerDrain: vi.fn(),
 }));

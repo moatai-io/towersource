@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useConfirm } from '../../hooks/useDialog';
 import { isOperatorOrAdmin } from '../../utils/auth';
 import i18n from '../../i18n';
+import { useProjectStore } from '../../stores/project-store';
 
 // Legacy manifests still carry these values. The normal Publishing Hub no longer
 // presents them as user-facing sharing modes: every listed artifact uses the
@@ -9,6 +10,7 @@ import i18n from '../../i18n';
 type Access = 'public' | 'unlisted' | 'private' | 'internal';
 
 interface Site {
+  ownerProjectId?: string;
   name: string;
   slug?: string;           // Phase 1: actual folder/URL name; falls back to `name` when absent
   description: string;
@@ -28,6 +30,7 @@ interface Site {
 }
 
 interface App {
+  ownerProjectId?: string;
   name: string;
   port?: number;
   path?: string;
@@ -97,6 +100,7 @@ interface PublishPanelProps {
   open: boolean;
   onClose: () => void;
   variant?: 'modal' | 'embedded';
+  initialProjectId?: string;
 }
 
 const API_BASE = '/api/publish';
@@ -166,7 +170,11 @@ function compareForSort<T extends { name?: string; fileName?: string; created_at
 // Archive/tag operations remain privileged in the current backend contract.
 const canManagePublications = isOperatorOrAdmin;
 
-export function PublishPanel({ open, onClose, variant = 'modal' }: PublishPanelProps) {
+export function PublishPanel({ open, onClose, variant = 'modal', initialProjectId }: PublishPanelProps) {
+  const projects = useProjectStore(state => state.projects);
+  const [ownerFilter,setOwnerFilter] = useState(initialProjectId || '');
+  useEffect(() => { if (open) setOwnerFilter(initialProjectId || ''); }, [open, initialProjectId]);
+  useEffect(() => { if (ownerFilter && !projects.some(p => p.id === ownerFilter && !p.archived)) setOwnerFilter(''); }, [projects,ownerFilter]);
   const confirm = useConfirm();
   const [sites, setSites] = useState<Site[]>([]);
   const [apps, setApps] = useState<App[]>([]);
@@ -214,11 +222,20 @@ export function PublishPanel({ open, onClose, variant = 'modal' }: PublishPanelP
     return token ? { Authorization: `Bearer ${token}` } : {};
   };
 
-  const fetchData = useCallback(async () => {
-    setLoading(true);
+  const fetchData = useCallback(async (statusOnly = false) => {
+    if (!statusOnly) setLoading(true);
     setError('');
     try {
       const headers = authHeaders();
+      if (statusOnly) {
+        const response = await fetch(`${API_BASE}/status`, { headers });
+        if (!response.ok) throw new Error(i18n.t('publish.serviceUnavailable'));
+        const status = await response.json();
+        setSites(status.sites || []);
+        setApps(status.apps || []);
+        setProjectDisplayMap(status.projects && typeof status.projects === 'object' ? status.projects : {});
+        return;
+      }
       const [statusRes, infoRes, tagsRes, sharedRes] = await Promise.all([
         fetch(`${API_BASE}/status`, { headers }),
         fetch(`${API_BASE}/info`, { headers }),
@@ -249,7 +266,7 @@ export function PublishPanel({ open, onClose, variant = 'modal' }: PublishPanelP
     } catch (err) {
       setError(err instanceof Error ? err.message : i18n.t('publish.loadFailed'));
     } finally {
-      setLoading(false);
+      if (!statusOnly) setLoading(false);
     }
   }, []);
 
@@ -366,10 +383,12 @@ export function PublishPanel({ open, onClose, variant = 'modal' }: PublishPanelP
     });
   };
 
-  // auto-refresh every 15s while open
+  // Refresh live status only while visible; static info and lists reload on open/manual actions.
   useEffect(() => {
     if (!open) return;
-    const interval = setInterval(fetchData, 15000);
+    const interval = setInterval(() => {
+      if (document.visibilityState === 'visible') void fetchData(true);
+    }, 15000);
     return () => clearInterval(interval);
   }, [open, fetchData]);
 
@@ -401,9 +420,9 @@ export function PublishPanel({ open, onClose, variant = 'modal' }: PublishPanelP
       external_url: d.url,
     }));
 
-  const allSites = useMemo(() => [...sites, ...gatewaySites], [sites, gatewaySites]);
-  const allApps = useMemo(() => [...apps, ...gatewayApps], [apps, gatewayApps]);
-  const visibleSharedFiles = useMemo(() => sharedFiles.filter(s => !s.expired), [sharedFiles]);
+  const allSites = useMemo(() => [...sites, ...gatewaySites].filter(site => !ownerFilter || site.ownerProjectId === ownerFilter), [sites, gatewaySites, ownerFilter]);
+  const allApps = useMemo(() => [...apps, ...gatewayApps].filter(app => !ownerFilter || app.ownerProjectId === ownerFilter), [apps, gatewayApps, ownerFilter]);
+  const visibleSharedFiles = useMemo(() => sharedFiles.filter(s => !s.expired && !ownerFilter), [sharedFiles, ownerFilter]);
 
   // Apply archived/tag filters. Legacy access tiers no longer affect the Hub UI;
   // every listed site follows the same link-sharing + noindex contract.
@@ -552,7 +571,7 @@ export function PublishPanel({ open, onClose, variant = 'modal' }: PublishPanelP
 
   const isEmbedded = variant === 'embedded';
   const panel = (
-      <div data-testid="publishing-hub" aria-label={i18n.t('publish.hubTitle')} className={`${variant === 'modal' ? 'relative bg-neutral-900 border border-neutral-700 rounded-xl shadow-2xl w-[820px] max-w-[95vw] h-[640px] max-h-[90vh]' : 'publish-panel-embedded h-full w-full bg-neutral-900'} flex flex-col overflow-hidden`}>
+      <div data-testid="publishing-hub" aria-label={i18n.t('publish.hubTitle')} className={`${variant === 'modal' ? 'relative bg-neutral-900 border border-neutral-700 rounded-xl shadow-2xl w-[820px] max-w-[95vw] h-[640px] max-h-[90vh]' : 'publish-panel-embedded h-full w-full bg-neutral-900'} @container/publishing min-w-0 flex flex-col overflow-hidden`}>
         {/* Header */}
         <div className={`${isEmbedded ? 'px-7 py-4' : 'px-5 py-3'} flex items-center justify-between border-b border-neutral-800 shrink-0`}>
           <div className="flex items-center gap-3">
@@ -577,7 +596,7 @@ export function PublishPanel({ open, onClose, variant = 'modal' }: PublishPanelP
           </div>
           <div className="flex items-center gap-2">
             <button
-              onClick={fetchData}
+              onClick={() => void fetchData()}
               disabled={loading}
               className="p-1.5 text-neutral-500 hover:text-neutral-300 transition-colors disabled:opacity-40"
               title={i18n.t('publish.refresh')}
@@ -594,6 +613,13 @@ export function PublishPanel({ open, onClose, variant = 'modal' }: PublishPanelP
           </div>
         </div>
 
+        <div className="flex flex-wrap items-center gap-3 border-b border-neutral-800 px-5 py-3">
+          <label className="text-sm text-neutral-300" htmlFor="publish-agent-filter">{i18n.t('publish.agentScopeLabel', { defaultValue: '담당 Agent' })}</label>
+          <select id="publish-agent-filter" value={ownerFilter} onChange={event => { setOwnerFilter(event.target.value); }} className="min-h-10 max-w-full rounded border border-neutral-700 bg-neutral-900 px-3 text-sm text-neutral-100">
+            <option value="">{i18n.t('publish.allAgents', { defaultValue: '접근 가능한 전체 게시물' })}</option>
+            {projects.filter(project => !project.archived).map(project => <option key={project.id} value={project.id}>{project.agent?.displayName || project.name}</option>)}
+          </select>
+        </div>
         {/* Stats + tab + sort/group controls */}
         <div className={`${isEmbedded ? 'gap-3 px-7 py-3.5' : 'gap-2 px-5 py-2.5'} flex flex-wrap items-center border-b border-neutral-800/50 shrink-0`}>
           {[
@@ -844,7 +870,7 @@ export function PublishPanel({ open, onClose, variant = 'modal' }: PublishPanelP
                 </svg>
               </div>
               <p className="text-base text-neutral-400">{error}</p>
-              <button onClick={fetchData} className="px-4 py-2 text-sm bg-neutral-800 hover:bg-neutral-700 rounded-lg text-neutral-300 transition-colors">
+              <button onClick={() => void fetchData()} className="px-4 py-2 text-sm bg-neutral-800 hover:bg-neutral-700 rounded-lg text-neutral-300 transition-colors">
                 {i18n.t('publish.retry')}
               </button>
             </div>
@@ -1147,7 +1173,7 @@ function SiteRow({
       href={url}
       target="_blank"
       rel="noopener noreferrer"
-      className={`group flex items-center gap-2 px-2.5 py-1.5 transition-colors ${
+      className={`group flex flex-wrap items-center gap-2 px-2.5 py-1.5 transition-colors ${
         isArchived
           ? 'bg-neutral-900/30 opacity-60 hover:opacity-90'
           : selected
@@ -1184,7 +1210,7 @@ function SiteRow({
       ) : (
         <div className="publish-thumbnail w-12 h-7 rounded bg-neutral-800/70 border border-neutral-700/50 shrink-0" title={i18n.t('publish.thumbnail.none')} />
       )}
-      <span className={`text-[15px] font-medium truncate min-w-0 ${
+      <span className={`text-[15px] font-medium truncate min-w-0 flex-1 basis-40 ${
         isArchived
           ? 'text-neutral-500 line-through group-hover:text-neutral-300'
           : 'text-neutral-100 group-hover:text-white'
@@ -1214,7 +1240,7 @@ function SiteRow({
           />
         </span>
       ) : (
-        <span className="flex items-center gap-1 shrink-0 max-w-[360px] overflow-hidden">
+        <span className="flex flex-wrap items-center gap-1 min-w-0 max-w-full @min-[48rem]/publishing:max-w-[360px] overflow-hidden">
           {tags.slice(0, 4).map(t => (
             <span
               key={t}
@@ -1244,12 +1270,12 @@ function SiteRow({
       <div className="flex-1" />
 
       {site.description && !isGateway && (
-        <span className="hidden md:inline text-[13px] text-neutral-500 truncate max-w-[260px]" title={site.description}>
+        <span className="hidden @min-[48rem]/publishing:inline text-[13px] text-neutral-500 truncate max-w-[260px]" title={site.description}>
           {site.description}
         </span>
       )}
       {slugDiffers && (
-        <span className="hidden lg:inline text-[12px] text-neutral-600 font-mono truncate max-w-[160px]" title={slug}>
+        <span className="hidden @min-[64rem]/publishing:inline text-[12px] text-neutral-600 font-mono truncate max-w-[160px]" title={slug}>
           {slug}
         </span>
       )}
@@ -1451,7 +1477,7 @@ function SharedFileRow({ file, url, justCopied, busy, onCopy, onRevoke }: Shared
       href={url}
       target="_blank"
       rel="noopener noreferrer"
-      className="group flex items-center gap-2 px-2.5 py-1.5 bg-neutral-900/40 hover:bg-neutral-800/60 transition-colors"
+      className="group flex flex-wrap items-center gap-2 px-2.5 py-1.5 bg-neutral-900/40 hover:bg-neutral-800/60 transition-colors"
       title={file.file_path}
     >
       <div className="w-1.5 h-1.5 rounded-full shrink-0 bg-sky-400" />
@@ -1465,7 +1491,7 @@ function SharedFileRow({ file, url, justCopied, busy, onCopy, onRevoke }: Shared
         {i18n.t('publish.shared')}
       </span>
       <div className="flex-1" />
-      <span className="hidden md:inline text-[13px] text-neutral-500 truncate max-w-[320px]" title={file.file_path}>
+      <span className="hidden @min-[48rem]/publishing:inline text-[13px] text-neutral-500 truncate max-w-[320px]" title={file.file_path}>
         {file.file_path}
       </span>
       <span className="text-[12px] text-neutral-500 shrink-0 tabular-nums">
@@ -1519,7 +1545,7 @@ function AppRow({ app, url, isExternal, isGateway, statusDot, accessBadge }: App
       href={url}
       target="_blank"
       rel="noopener noreferrer"
-      className="group flex items-center gap-2 px-2.5 py-1.5 bg-neutral-900/40 hover:bg-neutral-800/60 transition-colors"
+      className="group flex flex-wrap items-center gap-2 px-2.5 py-1.5 bg-neutral-900/40 hover:bg-neutral-800/60 transition-colors"
       title={app.description || app.name}
     >
       <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${statusDot}`} />
@@ -1534,7 +1560,7 @@ function AppRow({ app, url, isExternal, isGateway, statusDot, accessBadge }: App
       <div className="flex-1" />
 
       {app.description && !isGateway && (
-        <span className="hidden md:inline text-[13px] text-neutral-500 truncate max-w-[240px]" title={app.description}>
+        <span className="hidden @min-[48rem]/publishing:inline text-[13px] text-neutral-500 truncate max-w-[240px]" title={app.description}>
           {app.description}
         </span>
       )}

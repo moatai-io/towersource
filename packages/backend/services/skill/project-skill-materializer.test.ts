@@ -238,3 +238,82 @@ describe('project-skill-materializer', () => {
     expect(fs.existsSync(unmanaged)).toBe(true);
   });
 });
+it('rejects mixed storage before mutation and permits explicit full transition', async () => {
+  const home = makeTempDir('tower-mat-transition-home-');
+  const projectRoot = makeTempDir('tower-mat-transition-project-');
+  writeTeamskillsSkill(home, 'existing');
+  writeTeamskillsSkill(home, 'added');
+  const { materializeProjectRegistrySkills } = await loadWithHome(home);
+  materializeProjectRegistrySkills({ projectRootPath: projectRoot, skillNames: ['existing'] });
+  const manifestPath = path.join(projectRoot, '.tower', 'skills', 'manifest.json');
+  const before = fs.readFileSync(manifestPath, 'utf8');
+  expect(() => materializeProjectRegistrySkills({ projectRootPath: projectRoot, skillNames: ['added'], prune: false, storageMode: 'bind-ro' })).toThrow('Cannot retain incompatible skill storage modes (existing)');
+  expect(fs.readFileSync(manifestPath, 'utf8')).toBe(before);
+  expect(fs.existsSync(path.join(projectRoot, '.tower', 'skills', 'added'))).toBe(false);
+  expect(materializeProjectRegistrySkills({ projectRootPath: projectRoot, skillNames: ['existing', 'added'], prune: false, storageMode: 'bind-ro' }).ok).toBe(true);
+  const transitioned = fs.readFileSync(manifestPath, 'utf8');
+  expect(JSON.parse(transitioned).skills.every((entry: { storageMode?: string }) => entry.storageMode === 'bind-ro')).toBe(true);
+  expect(() => materializeProjectRegistrySkills({ projectRootPath: projectRoot, skillNames: ['added'], prune: false, storageMode: 'copy' })).toThrow('Cannot retain incompatible skill storage modes (existing)');
+  expect(fs.readFileSync(manifestPath, 'utf8')).toBe(transitioned);
+});
+
+it('repairs an already mixed v3 manifest by explicitly regenerating only the legacy entry', async () => {
+  const home = makeTempDir('tower-mat-repair-home-');
+  const projectRoot = makeTempDir('tower-mat-repair-project-');
+  writeTeamskillsSkill(home, 'legacy');
+  writeTeamskillsSkill(home, 'current');
+  const { materializeProjectRegistrySkills } = await loadWithHome(home);
+  materializeProjectRegistrySkills({ projectRootPath: projectRoot, skillNames: ['legacy'] });
+  const manifestPath = path.join(projectRoot, '.tower', 'skills', 'manifest.json');
+  const legacy = JSON.parse(fs.readFileSync(manifestPath, 'utf8')).skills[0];
+  materializeProjectRegistrySkills({ projectRootPath: projectRoot, skillNames: ['current'], storageMode: 'bind-ro' });
+  const mixed = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+  const current = mixed.skills[0];
+  mixed.skills.push(legacy);
+  fs.writeFileSync(manifestPath, JSON.stringify(mixed));
+  expect(materializeProjectRegistrySkills({ projectRootPath: projectRoot, skillNames: ['legacy'], storageMode: 'bind-ro', prune: false }).ok).toBe(true);
+  const repaired = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+  expect(repaired.schemaVersion).toBe(3);
+  expect(repaired.skills.every((entry: { storageMode?: string }) => entry.storageMode === 'bind-ro')).toBe(true);
+  expect(repaired.skills.find((entry: { name: string }) => entry.name === 'current')).toEqual(current);
+});
+
+it('does not publish a mixed manifest when a requested transition is skipped', async () => {
+  const home = makeTempDir('tower-mat-skipped-home-');
+  const projectRoot = makeTempDir('tower-mat-skipped-project-');
+  writeTeamskillsSkill(home, 'existing');
+  const { materializeProjectRegistrySkills } = await loadWithHome(home);
+  materializeProjectRegistrySkills({ projectRootPath: projectRoot, skillNames: ['existing'] });
+  const manifestPath = path.join(projectRoot, '.tower', 'skills', 'manifest.json');
+  const before = fs.readFileSync(manifestPath, 'utf8');
+  fs.rmSync(path.join(home, 'workspace', 'projects', 'teamskills', 'skills', 'existing'), { recursive: true });
+  expect(() => materializeProjectRegistrySkills({ projectRootPath: projectRoot, skillNames: ['existing'], prune: false, storageMode: 'bind-ro' })).toThrow('after skipped materialization (existing)');
+  expect(fs.readFileSync(manifestPath, 'utf8')).toBe(before);
+});
+
+it('preserves compatible bind-ro entries during a subset update', async () => {
+  const home = makeTempDir('tower-mat-bind-subset-home-');
+  const projectRoot = makeTempDir('tower-mat-bind-subset-project-');
+  writeTeamskillsSkill(home, 'existing');
+  writeTeamskillsSkill(home, 'added');
+  const { materializeProjectRegistrySkills } = await loadWithHome(home);
+  materializeProjectRegistrySkills({ projectRootPath: projectRoot, skillNames: ['existing'], storageMode: 'bind-ro' });
+  const manifestPath = path.join(projectRoot, '.tower', 'skills', 'manifest.json');
+  const existing = JSON.parse(fs.readFileSync(manifestPath, 'utf8')).skills[0];
+  materializeProjectRegistrySkills({ projectRootPath: projectRoot, skillNames: ['added'], prune: false, storageMode: 'bind-ro' });
+  expect(JSON.parse(fs.readFileSync(manifestPath, 'utf8')).skills.find((entry: { name: string }) => entry.name === 'existing')).toEqual(existing);
+});
+
+it('preserves unrelated manifest entries for a no-prune subset', async () => {
+  const home = makeTempDir('tower-subset-home-');
+  const projectRoot = makeTempDir('tower-subset-project-');
+  writeTeamskillsSkill(home, 'alpha'); writeTeamskillsSkill(home, 'beta');
+  const { materializeProjectRegistrySkills } = await loadWithHome(home);
+  const first = materializeProjectRegistrySkills({ projectRootPath: projectRoot, skillNames: ['alpha', 'beta'] });
+  const before = JSON.parse(fs.readFileSync(first.manifestPath, 'utf8'));
+  const second = materializeProjectRegistrySkills({ projectRootPath: projectRoot, skillNames: ['alpha'], prune: false });
+  const after = JSON.parse(fs.readFileSync(second.manifestPath, 'utf8'));
+  expect(after.skills.map((s: any) => s.name)).toEqual(['alpha', 'beta']);
+  expect(after.skills.find((s: any) => s.name === 'beta')).toEqual(before.skills.find((s: any) => s.name === 'beta'));
+  expect(second.materialized.map(s => s.name)).toEqual(['alpha']);
+});

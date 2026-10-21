@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import type { TFunction } from 'i18next';
 
 export type SkillInvocationMeta = {
   skillName?: string;
@@ -11,11 +12,11 @@ export type SkillInvocationMeta = {
   explicit?: boolean;
 };
 
-function triggerLabel(meta: SkillInvocationMeta): string {
-  if (meta.trigger === 'slash') return meta.matchedAlias || 'slash';
-  if (meta.trigger === 'picker') return 'picker';
-  if (meta.trigger === 'natural-language') return 'natural language';
-  return meta.trigger || 'skill';
+function triggerLabel(meta: SkillInvocationMeta, t: TFunction<'chat'>): string {
+  if (meta.trigger === 'slash') return meta.matchedAlias || t('skillInvocation.slash', { defaultValue: '슬래시 명령' });
+  if (meta.trigger === 'picker') return t('skillInvocation.picker', { defaultValue: '스킬 선택' });
+  if (meta.trigger === 'natural-language') return t('skillInvocation.naturalLanguage', { defaultValue: '자연어 요청' });
+  return meta.trigger || t('skillInvocation.skill', { defaultValue: '스킬' });
 }
 
 export function SkillInvocationChip({
@@ -29,8 +30,8 @@ export function SkillInvocationChip({
   const [expanded, setExpanded] = useState(false);
   if (!meta?.skillName && !meta?.displayName) return null;
 
-  const label = meta.displayName || meta.skillName || 'skill';
-  const trigger = triggerLabel(meta);
+  const label = meta.displayName || meta.skillName || t('skillInvocation.skill', { defaultValue: '스킬' });
+  const trigger = triggerLabel(meta, t);
   const isNatural = meta.trigger === 'natural-language';
 
   return (
@@ -60,11 +61,11 @@ export function SkillInvocationChip({
           <div className="max-w-[320px] rounded-lg border border-violet-500/15 bg-surface-900/85 px-3 py-2 text-[12px] text-gray-400 shadow-lg">
             <div className="font-medium text-violet-300">{t('skillInvocation.applied', { name: label })}</div>
             <div className="mt-1 space-y-0.5">
-              {meta.skillName && <div><span className="text-gray-500">name:</span> {meta.skillName}</div>}
-              {meta.canonicalCommand && <div><span className="text-gray-500">command:</span> {meta.canonicalCommand}</div>}
+              {meta.skillName && <div><span className="text-gray-500">{t('skillInvocation.name', { defaultValue: '이름' })}:</span> {meta.skillName}</div>}
+              {meta.canonicalCommand && <div><span className="text-gray-500">{t('skillInvocation.command', { defaultValue: '명령' })}:</span> {meta.canonicalCommand}</div>}
               {meta.matchedAlias && <div><span className="text-gray-500">matched:</span> {meta.matchedAlias}</div>}
-              {meta.source && <div><span className="text-gray-500">source:</span> {meta.source}</div>}
-              <div><span className="text-gray-500">trigger:</span> {trigger}</div>
+              {meta.source && <div><span className="text-gray-500">{t('skillInvocation.source', { defaultValue: '출처' })}:</span> {meta.source}</div>}
+              <div><span className="text-gray-500">{t('skillInvocation.trigger', { defaultValue: '호출 방식' })}:</span> {trigger}</div>
               {isNatural && <div className="pt-1 text-violet-200/70">{t('skillInvocation.naturalSelection')}</div>}
             </div>
           </div>

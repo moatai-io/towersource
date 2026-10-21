@@ -16,6 +16,13 @@ log(){ printf '[tower-oss-worker] %s\n' "$*"; }
 fail(){ printf '[tower-oss-worker] ERROR: %s\n' "$*" >&2; exit 1; }
 
 [[ $EUID -eq 0 ]] || fail 'run as root'
+# Enrolled Worker maintenance owns an exclusive VM-wide fence. Hold shared lock
+# through input updates, unit installation, restart and verification.
+if [[ -f /var/lib/tower-worker-maintenance/deployment.lock ]]; then
+  exec 197</var/lib/tower-worker-maintenance/deployment.lock
+  flock -s -n 197 || { echo 'Worker maintenance owns deployment lock' >&2; exit 1; }
+fi
+
 [[ -x "$CLOSURE_LINK/bin/tower-workbench-worker" ]] || fail "Nix Worker closure missing: $CLOSURE_LINK"
 [[ -f "$DATA_DIR/tower.env" ]] || fail "Tower environment missing: $DATA_DIR/tower.env"
 [[ -f "$APP_DIR/dist/backend/packages/backend/scripts/bootstrap-system-workbench-worker-credentials.js" ]] || fail 'compiled Worker bootstrap missing'
@@ -24,7 +31,19 @@ mkdir -p "$WORKER_DIR" /etc/tower-workers
 chmod 700 "$WORKER_DIR"
 chown root:"$EXECUTION_USER" /etc/tower-workers
 chmod 750 /etc/tower-workers
+# The OSS installer already owns this protected systemd input; pass its path only.
+# The maintenance installer validates root ownership/0600 and never copies values.
+export TOWER_WORKER_MAINTENANCE_DATABASE_ENV_FILE="$DATA_DIR/tower.env"
 if [[ -f "$STATE_FILE" ]]; then
+  # Upgrades must not skip enrollment merely because initial bootstrap completed.
+  # Preserve the existing config/identity/units and do NOT restart a busy Worker.
+  existing_port="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["port"])' "/etc/tower-workers/$WORKER_ID.json")"
+  TOWER_APP_ROOT="$(realpath "$CLOSURE_LINK")" TOWER_EXECUTION_USER="$EXECUTION_USER" \
+  TOWER_LOCAL_WORKER_ID="$WORKER_ID" TOWER_LOCAL_WORKER_DEPLOYMENT_ID=production \
+  TOWER_LOCAL_WORKER_BASE_URL="http://127.0.0.1:$existing_port" \
+  TOWER_LOCAL_WORKER_CONTROL_PLANE_URL="$CONTROL_PLANE_URL" \
+  "$CLOSURE_LINK/bin/install-worker-maintenance"
+  log 'Deployment-triggered Worker maintenance enrolled; Doctor reports whether the running Worker needs first safe activation'
   rm -f "$REQUEST_FILE"
   systemctl disable --now tower-oss-worker-bootstrap.timer >/dev/null 2>&1 || true
   exit 0
@@ -72,7 +91,7 @@ TOWER_BOOTSTRAP_DEPLOYMENT_ID=production \
 TOWER_BOOTSTRAP_WORKER_HOST=127.0.0.1 \
 TOWER_BOOTSTRAP_WORKER_PORT="$WORKER_PORT" \
 TOWER_BOOTSTRAP_ACTOR_USER_ID="$ACTOR_USER_ID" \
-TOWER_BOOTSTRAP_MAX_RUNS=4 \
+TOWER_BOOTSTRAP_MAX_RUNS=20 \
 node "$APP_DIR/dist/backend/packages/backend/scripts/bootstrap-system-workbench-worker-credentials.js"
 
 install -o root -g "$EXECUTION_USER" -m 640 "$stage/$WORKER_ID.json" "/etc/tower-workers/$WORKER_ID.json"
@@ -103,9 +122,9 @@ transport="$(sed -n 's/^TOWER_REMOTE_WORKER_TOKEN=//p' "/etc/tower-workers/$WORK
 [[ -n "$transport" ]] || fail 'Worker transport credential is missing'
 smoke="$(curl -fsS --max-time 30 -X POST "http://127.0.0.1:$WORKER_PORT/v1/runs" \
   -H "Authorization: Bearer $transport" -H 'Content-Type: application/json' \
-  --data "{\"spec\":{\"jobId\":990000001,\"projectId\":\"$PROJECT_ID\",\"command\":\"pwd; printf oss-worker-smoke-ok\",\"timeoutSec\":20,\"environmentKeys\":[],\"artifacts\":[]},\"credentials\":{}}")"
-grep -Fq "$PROJECT_ROOT" <<<"$smoke" && grep -Fq 'oss-worker-smoke-ok' <<<"$smoke" \
-  || fail 'local Worker direct execution smoke failed'
+  --data "{\"spec\":{\"jobId\":990000001,\"projectId\":\"$PROJECT_ID\",\"command\":\"set -e; pwd; f=.tower-oss-worker-smoke-\\$\\$.txt; printf oss-worker-roundtrip > \\\"\\$f\\\"; test \\\"\\$(cat \\\"\\$f\\\")\\\" = oss-worker-roundtrip; rm -f \\\"\\$f\\\"; test ! -e \\\"\\$f\\\"; printf oss-worker-file-roundtrip-ok\",\"timeoutSec\":20,\"environmentKeys\":[],\"artifacts\":[]},\"credentials\":{}}")"
+grep -Fq "$PROJECT_ROOT" <<<"$smoke" && grep -Fq 'oss-worker-file-roundtrip-ok' <<<"$smoke" \
+  || fail 'local Worker file round-trip smoke failed'
 
 log 'activating Worker-first binding and materializing project skills'
 TOWER_OSS_PROJECT_ID="$PROJECT_ID" TOWER_OSS_WORKER_ID="$WORKER_ID" TOWER_OSS_ACTOR_USER_ID="$ACTOR_USER_ID" \

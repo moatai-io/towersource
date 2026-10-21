@@ -34,7 +34,9 @@ The HTML should be print-stable:
 
 ## Verification loop
 
-After `pdf_export`, inspect the returned verification image(s).
+After `pdf_export`, inspect the returned verification image(s). Reuse those images instead of calling `pdf_view` again for the same unchanged PDF pages at the same resolution. Request another view only when the images were omitted or are no longer available, the PDF changed, or additional pages or higher resolution are needed. This is a reuse principle, not a limit on necessary verification.
+
+Implementation: `packages/backend/engines/pi-pdf-export-tool.ts`. Regression coverage: `packages/backend/engines/__tests__/pi-pdf-harness-tools.test.ts` (verification-image reuse guidance).
 
 For HTML that contains Mermaid, charts, or other dynamic rendering, do not report success until the preview confirms the rendered visual is present and the raw code is not left visible. Raw strings such as ```mermaid, `flowchart LR`, `sequenceDiagram`, chart JSON, or script fallback text in the final preview are export failures, not cosmetic issues.
 

@@ -4,6 +4,7 @@ import os from 'os';
 import fs from 'fs/promises';
 import { existsSync } from 'fs';
 import bcrypt from 'bcryptjs';
+import argon2 from 'argon2';
 import jwt from 'jsonwebtoken';
 import { config } from '../../config.js';
 import { query, queryOne, execute, transaction } from '../../db/pg-repo.js';
@@ -29,9 +30,11 @@ export interface JwtPayload {
   credentialId?: string;
   connectionScope?: 'agent' | 'organization';
   connectionMode?: 'create' | 'reauth';
+  /** Incremented on reactivation; missing claims are accepted only for untouched legacy accounts. */
+  authEpoch?: number;
 }
 
-// ───── AES-256-GCM Encryption ─────
+// ───── AES-256-GCM legacy read compatibility (never use for new writes) ─────
 
 const ALGO = 'aes-256-gcm';
 
@@ -40,6 +43,7 @@ function deriveKey(): Buffer {
   return crypto.createHash('sha256').update(config.jwtSecret).digest();
 }
 
+/** @deprecated Test/legacy compatibility only. Never use for new password writes. */
 export function encryptPassword(plain: string): string {
   const key = deriveKey();
   const iv = crypto.randomBytes(12);
@@ -69,16 +73,52 @@ function isAesEncrypted(stored: string): boolean {
   return stored.split(':').length === 3;
 }
 
-// ───── Legacy bcrypt (for migration) ─────
+function isArgon2Hash(stored: string): boolean {
+  return stored.startsWith('$argon2id$');
+}
 
-function verifyBcrypt(password: string, hash: string): boolean {
-  return bcrypt.compareSync(password, hash);
+// Each Argon2 operation uses at most 19 MiB. A two-slot process-local semaphore
+// bounds concurrent hashes AND verification near 38 MiB/process, regardless of
+// UV_THREADPOOL_SIZE. The slot transfers directly to the next waiter on release.
+export const PASSWORD_HASH_OPTIONS = { type: argon2.argon2id, memoryCost: 19 * 1024, timeCost: 2, parallelism: 1 } as const;
+let activePasswordHashes = 0;
+const waitingPasswordHashes: Array<() => void> = [];
+async function withPasswordHashSlot<T>(run: () => Promise<T>): Promise<T> {
+  if (activePasswordHashes < 2) activePasswordHashes++;
+  else await new Promise<void>(resolve => waitingPasswordHashes.push(resolve));
+  try { return await run(); }
+  finally {
+    const next = waitingPasswordHashes.shift();
+    if (next) next(); // transfer the reserved slot; do not open it for a new arrival
+    else activePasswordHashes--;
+  }
+}
+export async function hashPassword(password: string): Promise<string> {
+  return withPasswordHashSlot(() => argon2.hash(password, PASSWORD_HASH_OPTIONS));
+}
+
+// Legacy AES/bcrypt are accepted only as reads; all new writes use Argon2id.
+export async function verifyStoredPassword(password: string, stored: string): Promise<boolean> {
+  if (isArgon2Hash(stored)) {
+    try {
+      return await withPasswordHashSlot(() => argon2.verify(stored, password));
+    } catch {
+      return false;
+    }
+  }
+  if (isAesEncrypted(stored)) {
+    return decryptPassword(stored) === password;
+  }
+  // bcryptjs yields between work chunks; do not block the entire verification
+  // in one synchronous call. This does not move hashing to a worker thread.
+  return await bcrypt.compare(password, stored);
 }
 
 // ───── JWT ─────
 
-export function generateToken(payload: JwtPayload): string {
-  return jwt.sign(payload, config.jwtSecret, { expiresIn: config.tokenExpiry as any });
+export function generateToken(payload: JwtPayload, options?: { maxAgeSeconds: number }): string {
+  if (options && (!Number.isInteger(options.maxAgeSeconds) || options.maxAgeSeconds < 60 || options.maxAgeSeconds > 900)) throw new Error('invalid_short_session_expiry');
+  return jwt.sign(payload, config.jwtSecret, { expiresIn: options ? options.maxAgeSeconds : config.tokenExpiry as any });
 }
 
 /**
@@ -167,9 +207,14 @@ export class InvalidUsernameError extends Error {
   }
 }
 
+export class UserManagementForbiddenError extends Error {
+  constructor() { super('Only admins can modify privileged accounts'); this.name = 'UserManagementForbiddenError'; }
+}
+
 export interface CreateUserOpts {
   displayName?: string | null;
   affiliation?: string | null;
+  approvalStatus?: 'active' | 'pending';
 }
 
 /**
@@ -204,10 +249,12 @@ export async function createUser(
   if (!USERNAME_RE.test(username)) {
     throw new InvalidUsernameError(username);
   }
-  const encrypted = encryptPassword(password);
+  const encrypted = await hashPassword(password);
+  const approvalStatus = opts?.approvalStatus ?? 'active';
   const row = await queryOne<{ id: number }>(
-    'INSERT INTO users (username, password_hash, role, display_name, affiliation, password_changed_at) VALUES ($1, $2, $3, $4, $5, NOW()) RETURNING id',
-    [username, encrypted, role, opts?.displayName ?? null, opts?.affiliation ?? null],
+    `INSERT INTO users (username, password_hash, role, display_name, affiliation, approval_status, approved_at, password_changed_at)
+     VALUES ($1, $2, $3, $4, $5, $6, CASE WHEN $6 = 'active' THEN NOW() ELSE NULL END, NOW()) RETURNING id`,
+    [username, encrypted, role, opts?.displayName ?? null, opts?.affiliation ?? null, approvalStatus],
   );
   const userId = row!.id;
 
@@ -215,9 +262,11 @@ export async function createUser(
   // such as teamskills can exist as operator+ defaults without being all-user
   // invitations. 다른 active project 에 대한 auto-seed 는 폐기됨
   // (2026-05-04-five-role-model.md, section E).
-  await autoJoinDefaultProjects(userId, username, role);
+  if (approvalStatus === 'active') {
+    await autoJoinDefaultProjects(userId, username, role);
+  }
 
-  return { id: userId, username, role };
+  return { id: userId, username, role, approval_status: approvalStatus };
 }
 
 export type AuthFailureReason = 'invalid_credentials' | 'pending_approval' | 'rejected' | 'suspended';
@@ -225,26 +274,36 @@ export type AuthFailureReason = 'invalid_credentials' | 'pending_approval' | 're
 export interface AuthResult {
   ok: boolean;
   payload?: JwtPayload;
+  // Credential snapshot for deferred pre-session challenges; never include it in JWT payload.
+  passwordChangedAt?: string | null;
   reason?: AuthFailureReason;
 }
 
-export async function recordAuthEvent(input: { userId?: number | null; username?: string | null; eventType: 'login_success' | 'login_failure' | 'logout'; ip?: string | null; userAgent?: string | null }): Promise<void> {
+export async function recordAuthEvent(input: { userId?: number | null; username?: string | null; eventType: 'login_success' | 'login_failure' | 'logout'; ip?: string | null; userAgent?: string | null }) {
   try {
     await execute(
       'INSERT INTO auth_login_events (user_id, username, event_type, ip_address, user_agent) VALUES ($1, $2, $3, $4, $5)',
       [input.userId ?? null, input.username ?? null, input.eventType, input.ip ?? null, input.userAgent ?? null],
     );
   } catch (error) {
-    // Authentication observability must not make login or logout unavailable.
+    // Login visibility must not make authentication unavailable before migration is applied.
     console.warn('[auth] failed to record auth event:', error);
   }
 }
 
-export async function authenticateUser(username: string, password: string, context?: { ip?: string | null; userAgent?: string | null }): Promise<AuthResult> {
-  const user = await queryOne<any>(
-    'SELECT * FROM users WHERE username = $1 AND disabled = 0',
-    [username]
+export async function authenticateUser(username: string, password: string, context?: { ip?: string | null; userAgent?: string | null; deferSuccess?: boolean }): Promise<AuthResult> {
+  if (typeof username !== 'string' || username.length > 320 || !username.trim() || typeof password !== 'string') return { ok: false, reason: 'invalid_credentials' };
+  const identifier = username.trim();
+  // A verified primary identity is the only email alias. Resolve BOTH namespaces;
+  // legacy/corrupt username collisions must never silently choose an account.
+  const matches = await query<any>(
+    `SELECT u.* FROM users u WHERE u.username = $1
+       OR (u.primary_email_identity_id IS NOT NULL AND u.id IN
+         (SELECT e.user_id FROM account_email_identities e
+           WHERE e.email_normalized = $2 AND e.state = 'verified' AND e.id = u.primary_email_identity_id))`,
+    [identifier, identifier.toLowerCase()],
   );
+  const user = matches.length === 1 && Number(matches[0].disabled) === 0 ? matches[0] : undefined;
   if (!user) {
     await recordAuthEvent({ username, eventType: 'login_failure', ...context });
     return { ok: false, reason: 'invalid_credentials' };
@@ -269,29 +328,50 @@ export async function authenticateUser(username: string, password: string, conte
   }
 
   const stored = user.password_hash;
-  let ok = false;
+  const ok = await verifyStoredPassword(password, stored);
 
-  if (isAesEncrypted(stored)) {
-    // New AES path
-    const decrypted = decryptPassword(stored);
-    ok = decrypted === password;
-  } else {
-    // Legacy bcrypt fallback
-    ok = verifyBcrypt(password, stored);
-    // Auto-migrate to AES on successful login
-    if (ok) {
-      const encrypted = encryptPassword(password);
-      await execute('UPDATE users SET password_hash = $1 WHERE id = $2', [encrypted, user.id]);
-    }
+  // CAS prevents a concurrent reset/disable from being overwritten by a late login.
+  // Rehash does not advance password_changed_at: existing tokens remain compatible.
+  let expectedHash = stored;
+  if (ok && !isArgon2Hash(stored)) {
+    const hashed = await hashPassword(password);
+    const migrated = await execute(
+      "UPDATE users SET password_hash = $1 WHERE id = $2 AND password_hash = $3 AND disabled = 0 AND approval_status = 'active'",
+      [hashed, user.id, stored],
+    );
+    if (!migrated.changes) return { ok: false, reason: 'invalid_credentials' };
+    expectedHash = hashed;
   }
 
   if (!ok) {
     await recordAuthEvent({ userId: user.id, username: user.username, eventType: 'login_failure', ...context });
     return { ok: false, reason: 'invalid_credentials' };
   }
-  await execute('UPDATE users SET last_login_at = NOW(), last_login_ip = $1 WHERE id = $2', [context?.ip ?? null, user.id]);
-  await recordAuthEvent({ userId: user.id, username: user.username, eventType: 'login_success', ...context });
-  return { ok: true, payload: { userId: user.id, username: user.username, role: user.role } };
+  // Check the credential snapshot again even when no rehash was required.
+  const current = await queryOne<{ password_hash: string; disabled: number; approval_status: string; auth_epoch: number; password_changed_at: string | null; primary_email_identity_id: number; alias_valid: boolean }>(
+    `SELECT u.password_hash, u.disabled, u.approval_status, u.auth_epoch, u.password_changed_at, u.primary_email_identity_id,
+       EXISTS (SELECT 1 FROM account_email_identities e WHERE e.id=u.primary_email_identity_id AND e.user_id=u.id AND e.state='verified' AND e.email_normalized=$2) AS alias_valid
+       FROM users u WHERE u.id=$1`, [user.id, identifier.toLowerCase()],
+  );
+  if (identifier !== user.username && !current?.alias_valid) return { ok: false, reason: 'invalid_credentials' };
+  // A verified email can become another user's username while password hashing runs.
+  // Recheck both namespaces before accepting a stale alias resolution.
+  if (identifier !== user.username) {
+    const collision = await queryOne<{ id: number }>('SELECT id FROM users WHERE username=$1 AND id<>$2', [identifier, user.id]);
+    if (collision) return { ok: false, reason: 'invalid_credentials' };
+  }
+  if (!current || current.password_hash !== expectedHash || Number(current.disabled) !== 0 || current.approval_status !== 'active'
+      || Number(current.auth_epoch ?? 0) !== Number(user.auth_epoch ?? 0)) return { ok: false, reason: 'invalid_credentials' };
+  if (!context?.deferSuccess) {
+    await completeAuthenticationSuccess({ userId:user.id,username:user.username,ip:context?.ip,userAgent:context?.userAgent });
+  }
+  return { ok: true, payload: { userId: user.id, username: user.username, role: user.role, authEpoch: Number(current.auth_epoch) }, passwordChangedAt: current.password_changed_at ? new Date(current.password_changed_at).toISOString() : null };
+}
+
+export async function completeAuthenticationSuccess(input: { userId:number; username:string; ip?:string|null; userAgent?:string|null }): Promise<void> {
+  const updated = await execute("UPDATE users SET last_login_at = NOW(), last_login_ip = $1 WHERE id = $2 AND disabled = 0 AND approval_status = 'active'", [input.ip ?? null,input.userId]);
+  if (!updated.changes) throw new Error('Account is no longer active');
+  await recordAuthEvent({userId:input.userId,username:input.username,eventType:'login_success',ip:input.ip,userAgent:input.userAgent});
 }
 
 export async function hasUsers(): Promise<boolean> {
@@ -334,7 +414,7 @@ export async function authMiddleware(req: Request, res: Response, next: NextFunc
   if (payload.userId) {
     try {
       const state = await getUserAuthState(payload.userId);
-      if (!state || state.disabled || state.approvalStatus !== 'active') {
+      if (!state || state.disabled || state.approvalStatus !== 'active' || Number(payload.authEpoch ?? 0) !== state.authEpoch) {
         return res.status(401).json({ error: 'Account disabled or inactive' });
       }
       if (!payload.aud) {
@@ -424,30 +504,30 @@ export async function authMiddleware(req: Request, res: Response, next: NextFunc
 
 export async function listUsers() {
   const rows = await query<any>(
-    `SELECT u.id, u.username, u.role, u.password_hash,
-            u.display_name, u.affiliation, u.created_at,
+    `SELECT u.id, u.username, u.role, u.disabled,
+            u.display_name, u.affiliation, u.created_at, u.last_login_at, u.last_login_ip,
             u.approval_status, u.approved_at, u.rejected_at, u.rejection_reason,
+            ei.email AS account_email,
+            ei.state AS account_email_status,
             ic.id AS signup_invite_code_id,
             ic.code AS signup_invite_code,
             ic.label AS signup_invite_label,
-            COALESCE(
-              json_agg(DISTINCT jsonb_build_object('id', c.id, 'name', c.customer_name))
-                FILTER (WHERE c.id IS NOT NULL),
-              '[]'::json
-            ) AS customer_vms,
-            COALESCE(
-              json_agg(DISTINCT jsonb_build_object('id', p.id, 'name', p.name, 'role', pm.role))
-                FILTER (WHERE p.id IS NOT NULL),
-              '[]'::json
-            ) AS projects
+            COALESCE(project_access.projects, '[]'::json) AS projects
        FROM users u
        LEFT JOIN signup_invite_codes ic ON ic.id = u.signup_invite_code_id
-       LEFT JOIN user_customer_vms ucv ON ucv.user_id = u.id
-       LEFT JOIN gateway_customers c ON c.id = ucv.customer_id
-       LEFT JOIN project_members pm ON pm.user_id = u.id
-       LEFT JOIN projects p ON p.id = pm.project_id AND (p.archived IS NULL OR p.archived = 0)
-      WHERE u.disabled = 0
-      GROUP BY u.id, ic.id
+       LEFT JOIN LATERAL (
+         SELECT email, state
+           FROM account_email_identities
+          WHERE user_id = u.id AND state IN ('verified','pending')
+          ORDER BY CASE WHEN state = 'verified' THEN 0 ELSE 1 END, created_at DESC
+          LIMIT 1
+       ) ei ON TRUE
+       LEFT JOIN LATERAL (
+         SELECT json_agg(DISTINCT jsonb_build_object('id', p.id, 'name', p.name, 'role', pm.role)) AS projects
+           FROM project_members pm
+           JOIN projects p ON p.id = pm.project_id AND (p.archived IS NULL OR p.archived = 0)
+          WHERE pm.user_id = u.id
+       ) project_access ON TRUE
       ORDER BY u.id`
   );
 
@@ -455,19 +535,21 @@ export async function listUsers() {
     id: r.id,
     username: r.username,
     role: r.role,
+    disabled: Number(r.disabled) === 1,
     approval_status: r.approval_status || 'active',
     display_name: r.display_name,
     affiliation: r.affiliation,
+    account_email: r.account_email ?? null,
+    account_email_status: r.account_email_status ?? 'missing',
     signup_invite_code_id: r.signup_invite_code_id,
     signup_invite_code: r.signup_invite_code,
     signup_invite_label: r.signup_invite_label,
     approved_at: r.approved_at,
     rejected_at: r.rejected_at,
     rejection_reason: r.rejection_reason,
-    customer_vms: r.customer_vms || [],
     projects: r.projects || [],
-    // Decrypt password for admin view; show empty for legacy bcrypt
-    password_plain: isAesEncrypted(r.password_hash) ? decryptPassword(r.password_hash) || '' : '',
+    last_login_at: r.last_login_at ?? null,
+    last_login_ip: r.last_login_ip ?? null,
     created_at: r.created_at,
   }));
 }
@@ -489,11 +571,18 @@ export async function getOwnProfile(userId: number) {
   };
 }
 
-export async function updateUserRole(userId: number, role: string) {
+export async function updateUserRole(userId: number, role: string, actorRole: 'admin' | 'operator'): Promise<boolean> {
   if (!VALID_ROLES.has(role)) {
     throw new Error(`Invalid role: ${role}. Valid roles: ${[...VALID_ROLES].join(', ')}`);
   }
-  await execute('UPDATE users SET role = $1 WHERE id = $2', [role, userId]);
+  // PostgreSQL rechecks this predicate after waiting on a concurrent role promotion.
+  // An operator must not downgrade a user who has since become admin/operator.
+  if (actorRole === 'operator' && !['member', 'viewer', 'guest'].includes(role)) return false;
+  const updated = await execute(actorRole === 'admin'
+    ? 'UPDATE users SET role = $1 WHERE id = $2'
+    : "UPDATE users SET role = $1 WHERE id = $2 AND role IN ('member', 'viewer', 'guest')", [role, userId]);
+  if (updated.changes) invalidateAuthCache(userId);
+  return !!updated.changes;
 }
 
 /**
@@ -512,7 +601,8 @@ export async function updateUserPath(_userId: number, _allowedPath: string) {
 export async function updateUserProfile(
   userId: number,
   fields: { displayName?: string | null; affiliation?: string | null; language?: 'en' | 'ko' | null },
-) {
+  actorRole?: 'admin' | 'operator',
+): Promise<boolean> {
   const sets: string[] = [];
   const vals: any[] = [];
   let i = 1;
@@ -531,9 +621,11 @@ export async function updateUserProfile(
     sets.push(`language = $${i++}`);
     vals.push(fields.language);
   }
-  if (sets.length === 0) return;
+  if (sets.length === 0) return true;
   vals.push(userId);
-  await execute(`UPDATE users SET ${sets.join(', ')} WHERE id = $${i}`, vals);
+  const roleCondition = actorRole === 'operator' ? " AND role IN ('member', 'viewer', 'guest')" : '';
+  const updated = await execute(`UPDATE users SET ${sets.join(', ')} WHERE id = $${i}${roleCondition}`, vals);
+  return !!updated.changes;
 }
 
 /**
@@ -555,35 +647,33 @@ export async function updateUserUsername(
   userId: number,
   newUsername: string,
   changedBy: number | null,
-  opts?: { reason?: string | null },
+  opts?: { reason?: string | null; actorRole?: 'admin' | 'operator' },
 ): Promise<{ oldUsername: string; newUsername: string }> {
   if (!USERNAME_RE.test(newUsername)) {
     throw new InvalidUsernameError(newUsername);
   }
-  const current = await queryOne<{ username: string }>(
-    'SELECT username FROM users WHERE id = $1',
-    [userId],
-  );
-  if (!current) throw new Error(`User ${userId} not found`);
-  const oldUsername = current.username;
-  if (oldUsername === newUsername) return { oldUsername, newUsername };
-
-  const conflict = await queryOne<{ id: number }>(
-    'SELECT id FROM users WHERE username = $1 AND id != $2',
-    [newUsername, userId],
-  );
-  if (conflict) throw new UsernameTakenError(newUsername);
-
-  await transaction(async (client) => {
+  const oldUsername = await transaction(async (client) => {
+    const current = (await client.query<{ username: string; role: string }>(
+      'SELECT username, role FROM users WHERE id = $1 FOR UPDATE', [userId],
+    )).rows[0];
+    if (!current) throw new Error(`User ${userId} not found`);
+    if (opts?.actorRole === 'operator' && !['member', 'viewer', 'guest'].includes(current.role)) throw new UserManagementForbiddenError();
+    if (current.username === newUsername) return current.username;
+    const conflict = (await client.query<{ id: number }>(
+      'SELECT id FROM users WHERE username = $1 AND id != $2', [newUsername, userId],
+    )).rows[0];
+    if (conflict) throw new UsernameTakenError(newUsername);
     await client.query(
-      'UPDATE users SET username = $1, password_changed_at = NOW() WHERE id = $2',
+      'UPDATE users SET username = $1, password_changed_at = NOW(), auth_epoch = auth_epoch + 1 WHERE id = $2',
       [newUsername, userId],
     );
     await client.query(
       'INSERT INTO user_username_history (user_id, old_username, new_username, changed_by, reason) VALUES ($1, $2, $3, $4, $5)',
-      [userId, oldUsername, newUsername, changedBy, opts?.reason ?? null],
+      [userId, current.username, newUsername, changedBy, opts?.reason ?? null],
     );
+    return current.username;
   });
+  if (oldUsername === newUsername) return { oldUsername, newUsername };
 
   // FS rename — workspace/projects/_team/people/<u>.md
   try {
@@ -625,38 +715,40 @@ export async function changeOwnPassword(
   if (!user) return false;
 
   const stored = user.password_hash;
-  let ok = false;
-  if (isAesEncrypted(stored)) {
-    ok = decryptPassword(stored) === oldPassword;
-  } else {
-    ok = verifyBcrypt(oldPassword, stored);
-  }
+  const ok = await verifyStoredPassword(oldPassword, stored);
   if (!ok) return false;
 
-  const encrypted = encryptPassword(newPassword);
-  await execute(
-    'UPDATE users SET password_hash = $1, password_changed_at = NOW() WHERE id = $2',
-    [encrypted, userId],
+  const encrypted = await hashPassword(newPassword);
+  const changed = await execute(
+    'UPDATE users SET password_hash = $1, password_changed_at = NOW(), auth_epoch = auth_epoch + 1 WHERE id = $2 AND password_hash = $3 AND disabled = 0',
+    [encrypted, userId, stored],
   );
+  if (!changed.changes) return false;
   invalidateAuthCache(userId);
   return true;
 }
 
 export async function resetUserPassword(userId: number, newPassword: string) {
-  const encrypted = encryptPassword(newPassword);
-  await execute(
-    'UPDATE users SET password_hash = $1, password_changed_at = NOW() WHERE id = $2',
+  const encrypted = await hashPassword(newPassword);
+  const updated = await execute(
+    'UPDATE users SET password_hash = $1, password_changed_at = NOW(), auth_epoch = auth_epoch + 1 WHERE id = $2 AND disabled = 0',
     [encrypted, userId],
   );
-  invalidateAuthCache(userId);
+  if (updated.changes) invalidateAuthCache(userId);
 }
 
-export async function disableUser(userId: number) {
-  await execute(
-    'UPDATE users SET disabled = 1, password_changed_at = NOW() WHERE id = $1',
-    [userId],
-  );
-  invalidateAuthCache(userId);
+export async function disableUser(userId: number, actorRole: 'admin' | 'operator', actorUserId: number): Promise<'disabled' | 'not_found' | 'forbidden'> {
+  const result = await transaction(async client => {
+    const target = (await client.query<{ role: string }>('SELECT role FROM users WHERE id = $1 FOR UPDATE', [userId])).rows[0];
+    if (!target) return 'not_found' as const;
+    if (actorUserId === userId || (actorRole !== 'admin' && !['member', 'viewer', 'guest'].includes(target.role))) return 'forbidden' as const;
+    await client.query('UPDATE users SET disabled = 1, password_changed_at = NOW() WHERE id = $1', [userId]);
+    await client.query("UPDATE auth_login_otp_challenges SET status = 'cancelled' WHERE user_id = $1 AND status = 'pending'", [userId]);
+    await client.query("UPDATE auth_login_email_enrollments SET status = 'cancelled' WHERE user_id = $1 AND status = 'pending'", [userId]);
+    return 'disabled' as const;
+  });
+  if (result === 'disabled') invalidateAuthCache(userId);
+  return result;
 }
 
 // ───── Account-state cache ─────
@@ -668,13 +760,18 @@ interface AuthCacheEntry {
   disabled: boolean;
   approvalStatus: string;
   role: string;
+  authEpoch: number;
   cachedAt: number;
 }
 const AUTH_CACHE_TTL_MS = 5 * 1000;
 const authCache = new Map<number, AuthCacheEntry>();
+const authReads = new Map<number, { invalidated: boolean; promise: Promise<UserAuthState | null> }>();
 
 export function invalidateAuthCache(userId: number) {
   authCache.delete(userId);
+  const pending = authReads.get(userId);
+  if (pending) pending.invalidated = true;
+  authReads.delete(userId);
 }
 
 export interface UserAuthState {
@@ -682,22 +779,43 @@ export interface UserAuthState {
   disabled: boolean;
   approvalStatus: string;
   role: string;
+  authEpoch: number;
 }
 
 /** Return the current account state used by both HTTP and WebSocket auth. */
 export async function getUserAuthState(userId: number): Promise<UserAuthState | null> {
-  const now = Date.now();
-  const cached = authCache.get(userId);
-  if (cached && now - cached.cachedAt < AUTH_CACHE_TTL_MS) {
-    return cached;
+  // Recheck after awaiting: invalidation can happen even after SQL resolves but
+  // before an authentication caller consumes the result. Bound retries under
+  // repeated mutations; exhaustion throws and the middleware fails closed.
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const cached = authCache.get(userId);
+    if (cached && Date.now() - cached.cachedAt < AUTH_CACHE_TTL_MS) return cached;
+    let pending = authReads.get(userId);
+    if (!pending) {
+      const entry = { invalidated: false, promise: null! as Promise<UserAuthState | null> };
+      entry.promise = Promise.resolve().then(() => readUserAuthState(userId, Date.now(), () => entry.invalidated));
+      authReads.set(userId, entry);
+      pending = entry;
+    }
+    try {
+      const state = await pending.promise;
+      if (!pending.invalidated) return state;
+    } finally {
+      if (authReads.get(userId) === pending) authReads.delete(userId);
+    }
   }
+  throw new Error('Account state changed repeatedly during authentication');
+}
+
+async function readUserAuthState(userId: number, now: number, isInvalidated: () => boolean): Promise<UserAuthState | null> {
   const row = await queryOne<{
     password_changed_at: string | null;
     disabled: number | boolean;
     approval_status: string | null;
     role: string | null;
+    auth_epoch: number;
   }>(
-    'SELECT password_changed_at, disabled, approval_status, role FROM users WHERE id = $1',
+    'SELECT password_changed_at, disabled, approval_status, role, auth_epoch FROM users WHERE id = $1',
     [userId],
   );
   if (!row) return null;
@@ -706,9 +824,10 @@ export async function getUserAuthState(userId: number): Promise<UserAuthState | 
     disabled: row.disabled === true || Number(row.disabled) === 1,
     approvalStatus: row.approval_status || 'active',
     role: row.role || 'member',
+    authEpoch: Number(row.auth_epoch ?? 0),
     cachedAt: now,
   };
-  authCache.set(userId, state);
+  if (!isInvalidated()) authCache.set(userId, state);
   return state;
 }
 
@@ -730,8 +849,8 @@ export async function getUserRole(userId: number): Promise<string | null> {
  * single `allowedPath`. This no longer reads `users.allowed_path`.
  *
  * Active access enforcement is project-centric:
- *   - admin/operator/customer_manager → workspace root
- *   - member/guest/viewer             → workspace/projects/ as a coarse root,
+ *   - admin/operator      → workspace root
+ *   - member/guest/viewer → workspace/projects/ as a coarse root,
  *                                      then project_membership/access guards
  *                                      narrow it to invited projects
  *
@@ -744,7 +863,7 @@ export async function getUserAllowedPath(userId: number): Promise<string> {
     [userId],
   );
   const role = row?.role || 'member';
-  if (role === 'admin' || role === 'operator' || role === 'customer_manager') {
+  if (role === 'admin' || role === 'operator') {
     return config.workspaceRoot;
   }
   // member / guest / viewer / unknown → restrict to projects/ by default
@@ -790,7 +909,7 @@ export async function verifyWsToken(token: string | null): Promise<JwtPayload | 
   const payload = verifyToken(token);
   if (!payload?.userId) return null;
   const state = await getUserAuthState(payload.userId);
-  if (!state || state.disabled || state.approvalStatus !== 'active') return null;
+  if (!state || state.disabled || state.approvalStatus !== 'active' || Number(payload.authEpoch ?? 0) !== state.authEpoch) return null;
   if (!payload.aud && (payload as any).iat) {
     const tokenIssuedAtMs = (payload as any).iat * 1000;
     if (state.passwordChangedAt > tokenIssuedAtMs + 2000) return null;

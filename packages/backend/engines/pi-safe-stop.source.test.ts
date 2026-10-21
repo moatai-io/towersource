@@ -29,16 +29,22 @@ describe('Pi safe stop contract', () => {
     expect(engine).not.toContain('stopRuntimeBoxService');
   });
 
-  it('force stop aborts immediately without entering the safe-boundary path', () => {
+  it('force stop aborts immediately without requiring durable turn bookkeeping', () => {
     const handlerStart = ws.indexOf('async function handleTurnStopRequest');
     const handlerEnd = ws.indexOf('\nasync function handleAbort', handlerStart);
     const handler = ws.slice(handlerStart, handlerEnd);
+    const forceStart = handler.indexOf("if (mode === 'force')");
+    const missingTurnGuard = handler.indexOf('if (!rootTurnId)');
 
     expect(handler).toContain("mode === 'force'");
     expect(handler).toContain('abortSessionEverywhere(sessionId)');
     expect(handler).toContain("settleAgentTurnStop({ rootTurnId, mode: 'force' })");
+    expect(handler).toContain("data: { type: 'abort_session_sync' }");
     expect(handler).toContain("state: 'stopped_forced'");
-    expect(handler.indexOf("mode === 'force'")).toBeLessThan(handler.indexOf('engine.requestStopAtBoundary'));
+    expect(forceStart).toBeGreaterThanOrEqual(0);
+    expect(forceStart).toBeLessThan(missingTurnGuard);
+    expect(forceStart).toBeLessThan(handler.indexOf('requestAgentTurnStop'));
+    expect(forceStart).toBeLessThan(handler.indexOf('engine.requestStopAtBoundary'));
   });
 
   it('persists and broadcasts requested and terminal stop states', () => {

@@ -25,6 +25,8 @@ export interface ConfirmDialogProps {
   confirmLabel?: string;
   /** Cancel button label. Default '취소'. */
   cancelLabel?: string;
+  /** Hide the cancel action for informational alerts. */
+  hideCancel?: boolean;
   /** 'danger' renders the confirm button red — for destructive actions. */
   variant?: ConfirmVariant;
   /** When non-null, dialog acts as a prompt (text input). The string is the placeholder. */
@@ -42,6 +44,7 @@ export function ConfirmDialog({
   message,
   confirmLabel,
   cancelLabel,
+  hideCancel = false,
   variant = 'default',
   promptPlaceholder = null,
   promptInitialValue = '',
@@ -129,14 +132,16 @@ export function ConfirmDialog({
           )}
         </div>
         <div className="flex justify-end gap-2 px-4 py-3 border-t border-surface-700">
-          <button
-            type="button"
-            data-dialog-role="cancel"
-            onClick={cancel}
-            className="px-3 py-1.5 rounded-lg border border-surface-600 hover:border-surface-500 text-gray-300 text-[14px] font-medium transition-colors"
-          >
-            {resolvedCancelLabel}
-          </button>
+          {!hideCancel && (
+            <button
+              type="button"
+              data-dialog-role="cancel"
+              onClick={cancel}
+              className="px-3 py-1.5 rounded-lg border border-surface-600 hover:border-surface-500 text-gray-300 text-[14px] font-medium transition-colors"
+            >
+              {resolvedCancelLabel}
+            </button>
+          )}
           <button
             ref={confirmButtonRef}
             type="button"

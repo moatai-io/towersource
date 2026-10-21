@@ -1,106 +1,65 @@
-import { describe, expect, it } from 'vitest';
-import {
-  createPiVisualContextTransform,
-  piFreshVisualByteBudget,
-  sanitizePiVisualContextForProvider,
-} from './visual-context-lifecycle.js';
-
-const image = (data: string) => ({ type: 'image', data, mimeType: 'image/png' });
-const toolResult = (id: string, data: string) => ({
-  role: 'toolResult',
-  toolCallId: id,
-  toolName: 'pdf_view',
-  content: [{ type: 'text', text: `[PDF ${id}]` }, image(data)],
-  timestamp: Date.now(),
-});
-
-describe('sanitizePiVisualContextForProvider', () => {
-  it('keeps the newest PDF result for immediate vision and omits older rendered pages', () => {
-    const first = toolResult('old', 'A'.repeat(4_000_000));
-    const latest = toolResult('latest', 'B'.repeat(3_000_000));
-    const messages = [
-      { role: 'user', content: [{ type: 'text', text: 'review pages' }] },
-      first,
-      { role: 'assistant', content: [{ type: 'text', text: 'checking more pages' }] },
-      latest,
-    ];
-
-    const sanitized = sanitizePiVisualContextForProvider(messages);
-    expect(sanitized).not.toBe(messages);
-    expect(sanitized[1].content).toEqual([
-      { type: 'text', text: '[PDF old]' },
-      { type: 'text', text: expect.stringContaining('previous visual payload omitted') },
-    ]);
-    expect(sanitized[3]).toBe(latest);
-    expect(sanitized[3].content[1].data).toHaveLength(3_000_000);
-    expect(first.content[1].data).toHaveLength(4_000_000);
+import { afterEach, describe, it, expect, vi } from 'vitest';
+import { createPiVisualContextTransform, PI_FRESH_TOOL_TEXT_BYTES, PI_HISTORICAL_TOOL_TEXT_BYTES, PI_HISTORICAL_TOOL_TEXT_TOTAL_BYTES } from './visual-context-lifecycle.js';
+afterEach(() => vi.unstubAllEnvs());
+describe('native image history and bounded tool text', () => {
+  it('retains three parallel images, user images and history across replies and retries', async () => {
+    const images = ['a','b','c'].map(id => ({role:'toolResult',toolCallId:id,content:[{type:'image',mimeType:'image/png',data:id}]}));
+    const source = [{role:'user',content:[{type:'image',mimeType:'image/png',data:'user'}]}, ...images];
+    const transform = createPiVisualContextTransform();
+    expect(await transform(source)).toEqual(source);
+    const next = [...source,{role:'assistant',content:[{type:'text',text:'compare'}]},{role:'toolResult',toolCallId:'other',content:[{type:'text',text:'ok'}]}];
+    expect(await transform(next)).toEqual(next);
+    expect(await transform(next)).toEqual(next);
+    expect(images[0].content[0].type).toBe('image');
+  });
+  it('bounds large text results across a long tool loop without altering persisted evidence or assistant calls', async () => {
+    const transform = createPiVisualContextTransform();
+    const historical = Array.from({ length: 120 }, (_, i) => ({
+      role: 'toolResult', toolCallId: `old-${i}`, toolName: 'bash',
+      content: [{ type: 'text', text: `old-${i} ${'x '.repeat(16_000)}` }],
+    }));
+    const assistant = { role: 'assistant', content: [{ type: 'toolCall', id: 'fresh', name: 'bash', arguments: { command: 'inspect' } }] };
+    const fresh = { role: 'toolResult', toolCallId: 'fresh', toolName: 'bash', content: [{ type: 'text', text: 'important header\n' + 'z '.repeat(100_000) + '\nimportant footer' }] };
+    const original = [...historical, assistant, fresh];
+    const prepared = await transform(original);
+    expect(Buffer.byteLength(JSON.stringify(prepared), 'utf8')).toBeLessThan(PI_HISTORICAL_TOOL_TEXT_TOTAL_BYTES + PI_FRESH_TOOL_TEXT_BYTES + 60_000);
+    expect(prepared[0].content[0].text).toBe('');
+    expect(prepared[120]).toBe(assistant);
+    expect(prepared[121].content[0].text).toContain('important header');
+    expect(prepared[121].content[0].text).toContain('important footer');
+    expect(prepared[121].toolCallId).toBe('fresh');
+    expect(fresh.content[0].text).toHaveLength(200_000 + 'important header\n\nimportant footer'.length);
+    expect(historical[0].content[0].text).toContain('x '.repeat(16_000));
+    expect((await transform(original))[121].content[0].text).toBe(prepared[121].content[0].text);
   });
 
-  it('omits all historical visual payloads on a later text-only turn', () => {
-    const messages = [
-      toolResult('pdf', 'A'.repeat(4_000_000)),
-      { role: 'assistant', content: [{ type: 'text', text: 'PDF checked' }] },
-      { role: 'user', content: [{ type: 'text', text: 'continue' }] },
-    ];
-
-    const sanitized = sanitizePiVisualContextForProvider(messages, 0);
-    expect(JSON.stringify(sanitized)).not.toContain('A'.repeat(100));
-    expect(JSON.stringify(sanitized)).toContain('previous visual payload omitted');
+  it('budgets JSON-escaped text and keeps the head and tail of a newline-heavy tool result', async () => {
+    const text = 'important first line\n' + 'line "\\value"\n'.repeat(100_000) + 'important final line';
+    const tool = { role: 'toolResult', toolCallId: 'lines', content: [{ type: 'text', text }] };
+    const [prepared] = await createPiVisualContextTransform()([tool]);
+    expect(Buffer.byteLength(JSON.stringify(prepared.content[0].text), 'utf8')).toBeLessThanOrEqual(PI_FRESH_TOOL_TEXT_BYTES);
+    expect(prepared.content[0].text).toContain('important first line');
+    expect(prepared.content[0].text).toContain('important final line');
+    expect(prepared.content[0].text).toContain('fresh tool text shortened for provider request');
+    expect(tool.content[0].text).toBe(text);
   });
 
-  it('also removes non-tool historical images while preserving source messages', () => {
-    const sourceImage = image('C'.repeat(2_000_000));
-    const messages = [{ role: 'user', content: [sourceImage] }];
-    const sanitized = sanitizePiVisualContextForProvider(messages);
-    expect(sanitized[0].content[0].type).toBe('text');
-    expect(messages[0].content[0]).toBe(sourceImage);
+  it('keeps the latest unanswered tool output across a retry but retires it after assistant reply', async () => {
+    const transform = createPiVisualContextTransform();
+    const tool = { role: 'toolResult', toolCallId: 'retry', content: [{ type: 'text', text: 'fresh-header\n' + 'line\n'.repeat(50_000) + 'fresh-footer' }] };
+    const source = [{ role: 'assistant', content: [{ type: 'toolCall', id: 'retry' }] }, tool];
+    const first = await transform(source);
+    expect((await transform(source))[1].content[0].text).toBe(first[1].content[0].text);
+    const retired = await transform([...source, { role: 'assistant', content: [{ type: 'text', text: 'checked' }] }]);
+    expect(Buffer.byteLength(JSON.stringify(retired[1].content[0].text))).toBeLessThanOrEqual(PI_HISTORICAL_TOOL_TEXT_BYTES);
+    expect(retired[1].content[0].text).toContain('older tool text shortened for provider request');
   });
 
-  it('exposes a bounded visual tool result to one provider request only', async () => {
-    const transform = createPiVisualContextTransform({ maxFreshImageBytes: 1024 });
-    const pdf = toolResult('pdf-call', Buffer.alloc(512).toString('base64'));
-    const first = await transform([pdf]);
-    expect(first[0].content[1].type).toBe('image');
-
-    const later = await transform([pdf, { role: 'assistant', content: [{ type: 'text', text: 'checked' }] }]);
-    expect(later[0].content[1].type).toBe('text');
-    expect(JSON.stringify(later)).toContain('previous visual payload omitted');
+  it('removes opaque base64 from tool text even when the total text was under the fresh limit', async () => {
+    const text = '<svg href="data:image/png;base64,' + 'A'.repeat(10_000) + '">source</svg>';
+    const result = await createPiVisualContextTransform()([{ role: 'toolResult', toolCallId: 'svg', content: [{ type: 'text', text }] }]);
+    expect(result[0].content[0].text).toContain('embedded binary omitted');
+    expect(result[0].content[0].text).not.toContain('A'.repeat(100));
   });
 
-  it('omits an oversized newest visual result before its first provider request', async () => {
-    const transform = createPiVisualContextTransform({ maxFreshImageBytes: 1024 });
-    const pdf = toolResult('pdf-call', Buffer.alloc(1025).toString('base64'));
-
-    const first = await transform([pdf]);
-
-    expect(first[0].content[1]).toEqual({
-      type: 'text',
-      text: expect.stringContaining('fresh visual payload omitted by provider context budget'),
-    });
-    expect(JSON.stringify(first)).not.toContain(pdf.content[1].data.slice(0, 100));
-  });
-
-  it('applies the byte budget across every image in the newest tool result', async () => {
-    const transform = createPiVisualContextTransform({ maxFreshImageBytes: 1000 });
-    const multiPage = {
-      ...toolResult('pdf-pages', Buffer.alloc(600).toString('base64')),
-      content: [
-        { type: 'text', text: '[PDF pages]' },
-        image(Buffer.alloc(600).toString('base64')),
-        image(Buffer.alloc(600, 1).toString('base64')),
-      ],
-    };
-
-    const first = await transform([multiPage]);
-
-    expect(first[0].content[1].type).toBe('image');
-    expect(first[0].content[2].type).toBe('text');
-    expect(first[0].content[2].text).toContain('remaining 400 bytes');
-  });
-
-  it('scales the fresh visual budget with the model context window and caps it', () => {
-    expect(piFreshVisualByteBudget({ contextWindow: 353_400 })).toBe(512 * 1024);
-    expect(piFreshVisualByteBudget({ contextWindow: 760_000 })).toBeGreaterThan(512 * 1024);
-    expect(piFreshVisualByteBudget({ contextWindow: 10_000_000 })).toBe(2 * 1024 * 1024);
-  });
 });

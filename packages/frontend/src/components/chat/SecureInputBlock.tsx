@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useSessionStore } from '../../stores/session-store';
+import { useChatStore } from '../../stores/chat-store';
 
 interface CredentialVaultOptions {
   id?: string;
@@ -102,6 +103,7 @@ function SecureInputForm({ spec }: { spec: SecureInputSpec }) {
   const [status, setStatus] = useState<'idle' | 'saving' | 'done' | 'error'>('idle');
   const [errorMsg, setErrorMsg] = useState('');
   const [savedCount, setSavedCount] = useState(0);
+  const saveInFlight = useRef(false);
 
   const allRequiredFilled = spec.fields.every((f, index) => {
     const key = typeof f.key === 'string' && f.key.trim() ? f.key.trim() : `SECRET_${index + 1}`;
@@ -109,6 +111,10 @@ function SecureInputForm({ spec }: { spec: SecureInputSpec }) {
   });
 
   const handleSave = async () => {
+    if (saveInFlight.current || status === 'done') return;
+    saveInFlight.current = true;
+    // Capture the originating session before any asynchronous save requests.
+    const resumeSessionId = activeSessionId;
     setStatus('saving');
     setErrorMsg('');
     try {
@@ -147,24 +153,32 @@ function SecureInputForm({ spec }: { spec: SecureInputSpec }) {
         for (const [key, value] of entries) {
           const field = spec.fields.find(f => f.key === key)!;
           const credential = credentialOptionsFor(spec, field, spec.fields.length);
-          const credentialPath = credential.scope === 'workspace'
-            ? '/api/credential-vault/credentials/api-key'
-            : credential.scope === 'personal'
-              ? '/api/credential-vault/my/credentials/api-key'
-              : `/api/credential-vault/projects/${encodeURIComponent(resolvedProjectId!)}/credentials/api-key`;
+          const googleJson = credential.scope === 'project' && credential.provider === 'google' && field?.inputType === 'json';
+          const credentialPath = googleJson
+            ? `/api/credential-vault/projects/${encodeURIComponent(resolvedProjectId!)}/credentials/google-json`
+            : credential.scope === 'workspace'
+              ? '/api/credential-vault/credentials/api-key'
+              : credential.scope === 'personal'
+                ? '/api/credential-vault/my/credentials/api-key'
+                : `/api/credential-vault/projects/${encodeURIComponent(resolvedProjectId!)}/credentials/api-key`;
+          const body = googleJson ? {
+            id: credential.id,
+            displayName: credential.displayName,
+            credentialJson: value,
+          } : {
+            id: credential.id,
+            provider: credential.provider,
+            displayName: credential.displayName,
+            secretName: credential.secretName,
+            secretValue: value,
+            defaultEnvName: credential.envName,
+            scope: credential.scope,
+            metadata: credential.metadata,
+          };
           const res = await fetch(credentialPath, {
             method: 'POST',
             headers,
-            body: JSON.stringify({
-              id: credential.id,
-              provider: credential.provider,
-              displayName: credential.displayName,
-              secretName: credential.secretName,
-              secretValue: value,
-              defaultEnvName: credential.envName,
-              scope: credential.scope,
-              metadata: credential.metadata,
-            }),
+            body: JSON.stringify(body),
           });
           const data = await res.json().catch(() => ({}));
           if (!res.ok) throw new Error(data.error || t('credentialVaultSaveFailed', { id: credential.id }));
@@ -200,9 +214,17 @@ function SecureInputForm({ spec }: { spec: SecureInputSpec }) {
       setSavedCount(entries.length);
       setStatus('done');
       setValues(prev => Object.fromEntries(Object.keys(prev).map(key => [key, ''])));
+      if (isCredentialVault && entries.length > 0 && resumeSessionId) {
+        // Reuse the persisted per-session queue: wait for the current turn to
+        // finish rather than steering an engine with stale credential bindings.
+        // Never interpolate fields, provider errors, or secret values here.
+        useChatStore.getState().enqueueMessage(resumeSessionId, t('secureInputResumeRequest'));
+      }
     } catch (err: any) {
       setErrorMsg(err.message || t('secureInputSaveFailed'));
       setStatus('error');
+    } finally {
+      saveInFlight.current = false;
     }
   };
 
@@ -221,7 +243,14 @@ function SecureInputForm({ spec }: { spec: SecureInputSpec }) {
   }
 
   return (
-    <div className="my-2 rounded-lg border border-surface-700/40 bg-surface-900/60 p-4">
+    <div
+      className="my-2 rounded-lg border border-surface-700/40 bg-surface-900/60 p-4"
+      data-form-type="other"
+      data-1p-ignore="true"
+      data-bwignore="true"
+      data-lpignore="true"
+      data-protonpass-ignore="true"
+    >
       {/* Header */}
       <div className="flex items-center gap-2 mb-3">
         <svg className="tone-warning tone-text w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -243,23 +272,33 @@ function SecureInputForm({ spec }: { spec: SecureInputSpec }) {
               </label>
               {field.inputType === 'json' ? (
                 <textarea
+                  name={`tower-secret-json-${field.key}`}
                   value={values[field.key] || ''}
                   onChange={(e) => setValues(prev => ({ ...prev, [field.key]: e.target.value }))}
                   placeholder={t('serviceAccountJsonPlaceholder')}
                   rows={8}
                   className="w-full resize-y rounded-md border border-surface-700 bg-surface-800 px-3 py-2 font-mono text-[14px] text-surface-200 outline-none transition-colors placeholder:text-surface-600 focus:border-primary-500 focus-visible:ring-2 focus-visible:ring-primary-400"
-                  autoComplete="off"
-                  data-1p-ignore
+                  autoComplete="new-password"
+                  data-form-type="other"
+                  data-1p-ignore="true"
+                  data-bwignore="true"
+                  data-lpignore="true"
+                  data-protonpass-ignore="true"
                 />
               ) : (
                 <input
                   type="password"
+                  name={`tower-secret-value-${field.key}`}
                   value={values[field.key] || ''}
                   onChange={(e) => setValues(prev => ({ ...prev, [field.key]: e.target.value }))}
                   placeholder={field.key}
                   className="min-h-11 w-full rounded-md border border-surface-700 bg-surface-800 px-3 py-1.5 font-mono text-[14px] text-surface-200 outline-none transition-colors placeholder:text-surface-600 focus:border-primary-500 focus-visible:ring-2 focus-visible:ring-primary-400"
-                  autoComplete="off"
-                  data-1p-ignore
+                  autoComplete="new-password"
+                  data-form-type="other"
+                  data-1p-ignore="true"
+                  data-bwignore="true"
+                  data-lpignore="true"
+                  data-protonpass-ignore="true"
                 />
               )}
               {credential && (

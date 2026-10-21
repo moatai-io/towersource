@@ -173,11 +173,13 @@ aliases: [/미팅준비, /meeting_prep]
     });
   });
 
-  it('loads workflow command manifests from project .project/commands before .tower/commands', () => {
+  it('loads project commands/ before compatibility command folders and rejects alias collisions', () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tower-command-registry-'));
+    fs.mkdirSync(path.join(root, 'commands'), { recursive: true });
     fs.mkdirSync(path.join(root, '.project', 'commands'), { recursive: true });
     fs.mkdirSync(path.join(root, '.tower', 'commands'), { recursive: true });
-    fs.writeFileSync(path.join(root, '.project', 'commands', 'handoff.command.yaml'), `id: handoff-session\ncanonical: /handoff session\naliases:\n  - /인계세션\ndisplayName: 인계 세션\ndescription: 현재 대화를 새 세션으로 인계합니다.\nrisk: medium\ndispatch:\n  target: handoff.session\n`);
+    fs.writeFileSync(path.join(root, 'commands', 'handoff.command.yaml'), `id: handoff-session\ncanonical: /handoff session\naliases:\n  - /인계세션\ndisplayName: 인계 세션\ndescription: 현재 대화를 새 세션으로 인계합니다.\nrisk: medium\ndispatch:\n  target: handoff.session\n`);
+    fs.writeFileSync(path.join(root, '.project', 'commands', 'alias-duplicate.command.yaml'), `id: project-handoff\ncanonical: /project handoff\naliases:\n  - /인계세션\ndescription: Alias collision should be rejected\ndispatch:\n  target: project.handoff\n`);
     fs.writeFileSync(path.join(root, '.tower', 'commands', 'duplicate.command.yaml'), `id: tower-handoff\ncanonical: /handoff session\ndescription: Managed duplicate should be shadowed\ndispatch:\n  target: tower.handoff\n`);
 
     const entries = loadWorkflowCommandEntries(root, 'project');

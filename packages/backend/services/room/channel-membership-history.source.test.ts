@@ -8,7 +8,7 @@ const migration = fs.readFileSync(path.resolve(import.meta.dirname, '../../db/mi
 
 describe('channel membership provenance and immutable history', () => {
   it('keeps channel listing read-only', () => {
-    const listRooms = manager.slice(manager.indexOf('export async function listRooms'), manager.indexOf('export async function updateRoom'));
+    const listRooms = manager.slice(manager.indexOf('export async function listRooms'), manager.indexOf('export interface RoomMembershipEvent'));
     expect(listRooms).not.toContain('INSERT INTO room_members');
     expect(listRooms).toContain('Listing is read-only');
   });
@@ -20,10 +20,11 @@ describe('channel membership provenance and immutable history', () => {
     expect(migration).toContain("'legacy_backfilled'");
   });
 
-  it('records joins, rejoins, removals, self-leaves, and role changes', () => {
-    expect(manager).toContain("hadHistory.rowCount ? 'rejoined' : 'joined'");
-    expect(manager).toContain("audit.selfLeave ? 'left' : 'removed'");
-    expect(manager).toContain("'role_changed'");
+  it('keeps historical provenance readable without runtime mutation helpers', () => {
+    expect(manager).toContain('export async function getMembershipEvents');
+    expect(manager).not.toContain('export async function addMember');
+    expect(manager).not.toContain('export async function removeMember');
+    expect(manager).not.toContain('export async function updateMemberRole');
   });
 
   it('preserves provenance for archive while retiring manual membership mutation routes', () => {

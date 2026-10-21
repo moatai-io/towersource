@@ -18,7 +18,13 @@ import { promises as fs } from 'fs';
 import { Type } from '@sinclair/typebox';
 import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
 import type { AgentToolResult } from '@earendil-works/pi-coding-agent';
-import { prepareFileRepresentation, requireDetectedMime } from '../services/content-safety/file-representation-gateway.js';
+import {
+  prepareFileRepresentation,
+  requireDetectedMime,
+  withPreparedLocalFile,
+  type FileRepresentationSource,
+} from '../services/content-safety/file-representation-gateway.js';
+import { preparePdfVisualBatch, PDF_MODEL_BATCH_PAGES } from './pi/pdf-visual-batch.js';
 import { applyModelOutputBudget } from '../services/content-safety/model-output-budget-gateway.js';
 
 export interface PdfViewContext {
@@ -27,6 +33,11 @@ export interface PdfViewContext {
   userId?: number;
   userRole?: string;
   projectId?: string;
+  projectRoot?: string;
+  /** Already-authorized Project file source; its methods recheck current access on every operation. */
+  projectSource?: FileRepresentationSource;
+  /** Test seam for the renderer; production callers use renderPdfToCachedImages. */
+  renderPdf?: typeof renderPdfToCachedImages;
 }
 
 export interface RenderPdfArgs {
@@ -34,6 +45,9 @@ export interface RenderPdfArgs {
   path: string;
   pages?: string;
   dpi?: number;
+  /** Stable authority-owned identity for staged sources; avoids temp-path cache churn. */
+  cacheIdentity?: string;
+  modelBatch?: boolean;
 }
 
 export interface RenderPdfResult {
@@ -43,6 +57,8 @@ export interface RenderPdfResult {
   dpi: number;
   cacheDir: string;
   cacheHit: boolean;
+  sourceVersion?: string;
+  requestedPages?: number[];
   images: Array<{ page: number; path: string; mimeType: 'image/png' }>;
 }
 
@@ -58,12 +74,13 @@ const PdfViewParams = Type.Object({
   path: Type.String({
     minLength: 1,
     maxLength: 2000,
-    description: 'PDF path to view. Relative paths resolve from the current session cwd.',
+    description: 'PDF path or original session://attachments/ URI. Relative Project paths resolve from the current session cwd.',
   }),
   pages: Type.Optional(Type.String({
     maxLength: 100,
-    description: 'Pages to render, 1-based. Examples: "all", "1", "1-3", "1,3,5". Default: all, capped at 100 pages per call.',
+    description: 'Pages to render, 1-based. Examples: "all", "1", "1-3", "1,3,5". Default: all requested; returns at most two pages in a batch. Results are batched by page count and image bytes; follow returned coverage/nextCall until all requested pages are handled.',
   })),
+  pin: Type.Optional(Type.Boolean({ description: 'Keep comparison/editing pixels beyond the recent 8-page window for this user task. Release with the PDF unpin marker after use.' })),
   dpi: Type.Optional(Type.Integer({
     minimum: 72,
     maximum: 300,
@@ -75,10 +92,10 @@ function resolveInputPath(inputPath: string, cwd: string): string {
   return path.isAbsolute(inputPath) ? path.resolve(inputPath) : path.resolve(cwd, inputPath);
 }
 
-function parsePages(spec: string, total: number): number[] {
+function parsePages(spec: string, total: number, limit = MAX_PAGES_PER_CALL): number[] {
   const normalizedSpec = spec.trim().toLowerCase();
   if (normalizedSpec === 'all' || normalizedSpec === '*') {
-    return Array.from({ length: Math.min(total, MAX_PAGES_PER_CALL) }, (_, i) => i + 1);
+    return Array.from({ length: Math.min(total, limit) }, (_, i) => i + 1);
   }
 
   const out: number[] = [];
@@ -104,7 +121,7 @@ function parsePages(spec: string, total: number): number[] {
     if (seen.has(p)) continue;
     seen.add(p);
     unique.push(p);
-    if (unique.length >= MAX_PAGES_PER_CALL) break;
+    if (unique.length >= limit) break;
   }
   return unique;
 }
@@ -114,7 +131,7 @@ async function statForKey(pdfPath: string): Promise<{ size: number; mtimeMs: num
   return { size: st.size, mtimeMs: st.mtimeMs };
 }
 
-function cacheKey(input: { pdfPath: string; size: number; mtimeMs: number; pages: string; dpi: number }): string {
+function cacheKey(input: { pdfPath: string; size: number; mtimeMs: number; pages: string; dpi: number; cacheIdentity?: string }): string {
   return crypto.createHash('sha256')
     .update(JSON.stringify(input))
     .digest('hex')
@@ -227,19 +244,33 @@ async function renderMissingPages(args: {
 export async function renderPdfToCachedImages(args: RenderPdfArgs): Promise<RenderPdfResult> {
   await maybeCleanupPdfViewCache();
   const pdfPath = resolveInputPath(args.path, args.cwd);
-  if (!pdfPath.toLowerCase().endsWith('.pdf')) {
-    throw new Error('pdf_view only accepts .pdf files.');
-  }
+  // MIME detection already accepts extensionless PDFs. The renderer must not
+  // contradict it; inspect a bounded header instead of trusting the filename.
+  const handle = await fs.open(pdfPath, 'r');
+  try {
+    const header = Buffer.alloc(1024);
+    const { bytesRead } = await handle.read(header, 0, header.length, 0);
+    if (!header.subarray(0, bytesRead).includes(Buffer.from('%PDF-'))) throw new Error('pdf_view requires PDF content.');
+  } finally { await handle.close(); }
 
   const dpi = args.dpi || DEFAULT_DPI;
   const pagesSpec = args.pages || DEFAULT_PAGES;
   const [stat, pageCount] = await Promise.all([statForKey(pdfPath), getPageCount(pdfPath)]);
   if (!pageCount) throw new Error('PDF has no readable pages.');
 
-  const pages = parsePages(pagesSpec, pageCount);
+  const requestedPages = args.modelBatch && ['all', '*'].includes(pagesSpec.trim().toLowerCase())
+    ? Array.from({ length: pageCount }, (_, index) => index + 1) : parsePages(pagesSpec, pageCount, args.modelBatch ? pageCount : MAX_PAGES_PER_CALL);
+  const pages = args.modelBatch ? requestedPages.slice(0, PDF_MODEL_BATCH_PAGES) : requestedPages;
   if (pages.length === 0) throw new Error(`No valid pages selected from "${pagesSpec}" for a ${pageCount}-page PDF.`);
 
-  const key = cacheKey({ pdfPath, size: stat.size, mtimeMs: stat.mtimeMs, pages: pages.join(','), dpi });
+  const key = cacheKey({
+    pdfPath: args.cacheIdentity ? '' : pdfPath,
+    size: stat.size,
+    mtimeMs: args.cacheIdentity ? 0 : stat.mtimeMs,
+    pages: pages.join(','),
+    dpi,
+    cacheIdentity: args.cacheIdentity,
+  });
   const cacheDir = path.join(CACHE_ROOT, key);
   await fs.mkdir(cacheDir, { recursive: true });
 
@@ -269,6 +300,9 @@ export async function renderPdfToCachedImages(args: RenderPdfArgs): Promise<Rend
     dpi,
     cacheDir,
     cacheHit,
+    requestedPages,
+    sourceVersion: cacheKey({ pdfPath: args.cacheIdentity ? '' : pdfPath, cacheIdentity: args.cacheIdentity,
+      size: stat.size, mtimeMs: args.cacheIdentity ? 0 : stat.mtimeMs, pages: '', dpi: 0 }),
     images: pages.map((page, i) => ({ page, path: imagePaths[i], mimeType: 'image/png' as const })),
   };
 }
@@ -304,6 +338,8 @@ export function createPdfViewTool(ctx: PdfViewContext): ToolDefinition {
     description: [
       'View PDF pages as images for LLM vision analysis.',
       'Use this for scanned PDFs, slide decks, drawings, forms, visually laid out reports, or any PDF where layout matters.',
+      'For session attachments pass the original session://attachments/ URI directly. Do not pass its temporary host path or require Project storage.',
+      'For multi-page work record findings and unfinished pages, then follow coverage.nextCall. A batch result is not the whole document; reacquire older pages with pdf_view for comparisons.',
       'Rendered pages are cached in Tower internal cache and are not written into the project folder.',
     ].join(' '),
     promptSnippet: 'View PDF pages by rendering them to internal cached images and sending them to LLM vision.',
@@ -314,29 +350,42 @@ export function createPdfViewTool(ctx: PdfViewContext): ToolDefinition {
       'For detailed PDF reading, page-range, batching, and table-extraction rules, use runtime_guide_read with name="pdf-analysis".',
     ],
     parameters: PdfViewParams,
-    async execute(_toolCallId: string, params: { path: string; pages?: string; dpi?: number }) {
+    async execute(_toolCallId: string, params: { path: string; pages?: string; dpi?: number; pin?: boolean }) {
       try {
         const prepared = requireDetectedMime(await prepareFileRepresentation(params.path, {
           cwd: ctx.cwd,
           sessionId: ctx.sessionId,
           userId: ctx.userId,
+          ...(ctx.projectSource ? { projectRoot: ctx.projectRoot, projectSource: ctx.projectSource } : {}),
         }), ['application/pdf'], 'pdf_view');
-        const rendered = await renderPdfToCachedImages({
-          cwd: ctx.cwd,
-          path: prepared.path,
-          pages: params.pages,
-          dpi: params.dpi,
+        const rendered = await withPreparedLocalFile(prepared, ctx.projectSource, 100 * 1024 * 1024, async (localPath, metadata) => {
+          const result = await (ctx.renderPdf || renderPdfToCachedImages)({
+            cwd: ctx.cwd,
+            path: localPath,
+            pages: params.pages || 'all',
+            modelBatch: true,
+            dpi: params.dpi,
+            cacheIdentity: metadata.sha256 ? `${prepared.temporary ? prepared.source : prepared.path}:${metadata.sha256}` : undefined,
+          });
+          return { ...result, pdfPath: prepared.temporary ? params.path : prepared.path };
         });
-        const budgeted = applyModelOutputBudget(await pdfViewResultContent(rendered));
+        const batch = await preparePdfVisualBatch(rendered, { pinned: params.pin });
+        const content = await pdfViewResultContent(batch.rendered);
+        content.push({ type: 'text', text: batch.notice });
+        const budgeted = applyModelOutputBudget(content);
         return {
           content: budgeted.content,
+          ...(batch.reference.pages.length === 0 ? { isError: true } : {}),
           details: {
-            pdfViewed: true,
+            pdfViewed: batch.reference.pages.length > 0,
+            visualReference: batch.reference,
+            coverage: batch.coverage,
             pageCount: rendered.pageCount,
-            pages: rendered.pages,
+            pages: batch.coverage.deliveredPages,
             dpi: rendered.dpi,
             cacheHit: rendered.cacheHit,
             cacheDir: rendered.cacheDir,
+            projectStaged: Boolean(ctx.projectSource),
             outputBudget: budgeted,
           },
         };

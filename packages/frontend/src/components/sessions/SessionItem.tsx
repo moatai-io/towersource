@@ -7,13 +7,14 @@ import React, {
 } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
+import { useConfirm } from "../../hooks/useDialog";
 import type { SessionMeta } from "../../stores/session-store";
 import { useSessionStore } from "../../stores/session-store";
 import { useChatStore } from "../../stores/chat-store";
 import { useFileStore } from "../../stores/file-store";
 import type { Project } from "../../stores/project-store";
 import { toastSuccess, toastError } from "../../utils/toast";
-import { prefetchSessionMessages } from "../../App";
+import { prefetchSessionMessages } from "../../features/session-prefetch/prefetchSessionMessages";
 import { RelatedSessionsPopover } from "./RelatedSessionsPopover";
 import { getCurrentRole } from "../../utils/auth";
 import { RunIndicator } from "../common/RunIndicator";
@@ -24,9 +25,9 @@ import {
 import { useSettingsStore } from "../../stores/settings-store";
 import { AgentIdentityAvatar } from "../../features/agent-profile/AgentIdentityAvatar";
 import { serverNowMs } from "../../utils/server-clock";
-import { saveLongContextModel } from "./long-context-toggle";
+import { AgentSessionBadge } from "../../features/agent-sessions/AgentSessionBadge";
+import { FadeOverflowText } from "../common/FadeOverflowText";
 
-const DEFAULT_CONTEXT_MODEL_USED = "litellm-responses/smartest";
 const LONG_CONTEXT_MODEL_USED = "litellm-responses/smartest-long";
 
 function isLongContextSessionModel(modelUsed?: string | null): boolean {
@@ -58,11 +59,11 @@ function relativeTime(dateStr: string): string {
   if (isNaN(diff)) return "";
   const mins = Math.floor(diff / 60000);
   if (mins < 1) return "now";
-  if (mins < 60) return `~${mins}m`;
+  if (mins < 60) return `${mins}m`;
   const hours = diff / 3600000;
-  if (hours < 24) return `~${Math.round(hours * 10) / 10}h`;
+  if (hours < 24) return `${Math.round(hours * 10) / 10}h`;
   const days = hours / 24;
-  if (days < 30) return `~${Math.round(days * 10) / 10}d`;
+  if (days < 30) return `${Math.round(days * 10) / 10}d`;
   return new Date(normalized).toLocaleDateString("en-US", {
     month: "short",
     day: "numeric",
@@ -85,39 +86,36 @@ function SessionContextMenu({
   session,
   onRename,
   onToggleFavorite,
-  onToggleLongContext,
   onDelete,
   onClose,
-  onMoveToProject,
-  projects,
   canDelete,
+  canManageVisibility = false,
   onShowRelated,
   onSelect,
   mobile = false,
   deleteActionLabel,
-  deleteActionIcon = "archive",
+  deleteActionIcon = "trash",
 }: {
   x: number;
   y: number;
   session: SessionMeta;
   onRename: () => void;
   onToggleFavorite: () => void;
-  onToggleLongContext: () => void;
   onDelete: () => void;
   onClose: () => void;
-  onMoveToProject?: (sessionId: string, projectId: string | null) => void;
-  projects?: Project[];
   canDelete?: boolean;
+  canManageVisibility?: boolean;
   onShowRelated?: () => void;
   onSelect: (session: SessionMeta) => void;
   mobile?: boolean;
   deleteActionLabel?: string;
-  deleteActionIcon?: "archive" | "down";
+  deleteActionIcon?: "trash" | "archive" | "down";
 }) {
   const { t } = useTranslation("layout");
+  const confirm = useConfirm();
   const ref = useRef<HTMLDivElement>(null);
   const [adjustedPos, setAdjustedPos] = useState({ left: x, top: y });
-  const longContext = isLongContextSessionModel(session.modelUsed);
+  const [deckMenu, setDeckMenu] = useState<{ x: number; y: number } | null>(null);
 
   // Adjust position to stay within viewport (runs once on mount, before paint)
   useLayoutEffect(() => {
@@ -219,13 +217,32 @@ function SessionContextMenu({
           </svg>
           {session.favorite ? t("removeFavorite") : t("favorite")}
         </button>
+        {/* AI final-response subscription */}
+        <button
+          className={itemClass}
+          onClick={async () => {
+            const subscribed = session.currentUserSubscribed !== true;
+            const ok = await useSessionStore.getState().setSessionSubscription(session.id, subscribed);
+            if (!ok) toastError(t("sessionSubscriptionFailed"));
+            onClose();
+          }}
+        >
+          <svg className="w-3.5 h-3.5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2} aria-hidden="true">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M15 17h5l-1.4-1.4A2 2 0 0118 14.2V11a6 6 0 10-12 0v3.2c0 .5-.2 1-.6 1.4L4 17h5m6 0a3 3 0 01-6 0" />
+          </svg>
+          {session.currentUserSubscribed === true ? t("stopNewAnswerNotifications") : t("receiveNewAnswers")}
+        </button>
         {/* Visibility toggle */}
-        {session.projectId && (
+        {session.projectId && canManageVisibility && (
           <button
             className={itemClass}
-            onClick={() => {
+            onClick={async () => {
               const newVis =
                 session.visibility === "project" ? "private" : "project";
+              if (!await confirm({
+                title: t(newVis === "private" ? "makePrivate" : "makeShared"),
+                message: t(newVis === "private" ? "privateVisibilityWarning" : "sharedVisibilityWarning"),
+              })) return;
               const tk = localStorage.getItem("token");
               const hdrs: Record<string, string> = {
                 "Content-Type": "application/json",
@@ -288,30 +305,6 @@ function SessionContextMenu({
               : t("shareWithProject")}
           </button>
         )}
-        {/* Long context toggle — session-local sticky model override via sessions.model_used. */}
-        <button
-          className={itemClass}
-          onClick={() => {
-            onToggleLongContext();
-            onClose();
-          }}
-        >
-          <svg
-            className="w-3.5 h-3.5 text-gray-400"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-            strokeWidth={2}
-            aria-hidden="true"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              d="M4 7h16M4 12h10M4 17h16"
-            />
-          </svg>
-          {longContext ? t("restoreNormalContext") : t("useLongContext")}
-        </button>
         {/* Copy link */}
         <button
           className={itemClass}
@@ -363,13 +356,6 @@ function SessionContextMenu({
             {t("relatedSessions")}
           </button>
         )}
-        {/* Move to Project — legacy metadata move */}
-        <SessionProjectSubmenu
-          session={session}
-          onClose={onClose}
-          onMoveToProject={onMoveToProject}
-          projects={projects}
-        />
         {/* Duplicate — clone the session (DB rows + .jsonl) so context-up-to-now is preserved.
           Keep all non-deck actions above the deck picker so long deck lists cannot
           push them below the visible viewport.
@@ -474,7 +460,7 @@ function SessionContextMenu({
           </svg>
           {t("webShare")}
         </button>
-        {/* Hide (reversible) — only visible to admin or session owner */}
+        {/* Archive (reversible) — existing session mutation authority applies */}
         {canDelete !== false && (
           <button
             className={itemClass}
@@ -508,15 +494,32 @@ function SessionContextMenu({
                 <path
                   strokeLinecap="round"
                   strokeLinejoin="round"
-                  d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"
+                  d={deleteActionIcon === "archive"
+                    ? "M3 3h18v5H3zM5 8v13h14V8M9 12h6"
+                    : "M3 6h18M9 6V4h6v2M5 6l1 14h12l1-14M10 10v6M14 10v6"}
                 />
               </svg>
             )}
-            {deleteActionLabel ?? t("hideSession")}
+            {deleteActionLabel ?? t("deleteSession")}
           </button>
         )}
-        {/* Deck — flat list (frequently used), capped and scrollable at the bottom */}
-        <SessionDeckFlat session={session} onClose={onClose} />
+        <div className="my-1 border-t border-surface-700/50" />
+        <button
+          className={itemClass}
+          onClick={(event) => {
+            event.stopPropagation();
+            const rect = event.currentTarget.getBoundingClientRect();
+            setDeckMenu({ x: rect.right + 4, y: rect.top });
+          }}
+          aria-haspopup="menu"
+          aria-expanded={Boolean(deckMenu)}
+        >
+          <svg className="h-3.5 w-3.5 shrink-0 text-primary-500/60" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A2 2 0 013 12V7a4 4 0 014-4z" /></svg>
+          <span className="min-w-0 flex-1 truncate text-left">{t("moveToDeck")}</span>
+          <span className="max-w-[110px] truncate text-[11px] text-surface-600">{session.label || t("defaultDeck")}</span>
+          <span className="text-surface-600">›</span>
+        </button>
+        {deckMenu && <SessionDeckSubmenu x={deckMenu.x} y={deckMenu.y} session={session} onClose={() => setDeckMenu(null)} onComplete={onClose} />}
       </div>
     </>,
     document.body,
@@ -536,8 +539,10 @@ interface SessionItemProps {
   onMoveToProject?: (sessionId: string, projectId: string | null) => void;
   projects?: Project[];
   deleteActionLabel?: string;
-  deleteActionIcon?: "archive" | "down";
+  deleteActionIcon?: "trash" | "archive" | "down";
   showAgentAvatar?: boolean;
+  recentInbox?: boolean;
+  compactMetaAtNarrowWidth?: boolean;
 }
 
 export function SessionItem({
@@ -548,11 +553,12 @@ export function SessionItem({
   onDelete,
   onRename,
   onToggleFavorite,
-  onMoveToProject,
   projects,
   deleteActionLabel,
-  deleteActionIcon = "archive",
+  deleteActionIcon = "trash",
   showAgentAvatar = false,
+  recentInbox = false,
+  compactMetaAtNarrowWidth = false,
 }: SessionItemProps) {
   const { t } = useTranslation("layout");
   const [editing, setEditing] = useState(false);
@@ -583,9 +589,7 @@ export function SessionItem({
   const isStreaming = useSessionStore((s) =>
     s.streamingSessions.has(session.id),
   );
-  const isUnreadAttention = useSessionStore((s) =>
-    s.unreadSessions.has(session.id),
-  );
+  const isUnreadAttention = session.unreadAiResponse === true;
   const queueCount = useChatStore(
     (s) => (s.messageQueue[session.id] ?? []).length,
   );
@@ -614,18 +618,13 @@ export function SessionItem({
   // linked worker registry entry server-side.
   // 결정: workspace/decisions/2026-05-23-channel-ai-session-isolation.md
   // 결정: workspace/decisions/2026-06-14-unify-agent-sessions.md
-  const effectiveCanDelete = canDelete && !isChannelAi;
-  const markSessionRead = useSessionStore((s) => s.markSessionRead);
+  const effectiveCanDelete = canDelete && !isChannelAi && (!session.archived || deleteActionIcon === "down");
   const isMobile = useSessionStore((s) => s.isMobile);
-  const conversationTurnCount = session.userTurnCount ?? session.turnCount ?? 0;
-  const otherOwnerUsername =
-    session.projectId &&
-    session.ownerUsername &&
-    session.ownerUsername !== currentUsername
-      ? session.ownerUsername
-      : null;
-  const otherOwnerLabel = otherOwnerUsername
-    ? otherOwnerUsername.split("@")[0]
+  const ownerUsername = session.projectId && session.ownerUsername
+    ? session.ownerUsername
+    : null;
+  const ownerLabel = ownerUsername
+    ? ownerUsername.split("@")[0]
     : null;
   const agentFirstEnabled = useSettingsStore(
     (s) => s.serverConfig?.agentFirstEnabled === true,
@@ -656,7 +655,6 @@ export function SessionItem({
       ? rowState.indicator.summary || t("writingResponse")
       : null;
   const longContext = isLongContextSessionModel(session.modelUsed);
-  const [longContextPending, setLongContextPending] = useState(false);
 
   useEffect(() => {
     if (editing) inputRef.current?.focus();
@@ -697,40 +695,15 @@ export function SessionItem({
     setEditing(false);
   };
 
-  const toggleLongContext = async () => {
-    if (longContextPending) return;
-    const nextModel = longContext
-      ? DEFAULT_CONTEXT_MODEL_USED
-      : LONG_CONTEXT_MODEL_USED;
-    setLongContextPending(true);
-    try {
-      await saveLongContextModel(session.id, nextModel, {
-        token: localStorage.getItem("token"),
-      });
-      useSessionStore
-        .getState()
-        .updateSessionMeta(session.id, { modelUsed: nextModel });
-      toastSuccess(
-        longContext
-          ? t("normalContextRestored")
-          : t("longContextEnabled"),
-      );
-    } catch (err: any) {
-      toastError(err?.message || t("longContextSaveFailed"));
-    } finally {
-      setLongContextPending(false);
-    }
-  };
-
   return (
     <>
       <div
         data-sidebar-session-id={session.id}
-        className={`group flex items-center gap-1 pl-2 pr-0 rounded-md cursor-pointer text-sidebar-session-size transition-colors duration-200 ${isMobile ? "min-h-[28px] py-0" : isTouchDevice.current ? "min-h-[44px] py-1" : "py-1.5 lg:py-0.5"} ${
+        className={`sidebar-session-row ${recentInbox ? "sidebar-session-row--recent" : ""} group flex items-center gap-1 rounded-md px-2 cursor-pointer text-sidebar-session-size transition-colors duration-150 ${isMobile ? "min-h-[28px] py-0" : isTouchDevice.current ? "min-h-[44px] py-1" : "py-1.5 lg:py-0.5"} ${
           isActive
             ? isMobile
-              ? "bg-primary-500/10 text-gray-100 shadow-sm ring-1 ring-primary-500/25"
-              : "bg-surface-800/75 text-gray-100 shadow-sm ring-1 ring-surface-700/35"
+              ? "is-active bg-primary-500/10 text-gray-100 ring-1 ring-primary-500/25"
+              : "is-active bg-surface-800/75 text-gray-100 ring-1 ring-surface-700/35"
             : isMobile
               ? "text-gray-400 hover:bg-primary-500/10 hover:text-gray-200"
               : "text-gray-400 hover:bg-surface-850/75 hover:text-gray-200"
@@ -746,7 +719,6 @@ export function SessionItem({
           e.dataTransfer.effectAllowed = "move";
         }}
         onClick={(e) => {
-          markSessionRead(session.id);
           markTurnRead(session.id);
           // v3 (path B): shift/cmd/ctrl-click opens the session in a NEW chat tab
           // (keeps the current one). openChatTab(forceNew) runs *before* onSelect
@@ -761,7 +733,6 @@ export function SessionItem({
           // Middle-click → open in a new chat tab (browser convention).
           if (e.button === 1) {
             e.preventDefault();
-            markSessionRead(session.id);
             markTurnRead(session.id);
             useFileStore.getState().openChatTab(session.id, { forceNew: true });
             onSelect(session);
@@ -779,6 +750,7 @@ export function SessionItem({
         onDoubleClick={handleDoubleClick}
         onContextMenu={handleContextMenu}
       >
+        <div className="sidebar-session-highlight flex min-w-0 flex-1 items-center gap-1 rounded-md px-1 py-0.5">
         {agentFirstEnabled && showAgentAvatar && sessionProject && !editing && (
           <AgentIdentityAvatar
             project={sessionProject}
@@ -816,8 +788,8 @@ export function SessionItem({
           ) : rowState.indicator.kind === "running" ? (
             <RunIndicator
               size="xs"
-              label={t('sessionRunning')}
-              className="tower-session-run-mark shrink-0"
+              label=""
+              className="tone-success tone-text shrink-0"
             />
           ) : rowState.indicator.kind === "error" ? (
             <span
@@ -860,8 +832,8 @@ export function SessionItem({
             className="flex-1 min-w-0 h-[20px] lg:h-[18px] bg-surface-700 text-gray-100 text-sidebar-session-size px-1.5 py-0 rounded border border-surface-600 outline-none focus:border-primary-500"
           />
         ) : (
-          <span
-            className={`flex-auto min-w-0 truncate ${isMobile ? "leading-[16px]" : "leading-[20px] lg:leading-[18px]"} ${rowState.bold ? "font-bold text-gray-100" : "font-medium"}`}
+          <FadeOverflowText
+            className={`flex-auto min-w-0 overflow-hidden whitespace-nowrap ${isMobile ? "leading-[16px]" : "leading-[20px] lg:leading-[18px]"} ${rowState.bold ? "font-bold text-gray-100" : "font-medium"}`}
             title={session.name}
           >
             {/* Private lock icon (prefix) — only shown for private sessions in a project */}
@@ -880,6 +852,7 @@ export function SessionItem({
                 />
               </svg>
             )}
+            <AgentSessionBadge session={session} />
             {isKanbanTask && (
               <span className="tone-pill tone-warning mr-1 text-[10px] font-bold px-1 rounded align-middle">
                 run
@@ -893,15 +866,7 @@ export function SessionItem({
             {isKanbanTask
               ? session.name.replace(/^\[task\]\s*/, "").replace(/^🟢\s*/, "")
               : session.name}
-            {longContextPending ? (
-              <span
-                className="ml-1 inline-flex h-3 w-3 align-middle"
-                role="status"
-                aria-label={t("useLongContext")}
-              >
-                <span className="h-3 w-3 animate-spin rounded-full border border-amber-300/40 border-t-amber-200" />
-              </span>
-            ) : longContext ? (
+            {longContext ? (
               <span
                 className="ml-1 text-[9px] font-bold text-amber-200 bg-amber-500/15 ring-1 ring-amber-400/25 px-1 rounded align-middle"
                 title={t('longContextRouteHint')}
@@ -932,16 +897,23 @@ export function SessionItem({
                 #thread
               </span>
             )}
+          </FadeOverflowText>
+        )}
+
+        {session.archived && (
+          <span className="shrink-0 rounded bg-surface-800 px-1 py-px text-[10px] text-surface-500">
+            {t('sessionArchivedBadge')}
           </span>
         )}
+        </div>
 
         {/* Time (default) → action buttons (on hover) — both always rendered,
             toggle via opacity only to prevent layout shift / jitter.
             Uses JS isHovered (not CSS group-hover) for touch/remote-desktop compat. */}
         {!editing && (
-          <div className="relative ml-auto -mr-0.5 flex-none min-w-fit max-w-[48%] flex items-center justify-end overflow-visible text-right">
+          <div className="relative ml-auto flex h-full flex-none min-w-fit max-w-[48%] items-center justify-end overflow-visible text-right">
             <span
-              className={`text-sidebar-session-meta-size ${isMobile ? "text-gray-500" : "text-surface-700"} flex items-center justify-end gap-1 whitespace-nowrap transition-opacity duration-150 ${isHovered ? "opacity-0" : "opacity-100"}`}
+              className={`sidebar-session-meta ${compactMetaAtNarrowWidth ? "sidebar-session-meta--compact-responsive" : ""} ${isMobile ? "sidebar-session-meta--mobile-visible text-gray-500" : "text-surface-700"} text-sidebar-session-meta-size flex items-center justify-end gap-1 whitespace-nowrap transition-opacity duration-150 ${isHovered ? "opacity-0" : "opacity-100"}`}
             >
               {rowState.indicator.kind === "awaiting_user" ? (
                 <span className="tone-pill tone-warning text-[11px] font-semibold rounded px-1 py-0.5 leading-none">
@@ -954,23 +926,28 @@ export function SessionItem({
               ) : null}
               {runningElapsed ? (
                 <span
-                  className="flex min-w-0 max-w-[18rem] items-center justify-end gap-1"
+                  className="shrink-0 whitespace-nowrap tabular-nums"
                   title={t('runningElapsedHint', { activity: runningActivity || t('running'), elapsed: runningElapsed })}
                 >
-                  <span className="min-w-0 truncate text-surface-500">
-                    {runningActivity}
-                  </span>
-                  <span className="shrink-0 whitespace-nowrap tabular-nums">
-                    · {runningElapsed}
-                  </span>
+                  {runningElapsed}
                 </span>
-              ) : otherOwnerUsername && otherOwnerLabel ? (
+              ) : isMobile ? (
+                <span className="flex min-w-0 shrink items-center justify-end gap-1 tabular-nums" title={ownerLabel ? `${ownerUsername} · ${relativeTime(session.updatedAt)}` : relativeTime(session.updatedAt)}>
+                  {ownerLabel ? <span className="max-w-[9ch] truncate font-normal">{ownerLabel}</span> : null}
+                  {ownerLabel ? <span aria-hidden="true">·</span> : null}
+                  <span className="shrink-0">{relativeTime(session.updatedAt)}</span>
+                </span>
+              ) : recentInbox ? (
+                <span className="tabular-nums" title={t('recentActivity')}>
+                  {relativeTime(session.updatedAt)}
+                </span>
+              ) : ownerUsername && ownerLabel ? (
                 <>
                   <span
                     className="shrink min-w-[2ch] max-w-[9ch] truncate font-normal text-surface-500"
-                    title={t('sessionAuthor', { name: otherOwnerUsername })}
+                    title={t('sessionAuthor', { name: ownerUsername })}
                   >
-                    {otherOwnerLabel}
+                    {ownerLabel}
                   </span>
                   <span
                     className="shrink-0 whitespace-nowrap"
@@ -983,14 +960,6 @@ export function SessionItem({
               ) : (
                 <span title={t('recentActivity')}>{relativeTime(session.updatedAt)}</span>
               )}
-              {!runningElapsed && conversationTurnCount > 0 ? (
-                <span
-                  className="text-sidebar-session-meta-size text-surface-600 tabular-nums"
-                  title={t('conversationCountExcludingTools', { count: conversationTurnCount })}
-                >
-                  ({conversationTurnCount})
-                </span>
-              ) : null}
             </span>
             {isTouchDevice.current ? (
               <button
@@ -1014,53 +983,40 @@ export function SessionItem({
               <div
                 className={`absolute right-0 top-1/2 -translate-y-1/2 flex items-center gap-0.5 transition-opacity duration-150 ${isHovered ? "opacity-100" : "opacity-0 pointer-events-none"}`}
               >
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    startEditing();
-                  }}
-                  className="p-1.5 lg:p-1 hover:text-primary-400 hover:bg-primary-950/30 rounded transition-all text-surface-700"
-                  title={t("rename")}
-                  aria-label={t("renameSession")}
-                >
-                  <svg
-                    className="w-3 h-3"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
-                    />
-                  </svg>
-                </button>
                 {effectiveCanDelete && (
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
                       onDelete(session.id);
                     }}
-                    className="p-1.5 lg:p-1 hover:text-surface-300 hover:bg-surface-700/50 rounded transition-all text-surface-700"
-                    title={deleteActionLabel ?? t("hideSession")}
-                    aria-label={deleteActionLabel ?? t("hideSession")}
+                    className="group/session-action relative p-1.5 lg:p-1 hover:text-surface-300 hover:bg-surface-700/50 rounded transition-all text-surface-700"
+                    title={deleteActionIcon === "down" ? undefined : (deleteActionLabel ?? t("deleteSession"))}
+                    aria-label={deleteActionLabel ?? t("deleteSession")}
+                    aria-describedby={deleteActionIcon === "down" ? `hide-from-latest-hint-${session.id}` : undefined}
                   >
                     {deleteActionIcon === "down" ? (
-                      <svg
-                        className="w-3 h-3"
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={2}
-                          d="M19 9l-7 7-7-7"
-                        />
-                      </svg>
+                      <>
+                        <svg
+                          className="w-3 h-3"
+                          fill="none"
+                          stroke="currentColor"
+                          viewBox="0 0 24 24"
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={2}
+                            d="M19 9l-7 7-7-7"
+                          />
+                        </svg>
+                        <span
+                          id={`hide-from-latest-hint-${session.id}`}
+                          role="tooltip"
+                          className="pointer-events-none absolute bottom-full right-0 z-50 mb-1.5 hidden w-64 rounded-md border border-surface-700 bg-surface-900 px-2.5 py-2 text-left text-[11px] font-normal leading-4 text-surface-300 shadow-xl group-hover/session-action:block group-focus-visible/session-action:block"
+                        >
+                          {t("hideFromLatestHint")}
+                        </span>
+                      </>
                     ) : (
                       <svg
                         className="w-3 h-3"
@@ -1072,7 +1028,9 @@ export function SessionItem({
                           strokeLinecap="round"
                           strokeLinejoin="round"
                           strokeWidth={2}
-                          d="M6 18L18 6M6 6l12 12"
+                          d={deleteActionIcon === "archive"
+                    ? "M3 3h18v5H3zM5 8v13h14V8M9 12h6"
+                    : "M3 6h18M9 6V4h6v2M5 6l1 14h12l1-14M10 10v6M14 10v6"}
                         />
                       </svg>
                     )}
@@ -1094,12 +1052,10 @@ export function SessionItem({
           onToggleFavorite={() =>
             onToggleFavorite(session.id, !session.favorite)
           }
-          onToggleLongContext={toggleLongContext}
           onDelete={() => onDelete(session.id)}
           onClose={() => setCtxMenu(null)}
-          onMoveToProject={onMoveToProject}
-          projects={projects}
           canDelete={effectiveCanDelete}
+          canManageVisibility={session.ownerUsername === currentUsername}
           onShowRelated={() =>
             setRelatedPopover({ x: ctxMenu.x, y: ctxMenu.y })
           }
@@ -1122,291 +1078,45 @@ export function SessionItem({
   );
 }
 
-/* ── Deck — flat list (no expand, directly selectable) ── */
-
-function SessionDeckFlat({
-  session,
-  onClose,
-}: {
-  session: SessionMeta;
-  onClose: () => void;
-}) {
+/* ── Deck assignment submenu ── */
+function SessionDeckSubmenu({ x, y, session, onClose, onComplete }: { x: number; y: number; session: SessionMeta; onClose: () => void; onComplete: () => void }) {
   const { t } = useTranslation("layout");
-  const [showNewInput, setShowNewInput] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const sessions = useSessionStore((state) => state.sessions);
+  const projectSessionsLoading = useSessionStore((state) => session.projectId ? state.projectSessionsLoading.has(session.projectId) : false);
+  const [query, setQuery] = useState("");
   const [newLabel, setNewLabel] = useState("");
-  const inputRef = useRef<HTMLInputElement>(null);
-  const sessions = useSessionStore((s) => s.sessions);
-
-  const existingLabels = useMemo(() => {
-    if (!session.projectId) return [];
-    const labelSet = new Set<string>();
-    for (const s of sessions) {
-      if (s.projectId === session.projectId && s.label) labelSet.add(s.label);
-    }
-    return [...labelSet].sort();
-  }, [sessions, session.projectId]);
-
+  const [showNewInput, setShowNewInput] = useState(false);
+  const labels = useMemo(() => [...new Set(sessions.filter((candidate) => candidate.projectId === session.projectId && candidate.label).map((candidate) => candidate.label!))].sort(), [session.projectId, sessions]);
   useEffect(() => {
-    if (showNewInput) setTimeout(() => inputRef.current?.focus(), 50);
-  }, [showNewInput]);
-
-  const applyLabel = (label: string | null) => {
-    useSessionStore.getState().updateSessionMeta(session.id, { label });
-    onClose();
+    if (session.projectId) void useSessionStore.getState().hydrateProjectSessions(session.projectId, { force: true });
+  }, [session.projectId]);
+  const filteredLabels = labels.filter((label) => label.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()));
+  const left = Math.min(Math.max(8, x), window.innerWidth - 268);
+  const top = Math.min(Math.max(8, y), Math.max(8, window.innerHeight - 360));
+  useEffect(() => {
+    const close = (event: MouseEvent | TouchEvent) => { if (ref.current && !ref.current.contains(event.target as Node)) onClose(); };
+    document.addEventListener("mousedown", close); document.addEventListener("touchstart", close);
+    return () => { document.removeEventListener("mousedown", close); document.removeEventListener("touchstart", close); };
+  }, [onClose]);
+  const applyLabel = async (label: string | null) => {
+    const previousLabel = session.label ?? null;
+    useSessionStore.getState().updateSessionMeta(session.id, { label }); onComplete();
     const token = localStorage.getItem("token");
-    const headers: Record<string, string> = {
-      "Content-Type": "application/json",
-    };
-    if (token) headers["Authorization"] = `Bearer ${token}`;
-    fetch(`/api/sessions/${session.id}`, {
-      method: "PATCH",
-      headers,
-      body: JSON.stringify({ label }),
-    }).catch(() => {});
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (token) headers.Authorization = `Bearer ${token}`;
+    try {
+      const response = await fetch(`/api/sessions/${session.id}`, { method: "PATCH", headers, body: JSON.stringify({ label }) });
+      if (!response.ok) throw new Error("deck assignment failed");
+    } catch {
+      useSessionStore.getState().updateSessionMeta(session.id, { label: previousLabel }); toastError(t("deckAssignmentFailed"));
+    }
   };
-
-  const itemClass =
-    "w-full flex items-center gap-2 px-3 py-1 text-[13px] text-gray-300 hover:bg-primary-600/30 hover:text-white transition-colors";
-
-  // Nothing to show if no project
-  if (!session.projectId && existingLabels.length === 0 && !session.label)
-    return null;
-
-  return (
-    <>
-      <div className="border-t border-surface-700/50 my-1" />
-      <div className="px-3 py-1 text-[12px] text-surface-600 uppercase tracking-wider">
-        {t("deck")}
-      </div>
-      {/* Existing deck labels — directly listed. Cap the deck picker so it does not
-          swallow the rest of the context menu when a project has many decks. */}
-      <div className="max-h-[180px] overflow-y-auto overscroll-contain py-0.5">
-        {existingLabels.map((label) => (
-          <button
-            key={label}
-            onClick={() => applyLabel(label)}
-            className={`${itemClass} ${session.label === label ? "!text-primary-400" : ""}`}
-          >
-            <svg
-              className="w-3.5 h-3.5 text-primary-500/60 shrink-0"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              strokeWidth={2}
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A2 2 0 013 12V7a4 4 0 014-4z"
-              />
-            </svg>
-            <span className="truncate">{label}</span>
-            {session.label === label && (
-              <svg
-                className="w-3 h-3 ml-auto text-primary-400 shrink-0"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M5 13l4 4L19 7"
-                />
-              </svg>
-            )}
-          </button>
-        ))}
-      </div>
-      {/* New deck input (inline) */}
-      {showNewInput ? (
-        <div className="px-3 py-1 flex items-center gap-1.5">
-          <input
-            ref={inputRef}
-            value={newLabel}
-            onChange={(e) => setNewLabel(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && newLabel.trim())
-                applyLabel(newLabel.trim());
-              if (e.key === "Escape") setShowNewInput(false);
-            }}
-            onClick={(e) => e.stopPropagation()}
-            placeholder={t("newDeckPlaceholder")}
-            className="flex-1 bg-surface-700 text-[13px] text-gray-200 px-2 py-1 rounded border border-surface-600 outline-none focus:border-primary-500/50 placeholder-surface-600"
-          />
-          {newLabel.trim() && (
-            <button
-              onClick={() => applyLabel(newLabel.trim())}
-              className="text-[12px] text-primary-400 hover:text-primary-300 font-medium px-1"
-            >
-              {t("addDeck")}
-            </button>
-          )}
-        </div>
-      ) : (
-        <button
-          className={`${itemClass} !text-surface-500`}
-          onClick={(e) => {
-            e.stopPropagation();
-            setShowNewInput(true);
-          }}
-        >
-          <svg
-            className="w-3.5 h-3.5 text-surface-600 shrink-0"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-            strokeWidth={2}
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              d="M12 4v16m8-8H4"
-            />
-          </svg>
-          {t("newDeckMore")}
-        </button>
-      )}
-      {/* Remove deck */}
-      {session.label && (
-        <button
-          className={`${itemClass} !text-surface-500`}
-          onClick={() => applyLabel(null)}
-        >
-          <svg
-            className="w-3.5 h-3.5 text-surface-600 shrink-0"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-            strokeWidth={2}
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              d="M6 18L18 6M6 6l12 12"
-            />
-          </svg>
-          {t("removeDeck")}
-        </button>
-      )}
-    </>
-  );
-}
-
-/* ── Project — expandable submenu (click to expand) ── */
-
-function SessionProjectSubmenu({
-  session,
-  onClose,
-  onMoveToProject,
-  projects,
-}: {
-  session: SessionMeta;
-  onClose: () => void;
-  onMoveToProject?: (sessionId: string, projectId: string | null) => void;
-  projects?: Project[];
-}) {
-  const { t } = useTranslation("layout");
-  const [open, setOpen] = useState(false);
-
-  if (!onMoveToProject || !projects || projects.length === 0) return null;
-
-  const filteredProjects = projects.filter((p) => p.id !== session.projectId);
-  if (filteredProjects.length === 0 && !session.projectId) return null;
-
-  const itemClass =
-    "w-full flex items-center gap-2 px-3 py-1 text-[13px] text-gray-300 hover:bg-primary-600/30 hover:text-white transition-colors";
-
-  return (
-    <>
-      <button className={itemClass} onClick={() => setOpen(!open)}>
-        <svg
-          className="w-3.5 h-3.5 text-surface-600 shrink-0"
-          fill="none"
-          viewBox="0 0 24 24"
-          stroke="currentColor"
-          strokeWidth={1.5}
-        >
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            d="M2.25 12.75V12A2.25 2.25 0 014.5 9.75h15A2.25 2.25 0 0121.75 12v.75m-8.69-6.44l-2.12-2.12a1.5 1.5 0 00-1.061-.44H4.5A2.25 2.25 0 002.25 6v12a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9a2.25 2.25 0 00-2.25-2.25h-5.379a1.5 1.5 0 01-1.06-.44z"
-          />
-        </svg>
-        {session.projectId ? t("moveToProject") : t("addToProject")}
-        <svg
-          className={`w-3 h-3 ml-auto text-surface-600 transition-transform ${open ? "rotate-90" : ""}`}
-          fill="none"
-          stroke="currentColor"
-          viewBox="0 0 24 24"
-        >
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth={2}
-            d="M9 5l7 7-7 7"
-          />
-        </svg>
-      </button>
-      {open && (
-        <div className="py-1 border-t border-surface-700/30">
-          <div className="max-h-[320px] overflow-y-auto overscroll-contain">
-            {filteredProjects.map((p) => (
-              <button
-                key={p.id}
-                className={`${itemClass} pl-6`}
-                onClick={() => {
-                  onMoveToProject(session.id, p.id);
-                  onClose();
-                }}
-              >
-                <svg
-                  className="w-3 h-3 text-surface-600 shrink-0"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                  strokeWidth={1.5}
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    d="M2.25 12.75V12A2.25 2.25 0 014.5 9.75h15A2.25 2.25 0 0121.75 12v.75m-8.69-6.44l-2.12-2.12a1.5 1.5 0 00-1.061-.44H4.5A2.25 2.25 0 002.25 6v12a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9a2.25 2.25 0 00-2.25-2.25h-5.379a1.5 1.5 0 01-1.06-.44z"
-                  />
-                </svg>
-                <span className="truncate">{p.name}</span>
-              </button>
-            ))}
-          </div>
-          {session.projectId && (
-            <>
-              <div className="border-t border-surface-700/30 my-0.5" />
-              <button
-                className={`${itemClass} pl-6 !text-surface-500`}
-                onClick={() => {
-                  onMoveToProject(session.id, null);
-                  onClose();
-                }}
-              >
-                <svg
-                  className="w-3 h-3 text-surface-600 shrink-0"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                  strokeWidth={1.5}
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    d="M6 18L18 6M6 6l12 12"
-                  />
-                </svg>
-                {t("removeFromProject")}
-              </button>
-            </>
-          )}
-        </div>
-      )}
-    </>
-  );
+  const itemClass = "flex w-full items-center gap-2 px-3 py-1.5 text-left text-[13px] text-gray-300 transition-colors hover:bg-primary-600/30 hover:text-white";
+  return createPortal(<div ref={ref} role="menu" className="fixed z-[10000] w-[260px] overflow-hidden rounded-lg border border-surface-700 bg-surface-800 py-1 shadow-xl" style={{ left, top }} onClick={(event) => event.stopPropagation()}>
+    <div className="px-2 pb-1 pt-1"><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t("searchDecks")} className="w-full rounded border border-surface-700 bg-surface-900 px-2 py-1.5 text-[12px] text-surface-200 outline-none placeholder:text-surface-600 focus:border-primary-500/50" autoFocus /></div>
+    <button className={`${itemClass} ${!session.label ? "!text-primary-400" : ""}`} onClick={() => void applyLabel(null)}><span className="h-2 w-2 rounded-full bg-surface-500" /><span className="flex-1">{t("defaultDeck")}</span>{!session.label && <span className="text-primary-400">✓</span>}</button>
+    <div className="max-h-[220px] overflow-y-auto overscroll-contain border-y border-surface-700/50 py-0.5">{projectSessionsLoading && <div className="px-3 py-2 text-[12px] text-surface-500">{t("loadingDecks")}</div>}{filteredLabels.map((label) => <button key={label} className={`${itemClass} ${session.label === label ? "!text-primary-400" : ""}`} onClick={() => void applyLabel(label)}><span className="h-2 w-2 rounded-full bg-primary-500/60" /><span className="min-w-0 flex-1 truncate">{label}</span>{session.label === label && <span className="text-primary-400">✓</span>}</button>)}{!projectSessionsLoading && filteredLabels.length === 0 && <div className="px-3 py-3 text-center text-[12px] text-surface-600">{t("noDeckResults")}</div>}</div>
+    {showNewInput ? <div className="flex gap-1.5 px-2 py-1.5"><input value={newLabel} onChange={(event) => setNewLabel(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && newLabel.trim()) void applyLabel(newLabel.trim()); if (event.key === "Escape") setShowNewInput(false); }} placeholder={t("newDeckPlaceholder")} className="min-w-0 flex-1 rounded border border-surface-700 bg-surface-900 px-2 py-1 text-[12px] text-surface-200 outline-none" autoFocus /><button disabled={!newLabel.trim()} onClick={() => void applyLabel(newLabel.trim())} className="text-[12px] font-semibold text-primary-400 disabled:opacity-40">{t("addDeck")}</button></div> : <button className={`${itemClass} !text-surface-500`} onClick={() => setShowNewInput(true)}><span className="text-base">＋</span>{t("newDeckMore")}</button>}
+  </div>, document.body);
 }

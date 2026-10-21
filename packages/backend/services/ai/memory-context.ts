@@ -139,8 +139,20 @@ export async function buildMemoryContext(opts: BuildMemoryContextOpts): Promise<
   if (!scope) return null;
 
   try {
+    // Personal continuity is unsafe in a shared target conversation: future turns
+    // or summaries may disclose it to another participant. Verify the current
+    // owner/audience from authoritative sessions and internal shares, not caller opts.
+    const [target] = await query<{ user_id: number | null; visibility: string | null; room_id: string | null; internally_shared: boolean }>(
+      `SELECT s.user_id, s.visibility, s.room_id,
+              EXISTS (SELECT 1 FROM session_shares sh WHERE sh.session_id = s.id
+                AND sh.share_type = 'internal' AND sh.revoked = 0) AS internally_shared
+         FROM sessions s WHERE s.id = $1`, [opts.sessionId],
+    );
+    if (!target || target.user_id !== opts.userId || target.visibility === 'project'
+      || target.room_id || target.internally_shared) return null;
+
     let cards: SessionMemoryCard[] = [];
-    if (opts.userId) {
+    if (opts.userId && opts.projectId) {
       try {
         cards = await getMemoryCardsForContext({
           userId: opts.userId,

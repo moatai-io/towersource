@@ -16,7 +16,9 @@ describe('ProjectHome session lazy-load contract', () => {
   it('keeps project hydration state and reconciliation in the shared store', () => {
     expect(sessionStoreSource).toContain('hydrateProjectSessions: (projectId: string');
     expect(sessionStoreSource).toContain('hydratedProjectSessionIds: Set<string>;');
-    expect(sessionStoreSource).toContain('if (session.projectId !== projectId) byId.set(session.id, session);');
+    // Preserve sessions created while a project snapshot request is in flight.
+    expect(sessionStoreSource).toContain('const initialIds = new Set(initial.sessions.map(session => session.id));');
+    expect(sessionStoreSource).toContain('if (session.projectId !== projectId || !initialIds.has(session.id)) byId.set(session.id, session);');
     expect(sessionStoreSource).toContain('hydratedProjectSessionIds.add(projectId);');
   });
 });

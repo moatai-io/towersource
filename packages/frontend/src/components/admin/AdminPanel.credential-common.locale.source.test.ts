@@ -3,24 +3,27 @@ import { describe, expect, it } from 'vitest';
 
 const source = readFileSync(new URL('./AdminPanel.tsx', import.meta.url), 'utf8');
 const start = source.indexOf('function CredentialVaultManagement');
-const end = source.indexOf('// ─────', start + 1);
-const credentialSource = source.slice(start, end > start ? end : undefined);
+const end = source.indexOf('// ───── System Tab', start);
+const credentialSource = source.slice(start, end);
 
-describe('AdminPanel credential common locale routing', () => {
-  it('routes shared Credential chrome through admin locale keys', () => {
-    expect(credentialSource).toContain("t('credentialConnections.serviceConnections')");
-    expect(credentialSource).toContain("t('credentialConnections.advancedManagement')");
-    expect(credentialSource).toContain("t('credentialConnections.advancedManagementDescription')");
-    expect(credentialSource).toContain("t('credentialConnections.collapse')");
-    expect(credentialSource).toContain("t('credentialConnections.expand')");
-    expect(credentialSource).toContain("t('credentialConnections.addExternalConnection')");
-    expect(credentialSource).toContain("t('credentialConnections.addExternalConnectionDescription')");
+describe('AdminPanel simplified Connection locale routing', () => {
+  it('routes the team Connection surface through admin locale keys', () => {
+    for (const key of [
+      'credentialConnections.vmVault',
+      'credentialConnections.vmVaultDescription',
+      'credentialConnections.addConnection',
+      'credentialConnections.replace',
+      'credentialConnections.enable',
+      'credentialConnections.disable',
+      'credentialConnections.delete',
+    ]) expect(credentialSource).toContain(`t('${key}')`);
   });
 
-  it('preserves the advanced-management and connection-mode behavior contracts', () => {
-    expect(credentialSource).toContain('aria-expanded={showAdvanced}');
-    expect(credentialSource).toContain('setShowAdvanced(value => !value)');
-    expect(credentialSource).toContain("connectionMode !== 'none'");
-    expect(credentialSource).toContain("setConnectionMode('none')");
+  it('removes advanced, policy, default, profile, and target management', () => {
+    expect(credentialSource).not.toContain('advancedManagement');
+    expect(credentialSource).not.toContain('connection-defaults');
+    expect(credentialSource).not.toContain('project-policies');
+    expect(credentialSource).not.toContain('bundle-types');
+    expect(credentialSource).not.toContain('/targets');
   });
 });

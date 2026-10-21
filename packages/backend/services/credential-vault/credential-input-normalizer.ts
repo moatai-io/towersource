@@ -30,7 +30,7 @@ export function inferSecretPolicy(input: {
   envName?: string;
   credentialType?: string;
 }): SecretNormalizationPolicy {
-  if (input.credentialType === 'ssh_private_key' || /private[_-]?key/i.test(input.fieldId || '') || /SSH.*KEY/i.test(input.envName || '')) {
+  if (input.credentialType === 'ssh_private_key' || input.credentialType === 'private_key' || /private[_-]?key/i.test(input.fieldId || '') || /PRIVATE[_-]?KEY/i.test(input.envName || '') || /SSH.*KEY/i.test(input.envName || '')) {
     return { inputKind: 'private_key', trim: 'outer' };
   }
   if (/password/i.test(input.fieldId || '') || /PASSWORD/i.test(input.envName || '')) {

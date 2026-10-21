@@ -1,18 +1,23 @@
+import { languageRequestEvidence } from './language-request-evidence.js';
+import { configuredPiImageLimit, configuredPiImageByteLimit } from './image-request-policy.js';
 /**
  * Owns Pi provider request/response safeguards.
- * Public API: installPiProviderSafeguards, piFetchCorrelation, context-token hints, allowPiOpenAiDirect.
+ * Public API: installPiProviderSafeguards, piFetchCorrelation, context-token hints.
  *
  * This module contains provider-specific patches and observability that sit
  * around the Pi SDK transport layer. Keep it operational/transport-focused:
  * no product/workflow judgement belongs here.
  */
 
+import { clampResponsesOutputBudget } from './responses-output-budget.js';
 import { AsyncLocalStorage } from 'async_hooks';
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import { config } from '../../config.js';
 import { recordAgentTurnRouterEvidence, type RouterTerminalType } from '../../services/agent-turn/router-evidence.js';
+import { estimateProviderInput, inspectProviderRequestBody } from './provider-request-budget.js';
+import { measureInitialResponsesContext } from './initial-context-metrics.js';
 
 /**
  * Rough token estimate for OpenAI-compatible request bodies.
@@ -27,12 +32,7 @@ import { recordAgentTurnRouterEvidence, type RouterTerminalType } from '../../se
  * ASCII is roughly 4 chars/token, and JSON/tool overhead is real for Chat Completions.
  */
 function estimateOpenRouterRequestTokens(messages: any[], tools: any[]): number {
-  const text = JSON.stringify({ messages: messages || [], tools: tools || [] });
-  let estimated = 0;
-  for (const ch of text) {
-    const code = ch.codePointAt(0) || 0;
-    estimated += code > 0x7f ? 1 : 0.25;
-  }
+  const estimated = estimateProviderInput({ messages: messages || [], tools: tools || [] }).estimatedTokens;
   // Per-message/tool-call overhead + safety margin. This tracks OpenRouter's
   // tokenizer better than chars/4 for Korean-heavy/system-prompt-heavy payloads.
   const structuralOverhead = (messages?.length || 0) * 8 + (tools?.length || 0) * 24 + 2048;
@@ -77,39 +77,11 @@ function clampChatCompletionsOutputTokens(bodyObj: any): { mutated: boolean; rea
 }
 
 function estimateOpenAIResponsesRequestTokens(bodyObj: any): number {
-  const text = JSON.stringify({
-    instructions: bodyObj?.instructions,
-    input: bodyObj?.input || [],
-    tools: bodyObj?.tools || [],
-  });
-  let estimated = 0;
-  for (const ch of text) {
-    const code = ch.codePointAt(0) || 0;
-    estimated += code > 0x7f ? 1 : 0.25;
-  }
-  const inputCount = Array.isArray(bodyObj?.input) ? bodyObj.input.length : 0;
-  const toolCount = Array.isArray(bodyObj?.tools) ? bodyObj.tools.length : 0;
-  const structuralOverhead = inputCount * 10 + toolCount * 32 + 4096;
-  return Math.ceil((estimated + structuralOverhead) * 1.2);
+  const estimated = estimateProviderInput({ instructions: bodyObj?.instructions,
+    input: bodyObj?.input || [], tools: bodyObj?.tools || [] }).estimatedTokens;
+  return Math.ceil((estimated + 2048) * 1.15);
 }
 
-function openAIResponsesContextWindow(modelId: string, url: string): number | null {
-  const model = modelId.toLowerCase();
-  // LiteLLM/Codex-LB aliases currently route to Codex-family Responses models.
-  // Codex CLI applies a 95% effective-window guard. Use the effective window so
-  // output clamping leaves room for SDK compaction before the hard edge.
-  // - gpt-5.5 / gpt-5.4-mini catalog: 272000 * 0.95 = 258400
-  // - gpt-5.6 Sol/Terra catalog: 372000 * 0.95 = 353400
-  // - smartest-long operator override: 800000 * 0.95 = 760000
-  if (model === 'smartest-long') return 760_000;
-  if (model === 'smartest' || model === 'smart' || model === 'gpt-5.6-sol' || model === 'gpt-5.6-terra') return 353_400;
-  if (model === 'gpt55' || model === 'mini' || model === 'gpt-5.5') return 258_400;
-  if (/chatgpt\.com\/backend-api\/codex\/responses/i.test(url)) {
-    return model === 'gpt-5.6-sol' || model === 'gpt-5.6-terra' ? 353_400 : 258_400;
-  }
-  if (/openai\.azure\.com|cognitive\.microsoft\.com\/openai/i.test(url)) return 400_000;
-  return null;
-}
 
 function getPiContextHintMap(): Map<string, number> {
   const g = globalThis as any;
@@ -165,8 +137,8 @@ export function inspectResponsesFileRepresentations(bodyObj: any): {
     Object.values(value).forEach(visit);
   };
   visit(bodyObj?.input || []);
-  const maxItems = Number(process.env.PI_RESPONSES_MAX_INLINE_FILE_IMAGES || 24);
-  const maxBytes = Number(process.env.PI_RESPONSES_MAX_INLINE_FILE_IMAGE_BYTES || 48 * 1024 * 1024);
+  const maxItems = configuredPiImageLimit();
+  const maxBytes = configuredPiImageByteLimit();
   const rejected = imageItems > maxItems || imageBytes > maxBytes;
   return {
     imageItems,
@@ -176,35 +148,17 @@ export function inspectResponsesFileRepresentations(bodyObj: any): {
   };
 }
 
-function shouldRejectNearContextOpenAIResponsesRequest(bodyObj: any, url: string, bodyEstimatedPromptTokens: number): { reject: boolean; reason?: string } {
-  const contextWindow = openAIResponsesContextWindow(String(bodyObj?.model || ''), url);
-  if (!contextWindow || !Number.isFinite(bodyEstimatedPromptTokens) || bodyEstimatedPromptTokens <= 0) {
-    return { reject: false };
-  }
-
-  // Reject near-context requests before the upstream call so Pi's existing
-  // context-overflow recovery can compact and retry. This returns a provider-style
-  // 400 response (rather than throwing inside fetch), preserving the overflow
-  // classification without silently shrinking the user's output budget.
-  // Operators may set the ratio to 0 only as an emergency compatibility escape.
-  const ratio = Number(process.env.PI_RESPONSES_PREFLIGHT_CONTEXT_RATIO ?? 0.90);
-  if (!Number.isFinite(ratio) || ratio <= 0) return { reject: false };
-
-  const floor = Math.max(1024, Math.floor(contextWindow * Math.min(Math.max(ratio, 0.5), 0.99)));
-  if (bodyEstimatedPromptTokens < floor) return { reject: false };
-  return {
-    reject: true,
-    reason: `bodyEstimatedPromptTokens=${bodyEstimatedPromptTokens} >= preflightFloor=${floor} (ratio=${ratio}, context=${contextWindow})`,
-  };
-}
-
 type PiFetchCorrelationContext = {
   sessionId: string;
   runId: string;
   rootTurnId?: string;
+  projectId?: string;
+  executionKind?: string;
   attempt?: number;
   /** Optional stable logical id for provider prompt-cache affinity. */
   promptCacheSessionId?: string;
+  /** Active SDK model metadata, resolved for each prompt/continuation. */
+  contextWindow?: number;
 };
 
 const LITELLM_RESPONSES_PROMPT_CACHE_PREFIX = 'pcache:v2:litellm-responses:';
@@ -429,12 +383,16 @@ function injectTowerCorrelationMetadata(bodyObj: any, ctx: PiFetchCorrelationCon
     tower_session_id: ctx.sessionId,
     tower_run_id: ctx.runId,
     ...(ctx.rootTurnId ? { tower_root_turn_id: ctx.rootTurnId } : {}),
+    ...(ctx.projectId ? { tower_project_id: ctx.projectId } : {}),
+    ...(ctx.executionKind ? { tower_execution_kind: ctx.executionKind } : {}),
     tower_attempt: ctx.attempt ?? 0,
     tower_engine: 'pi',
   };
   const mutated = current.tower_session_id !== ctx.sessionId
     || current.tower_run_id !== ctx.runId
     || current.tower_root_turn_id !== ctx.rootTurnId
+    || current.tower_project_id !== ctx.projectId
+    || current.tower_execution_kind !== ctx.executionKind
     || current.tower_attempt !== (ctx.attempt ?? 0)
     || current.tower_engine !== 'pi'
     || bodyObj.client_metadata !== current;
@@ -480,6 +438,7 @@ async function captureLiteLLMRouterEvidence(params: {
 
   let terminalType: RouterTerminalType | undefined;
   let responseId: string | undefined;
+  let responseModel: string | undefined;
   let serviceTier: string | undefined;
   let errorCode: string | undefined;
   let eventCount = 0;
@@ -505,6 +464,7 @@ async function captureLiteLLMRouterEvidence(params: {
           if (observedTerminal) terminalType = observedTerminal;
           const responseObj = payload?.response && typeof payload.response === 'object' ? payload.response : payload;
           if (typeof responseObj?.id === 'string') responseId = responseObj.id;
+          if (typeof responseObj?.model === 'string') responseModel = responseObj.model;
           if (typeof responseObj?.service_tier === 'string') serviceTier = responseObj.service_tier;
           const candidateError = responseObj?.error?.code || responseObj?.incomplete_details?.reason || payload?.error?.code;
           if (typeof candidateError === 'string') errorCode = candidateError;
@@ -524,7 +484,13 @@ async function captureLiteLLMRouterEvidence(params: {
     serviceTier,
     durationMs: Date.now() - params.startedAt,
     errorCode: errorCode ?? (!response.ok ? `http_${response.status}` : undefined),
-    evidence: { event_count: eventCount },
+    evidence: {
+      event_count: eventCount,
+      provider: 'litellm',
+      response_model: responseModel,
+      provider_model: responseModel,
+      requested_router_model: params.requestModel,
+    },
   });
 }
 
@@ -577,19 +543,6 @@ function appendCodexUsageSnapshot(snapshot: any): void {
   } catch (err: any) {
     console.warn(`[Pi] codex usage snapshot write failed: ${err?.message || err}`);
   }
-}
-
-/**
- * Whether Tower may hand OPENAI_API_KEY to Pi's generic `openai/*` provider.
- *
- * Default is OFF: OPENAI_API_KEY is also used by non-agent features such as
- * image generation, and blindly registering it with Pi can make an apparent
- * OpenRouter/Azure turn fall through to expensive OpenAI direct models. Use
- * `openai-codex/*` OAuth or Azure/OpenRouter for Pi by default. If an operator
- * intentionally wants OpenAI direct inside Pi, they must opt in explicitly.
- */
-export function allowPiOpenAiDirect(): boolean {
-  return /^(1|true|yes)$/i.test(process.env.PI_ALLOW_OPENAI_DIRECT || '');
 }
 
 async function captureCodexSseUsage(res: Response, sessionId?: string): Promise<void> {
@@ -950,24 +903,27 @@ export function installPiProviderSafeguards(): void {
               : { mutated: false as boolean, reason: undefined as string | undefined, removedCallIds: undefined as string[] | undefined };
             const fileRepresentationAdmission = inspectResponsesFileRepresentations(bodyObj);
             if (fileRepresentationAdmission.rejected) {
-              const detail = `request_too_large: Pi Responses rejected accumulated file representations before upstream send (${fileRepresentationAdmission.reason})`;
+              const detail = `tower_transport_budget_exceeded: accumulated file representations rejected before upstream send (${fileRepresentationAdmission.reason})`;
               console.warn(`[Pi] responses file representation admission rejected request: ${detail}`);
               return new Response(JSON.stringify({
                 error: {
                   message: detail,
                   type: 'invalid_request_error',
-                  code: 'request_too_large',
+                  code: 'tower_transport_budget_exceeded',
                 },
               }), {
-                status: 400,
+                status: 422,
                 headers: { 'content-type': 'application/json' },
               });
             }
+            if (process.env.PI_INITIAL_CONTEXT_METRICS === '1') {
+              const metrics = measureInitialResponsesContext(bodyObj, correlationCtx?.sessionId);
+              if (metrics) console.info(`[Pi] initial context metrics ${JSON.stringify(metrics)}`);
+            }
             const bodyEstimatedPromptTokens = estimateOpenAIResponsesRequestTokens(bodyObj);
-            // The actual Responses body is the most faithful signal for what the
-            // provider is about to validate. Estimate AFTER request sanitizers (notably
-            // reasoning/commentary replay removal), otherwise CTX risk/preflight can be
-            // inflated by input items that would never be sent upstream.
+            // Heuristic diagnostics only: estimate AFTER request sanitizers so
+            // telemetry reflects the outgoing body. Never synthesize a context
+            // error from this estimate; Pi handles actual provider overflow.
             if (correlationCtx && isLiteLLMResponses) {
               rememberPiContextTokenHint(correlationCtx.sessionId, bodyEstimatedPromptTokens);
               rememberPiContextTokenHint(correlationCtx.promptCacheSessionId, bodyEstimatedPromptTokens);
@@ -976,30 +932,16 @@ export function installPiProviderSafeguards(): void {
               rememberPiContextTokenHint(promptCacheKey, bodyEstimatedPromptTokens);
               contextHint = getPiContextHintMap().get(promptCacheKey);
             }
-            const nearContextPreflight = shouldRejectNearContextOpenAIResponsesRequest(bodyObj, url, bodyEstimatedPromptTokens);
-            if (nearContextPreflight.reject) {
-              const detail = `context_length_exceeded: Pi Responses preflight rejected near-context request before upstream send (${nearContextPreflight.reason})`;
-              console.warn(`[Pi] responses preflight rejected request: ${detail}`);
-              // Return a synthetic non-retryable provider-style 400 instead of throwing
-              // inside fetch(). Throwing is collapsed by the OpenAI client/Pi SDK into a
-              // generic Connection error and can be retried repeatedly, which defeats the
-              // purpose of protecting upstream account stream slots. A 400 preserves the
-              // context_overflow classification while guaranteeing no upstream request is made.
-              return new Response(JSON.stringify({
-                error: {
-                  message: detail,
-                  type: 'invalid_request_error',
-                  code: 'context_length_exceeded',
-                },
-              }), {
-                status: 400,
-                headers: { 'content-type': 'application/json' },
-              });
+            // Output reservation is independent of compaction: constrain every
+            // outgoing call, including tool-loop calls, without rejecting input.
+            if (clampResponsesOutputBudget(bodyObj, correlationCtx?.contextWindow, bodyEstimatedPromptTokens)) {
+              effectiveInit = {
+                ...effectiveInit,
+                method: 'POST',
+                headers: effectiveInit?.headers ?? (effectiveInput instanceof Request ? Object.fromEntries(effectiveInput.headers.entries()) : undefined),
+                body: JSON.stringify(bodyObj),
+              };
             }
-            // Preserve the model/output budget requested by Pi. Near-context
-            // requests are compacted through the explicit preflight path above;
-            // they must never be made to look successful by silently clamping
-            // max_output_tokens to a tiny value.
             // Correlate Tower Pi turns with codex-lb request_logs. Custom headers may
             // be stripped by LiteLLM, but codex-lb explicitly preserves client_metadata
             // in its Responses bridge path. Limit this to our LiteLLM Responses router.
@@ -1064,10 +1006,6 @@ export function installPiProviderSafeguards(): void {
         }
       } catch (safeguardErr: any) {
         const message = String(safeguardErr?.message || safeguardErr || '');
-        if (/context_length_exceeded: Pi Responses preflight rejected near-context request/i.test(message)) {
-          console.warn(`[Pi] responses preflight rejected request: ${message}`);
-          throw safeguardErr;
-        }
         console.warn(`[Pi] responses safeguards failed (passing through): ${message}`);
       }
     }
@@ -1130,6 +1068,31 @@ export function installPiProviderSafeguards(): void {
         // Request correlation remains useful even when the body cannot be inspected.
       }
     }
+    // Final serialized transport budget, independent of token estimates or SDK image history.
+    const budgetedModelRequest = isOpenRouterChat || isLiteLLMChat || isAzureResponses || isGenericOpenAIResponses;
+    const finalRequestBody = budgetedModelRequest
+      ? (typeof effectiveInit?.body === 'string' ? effectiveInit.body
+        : effectiveInput instanceof Request && effectiveInit?.body === undefined ? await effectiveInput.clone().text() : undefined)
+      : undefined;
+    if (finalRequestBody !== undefined) {
+      const admission = inspectProviderRequestBody(finalRequestBody);
+      if (admission.rejected) {
+        console.warn(`[Pi] request_body_budget_exceeded: bytes=${admission.requestBytes} limit=${admission.maxBytes}`);
+        return new Response(JSON.stringify({ error: {
+          message: `tower_transport_budget_exceeded: request_body_budget_exceeded bytes=${admission.requestBytes} limit=${admission.maxBytes}; reduce image batches or input bytes; text compaction is not a transport repair`,
+          type: 'invalid_request_error', code: 'tower_transport_budget_exceeded',
+        } }), { status: 422, headers: { 'content-type': 'application/json' } });
+      }
+    }
+    // Value-free evidence at the final serialized Responses request boundary.
+    if (isLiteLLMResponses && routerCorrelation) {
+      console.info('[Pi] language request evidence', JSON.stringify({
+        sessionId: routerCorrelation.sessionId,
+        runId: routerCorrelation.runId,
+        rootTurnId: routerCorrelation.rootTurnId,
+        ...languageRequestEvidence(effectiveInit?.body),
+      }));
+    }
     const res = await _origFetch(effectiveInput as any, effectiveInit);
 
     if (isLiteLLMResponses && routerCorrelation?.rootTurnId) {
@@ -1149,6 +1112,18 @@ export function installPiProviderSafeguards(): void {
     }
 
     // ── Codex rate-limit observability ───────────────────────────────
+    // Native Pi maps request_too_large/413 to token overflow. Normalize only
+    // actual transport 413 responses on recognized model paths before SDK sees
+    // them, retaining the true status in value-free observability, not history.
+    if ((isOpenRouterChat || isLiteLLMChat || isAzureResponses || isGenericOpenAIResponses) && res.status === 413) {
+      await res.body?.cancel();
+      console.warn('[Pi] provider_transport_payload_rejected: upstreamStatus=413');
+      return new Response(JSON.stringify({ error: { type: 'invalid_request_error',
+        code: 'tower_transport_budget_exceeded',
+        message: 'tower_transport_budget_exceeded: upstream rejected HTTP body size; use smaller image/page batches, not automatic token compaction',
+      } }), { status: 422, headers: { 'content-type': 'application/json' } });
+    }
+
     // Codex CLI's status line is backed by `token_count.rate_limits` events.
     // Pi SDK's openai-codex provider currently lets those raw SSE events pass
     // through to processResponsesStream, where unknown event types are ignored.

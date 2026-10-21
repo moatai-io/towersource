@@ -24,6 +24,8 @@ import { WorkbenchToolCommandError } from '../services/runtime-box/workbench-too
 import { assertExperimentalWorkbenchToolAccess, WorkbenchToolExperimentAccessError } from '../services/runtime-box/workbench-tool-experiment-policy.js';
 import type { BoxRow, ServiceRow } from '../services/runtime-box/types.js';
 import { getRuntimeBoxCapacity, updateRuntimeBoxCapacity } from '../services/runtime-box/runtime-box-capacity.js';
+import { listPersistedWorkbenchWorkers } from '../services/execution/worker/worker-repository.js';
+import { resolveProjectEnvironmentDeploymentId } from '../services/project-environment/project-environment-deployment.js';
 import { listWorkbenchRollouts, resolveWorkbenchRollout, setWorkbenchRollout } from '../services/runtime-box/workbench-rollout-registry.js';
 
 const router = Router();
@@ -115,6 +117,45 @@ function boxJson(b: BoxRow & { project_name?: string | null }) {
     network_policy: b.network_policy,
   };
 }
+
+// Read-only current execution inventory. Storage authority and Worker health are
+// separate facts; a healthy Worker is not a promise that a Project can execute.
+router.get('/environment-overview', async (req, res) => {
+  try {
+    const privileged = assertPrivileged(req);
+    if (!privileged.ok) return res.status(privileged.status).json({ error: privileged.error });
+    const deploymentId = resolveProjectEnvironmentDeploymentId();
+    const [projects, workers] = await Promise.all([
+      query<{ id: string; name: string; storage_kind: string | null; storage_state: string | null; storage_worker_id: string | null; legacy_worker_id: string | null; legacy_workstation_mode: boolean | null }>(`
+        SELECT p.id, p.name, fs.storage_kind, fs.state AS storage_state,
+          fs.worker_id AS storage_worker_id,
+          COALESCE(cb.workstation_mode, CASE WHEN $1 = 'development' THEN cs.workstation_mode END) AS legacy_workstation_mode,
+          COALESCE(cb.default_worker_id, CASE WHEN $1 = 'development' THEN cs.default_worker_id END) AS legacy_worker_id
+        FROM projects p
+        LEFT JOIN project_file_storage_bindings fs ON fs.project_id = p.id AND fs.deployment_id = $1
+        LEFT JOIN project_compute_deployment_bindings cb ON cb.project_id = p.id AND cb.deployment_id = $1
+        LEFT JOIN project_compute_settings cs ON cs.project_id = p.id AND $1 = 'development' AND cb.project_id IS NULL
+        WHERE COALESCE(p.archived, 0) = 0 AND COALESCE(p.lifecycle_status, 'active') = 'active'
+          AND p.system_key IS NULL
+        ORDER BY p.name, p.id LIMIT 200`, [deploymentId]),
+      listPersistedWorkbenchWorkers(),
+    ]);
+    res.json({ deploymentId,
+      projects: projects.map(p => ({
+        projectId: p.id, name: p.name,
+        storageKind: p.storage_kind ?? 'unresolved', storageState: p.storage_state ?? 'unresolved',
+        environmentMode: p.storage_kind === 'worker' || (!p.storage_kind && p.legacy_workstation_mode)
+          ? 'legacy-worker-workspace' : p.storage_kind === 'host' ? 'canonical-project-workspace' : 'unresolved',
+        preferredWorkerId: p.storage_kind === 'worker' ? (p.storage_worker_id ?? p.legacy_worker_id)
+          : !p.storage_kind && p.legacy_workstation_mode ? p.legacy_worker_id : null,
+      })),
+      workers: workers.filter(worker => worker.deploymentId === deploymentId).map(worker => ({
+        workerId: worker.workerId, status: worker.status, draining: worker.draining,
+        activeRuns: worker.capacity.activeRuns, maxRuns: worker.capacity.maxRuns,
+      })),
+    });
+  } catch (err: any) { res.status(500).json({ error: err?.message || 'Environment overview failed' }); }
+});
 
 router.get('/capacity', async (req, res) => {
   try {

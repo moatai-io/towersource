@@ -1,3 +1,4 @@
+import { AGENT_COLLABORATION_GUIDANCE, buildAgentCollaborationMessage } from "./agent-collaboration-prompt.js";
 // Owns Agent Control Plane MVP persistence and worker orchestration helpers.
 // Public API: createPersistentWorker, sendWorker, listWorkers, getWorkerStatus,
 // recoverRunningAgentRunsOnStartup, startAgentRunSettlementRecovery.
@@ -330,7 +331,8 @@ async function setWorkerStatus(
   await execute(
     `UPDATE agent_workers
         SET status = $2, updated_at = NOW(), last_heartbeat_at = NOW()
-      WHERE id = $1`,
+      WHERE id = $1
+        AND (status NOT IN ('paused', 'archived') OR $2 IN ('paused', 'archived'))`,
     [workerId, status],
   );
 }
@@ -399,6 +401,9 @@ async function refreshWorkerFromBackingSession(
   runId?: string,
 ): Promise<void> {
   if (!worker.backing_session_id) return;
+  // Persisted assistant text may still be a streaming prefix (for example "**").
+  // Never settle or backfill a report while its backing engine is active.
+  if (getAllRunningSessionIds().includes(worker.backing_session_id)) return;
   // A backing Agent Session often emits assistant tool_use rows before its final
   // text answer. After backend restarts those tool_use-only rows can be the
   // latest assistant row for a short window; do not treat them as a completed
@@ -678,14 +683,16 @@ export async function createPersistentWorker(
     "",
     `지시: ${input.instruction}`,
     "",
+    AGENT_COLLABORATION_GUIDANCE,
+    "",
     "운영 규칙:",
     "- 이 세션은 subagent의 backing Agent Session이다. 맥락을 유지하고 후속 호출에서 이어서 일한다.",
-    "- 부모 세션의 목표·제약·성공 기준을 먼저 재진술하고, 모호하면 가장 안전한 가정을 명시한다.",
-    "- 깊은 분석, 툴콜 흔적, 중간 생각, 긴 표는 이 backing session 또는 workspace 산출물에 남긴다. 부모에게는 핵심 보고만 간결히 전달된다.",
+    "- 목표를 반복 설명하기보다 이해 불일치와 중요한 가정만 보고한다. 지시가 기존 목표·권한·담당 범위와 충돌하면 해당 변경을 보류하고 확인하며, 충돌하지 않는 승인된 작업은 계속한다.",
+    "- 설계 결정과 대안, 관찰 사실, 재현 명령, 검증 결과는 이 backing session 또는 workspace 산출물에 남긴다. 내부 사고 과정 대신 검토 가능한 근거를 기록하고 부모에게는 핵심 보고만 간결히 전달한다.",
     "- 최종 답변 끝에는 필요할 때만 부모 전달용 `PARENT_NEXT:` 한 줄을 둘 수 있다. 부모가 즉시 해야 할 다음 판단/질문/중단 신호만 적는다.",
     "- 긴 원문/표/검증 로그를 파일로 남겼다면, 부모가 나중에 찾아볼 수 있도록 선택적으로 `DETAIL_ARTIFACTS:` 아래에 절대경로와 한 줄 설명을 적는다.",
     "- 부모가 필요할 때만 읽으면 좋은 구간이 분명할 때만 `READ_IF_NEEDED:` 아래에 섹션명/라인 범위/읽는 이유를 적는다. 억지로 채우지 않는다.",
-    "- 부모용 보고는 결론, 근거 3~5개, 산출물 절대경로, 리스크/불확실성을 중심으로 900~1500자 내외를 목표로 한다. DETAIL_ARTIFACTS, READ_IF_NEEDED, PARENT_NEXT는 도움이 될 때만 덧붙이는 힌트이며, 본문 요약 안에서 필드명을 반복 설명하지 말고 필요하면 별도 섹션에만 둔다.",
+    "- 부모용 보고는 완료 / 부분 완료 / 결정 필요 중 상태를 먼저 밝히고 결과·검증 증거·산출물 경로·미검증 범위를 간결히 적는다. 고정 분량을 채우지 말고 중요한 차단 조건은 생략하지 않는다. 검증한 사실과 미검증 사항을 구분한다. 로컬 패치 완료를 통합 검증이나 운영 준비 완료로 표현하지 않는다. DETAIL_ARTIFACTS, READ_IF_NEEDED, PARENT_NEXT는 도움이 될 때만 덧붙이는 힌트이며, 본문 요약 안에서 필드명을 반복 설명하지 말고 필요하면 별도 섹션에만 둔다.",
     "- 상세 원문이 필요한 경우 부모/사용자가 이 backing session 또는 산출물 파일을 열어볼 수 있게 파일 경로와 읽을 위치를 남긴다.",
     "- destructive action, 배포, 외부 메시지 전송, 비용 큰 반복 작업은 사용자/부모 확인 없이 하지 않는다.",
     "- 필요한 경우 산출물은 workspace 안에 만들고 절대경로를 남긴다.",
@@ -890,8 +897,8 @@ export async function sendWorker(
       sourceUserId: input.callerUserId,
       sourceRole: input.callerRole,
       targetSessionId: worker.backing_session_id,
-      message: input.message,
-      // Persistent worker messaging always resumes the supervisor.
+      message: buildAgentCollaborationMessage(input.message),
+      // Reply wakes the requesting session, including an authorized peer.
       onComplete: "wake",
       effort: executionPolicy?.effectiveEffort,
       modelPolicyId: executionPolicy?.id,
@@ -955,7 +962,9 @@ export async function refreshWorkerStatus(workerId: string): Promise<void> {
       : worker.status === "archived" || worker.status === "paused"
         ? worker.status
         : "idle";
-  await setWorkerStatus(worker.id, runtimeStatus);
+  if (worker.status !== "paused" && worker.status !== "archived") {
+    await setWorkerStatus(worker.id, runtimeStatus);
+  }
   const latestRun = await queryOne<AgentRunRow>(
     `SELECT * FROM agent_runs WHERE worker_id = $1 ORDER BY created_at DESC LIMIT 1`,
     [worker.id],
@@ -1122,7 +1131,7 @@ export async function resumeWorker(
     parentSessionId,
     idOrName,
   );
-  await setWorkerStatus(worker.id, "idle");
+  await execute("UPDATE agent_workers SET status='idle',updated_at=NOW() WHERE id=$1 AND status='paused'", [worker.id]);
   await recordAgentEvent({
     kind: "worker_resumed",
     workerId: worker.id,
@@ -1154,7 +1163,7 @@ export async function archiveWorker(
     await execute(
       `UPDATE sessions
           SET archived = 1,
-              updated_at = CURRENT_TIMESTAMP
+              archived_at = CURRENT_TIMESTAMP
         WHERE id = $1`,
       [worker.backing_session_id],
     );

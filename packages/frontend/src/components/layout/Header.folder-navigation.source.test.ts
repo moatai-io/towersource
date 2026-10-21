@@ -5,9 +5,9 @@ import { describe, expect, it } from 'vitest';
 const source = fs.readFileSync(path.resolve(import.meta.dirname, './Header.tsx'), 'utf8');
 
 describe('Header desktop folder navigation', () => {
-  it('shows AI team and folder without the retired Channel tab', () => {
+  it('shows AI team and folder without duplicate Work or retired Channel tabs', () => {
     expect(source).toContain("{ key: 'ai', label: t('conversationsNav'), badge: 0 }");
-    expect(source).toContain("{ key: 'work', label: t('workHubNav'), badge: workAttentionCount }");
+    expect(source).not.toContain("{ key: 'work'");
     expect(source).toContain("{ key: 'files', label: t('files'), badge: 0 }");
     expect(source).not.toContain("key: 'channel'");
     expect(source).not.toContain('totalRoomUnread');

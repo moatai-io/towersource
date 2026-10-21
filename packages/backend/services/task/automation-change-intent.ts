@@ -4,7 +4,7 @@
  */
 import { createHash } from 'node:crypto';
 import { query, queryOne, transaction, withClient } from '../../db/pg-repo.js';
-import { materializeAutomationYamlV1, validateAutomationYamlV1 } from '../../../shared/automation-yaml.js';
+import { materializeAutomationChangeV1, validateAutomationYamlV1 } from '../../../shared/automation-yaml.js';
 import { getAutomation, getAutomationInTransaction, getAutomationForUpdateInTransaction, updateAutomationInTransaction, type Automation, type AutomationRiskLevel } from './automation-manager.js';
 import { authorizeAutomationMutation } from './automation-mutation-policy.js';
 import { canAccessAutomationJob } from './schedule-permissions.js';
@@ -81,7 +81,7 @@ export async function createAutomationChangeIntent(input: {
   if (!access.allowed) throw new Error(access.message || 'forbidden');
   const validation = validateAutomationYamlV1(input.yaml);
   if (!validation.ok) throw new Error('invalid automation yaml');
-  const materialized = materializeAutomationYamlV1(input.yaml);
+  const materialized = materializeAutomationChangeV1(input.yaml, input.automation);
   const policy = await authorizeAutomationMutation({
     actor: { userId: input.actorUserId, role: input.actorRole },
     existing: input.automation,
@@ -219,11 +219,18 @@ export async function applyAutomationChangeIntent(input: {
     if (!current) throw new Error('automation not found');
     const access = await canAccessAutomationJob(current, input.actorUserId, input.actorRole, 'edit');
     if (!access.allowed) throw new Error(access.message || 'forbidden');
+    // Old pending intents can predate the strict validator. Never apply their
+    // silently ignored condition/AI/report sections, even with a valid hash.
+    if (!validateAutomationYamlV1(intent.yaml).ok) throw new Error('automation change intent YAML contains unsupported fields; create a new preview');
     if (new Date(current.configUpdatedAt).getTime() !== new Date(intent.baseConfigUpdatedAt).getTime()) {
       throw new Error('automation changed after this proposal; create a new preview');
     }
 
     const updates = intent.updates as any;
+    const currentMaterialization = materializeAutomationChangeV1(intent.yaml, current).updates;
+    if (stable(currentMaterialization) !== stable(Object.fromEntries(Object.entries(updates).filter(([key]) => key !== 'riskLevel')))) {
+      throw new Error('automation change intent no longer matches the supported YAML fields; create a new preview');
+    }
     const policy = await authorizeAutomationMutation({
       actor: { userId: input.actorUserId, role: input.actorRole },
       existing: current,

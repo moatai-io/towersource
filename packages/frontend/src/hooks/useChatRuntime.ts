@@ -1,7 +1,15 @@
+import { towerWebSocketUrl, readBrowserAuthToken } from '../features/client-connection/connection';
+import { notifyAnswerCompleted, notifyQuestionRequired } from '../features/answer-sound/answer-sound';
+import { refreshLatestSessionSnapshot } from '../utils/latest-session-sync';
+import { saveFileOperation } from '../features/file-operation-feedback/save-operation';
+import { acknowledgeFileSave } from '../features/file-operation-feedback/save-acknowledgement';
+import { reportChatRequestFailure, setChatConnection } from '../features/chat-feedback/feedback';
+import { newerContextSnapshot, normalizeContextMeasurement, newerContextMeasurement } from '../utils/context-measurement';
+import { preserveMeasuredContext } from '../utils/context-metric';
 import { useCallback, useEffect, useRef } from 'react';
 import { useWebSocket } from './useWebSocket';
 import i18n from '../i18n';
-import { useChatStore, type ChatMessage, type SlashCommandInfo, type TurnMetrics } from '../stores/chat-store';
+import { useChatStore, type ChatMessage, type ContentBlock, type SlashCommandInfo, type TurnMetrics } from '../stores/chat-store';
 import { useFileStore } from '../stores/file-store';
 import { useSessionStore } from '../stores/session-store';
 import { useModelStore, getModelIdForBackend, resolveEffectiveModel, reconcileSelectedModel } from '../stores/model-store';
@@ -42,7 +50,7 @@ import { useAiPanelStore } from '../stores/ai-panel-store';
 import { useProjectStore } from '../stores/project-store';
 import { useAgentDraftStore, type AgentDraftArtifact } from '../stores/agent-draft-store';
 import { getCurrentUsername } from '../utils/auth';
-import { markSessionRunActive, markSessionRunAwaitingUser, markSessionRunFinished, markSessionRunIdle, markSessionRunQueued, markSessionRunWaitingRetry } from '../features/session-run-state/session-run-actions';
+import { resolveSessionQuestion, markSessionRunActive, markSessionRunAwaitingUser, markSessionRunFinished, markSessionRunIdle, markSessionRunQueued, markSessionRunWaitingRetry } from '../features/session-run-state/session-run-actions';
 import { syncServerClock } from '../utils/server-clock';
 import { presentChatRuntimeError } from '../utils/chat-runtime-error';
 
@@ -365,7 +373,7 @@ function mapStoredMessagesToChat(stored: any[], sessionId: string, ownerUsername
  * into the live transcript. If it is backgrounded, draining is enough: the next
  * session load/DB merge will show the persisted messages in authoritative order.
  */
-function upsertSteerGroupMessage(sessionId: string, item: { id: string; text: string; username?: string | null; order?: number }) {
+function upsertSteerGroupMessage(sessionId: string, item: { id: string; text: string; username?: string | null; order?: number; assistantMsgId?: string; assistantContent?: ContentBlock[] }) {
   const store = useChatStore.getState();
   const messages = store.messages;
   const last = messages[messages.length - 1];
@@ -377,6 +385,8 @@ function upsertSteerGroupMessage(sessionId: string, item: { id: string; text: st
     id: item.id,
     text: item.text,
     order: typeof item.order === 'number' ? item.order : Number.MAX_SAFE_INTEGER,
+    assistantMsgId: item.assistantMsgId,
+    assistantContent: item.assistantContent,
   };
 
   if (sameTurnGroup) {
@@ -660,9 +670,10 @@ async function mergeMessagesFromDb(sessionId: string) {
 }
 
 export function useChatRuntime(wsEnabled = true) {
-  const token = localStorage.getItem('token');
-  const wsBase = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`;
+  const token = readBrowserAuthToken();
+  const wsBase = towerWebSocketUrl('/ws');
   const wsUrl = wsEnabled ? (token ? `${wsBase}?token=${encodeURIComponent(token)}` : wsBase) : null;
+  const nativeCompactingSessionRef = useRef<string | null>(null);
   const currentAssistantMsg = useRef<ChatMessage | null>(null);
   const currentAssistantSessionRef = useRef<string | null>(null);
   const sendRef = useRef<(data: any) => void>(() => {});
@@ -678,9 +689,11 @@ export function useChatRuntime(wsEnabled = true) {
     setSystemInfo, setCost, setSessionStartTime,
     setTurnStartTime,
     setTurnPhase,
-  } = useChatStore();
+  } = useChatStore.getState();
 
-  const { setTree, setDirectoryChildren, handleFileChange } = useFileStore();
+  // Runtime owns event delivery, not chat rendering. Store actions are stable;
+  // subscribing here would rerender App on every streamed message update.
+  const { setTree, setDirectoryChildren, handleFileChange } = useFileStore.getState();
 
   const upsertAssistantMessage = useCallback((sessionId: string, msgId: string, parsed: any[], parentToolUseId?: string, timestamp?: number, metadata?: ChatMessage['metadata']) => {
     if (shouldResetAssistantRef(currentAssistantSessionRef.current, sessionId)) {
@@ -721,7 +734,10 @@ export function useChatRuntime(wsEnabled = true) {
     duration?: number;
     contextInputTokens?: number;
     contextOutputTokens?: number;
+    contextSnapshot?: unknown;
+    compactThresholdTokens?: number;
     contextWindowSize?: number;
+    contextCompacted?: boolean;
     contextEstimatedTokens?: number;
     stopReason?: string;
     /** Final assistant message row that owns this turn's persisted metrics. */
@@ -731,20 +747,29 @@ export function useChatRuntime(wsEnabled = true) {
     /** Only final turn_done metrics should be copied onto a visible chat bubble. */
     attachToMessage?: boolean;
   }) => {
-    setCost({
+    setCost(preserveMeasuredContext(useChatStore.getState().cost, {
       totalCost: payload.totalCost || 0,
       inputTokens: payload.inputTokens || 0,
       outputTokens: payload.outputTokens || 0,
       cacheCreationTokens: payload.cacheCreationTokens,
       cacheReadTokens: payload.cacheReadTokens,
       duration: payload.duration,
+      contextMeasurement: newerContextMeasurement(useChatStore.getState().cost.contextMeasurement,
+        normalizeContextMeasurement({ requestId: payload.targetMessageId || 'turn', measuredAt: Date.now(),
+          actual: payload.contextInputTokens, estimated: payload.contextEstimatedTokens,
+          window: payload.contextWindowSize, compactThreshold: payload.compactThresholdTokens, compacted: payload.contextCompacted })),
       contextInputTokens: payload.contextInputTokens || 0,
       contextOutputTokens: payload.contextOutputTokens || 0,
       contextWindowSize: payload.contextWindowSize || 0,
+      compactThresholdTokens: payload.compactThresholdTokens,
+      contextSnapshot: newerContextSnapshot(useChatStore.getState().cost.contextSnapshot, payload.contextSnapshot),
       contextEstimatedTokens: payload.contextEstimatedTokens || 0,
-    });
+      contextCompacted: payload.contextCompacted === true,
+    }));
     const turnMetrics = {
-      inputTokens: payload.contextEstimatedTokens || payload.contextInputTokens || payload.inputTokens || 0,
+      contextSnapshot: payload.contextSnapshot,
+      inputTokens: payload.contextInputTokens || payload.inputTokens || 0,
+      contextCompacted: payload.contextCompacted === true,
       outputTokens: payload.contextOutputTokens || payload.outputTokens || 0,
       reasoningTokens: payload.reasoningTokens,
       contextEstimatedTokens: payload.contextEstimatedTokens,
@@ -837,6 +862,13 @@ export function useChatRuntime(wsEnabled = true) {
     syncServerClock(data?.serverNow);
     switch (data.type) {
       case 'connected': {
+        // Server-owned unanswered questions survive browser reconnects without opening a popup.
+        for (const [sid, state] of Object.entries(useChatStore.getState().turnStateBySession)) {
+          if (state.pendingQuestionId) markSessionRunActive(sid, 'preparing', { pendingQuestionId: null });
+        }
+        for (const question of data.pendingQuestions || []) {
+          if (question.sessionId && question.questionId) markSessionRunAwaitingUser(question.sessionId, question.questionId);
+        }
         // Request browser notification permission on first connect
         requestNotificationPermission();
         const newEpoch = data.serverEpoch;
@@ -932,8 +964,10 @@ export function useChatRuntime(wsEnabled = true) {
 
         // Drain orphaned queues: messages queued for sessions that are no longer streaming.
         // Delayed to ensure sessions are loaded from API and WS is fully ready.
-        const runningSet = new Set(runningSessions);
+        const reconnectGeneration = lastConnectTs.current;
         setTimeout(() => {
+          if (lastConnectTs.current !== reconnectGeneration || wsRef2.current?.readyState !== WebSocket.OPEN) return;
+          const runningSet = useSessionStore.getState().streamingSessions;
           const allQueues = useChatStore.getState().messageQueue;
           const activeSid2 = useChatStore.getState().sessionId;
           for (const [sid, queue] of Object.entries(allQueues)) {
@@ -943,14 +977,11 @@ export function useChatRuntime(wsEnabled = true) {
             // If session is still streaming, session_status handler will drain when it finishes
             if (runningSet.has(sid)) continue;
             // Orphaned queue: session not streaming, not active → send first message
+            // A missing list entry may still be loading; preserve queued input.
+            const session = useSessionStore.getState().sessions.find((s) => s.id === sid);
+            if (!session) continue;
             const msg = useChatStore.getState().dequeueMessage(sid);
             if (msg) {
-              const session = useSessionStore.getState().sessions.find((s) => s.id === sid);
-              if (!session) {
-                // Session was deleted — just clear the orphaned queue
-                useChatStore.getState().clearSessionQueue(sid);
-                continue;
-              }
               const messageId = generateUUID();
               sendRef.current({
                 type: 'chat',
@@ -1012,7 +1043,7 @@ export function useChatRuntime(wsEnabled = true) {
           if (data.sessionId) {
             if (data.durableTurnState === 'waiting_retry') {
               markSessionRunWaitingRetry(data.sessionId, data.durableTurnError || undefined);
-            } else if (data.durableTurnState === 'needs_attention') {
+            } else if (data.durableTurnState === 'needs_attention' && data.durableTurnRequiresAttention !== false) {
               markSessionRunFinished(data.sessionId, 'error', { errorMessage: data.durableTurnError || undefined });
             } else {
               markSessionRunIdle(data.sessionId, { pendingMessageCount: 0 });
@@ -1108,7 +1139,7 @@ export function useChatRuntime(wsEnabled = true) {
           if (data.sessionId) {
             if (data.durableTurnState === 'waiting_retry') {
               markSessionRunWaitingRetry(data.sessionId, data.durableTurnError || undefined);
-            } else if (data.durableTurnState === 'needs_attention') {
+            } else if (data.durableTurnState === 'needs_attention' && data.durableTurnRequiresAttention !== false) {
               markSessionRunFinished(data.sessionId, 'error', { errorMessage: data.durableTurnError || undefined });
             } else {
               markSessionRunIdle(data.sessionId, { pendingMessageCount: 0 });
@@ -1237,16 +1268,10 @@ export function useChatRuntime(wsEnabled = true) {
       case 'session_awaiting_user': {
         if (!data.sessionId) break;
         if (data.awaiting) {
-          // This content-free event is broadcast globally. Keep AUQ attention visible
-          // in Latest and already-open main tabs even when this browser is looking at
-          // another session; the full question payload remains session-scoped.
+          // Recipient-scoped attention updates the original session row, not a background popup.
           markSessionRunAwaitingUser(data.sessionId, data.questionId);
         } else {
-          const current = useChatStore.getState().turnStateBySession[data.sessionId];
-          // Ignore stale clear edges after a newer phase has already taken over.
-          if (current?.phase === 'awaiting_user') {
-            markSessionRunActive(data.sessionId, 'preparing', { pendingQuestionId: undefined });
-          }
+          resolveSessionQuestion(data.sessionId, data.questionId);
         }
         break;
       }
@@ -1389,7 +1414,7 @@ export function useChatRuntime(wsEnabled = true) {
           console.log(`[chat] stale guard: server confirmed session ${data.sessionId.slice(0, 8)} is idle, clearing streaming`);
           if (data.durableTurnState === 'waiting_retry') {
             markSessionRunWaitingRetry(data.sessionId, data.durableTurnError || undefined);
-          } else if (data.durableTurnState === 'needs_attention') {
+          } else if (data.durableTurnState === 'needs_attention' && data.durableTurnRequiresAttention !== false) {
             markSessionRunFinished(data.sessionId, 'error', { errorMessage: data.durableTurnError || undefined });
           } else {
             markSessionRunIdle(data.sessionId, { pendingMessageCount: 0 });
@@ -1438,6 +1463,7 @@ export function useChatRuntime(wsEnabled = true) {
               path: data.path,
               label: data.label,
               focus: data.focus !== false,
+              reveal: data.reveal === true,
             },
           }));
         }
@@ -1448,12 +1474,13 @@ export function useChatRuntime(wsEnabled = true) {
         if (!data.sessionId) break;
         useSessionStore.getState().setTurnTerminal(data.sessionId, data);
         if (data.outcome === 'completed') {
+          notifyAnswerCompleted(data.sessionId, data.rootTurnId);
           flushPendingLastTurnText(data.sessionId);
           const existing = useSessionStore.getState().lastTurnTextBySession[data.sessionId];
           if (existing && !existing.finalized) {
             queueLastTurnText(data.sessionId, existing.text, true, undefined, true);
           }
-          useSessionStore.getState().markSessionCompleted(data.sessionId);
+          window.dispatchEvent(new CustomEvent('tower:session-ai-response-completed', { detail: { sessionId: data.sessionId } }));
           markSessionRunFinished(data.sessionId, 'done', { pendingMessageCount: 0 });
         } else if (data.outcome === 'stopped') {
           markSessionRunFinished(data.sessionId, 'stopped', { pendingMessageCount: 0 });
@@ -1489,6 +1516,7 @@ export function useChatRuntime(wsEnabled = true) {
           } else if (towerMsg.type === 'turn_terminal') {
             // A terminal cache is final only when the root turn durably completed.
             if (towerMsg.outcome === 'completed') {
+            notifyAnswerCompleted(data.sessionId, towerMsg.rootTurnId);
               flushPendingLastTurnText(data.sessionId);
               const existing = useSessionStore.getState().lastTurnTextBySession[data.sessionId];
               if (existing && !existing.finalized) {
@@ -1507,7 +1535,7 @@ export function useChatRuntime(wsEnabled = true) {
         if (towerMsg?.type === 'turn_terminal' && data.sessionId) {
           useSessionStore.getState().setTurnTerminal(data.sessionId, towerMsg);
           if (towerMsg.outcome === 'completed') {
-            useSessionStore.getState().markSessionCompleted(data.sessionId);
+            window.dispatchEvent(new CustomEvent('tower:session-ai-response-completed', { detail: { sessionId: data.sessionId } }));
             markSessionRunFinished(data.sessionId, 'done', { pendingMessageCount: 0 });
           } else if (towerMsg.outcome === 'stopped') {
             markSessionRunFinished(data.sessionId, 'stopped', { pendingMessageCount: 0 });
@@ -1572,7 +1600,7 @@ export function useChatRuntime(wsEnabled = true) {
           const existingBlocks = cur && cur.id === msgId
             ? cur.content
             : useChatStore.getState().messages.find((m) => m.id === msgId)?.content || [];
-          const parsed = normalizeContentBlocks(stripAgentDraftPatchBlocks(towerMsg.content || []), existingBlocks);
+          const parsed = normalizeContentBlocks(stripAgentDraftPatchBlocks(towerMsg.content || []), existingBlocks, true);
           applyAgentDraftPatchesFromText(extractAgentDraftPatchText(towerMsg.content || []));
           const toolBlocks = parsed.filter((b) => b.type === 'tool_use' && b.toolUse);
           const lastTool = toolBlocks[toolBlocks.length - 1]?.toolUse;
@@ -1589,6 +1617,22 @@ export function useChatRuntime(wsEnabled = true) {
           break;
         }
 
+        if (towerMsg.type === 'context_usage') {
+          if (Number(towerMsg.contextInputTokens) > 0) {
+            setCost({
+              contextMeasurement: newerContextMeasurement(useChatStore.getState().cost.contextMeasurement,
+                normalizeContextMeasurement({ requestId: towerMsg.msgId, measuredAt: towerMsg.measuredAt,
+                  actual: towerMsg.contextInputTokens, compactThreshold: towerMsg.compactThresholdTokens, window: towerMsg.contextWindowSize })),
+              contextSnapshot: newerContextSnapshot(useChatStore.getState().cost.contextSnapshot, towerMsg.contextSnapshot),
+              contextInputTokens: towerMsg.contextInputTokens,
+              contextOutputTokens: towerMsg.contextOutputTokens || 0,
+              contextWindowSize: towerMsg.contextWindowSize || useChatStore.getState().cost.contextWindowSize,
+              contextEstimatedTokens: 0,
+              contextCompacted: false,
+            });
+          }
+          break;
+        }
         if (towerMsg.type === 'turn_done') {
           setSessionId(data.sessionId);
           // Force-apply any RAF-batched assistant content updates that may
@@ -1609,7 +1653,10 @@ export function useChatRuntime(wsEnabled = true) {
             contextInputTokens: usage.contextInputTokens || 0,
             contextOutputTokens: usage.contextOutputTokens || 0,
             contextWindowSize: usage.contextWindowSize || 0,
+            compactThresholdTokens: usage.compactThresholdTokens,
+            contextSnapshot: newerContextSnapshot(useChatStore.getState().cost.contextSnapshot, usage.contextSnapshot),
             contextEstimatedTokens: usage.contextEstimatedTokens || 0,
+            contextCompacted: usage.contextCompacted === true,
             stopReason: usage.stopReason,
             targetMessageId: towerMsg.msgId,
             targetMessageIds: Array.isArray(towerMsg.assistantMsgIds) ? towerMsg.assistantMsgIds : undefined,
@@ -1639,6 +1686,8 @@ export function useChatRuntime(wsEnabled = true) {
                 text: towerMsg.text ?? '',
                 username: towerMsg.username || undefined,
                 order: pendingOrder >= 0 ? pendingOrder : undefined,
+                assistantMsgId: towerMsg.assistantMsgId,
+                assistantContent: Array.isArray(towerMsg.assistantContent) ? towerMsg.assistantContent : undefined,
               });
               if (insertedNewGroup) {
                 const sessionStore = useSessionStore.getState();
@@ -1657,9 +1706,12 @@ export function useChatRuntime(wsEnabled = true) {
           setSessionId(data.sessionId);
           const sid = useChatStore.getState().sessionId;
           if (towerMsg.phase === 'boundary' || towerMsg.phase === 'compacting') {
+            nativeCompactingSessionRef.current = sid;
             useChatStore.getState().setCompacting(sid);
             if (sid) markSessionRunActive(sid, 'compacting');
           } else if (towerMsg.phase === 'done') {
+            setCost({ contextSnapshot: { capturedAt: new Date().toISOString(), windowTokens: useChatStore.getState().cost.contextWindowSize } });
+            nativeCompactingSessionRef.current = null;
             useChatStore.getState().setCompacting(null);
             if (sid) markSessionRunActive(sid, 'streaming');
             const msgs = useChatStore.getState().messages;
@@ -1673,12 +1725,14 @@ export function useChatRuntime(wsEnabled = true) {
               });
             }
           } else if (towerMsg.phase === 'skipped') {
+            nativeCompactingSessionRef.current = null;
             // A small session can legitimately have nothing to summarize. Clear
             // compacting UI without marking the run failed; the engine continues
             // from the unchanged native Session state.
             useChatStore.getState().setCompacting(null);
             if (sid) markSessionRunActive(sid, 'streaming');
           } else if (towerMsg.phase === 'failed') {
+            nativeCompactingSessionRef.current = null;
             useChatStore.getState().setCompacting(null);
             if (sid) {
               markSessionRunFinished(sid, 'error', {
@@ -1802,7 +1856,8 @@ export function useChatRuntime(wsEnabled = true) {
 
         // Safety net: clear compacting banner when assistant message arrives
         // (SDK may not send explicit status:null after compaction)
-        if (sdkMsg.type === 'assistant' && useChatStore.getState().compactingSessionId !== null) {
+        if (sdkMsg.type === 'assistant' && useChatStore.getState().compactingSessionId !== null
+          && nativeCompactingSessionRef.current !== data.sessionId) {
           useChatStore.getState().setCompacting(null);
           if (data.sessionId) markSessionRunActive(data.sessionId, 'streaming');
           // The status handler (or DB marker on next merge) handles the divider.
@@ -1826,7 +1881,7 @@ export function useChatRuntime(wsEnabled = true) {
           const existingBlocks = cur && cur.id === msgId
             ? cur.content
             : useChatStore.getState().messages.find((m) => m.id === msgId)?.content || [];
-          const parsed = normalizeContentBlocks(parseSDKMessage(sdkMsg), existingBlocks);
+          const parsed = normalizeContentBlocks(parseSDKMessage(sdkMsg, true), existingBlocks, true);
 
           const toolBlocks = parsed.filter((b) => b.type === 'tool_use' && b.toolUse);
           const lastTool = toolBlocks[toolBlocks.length - 1]?.toolUse;
@@ -2019,12 +2074,8 @@ export function useChatRuntime(wsEnabled = true) {
       }
 
       case 'file_saved': {
-        toastSuccess(`${data.path.split('/').pop()} saved`);
-        const fs = useFileStore.getState();
-        fs.markTabSavedByPath(data.path);
-        if (fs.openFile && fs.openFile.path === data.path) {
-          fs.markSaved();
-        }
+        // Legacy frame lacks submitted content/correlation. Current saves await HTTP.
+        // Never mark newer edits clean or show success from an unsolicited frame.
         break;
       }
 
@@ -2125,10 +2176,13 @@ export function useChatRuntime(wsEnabled = true) {
           sessionId: data.sessionId,
           questions: data.questions,
         });
+        if (normalizedPendingQuestion) {
+          notifyQuestionRequired(normalizedPendingQuestion.sessionId, normalizedPendingQuestion.questionId);
+        }
         if (data.sessionId) {
           markSessionRunAwaitingUser(data.sessionId, data.questionId);
         }
-        if (!shouldDropSessionMessage(curSid, data.sessionId, useSessionStore.getState().activeSessionId)) {
+        if (useSessionStore.getState().activeSessionId === data.sessionId && !shouldDropSessionMessage(curSid, data.sessionId, useSessionStore.getState().activeSessionId)) {
           useChatStore.getState().setPendingQuestion(normalizedPendingQuestion);
           useChatStore.getState().setStreaming(false);
         }
@@ -2137,17 +2191,36 @@ export function useChatRuntime(wsEnabled = true) {
 
       case 'ask_user_timeout': {
         const pq = useChatStore.getState().pendingQuestion;
-        if (data.sessionId) {
-          markSessionRunActive(data.sessionId, 'preparing', { pendingQuestionId: undefined });
-        }
-        if (pq && pq.questionId === data.questionId) {
-          useChatStore.getState().setPendingQuestion(null);
+        if (data.sessionId) resolveSessionQuestion(data.sessionId, data.questionId);
+        if (pq && pq.sessionId === data.sessionId && pq.questionId === data.questionId) {
           toastWarning(i18n.t('chat:runtime.questionTimedOut'));
         }
         break;
       }
 
+      case 'answer_question_ack': {
+        if (data.sessionId) resolveSessionQuestion(data.sessionId, data.questionId);
+        break;
+      }
+
+      case 'answer_question_error': {
+        const pq = useChatStore.getState().pendingQuestion;
+        if (pq && pq.questionId === data.questionId) {
+          useChatStore.getState().setPendingQuestion({ ...pq, submissionStatus: 'send_failed', submissionError: data.reason || 'answer_not_delivered' });
+          useChatStore.getState().setStreaming(false);
+          if (data.sessionId) markSessionRunAwaitingUser(data.sessionId, data.questionId);
+          toastWarning(i18n.t('chat:runtime.questionAnswerFailed'));
+        }
+        break;
+      }
+
       case 'error': {
+        // Unscoped operation failures must never terminate a chat run, including
+        // the initial load where session filtering otherwise accepts all events.
+        if (typeof data.sessionId !== 'string' || !data.sessionId.trim()) {
+          reportChatRequestFailure(useSessionStore.getState().activeSessionId);
+          break;
+        }
         // Ignore session-specific errors for sessions we're not viewing
         const _errSid = useChatStore.getState().sessionId;
         if (shouldDropSessionMessage(_errSid, data.sessionId, useSessionStore.getState().activeSessionId)) return;
@@ -2178,14 +2251,8 @@ export function useChatRuntime(wsEnabled = true) {
           markSessionRunFinished(data.sessionId, 'error', { errorMessage: presentation.message, pendingMessageCount: 0 });
         }
         currentAssistantMsg.current = null;
-        if (presentation.tone === 'warning') {
-          toastWarning(presentation.message);
-        } else {
-          toastError(presentation.message);
-        }
-        // Runtime/provider diagnostics belong in logs and activity metadata, not in
-        // the conversation transcript. The run-state error and one toast are the
-        // single user-facing surface; the normal composer provides the recovery action.
+        // Run errors are rendered by ChatFeedback in their owning session.
+        // Diagnostics remain in logs, not toasts or transcript messages.
         break;
       }
 
@@ -2218,6 +2285,11 @@ export function useChatRuntime(wsEnabled = true) {
             timestamp: data.message.timestamp || Date.now(),
           });
         }
+        break;
+      }
+
+      case 'session_attention_updated': {
+        void refreshLatestSessionSnapshot();
         break;
       }
 
@@ -2517,7 +2589,13 @@ export function useChatRuntime(wsEnabled = true) {
               } : {}),
             });
           } else if (notif.type === 'session.completed' || notif.type === 'spawn.completed') {
-            toastInfo(notif.title, { description: notif.body });
+            toastInfo(notif.title, {
+              description: notif.body,
+              ...(notificationSessionId ? { action: {
+                label: i18n.t('settings:notificationOpenSession'),
+                onClick: () => { window.dispatchEvent(new CustomEvent('kanban-select-session', { detail: { sessionId: notificationSessionId } })); },
+              } } : {}),
+            });
           }
         }
         break;
@@ -2615,6 +2693,7 @@ export function useChatRuntime(wsEnabled = true) {
       }
 
       // ── Session lifecycle (added 2026-04-10) ─────────────────
+      case 'session_access_revoked':
       case 'session_deleted': {
         const { sessionId: deletedId } = data;
         if (deletedId) {
@@ -2632,6 +2711,7 @@ export function useChatRuntime(wsEnabled = true) {
 
   // Reconnect handler — send session context to backend for stream re-attachment
   const handleReconnect = useCallback(() => {
+    void refreshLatestSessionSnapshot();
     const { sessionId: sid, engineSessionId } = useChatStore.getState();
     if (sid) {
       // Foreground/app-switch recovery must not depend only on WS events. On
@@ -2654,6 +2734,7 @@ export function useChatRuntime(wsEnabled = true) {
   }, []);
 
   const { send, connected, ws: wsRef2, safetyTimerFired } = useWebSocket(wsUrl, handleMessage, handleReconnect);
+  useEffect(() => { setChatConnection(connected); }, [connected]);
   sendRef.current = send;
 
   useEffect(() => {
@@ -2701,7 +2782,11 @@ export function useChatRuntime(wsEnabled = true) {
       void recoverActiveStreamingSession();
     }, MOBILE_STREAM_RECOVERY_POLL_MS);
 
-    const recoverOnReturn = () => { void recoverActiveStreamingSession(); };
+    const recoverOnReturn = () => {
+      if (document.visibilityState === 'hidden') return;
+      void refreshLatestSessionSnapshot();
+      void recoverActiveStreamingSession();
+    };
     window.addEventListener('online', recoverOnReturn);
     window.addEventListener('focus', recoverOnReturn);
     document.addEventListener('visibilitychange', recoverOnReturn);
@@ -2715,7 +2800,7 @@ export function useChatRuntime(wsEnabled = true) {
     };
   }, [connected, wsRef2]);
 
-  // Expose WS reference globally for KanbanBoard to send task_spawn/abort messages
+  // Expose the active socket to UI surfaces that send scoped real-time commands.
   if (wsRef2.current) {
     (window as any).__towerWs = wsRef2.current;
     // Compatibility for older components/extensions during the transition.
@@ -2723,7 +2808,7 @@ export function useChatRuntime(wsEnabled = true) {
   }
 
   const sendMessage = useCallback(
-    (message: string, cwdOrOptions?: string | { commandTrigger?: 'slash' | 'picker' | 'natural-language'; cwd?: string; suppressUserEcho?: boolean }, maybeOptions?: { commandTrigger?: 'slash' | 'picker' | 'natural-language'; suppressUserEcho?: boolean }) => {
+    (message: string, cwdOrOptions?: string | { commandTrigger?: 'slash' | 'picker' | 'natural-language'; cwd?: string; suppressUserEcho?: boolean; sourceReference?: unknown }, maybeOptions?: { commandTrigger?: 'slash' | 'picker' | 'natural-language'; suppressUserEcho?: boolean; sourceReference?: unknown }) => {
       const cwd = typeof cwdOrOptions === 'string' ? cwdOrOptions : cwdOrOptions?.cwd;
       const sendOptions = typeof cwdOrOptions === 'string' ? maybeOptions : cwdOrOptions;
       // Resolve sessionId: chatStore is primary, sessionStore is fallback (handles desync)
@@ -2765,6 +2850,7 @@ export function useChatRuntime(wsEnabled = true) {
           content: [{ type: 'text', text: message }],
           timestamp: Date.now(),
           username: getCurrentUsername() || (typeof window !== 'undefined' ? localStorage.getItem('username') || undefined : undefined),
+          metadata: sendOptions?.sourceReference ? { sourceReference: sendOptions.sourceReference, scopedEditTurn: true } : null,
           sendStatus: 'pending',
         });
       }
@@ -2789,8 +2875,10 @@ export function useChatRuntime(wsEnabled = true) {
         engineSessionId: useChatStore.getState().engineSessionId || undefined,
         cwd,
         model: backendModel,
+        effort: currentSession?.reasoningEffort ?? undefined,
         commandTrigger: sendOptions?.commandTrigger,
         suppressUserEcho: sendOptions?.suppressUserEcho,
+        sourceReference: sendOptions?.sourceReference,
       });
 
       if (!sent) {
@@ -2831,7 +2919,7 @@ export function useChatRuntime(wsEnabled = true) {
     [send, addMessage, setStreaming, setTurnStartTime]
   );
 
-  const requestSafeStop = useCallback(() => {
+  const requestImmediateStop = useCallback(() => {
     const sessionId = useChatStore.getState().sessionId;
     if (!sessionId) return;
     send({ type: 'request_turn_stop', sessionId, mode: 'force' });
@@ -2884,9 +2972,12 @@ export function useChatRuntime(wsEnabled = true) {
 
   const saveFile = useCallback(
     (path: string, content: string) => {
-      send({ type: 'file_write', path, content });
+      const token = localStorage.getItem('token');
+      void saveFileOperation(path, () => fetch('/api/files/write', {
+        method: 'POST', headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) }, body: JSON.stringify({ path, content }),
+      }), () => acknowledgeFileSave(path, content));
     },
-    [send]
+    []
   );
 
   const answerQuestion = useCallback(
@@ -2896,8 +2987,16 @@ export function useChatRuntime(wsEnabled = true) {
       const pendingQuestion = chatState.pendingQuestion?.questionId === questionId
         ? chatState.pendingQuestion
         : null;
-      send({ type: 'answer_question', sessionId, questionId, answer });
+      const sendResult = send({ type: 'answer_question', sessionId, questionId, answer });
+      if (!sendResult) {
+        if (pendingQuestion) {
+          useChatStore.getState().setPendingQuestion({ ...pendingQuestion, submissionStatus: 'send_failed', submissionError: 'websocket_not_ready' });
+        }
+        toastWarning(i18n.t('chat:runtime.questionAnswerFailed'));
+        return;
+      }
       if (pendingQuestion) {
+        useChatStore.getState().setPendingQuestion({ ...pendingQuestion, submissionStatus: 'submitting', submissionError: undefined });
         // The backend tool result arrives after the suspended model resumes. Update
         // the visible AUQ card immediately so it never keeps spinning after submit.
         const optimisticResult = buildAskUserQuestionDisplayResult(pendingQuestion.questions, answer);
@@ -2916,13 +3015,8 @@ export function useChatRuntime(wsEnabled = true) {
         }
         if (optimisticToolUseId) chatState.attachToolResult(optimisticToolUseId, optimisticResult);
       }
-      useChatStore.getState().setPendingQuestion(null);
-      if (sessionId) {
-        useChatStore.getState().setStreaming(true);
-        markSessionRunActive(sessionId, 'preparing');
-        if (!useChatStore.getState().turnStartTime) {
-          useChatStore.getState().setTurnStartTime(Date.now());
-        }
+      if (sessionId && !useChatStore.getState().turnStartTime) {
+        useChatStore.getState().setTurnStartTime(Date.now());
       }
     },
     [send]
@@ -2930,7 +3024,7 @@ export function useChatRuntime(wsEnabled = true) {
 
   return {
     sendMessage,
-    requestSafeStop,
+    requestImmediateStop,
     abort,
     setActiveSession,
     requestFileTree,

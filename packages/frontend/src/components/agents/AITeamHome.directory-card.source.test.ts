@@ -13,12 +13,21 @@ describe('AI teammate management cards', () => {
     expect(source).not.toContain('role="link"');
   });
 
-  it('surfaces identity, role, workspace, and availability instead of work usage', () => {
-    for (const copy of ["t('teammateRole')", "t('teammateInstruction')", "t('workspace')", "t('teammateStatus.available')"]) {
+  it('keeps identity, skill level, workspace, role, and compact operating totals', () => {
+    for (const copy of ["levelTitle(level)", "t('teammateInstruction')", "t('workspace')", "t('teammateStatus.available')", "t('totalConversations')", "t('completedWork')"]) {
       expect(source).toContain(copy);
     }
+    expect(source).toContain('conversationCount: project.sessionCount ?? 0');
+    expect(source).toContain('completedWorkCount: project.careerMetrics?.completedWorkstreams ?? 0');
+    expect(source).not.toContain('session.userTurnCount || 0');
     for (const removed of ['memberCount', 'recentUsage', 'changePercent', 'dailyTurns']) {
       expect(source).not.toContain(removed);
     }
   });
+});
+
+ it('keeps owned and discoverable team portraits free of decorative frames', () => {
+  expect(source).toContain('variant="list" showListAccent={false} className="h-[84px] w-[84px] shrink-0"');
+  expect(source).toContain('<AgentIdentityAvatar project={project} className="h-20 w-20 shrink-0"');
+  expect(source).not.toContain('rounded-xl border border-primary-400/20');
 });

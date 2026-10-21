@@ -66,11 +66,16 @@ export async function issueServiceToken(
   const jti = crypto.randomBytes(16).toString('hex'); // 32-char hex
   const expiresIn = opts.expiresIn ?? '90d';
 
+  const state = await queryOne<{ auth_epoch: number; disabled: number; approval_status: string }>(
+    'SELECT auth_epoch, disabled, approval_status FROM users WHERE id = $1', [opts.userId],
+  );
+  if (!state || Number(state.disabled) !== 0 || state.approval_status !== 'active') throw new Error('Target account is inactive');
   const payload: JwtPayload & { issued_for: string } = {
     userId: opts.userId,
     username: opts.username,
     role: opts.role,
     aud: opts.aud,
+    authEpoch: Number(state.auth_epoch),
     issued_for: opts.issuedFor,
   };
 

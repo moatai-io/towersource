@@ -168,6 +168,44 @@ describe('create_primary_agent_project', () => {
     expect(execute).toHaveBeenCalledWith(expect.stringContaining('instruction_version=instruction_version+1'), expect.any(Array));
   });
 
+  it('preserves the UI-managed Operator access flag when an AI profile update replaces authority policy', async () => {
+    const row = {
+      root_path: '/workspace/project', instruction_version: 3, display_name: '기존', face: '✨',
+      tagline: '기존 소개', role: '기존 역할', promise: '기존 약속', instruction: '기존 지침',
+      authority_policy: { superuser: true, externalActions: 'confirm' }, tool_policy: {},
+    };
+    queryOne.mockReset().mockResolvedValueOnce(row);
+    isProjectOwner.mockResolvedValue(true);
+    execute.mockResolvedValue({ changes: 1 });
+    const [, update]: any = createPrimaryAgentProfileTools({ userId: 1, userRole: 'member', projectId: 'talent' });
+    const applied = await update.execute('update', {
+      targetProjectId: 'p1', confirmed: true, expectedVersion: 3,
+      changes: { authorityPolicy: { externalActions: 'allow' } },
+    });
+    expect(applied.isError).toBe(false);
+    const updateArgs = execute.mock.calls[0][1];
+    expect(JSON.parse(updateArgs[6])).toEqual({ externalActions: 'allow', superuser: true });
+  });
+
+  it('prevents an AI profile update from changing the UI-managed Operator access flag', async () => {
+    const row = {
+      root_path: '/workspace/project', instruction_version: 3, display_name: '기존', face: '✨',
+      tagline: '기존 소개', role: '기존 역할', promise: '기존 약속', instruction: '기존 지침',
+      authority_policy: { superuser: true }, tool_policy: {},
+    };
+    queryOne.mockReset().mockResolvedValueOnce(row);
+    isProjectOwner.mockResolvedValue(true);
+    execute.mockResolvedValue({ changes: 1 });
+    const [, update]: any = createPrimaryAgentProfileTools({ userId: 1, userRole: 'member', projectId: 'talent' });
+    const response = await update.execute('update', {
+      targetProjectId: 'p1', confirmed: true, expectedVersion: 3,
+      changes: { authorityPolicy: { superuser: false } },
+    });
+    expect(response.isError).toBe(true);
+    expect(response.content[0].text).toContain('AGENT_EXECUTION_AUTHORITY_RESERVED');
+    expect(execute).not.toHaveBeenCalled();
+  });
+
   it('refuses a Profile update when AGENTS.md cannot be synchronized', async () => {
     const row = { root_path: '/workspace/project', instruction_version: 1, display_name: '기존', face: '✨', tagline: '', role: '', promise: '', instruction: '기존', authority_policy: {}, tool_policy: {} };
     queryOne.mockResolvedValueOnce(row);
@@ -178,5 +216,30 @@ describe('create_primary_agent_project', () => {
     expect(out.isError).toBe(true);
     expect(out.content[0].text).toContain('could not be synchronized');
     expect(execute).not.toHaveBeenCalled();
+  });
+});
+
+describe('profile tool reserved execution authority', () => {
+  it.each(['member', 'operator', 'admin'])('rejects absent-key insertion in preview and apply for %s', async userRole => {
+    queryOne.mockReset().mockResolvedValue({ root_path: '/workspace/project', instruction_version: 3, authority_policy: {}, tool_policy: {} });
+    const [preview, update]: any = createPrimaryAgentProfileTools({ userId: 1, userRole, projectId: 'p1' });
+    const request = { targetProjectId: 'p1', confirmed: true, expectedVersion: 3, changes: { authorityPolicy: { superuser: true } } };
+    for (const tool of [preview, update]) {
+      const response = await tool.execute('reserved', request);
+      expect(response.isError).toBe(true);
+      expect(response.content[0].text).toContain('AGENT_EXECUTION_AUTHORITY_RESERVED');
+    }
+    expect(ensureProjectAgentInstruction).not.toHaveBeenCalled();
+    expect(execute).not.toHaveBeenCalled();
+  });
+  it('shows the same preserved platform key in preview as is written by apply', async () => {
+    queryOne.mockReset().mockResolvedValue({ root_path: '/workspace/project', instruction_version: 3, authority_policy: { superuser: true }, tool_policy: {} });
+    execute.mockResolvedValue({ changes: 1 });
+    const [preview, update]: any = createPrimaryAgentProfileTools({ userId: 1, userRole: 'member', projectId: 'p1' });
+    const request = { targetProjectId: 'p1', confirmed: true, expectedVersion: 3, changes: { authorityPolicy: { externalActions: 'confirm' } } };
+    const shown = JSON.parse((await preview.execute('preview', request)).content[0].text);
+    expect(shown.after.authorityPolicy).toEqual({ superuser: true, externalActions: 'confirm' });
+    await update.execute('apply', request);
+    expect(JSON.parse(execute.mock.calls[0][1][6])).toEqual(shown.after.authorityPolicy);
   });
 });

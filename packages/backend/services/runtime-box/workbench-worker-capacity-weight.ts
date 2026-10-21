@@ -2,7 +2,7 @@
  * Owns: conservative capacity-unit classification for transient Worker Runs.
  * Public API: classifyWorkbenchWorkerCapacityWeight.
  */
-import type { WorkbenchExecutionLifecycle, WorkbenchExecutionRequest } from './workbench-execution-broker.js';
+import type { WorkbenchExecutionLifecycle, WorkbenchExecutionRequest } from '../execution/execution-broker.js';
 
 /**
  * Estimate host pressure without inspecting Project data. Services use the separate

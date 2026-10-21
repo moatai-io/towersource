@@ -12,7 +12,9 @@ describe('Pi AskUserQuestion tool', () => {
     const guidance = tool.promptGuidelines?.join(' ') || '';
 
     expect(tool.description).toContain('one-at-a-time interviews');
-    expect(tool.promptSnippet).toContain('focused interviews');
+    expect(tool.promptSnippet).toContain('requested interviews');
+    expect(tool.promptSnippet).toContain('required approvals');
+    expect(tool.promptSnippet).toContain('not for routine continuation of authorized work');
     expect(guidance).toContain('material clarification of scope/audience/direction/environment/risk');
     expect(guidance).toContain('pass explicit options such as Yes/No or Approve/Cancel');
     expect(guidance).toContain('Do not create a free-text question that asks the user to type only');

@@ -12,7 +12,7 @@ const visibleKeys = [
   'enabledAutomations',
   'filterByProject',
   'requestExamples',
-  'adjustByConversation',
+  'reviewChanges',
   'upcomingExecutions',
   'progressStatus',
   'scheduleWizardPrompt',
@@ -26,12 +26,22 @@ describe('SchedulePanel locale contract', () => {
     }
   });
 
+  it('does not offer unsupported conditional execution as a ready-made example', () => {
+    expect(ko.exampleEventOnlyBody).toContain('지원되는지 확인');
+    expect(en.exampleEventOnlyBody).toContain('whether this is supported');
+    expect(ko.exampleChangeTimeBody).toContain('30분마다');
+    expect(en.exampleChangeTimeBody).toContain('30-minute interval');
+    expect(ko.exampleChangeTimeBody).not.toContain('10시 10분');
+    expect(en.exampleChangeTimeBody).not.toContain('10:10');
+  });
+
   it('routes the automation home and details through schedule locale keys', () => {
     expect(source).toContain("t('homeTitle')");
     expect(source).toContain("t('filterByProject')");
-    expect(source).toContain("t('adjustByConversation')");
+    expect(source).toContain("isCreationDraft(selectedJob) ? 'planDraftResume' : 'reviewChanges'");
     expect(source).toContain("t('progressStatus')");
-    expect(source).toContain("t('scheduleWizardPrompt'");
+    expect(source).toContain('<AutomationCreatePanel');
+    expect(source).not.toContain("tower-start-schedule-wizard");
     expect(source).not.toContain("defaultValue: '자동화");
     expect(source).not.toContain('>대화로 조정</button>');
   });

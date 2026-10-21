@@ -34,17 +34,16 @@ export function SidebarSessionTimeline({
   return runs.map((run, runIndex) => (
     <React.Fragment key={`${run.dateKey}:${run.key}:${run.sessions[0].id}`}>
       {(runIndex === 0 || runs[runIndex - 1].dateKey !== run.dateKey) && (
-        <div className="sticky top-0 z-10 flex items-center gap-2 bg-surface-950/92 px-1 pb-1 pt-2 text-[11px] font-semibold text-surface-500 backdrop-blur-sm" data-new-date-group={run.dateKey}>
-          <span>{run.dateLabel}</span><span className="h-px min-w-0 flex-1 bg-surface-800" />
+        <div className="sidebar-timeline-date px-2 pb-1 pt-3 text-[11px] font-semibold text-surface-500" data-new-date-group={run.dateKey}>
+          <span>{run.dateLabel}</span>
         </div>
       )}
       {run.project ? (
         <section className="min-w-0 pb-1" data-new-agent-run={run.project.id}>
-          <div className="flex items-center gap-2 px-2 pb-0.5 pt-1 text-[11px] font-semibold text-surface-500">
+          <div className="sidebar-timeline-project flex items-center px-2 pb-0.5 pt-1 text-[11px] font-semibold text-surface-500">
             <span className="min-w-0 flex-1 truncate">{run.project.agent?.displayName || run.project.name}</span>
-            <span className="text-[11px] font-normal tabular-nums text-surface-650">{run.sessions.length}</span>
           </div>
-          <div className="ml-2 space-y-0.5 border-l border-surface-700/35 pl-1">
+          <div className="sidebar-timeline-sessions ml-2.5 space-y-0.5 border-l border-surface-700/25 pl-3">
             {run.sessions.map((session) => (
               <SessionItem
                 key={`active-${session.id}`}
@@ -59,6 +58,8 @@ export function SidebarSessionTimeline({
                 projects={projects}
                 deleteActionLabel={hideFromLatestLabel}
                 deleteActionIcon="down"
+                recentInbox
+                compactMetaAtNarrowWidth
               />
             ))}
           </div>
@@ -76,6 +77,8 @@ export function SidebarSessionTimeline({
           projects={projects}
           deleteActionLabel={hideFromLatestLabel}
           deleteActionIcon="down"
+          recentInbox
+          compactMetaAtNarrowWidth
         />
       )}
     </React.Fragment>

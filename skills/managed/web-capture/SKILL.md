@@ -8,23 +8,22 @@ description: >
   "사이트 열어", "페이지 내용", "browse", "screenshot", "web capture", "캡처".
   NOT for: user direct interaction or shared remote desktop control. Neko/browser-live is retired; use Tower OAuth Connections or a purpose-built user-facing flow instead.
 requires:
-  runtime: runtime-box
   cli: [playwright-core, chromium]
   network: required
 ---
 
 # Web Capture — AI Browser Automation
 
-AI가 Runtime Box 안의 Playwright/system Chromium으로 웹페이지를 캡처·확인하는 스킬.
-**프로젝트 격리 우선** — host 전역 브라우저 daemon이 아니라 프로젝트 Runtime Box에서 실행한다.
+AI가 Project 브라우저 도구 또는 Project `bash`의 Playwright/system Chromium으로 웹페이지를 캡처·확인하는 스킬.
+**프로젝트 격리 우선** — host 전역 브라우저 daemon을 직접 선택하지 않고 Tower가 배정한 Project 실행면을 사용한다.
 
 ## ⚡ 실행 경계
 
-Tower 세션에서는 먼저 제공된 first-party web capture/browser 도구를 사용한다. Project Runtime Box/customer member 세션에서 host `~/.claude/scripts/...`를 직접 읽거나 실행하지 않는다.
+Tower 세션에서는 먼저 제공된 first-party web capture/browser 도구를 사용한다. Project/customer member 세션에서 host `~/.claude/scripts/...`를 직접 읽거나 실행하지 않는다.
 
-## Runtime Box Playwright 사용법
+## Project `bash` Playwright fallback
 
-Project Runtime Box 안에서 `playwright-core + /usr/bin/chromium` 조합을 사용한다. Playwright browser bundle을 새로 다운로드하지 않는다.
+First-party 도구가 없고 Project `bash`에 필요한 CLI가 준비된 경우에만 `playwright-core + system Chromium` 조합을 사용한다. Worker-first에서는 Project Workstation으로 라우팅되며, compatibility 실행면은 Tower가 내부적으로 선택한다. Playwright browser bundle을 새로 다운로드하지 않는다.
 
 ```js
 const { chromium } = require('playwright-core');

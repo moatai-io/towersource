@@ -13,9 +13,10 @@ describe('Primary Agent bootstrap staffing',()=>{
     expect(first.payload).toEqual(second.payload);
     expect(first.payload).toMatchObject({creationMode:'bootstrap',sourceExpertiseIntent:'복잡한 자료에서 핵심 찾기',harnessBinding:{harnessId:'tower-default',harnessVersion:1,runtimeProfileId:'standard',runtimeProfileVersion:1},capabilityRequirements:{required:['project_file_write','public_web_research']}});
     expect(first.payload.role).toContain('사용자의 실제 업무를 수행');
-    expect(first.payload.instruction).toContain('별도의 입사 인터뷰나 온보딩 절차를 시작하지 마세요');
+    expect(first.payload.instruction).toContain('이미 받은 정보를 다시 묻지 말고 사용자가 맡긴 업무를 온보딩보다 우선하세요');
     expect(first.payload.instruction).toContain('시스템 지침을 따르세요');
-    expect(first.payload.firstMission).toBe('사용자의 첫 실제 업무를 수행하기');
+    expect(first.payload.promise).toContain('일의 이유를 먼저 배우고');
+    expect(first.payload.firstMission).toBe('첫 질문으로 업무 목적을 배우고 프로젝트의 업무 기반을 정립하기');
     expect(first.card.profileStatus).toBe('ready');
     expect(queryOne.mock.calls[0][0]).toContain("rp.profile_id='standard'");
     expect(queryOne.mock.calls[0][0]).toContain('v.staffing_capability_ids');

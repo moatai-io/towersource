@@ -12,6 +12,18 @@ import {
   sessionMsgCache,
 } from "../../utils/session-message-cache";
 
+describe('MessageBubble render isolation', () => {
+  it('uses React memo while still rendering changed message content', () => {
+    const descriptor = Object.getOwnPropertyDescriptor(MessageBubble, '$$typeof');
+    expect(descriptor?.value).toBe(Symbol.for('react.memo'));
+    const message: ChatMessage = { id: 'memo-test', role: 'user', content: [{ type: 'text', text: 'before' }], timestamp: 1 };
+    const { rerender } = render(<MessageBubble message={message} />);
+    expect(screen.getByText('before')).toBeInTheDocument();
+    rerender(<MessageBubble message={{ ...message, content: [{ type: 'text', text: 'after' }] }} />);
+    expect(screen.getByText('after')).toBeInTheDocument();
+  });
+});
+
 beforeEach(async () => {
   await i18n.changeLanguage("ko");
   localStorage.clear();
@@ -41,6 +53,57 @@ beforeEach(async () => {
 afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
+});
+
+describe("MessageBubble retired model recovery", () => {
+  it("shows a small persisted status notice instead of an assistant response", () => {
+    const message: ChatMessage = {
+      id: "model-recovery-1",
+      role: "assistant",
+      timestamp: Date.now(),
+      content: [{ type: "text", text: "이전 모델을 Core로 전환했습니다." }],
+      metadata: { modelRecovery: { from: "litellm-responses/smart", to: "preset/core" } },
+    };
+
+    render(<MessageBubble message={message} />);
+    expect(screen.getByRole("status")).toHaveTextContent("litellm-responses/smart");
+    expect(screen.getByRole("status")).toHaveTextContent("Core로 전환했습니다");
+    expect(screen.getByRole("status")).toHaveTextContent("기존 대화는 유지됩니다");
+  });
+});
+
+describe("MessageBubble submitted source reference", () => {
+  it("shows the source chip inside the sent user bubble", () => {
+    const message: ChatMessage = {
+      id: "source-user-1",
+      role: "user",
+      timestamp: Date.now(),
+      content: [{ type: "text", text: "색상을 바꿔줘" }],
+      metadata: {
+        sourceReference: {
+          version: 1,
+          id: "index.html:10:31",
+          path: "index.html",
+          language: "html",
+          kind: "element",
+          tagName: "button",
+          start: 10,
+          end: 31,
+          lineStart: 4,
+          lineEnd: 4,
+          source: "<button>Buy</button>",
+          confidence: "exact",
+          mappingProvider: "html-parser",
+        },
+      },
+    };
+
+    render(<MessageBubble message={message} />);
+
+    expect(screen.getByText(/<button> · index\.html:L4–L4/)).toBeInTheDocument();
+    expect(screen.getByText(i18n.t("sourceReference.sent", { ns: "chat", defaultValue: "전송됨" }))).toBeInTheDocument();
+    expect(screen.queryByLabelText(i18n.t("sourceReference.remove", { ns: "chat", defaultValue: "소스 참조 제거" }))).not.toBeInTheDocument();
+  });
 });
 
 describe("MessageBubble user inline edit", () => {
@@ -97,12 +160,18 @@ describe("MessageBubble user inline edit", () => {
     ).toHaveValue("원래 요청입니다.");
     expect(screen.queryByText("원본은 유지됩니다.")).toBeNull();
     expect(screen.getByRole("button", { name: "취소" })).toHaveTextContent("×");
+    const newConversationButton = screen.getByRole("button", {
+      name: "새 대화에서 보내기",
+    });
+    const resendButton = screen.getByRole("button", { name: "다시 보내기" });
+    expect(newConversationButton).toBeInTheDocument();
+    expect(resendButton).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: "다시 보내기" }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: "새 대화에서 보내기" }),
-    ).toBeInTheDocument();
+      newConversationButton.compareDocumentPosition(resendButton)
+        & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(newConversationButton).not.toHaveClass("tone-accent", "tone-action");
+    expect(resendButton).toHaveClass("tone-accent", "tone-action");
   });
 
   it("sends the edited prompt to a new branch session", async () => {
@@ -317,7 +386,18 @@ describe("MessageBubble user file path links", () => {
 });
 
 describe("MessageBubble artifact-backed Markdown card", () => {
-  it("renders a saved artifact as a plain clickable file path link", () => {
+  it("renders Markdown authoring as conversation rather than a tool card", () => {
+    const message: ChatMessage = { id: "doc-tool", role: "assistant", timestamp: Date.now(), content: [{
+      type: "tool_use", toolUse: { id: "call-doc", name: "create_markdown_artifact", input: { title: "Delivered", path: "work/doc.md", body: "# Delivered\n\nOnly once." }, result: JSON.stringify({ ok: true, artifact: "markdown", path: "/project/work/doc.md" }) },
+    }] };
+    const { container } = render(<MessageBubble message={message} />);
+    expect(screen.getByRole("heading", { name: "Delivered" })).toBeInTheDocument();
+    expect(screen.getAllByText("Only once.")).toHaveLength(1);
+    expect(screen.queryByText("create_markdown_artifact")).toBeNull();
+    expect(container.querySelector(".tone-card")).toBeNull();
+  });
+
+  it("renders a saved artifact as prose with a quiet save link", () => {
     const onFileClick = vi.fn();
     const path = "~/workspace/projects/demo/work/report.md";
     const message: ChatMessage = {
@@ -341,10 +421,10 @@ describe("MessageBubble artifact-backed Markdown card", () => {
 
     expect(screen.getByRole("heading", { name: "Report" })).toBeInTheDocument();
     expect(screen.queryByText("파일로도 저장됨")).toBeNull();
-    expect(screen.getByText("파일:")).toBeInTheDocument();
+    expect(screen.getByText("문서로 저장됨 ·")).toBeInTheDocument();
     const openButton = screen.getByRole("button", { name: `파일 열기: ${path}` });
-    expect(openButton).toHaveTextContent(path);
-    expect(openButton).toHaveClass("break-all", "underline", "font-mono");
+    expect(openButton).toHaveTextContent("Report");
+    expect(openButton).toHaveClass("break-all", "underline");
     fireEvent.click(openButton);
     expect(onFileClick).toHaveBeenCalledWith(path);
   });
@@ -370,7 +450,8 @@ describe("MessageBubble artifact-backed Markdown card", () => {
 
     expect(container.querySelector(".tone-card")).toBeNull();
     expect(screen.getByRole("button", { name: `파일 열기: ${longPath}` })).toHaveClass("break-all");
-    expect(screen.getByText(longPath)).toBeInTheDocument();
+    expect(screen.queryByText(longPath)).toBeNull();
+    expect(screen.getByRole("button", { name: `파일 열기: ${longPath}` })).toHaveTextContent(longPath.split('/').pop()!);
   });
 
   it("shows warning copy only when artifact saving failed", () => {
@@ -393,6 +474,8 @@ describe("MessageBubble artifact-backed Markdown card", () => {
 
     expect(screen.getByText("파일을 저장하지 못했습니다")).toBeInTheDocument();
     expect(screen.getByText("unsafe_or_unsupported_artifact_path")).toBeInTheDocument();
+    expect(screen.getByText("저장되지 않은 초안 보기").closest('details')).not.toHaveAttribute('open');
+    expect(screen.queryByRole('button', { name: '파일 열기: ../outside.md' })).toBeNull();
   });
 });
 
@@ -416,6 +499,33 @@ describe("MessageBubble thinking/tool meta row", () => {
     expect(screen.getByText("Worker 서비스를 확인하겠습니다.")).toBeInTheDocument();
     expect(screen.queryByText("Need internal planning.")).toBeNull();
     expect(screen.getByText("완료했습니다.")).toBeInTheDocument();
+  });
+
+  it("keeps the working dots inside the active answer and removes them on completion", () => {
+    const message: ChatMessage = {
+      id: "working-answer", role: "assistant", timestamp: Date.now(),
+      content: [{ type: "text", text: "답변을 작성하고 있습니다." }],
+    };
+    const { rerender } = render(<MessageBubble message={message} isLastAssistant={true} />);
+    const dots = screen.getByTestId("assistant-running-dots");
+    expect(dots).toHaveClass("tower-dots-logo");
+    expect(dots.closest('[data-message-id="working-answer"]')).toBeInTheDocument();
+    rerender(<MessageBubble message={message} isLastAssistant={false} />);
+    expect(screen.queryByTestId("assistant-running-dots")).not.toBeInTheDocument();
+  });
+
+  it("reveals secure input appended to an already collapsed tool group", () => {
+    const message: ChatMessage = {
+      id: "late-credential", role: "assistant", timestamp: Date.now(),
+      content: [{ type: "tool_use", toolUse: { id: "first-read", name: "read", input: { path: "demo.md" }, result: "done" } }],
+    };
+    const { rerender } = render(<MessageBubble message={message} isLastAssistant={true} />);
+    rerender(<MessageBubble message={{ ...message, content: [...message.content, {
+      type: "tool_use", toolUse: { id: "late-secure", name: "credential_vault_input", input: {
+        id: "example", provider: "custom", displayName: "Example", envName: "EXAMPLE_API_KEY", scope: "project",
+      }, result: "Secure credential input requested." },
+    }] }} isLastAssistant={true} />);
+    expect(screen.getByPlaceholderText("EXAMPLE_API_KEY")).toBeInTheDocument();
   });
 
   it("automatically opens a Credential Vault tool group and selects its secure input", () => {
@@ -574,12 +684,22 @@ describe("MessageBubble thinking/tool meta row", () => {
       ],
     };
 
-    render(<MessageBubble message={message} />);
+    const { rerender } = render(<MessageBubble message={message} isLastAssistant />);
 
     expect(screen.queryByText("이전 진행 상태")).toBeNull();
     expect(screen.queryByText("0/2")).toBeNull();
     expect(screen.getByText("1/2")).toBeInTheDocument();
+    expect(screen.getByText("작업 기록")).toBeInTheDocument();
     expect(screen.getByText("첫 단계")).toBeInTheDocument();
+    expect(screen.getByText("둘째 단계")).toBeInTheDocument();
+    expect(screen.queryByText("마지막 기록")).toBeNull();
+
+    rerender(<MessageBubble message={message} />);
+    const summary = screen.getByText("마지막 기록").closest("summary")!;
+    expect(summary).toHaveTextContent("1/2");
+    expect(summary.closest("details")).not.toHaveAttribute("open");
+    fireEvent.click(summary);
+    expect(summary.closest("details")).toHaveAttribute("open");
     expect(screen.getByText("둘째 단계")).toBeInTheDocument();
   });
 
@@ -620,7 +740,7 @@ describe("MessageBubble thinking/tool meta row", () => {
     expect(screen.queryByText("둘째 단계")).toBeNull();
   });
 
-  it("hides all TodoWrite snapshots once the latest todo state is fully completed", () => {
+  it("keeps the latest completed TodoWrite snapshot collapsed and expandable", () => {
     const message: ChatMessage = {
       id: "todo-complete-1",
       role: "assistant",
@@ -676,9 +796,90 @@ describe("MessageBubble thinking/tool meta row", () => {
 
     expect(screen.getByText("작업 완료")).toBeInTheDocument();
     expect(screen.queryByText("이전 진행 상태")).toBeNull();
-    expect(screen.queryByText("첫 단계")).toBeNull();
-    expect(screen.queryByText("둘째 단계")).toBeNull();
-    expect(screen.queryByText("2/2")).toBeNull();
+    expect(screen.queryByText("0/2")).toBeNull();
+    const summary = screen.getByText("완료").closest("summary")!;
+    expect(summary).toHaveTextContent("작업 기록");
+    expect(summary).toHaveTextContent("2/2");
+    expect(summary).toHaveTextContent("단계 보기");
+    expect(summary.closest("details")).not.toHaveAttribute("open");
+    fireEvent.click(summary);
+    expect(summary.closest("details")).toHaveAttribute("open");
+    expect(screen.getByText("첫 단계")).toBeInTheDocument();
+    expect(screen.getByText("둘째 단계")).toBeInTheDocument();
+    expect(screen.getByText("첫 단계")).not.toHaveClass("line-through");
+    expect(summary.closest("details")).not.toHaveClass("tone-success");
+    expect(summary).toHaveTextContent("접기");
+    fireEvent.click(summary);
+    expect(summary.closest("details")).not.toHaveAttribute("open");
+  });
+
+  it.each([
+    ["aborted", "중단됨"],
+    ["error", "오류로 종료"],
+  ] as const)("keeps interrupted work steps accessible after %s", (stopReason, label) => {
+    const message: ChatMessage = {
+      id: `todo-${stopReason}`,
+      role: "assistant",
+      timestamp: Date.now(),
+      stopReason,
+      content: [{
+        type: "tool_use",
+        toolUse: {
+          id: "todo-1",
+          name: "TodoWrite",
+          input: { todos: [
+            { content: "완료한 단계", status: "completed" },
+            { content: "남은 단계", status: "in_progress" },
+          ] },
+        },
+      }],
+    };
+
+    render(<MessageBubble message={message} />);
+    const summary = screen.getByText(label).closest("summary")!;
+    expect(summary).toHaveTextContent("1/2");
+    expect(summary.closest("details")).not.toHaveAttribute("open");
+    fireEvent.click(summary);
+    expect(screen.getByText("남은 단계")).toBeInTheDocument();
+  });
+
+  it("keeps the folded snapshot after a later assistant message starts", () => {
+    const message: ChatMessage = {
+      id: "older-todo-message",
+      role: "assistant",
+      timestamp: Date.now(),
+      content: [{
+        type: "tool_use",
+        toolUse: { id: "todo-1", name: "TodoWrite", input: { todos: [
+          { content: "완료한 단계", status: "completed" },
+        ] } },
+      }],
+    };
+
+    render(<MessageBubble message={message} />);
+    const summary = screen.getByText("완료").closest("summary")!;
+    expect(summary).toHaveTextContent("1/1");
+    expect(summary.closest("details")).not.toHaveAttribute("open");
+  });
+
+  it("does not imply completion when a turn ended without a final TodoWrite", () => {
+    const message: ChatMessage = {
+      id: "todo-incomplete",
+      role: "assistant",
+      timestamp: Date.now(),
+      content: [{
+        type: "tool_use",
+        toolUse: { id: "todo-1", name: "TodoWrite", input: { todos: [
+          { content: "완료한 단계", status: "completed" },
+          { content: "남은 단계", status: "pending" },
+        ] } },
+      }],
+    };
+
+    render(<MessageBubble message={message} />);
+    const summary = screen.getByText("마지막 기록").closest("summary")!;
+    expect(summary).toHaveTextContent("1/2");
+    expect(summary.closest("details")).not.toHaveAttribute("open");
   });
 
   it("renders a thinking chip and tool chip without exposing raw thinking content", () => {
@@ -755,11 +956,11 @@ describe("MessageBubble thinking/tool meta row", () => {
     const prose = screen.getByText("답변 본문 마지막 문장입니다.");
     const actions = screen.getByTestId("assistant-message-actions");
     expect(actions).not.toHaveClass("absolute");
-    expect(actions).toHaveClass(
-      "justify-end",
+    expect(actions).toHaveClass("message-actions", "justify-end");
+    expect(actions).not.toHaveClass(
       "md:opacity-0",
+      "md:pointer-events-none",
       "md:group-hover/message:opacity-100",
-      "md:group-focus-within/message:opacity-100",
     );
     expect(
       prose.compareDocumentPosition(actions) & Node.DOCUMENT_POSITION_FOLLOWING,
@@ -770,6 +971,56 @@ describe("MessageBubble thinking/tool meta row", () => {
     expect(
       screen.getByRole("button", { name: "메시지 복사" }),
     ).toBeInTheDocument();
+  });
+
+  it("falls back to plain text when rich clipboard writes are unavailable", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal("ClipboardItem", undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    const message: ChatMessage = {
+      id: "assistant-copy-plain-text",
+      role: "assistant",
+      timestamp: Date.now(),
+      content: [{ type: "text", text: "복사할 답변입니다." }],
+    };
+
+    render(<MessageBubble message={message} />);
+    fireEvent.click(screen.getByRole("button", { name: "메시지 복사" }));
+
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith("복사할 답변입니다."));
+  });
+
+  it("uses the selection fallback when the async clipboard API is blocked", async () => {
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: {
+        write: vi.fn().mockRejectedValue(new Error("blocked")),
+        writeText: vi.fn().mockRejectedValue(new Error("blocked")),
+      },
+    });
+    vi.stubGlobal("ClipboardItem", class ClipboardItemMock {
+      constructor(_items: Record<string, Blob>) {}
+    });
+    const execCommand = vi.fn().mockReturnValue(true);
+    Object.defineProperty(document, "execCommand", {
+      configurable: true,
+      value: execCommand,
+    });
+    const message: ChatMessage = {
+      id: "assistant-copy-selection-fallback",
+      role: "assistant",
+      timestamp: Date.now(),
+      content: [{ type: "text", text: "fallback 답변" }],
+    };
+
+    render(<MessageBubble message={message} />);
+    fireEvent.click(screen.getByRole("button", { name: "메시지 복사" }));
+
+    await waitFor(() => expect(execCommand).toHaveBeenCalledWith("copy"));
+    expect(document.querySelector("textarea")).toBeNull();
   });
 
   it("stacks assistant identity above the message body on mobile width", () => {
@@ -834,7 +1085,8 @@ describe("MessageBubble thinking/tool meta row", () => {
     render(<MessageBubble message={message} />);
 
     expect(screen.getByText("Could not save file")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Open file: report.md" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Open file: report.md" })).toBeNull();
+    expect(screen.getByText("report.md")).toBeInTheDocument();
   });
 
   it("hides stale empty thinking placeholders while keeping adjacent tool chips static", () => {
@@ -1146,7 +1398,7 @@ describe("MessageBubble — agent-origin run card", () => {
 
     render(<MessageBubble message={message} />);
 
-    expect(screen.getByText("Frontend reviewer")).toBeInTheDocument();
+    expect(screen.getAllByText("Frontend reviewer").length).toBeGreaterThan(0);
     expect(
       screen.getByText("사용자에게 보이는 회귀를 찾습니다"),
     ).toBeInTheDocument();
@@ -1165,12 +1417,11 @@ describe("MessageBubble — agent-origin run card", () => {
         .closest("button"),
     ).toHaveAttribute("aria-expanded", "false");
 
-    fireEvent.click(screen.getByText("Frontend reviewer").closest("button")!);
+    fireEvent.click(screen.getByText("Review the changed UI files and summarize risks.").closest("button")!);
 
-    expect(screen.getByRole("link", { name: /세션 열기/ })).toHaveAttribute(
-      "href",
-      "/s/5f8bc275-283f-4218-8ccc-f6593d69e0cc",
-    );
+    // Unknown session-list entries retain provenance without an unverified link.
+    expect(screen.getByTitle("받는 세션: Frontend reviewer")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /세션 열기/ })).toBeNull();
     expect(
       screen.getByText("Review the changed UI files and summarize risks."),
     ).not.toHaveClass("line-clamp-3");
@@ -1252,7 +1503,7 @@ describe("MessageBubble — agent-origin run card", () => {
 
     render(<MessageBubble message={message} />);
 
-    expect(screen.getByText("QA steward")).toBeInTheDocument();
+    expect(screen.getAllByText("QA steward").length).toBeGreaterThan(0);
     expect(screen.getByText("검수 완료: 문제 없음")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "답변 펼치기" })).toHaveAttribute(
       "aria-expanded",

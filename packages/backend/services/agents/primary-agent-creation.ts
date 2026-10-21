@@ -1,3 +1,6 @@
+import { scheduleDurableInterview } from './durable-interview.js';
+import { scheduleInitialPreparation } from './agent-initial-preparation.js';
+import { assertOrdinaryAgentCreationAuthority } from '../authority/agent-authority-policy-update.js';
 /**
  * Owns: idempotent Primary Agent creation orchestration across Project, profile, Harness binding, files, and first Session.
  * Public API: createPrimaryAgentCommand.
@@ -99,6 +102,7 @@ async function ensureBinding(projectId:string,input:PrimaryAgentCreationInput,co
 
 /** Run or safely resume one server-approved Primary Agent creation command. */
 export async function createPrimaryAgentCommand(input:PrimaryAgentCreationInput){
+  assertOrdinaryAgentCreationAuthority(input.authorityPolicy);
   const requestHash=hash({...input,idempotencyKey:undefined});
   return withCommandLock(input.actorUserId,input.idempotencyKey,async()=>{
     let command=await reserveCommandAndConsumeIntent(input,requestHash);
@@ -128,8 +132,14 @@ export async function createPrimaryAgentCommand(input:PrimaryAgentCreationInput)
       assertEqual(sessionProvenance?.agent_creation_command_id,command.id,'Session creation command');
       const hydratedProject=await getProject(project.id);
       if(!hydratedProject)throw new Error('Primary Agent Project hydration failed');
-      const result={ok:true,commandId:command.id,project:hydratedProject,session:{...session,visibility:'project'},harnessBinding:actualBinding};
-      await state(command.id,'ready',{projectId:project.id,sessionId:session.id,result});await event(command.id,'command_ready',{projectId:project.id,sessionId:session.id});return result;
+      command=await queryOne<any>('SELECT * FROM primary_agent_creation_commands WHERE id=$1',[command.id]);
+      let interviewSession=command?.interview_session_id?await getSession(command.interview_session_id,input.actorUserId):null;
+      if(!interviewSession){interviewSession=await createSession('처음 인사 · 역할 맞추기',project.rootPath!,input.actorUserId,project.id,'pi',null,null,null,undefined,null,{visibility:'project'});await execute('UPDATE primary_agent_creation_commands SET interview_session_id=$2 WHERE id=$1',[command.id,interviewSession.id]);}
+      const result={ok:true,commandId:command.id,project:hydratedProject,session:{...interviewSession,visibility:'project'},workSession:session,interviewSession,harnessBinding:actualBinding};
+      await state(command.id,'ready',{projectId:project.id,sessionId:session.id,result});await event(command.id,'command_ready',{projectId:project.id,sessionId:session.id});
+      scheduleInitialPreparation(project.rootPath!, { projectId: project.id, profileVersion: 1, sessionId: session.id, commandId: command.id, approvedCardHash: input.approvedCardHash, name: input.name, role: input.role, promise: input.promise, instruction: input.instruction, firstMission: input.firstMission });
+      await scheduleDurableInterview(project.id, interviewSession.id, input.actorUserId).catch(() => console.warn('[initial-interview] scheduling unavailable', project.id));
+      return result;
     }catch(error){const message=error instanceof Error?error.message:String(error);await state(command.id,'failed',{error:message});await event(command.id,'command_failed',{error:message});throw error}
   });
 }

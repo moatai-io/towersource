@@ -11,10 +11,10 @@ describe('shared-session attachment role matrix source contract', () => {
     expect(api).toContain('resolveReadableSessionAttachment(req.params.sessionId, req.params.attachmentId)');
   });
 
-  it('allows writable project members while explicitly rejecting viewer and guest writes', () => {
+  it('requires owner/admin/operator content-write authority and rejects readonly roles', () => {
     expect(api).toContain("if (role === 'viewer' || role === 'guest')");
     expect(api).toContain("throw new SessionAttachmentError('FORBIDDEN', 'Session attachment write access denied')");
-    expect(api).toContain('const access = await canAccessSession(sessionId, userId, role)');
+    expect(api).toContain('const access = await canWriteSessionContent(sessionId, userId, role)');
   });
 
   it('keeps staging deletion uploader-owned even when session readers can view bytes', () => {

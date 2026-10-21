@@ -10,7 +10,7 @@ import { queryOne } from '../../db/pg-repo.js';
 import { createSessionAttachmentFromPath, deleteSessionAttachment } from '../session-attachments/session-attachment-store.js';
 import { archivePersonalFile, createPersonalBinaryFileFromPath } from '../personal-space/personal-space-store.js';
 import { addChannelSharedFile, deleteChannelSharedFileRecord } from '../room/channel-shared-files.js';
-import { getProject } from '../pm/project-manager.js';
+import { commitProjectWorkspaceFile } from '../project-environment/project-workspace-files.js';
 import { decideTransferPolicy } from './file-exchange-policy.js';
 import { assertFileDestination, reserveUniqueName, resolveFileSource, type ResolvedFileSource } from './file-exchange-providers.js';
 import type {
@@ -107,18 +107,22 @@ export async function inspectFileTransfer(actor: FileExchangeActor, intent: File
   }
   const policy = decideTransferPolicy(intent.source, intent.destination);
   const source = await resolveFileSource(actor, intent.source);
-  await assertFileDestination(actor, intent.destination);
-  const row = await queryOne<PlanRow>(
-    `INSERT INTO file_exchange_plans
-       (actor_user_id, principal_ref, delegated_by_user_id, source_ref, destination_ref, mode, source_name, source_mime_type,
-        source_size_bytes, source_version, source_sha256, confirmation_required)
-     VALUES ($1,$2::jsonb,$1,$3::jsonb,$4::jsonb,$5,$6,$7,$8,$9,$10,$11)
-     RETURNING *, expires_at::text`,
-    [actor.userId, JSON.stringify(principal), JSON.stringify(intent.source), JSON.stringify(intent.destination), policy.mode, source.name,
-      source.mimeType, source.sizeBytes, source.version, source.sha256, policy.confirmationRequired],
-  );
-  if (!row) throw new FileExchangeError('FAILED', '전달 계획을 만들지 못했습니다.', 'inspect.persist');
-  return planDocument(row, policy.confirmationMessage);
+  try {
+    await assertFileDestination(actor, intent.destination);
+    const row = await queryOne<PlanRow>(
+      `INSERT INTO file_exchange_plans
+         (actor_user_id, principal_ref, delegated_by_user_id, source_ref, destination_ref, mode, source_name, source_mime_type,
+          source_size_bytes, source_version, source_sha256, confirmation_required)
+       VALUES ($1,$2::jsonb,$1,$3::jsonb,$4::jsonb,$5,$6,$7,$8,$9,$10,$11)
+       RETURNING *, expires_at::text`,
+      [actor.userId, JSON.stringify(principal), JSON.stringify(intent.source), JSON.stringify(intent.destination), policy.mode, source.name,
+        source.mimeType, source.sizeBytes, source.version, source.sha256, policy.confirmationRequired],
+    );
+    if (!row) throw new FileExchangeError('FAILED', '전달 계획을 만들지 못했습니다.', 'inspect.persist');
+    return planDocument(row, policy.confirmationMessage);
+  } finally {
+    await source.cleanup?.();
+  }
 }
 
 /** Record one authenticated user's approval for this exact, still-pending plan. */
@@ -293,21 +297,24 @@ async function copyToDestination(actor: FileExchangeActor, plan: PlanRow, source
     }
   }
 
-  const project = await getProject(destination.projectId);
-  if (!project?.rootPath) throw new FileExchangeError('NOT_FOUND', 'AI 팀원 작업공간을 찾지 못했습니다.', 'destination.resolve');
   const relativeDirectory = (destination.relativeDirectory || 'uploads').replace(/\\/g, '/').replace(/^\/+/, '');
-  const targetDir = path.join(project.rootPath, relativeDirectory);
-  const verified = await copyToVerifiedTemp(source, plan.source_sha256, targetDir);
-  let committed: { name: string; path: string } | null = null;
+  const stagingDir = path.join(config.dataDir, 'upload-staging', 'file-exchange');
+  const verified = await copyToVerifiedTemp(source, plan.source_sha256, stagingDir);
   try {
-    committed = await commitVerifiedTemp(targetDir, plan.source_name, verified.path);
+    const committed = await commitProjectWorkspaceFile({
+      projectId: destination.projectId,
+      relativeDirectory,
+      requestedName: plan.source_name,
+      sourcePath: verified.path,
+      sizeBytes: verified.sizeBytes,
+      actorUserId: actor.userId,
+    });
     return {
-      result: { scope: 'project', projectId: destination.projectId, relativePath: path.posix.join(relativeDirectory, committed.name), name: committed.name },
-      compensate: () => fs.rm(committed!.path, { force: true }),
+      result: { scope: 'project', projectId: destination.projectId, relativePath: committed.relativePath, name: committed.name },
+      compensate: committed.compensate,
     };
-  } catch (error) {
-    await fs.rm(committed?.path || verified.path, { force: true }).catch(() => undefined);
-    throw error;
+  } finally {
+    await fs.rm(verified.path, { force: true }).catch(() => undefined);
   }
 }
 
@@ -375,19 +382,29 @@ export async function executeFileTransfer(actor: FileExchangeActor, planId: stri
   }
 
   let destinationWrite: DestinationWrite | null = null;
+  let sourceCleanup: (() => Promise<void>) | undefined;
   try {
     const source = await resolveFileSource(actor, plan.source_ref, { measureContent: false });
+    sourceCleanup = source.cleanup;
     if (source.version !== plan.source_version) {
+      await sourceCleanup?.();
+      sourceCleanup = undefined;
       await queryOne(`UPDATE file_exchange_plans SET status = 'failed', updated_at = NOW() WHERE id = $1`, [plan.id]);
       return insertReceipt({ plan, status: 'stale', confirmed, failureCode: 'STALE', failureStage: 'source.revalidate' });
     }
     await assertFileDestination(actor, plan.destination_ref);
-    destinationWrite = await copyToDestination(actor, plan, source);
+    try {
+      destinationWrite = await copyToDestination(actor, plan, source);
+    } finally {
+      await sourceCleanup?.();
+      sourceCleanup = undefined;
+    }
     const receipt = await insertReceipt({ plan, status: 'completed', confirmed, result: destinationWrite.result });
     await queryOne(`UPDATE file_exchange_plans SET status = 'completed', updated_at = NOW() WHERE id = $1`, [plan.id])
       .catch(error => console.warn('[file-exchange] receipt persisted but plan completion update failed:', error));
     return receipt;
   } catch (error: any) {
+    await sourceCleanup?.().catch(() => undefined);
     let orphanDetail: Record<string, unknown> | null = null;
     if (destinationWrite) {
       try {

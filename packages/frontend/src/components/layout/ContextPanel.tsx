@@ -1,3 +1,8 @@
+import { towerHttpUrl } from '../../features/client-connection/connection';
+import { KeepDashboard } from '../interactive-apps/KeepDashboard';
+import { PricingFilePreview, isPricingAppFile } from '../interactive-apps/PricingFilePreview';
+import { FileOperationFeedback } from '../../features/file-operation-feedback/FileOperationFeedback';
+import { saveScope } from '../../features/file-operation-feedback/feedback';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useFileStore } from '../../stores/file-store';
@@ -6,18 +11,21 @@ import { useScrollMemory } from '../../hooks/useScrollMemory';
 import { TabBar } from '../files/TabBar';
 import { MarkdownReadSurface } from '../files/MarkdownReadSurface';
 import { FileActionsMenu } from '../files/FileActionsMenu';
-import { ShareModal } from '../files/ShareModal';
-import { HtmlPreviewSurface } from '../files/HtmlPreviewSurface';
-import { UrlPreviewSurface } from '../files/UrlPreviewSurface';
-import { OpenUrlPreviewDialog } from '../files/OpenUrlPreviewDialog';
-import { PersonalTodoView } from '../personal-space/PersonalTodoView';
-import { PersonalMaterialsView } from '../personal-space/PersonalMaterialsView';
-import { PersonalArchiveView } from '../personal-space/PersonalArchiveView';
-import { MobilePersonalDocumentsView } from '../personal-space/MobilePersonalDocumentsView';
+
 import { AgentDraftPreview } from '../files/AgentDraftPreview';
 import { shouldUseFileBodySelectAll, selectElementTextContents } from '../files/fileSelection';
 import { useSettingsStore } from '../../stores/settings-store';
 import { buildPdfServeUrl } from '../../utils/pdf-open';
+
+// Conditional viewer surfaces stay out of the initial chat shell.
+const LazyShareModal = React.lazy(() => import('../files/ShareModal').then(module => ({ default: module.ShareModal })));
+const LazyHtmlPreviewSurface = React.lazy(() => import('../files/HtmlPreviewSurface').then(module => ({ default: module.HtmlPreviewSurface })));
+const LazyUrlPreviewSurface = React.lazy(() => import('../files/UrlPreviewSurface').then(module => ({ default: module.UrlPreviewSurface })));
+const LazyOpenUrlPreviewDialog = React.lazy(() => import('../files/OpenUrlPreviewDialog').then(module => ({ default: module.OpenUrlPreviewDialog })));
+const LazyPersonalTodoView = React.lazy(() => import('../personal-space/PersonalTodoView').then(module => ({ default: module.PersonalTodoView })));
+const LazyPersonalMaterialsView = React.lazy(() => import('../personal-space/PersonalMaterialsView').then(module => ({ default: module.PersonalMaterialsView })));
+const LazyPersonalArchiveView = React.lazy(() => import('../personal-space/PersonalArchiveView').then(module => ({ default: module.PersonalArchiveView })));
+const LazyMobilePersonalDocumentsView = React.lazy(() => import('../personal-space/MobilePersonalDocumentsView').then(module => ({ default: module.MobilePersonalDocumentsView })));
 
 // Lazy-loaded Office preview components
 const DocxPreview = React.lazy(() => import('../files/DocxPreview').then(m => ({ default: m.DocxPreview })));
@@ -36,6 +44,21 @@ function FeatureLoading({ i18nKey = 'loadingFeature' }: { i18nKey?: string }) {
   const { t } = useTranslation('layout');
   return <div className="flex h-full min-h-24 items-center justify-center text-sm text-surface-500">{t(i18nKey)}</div>;
 }
+
+function deferredSurface<T extends React.ComponentType<any>>(Component: T) {
+  return function DeferredSurface(props: React.ComponentProps<T>) {
+    return <React.Suspense fallback={<FeatureLoading />}><Component {...props} /></React.Suspense>;
+  };
+}
+
+const ShareModal = deferredSurface(LazyShareModal);
+const HtmlPreviewSurface = deferredSurface(LazyHtmlPreviewSurface);
+const UrlPreviewSurface = deferredSurface(LazyUrlPreviewSurface);
+const OpenUrlPreviewDialog = deferredSurface(LazyOpenUrlPreviewDialog);
+const PersonalTodoView = deferredSurface(LazyPersonalTodoView);
+const PersonalMaterialsView = deferredSurface(LazyPersonalMaterialsView);
+const PersonalArchiveView = deferredSurface(LazyPersonalArchiveView);
+const MobilePersonalDocumentsView = deferredSurface(LazyMobilePersonalDocumentsView);
 
 function CodeEditor(props: React.ComponentProps<typeof LazyCodeEditor>) {
   return <React.Suspense fallback={<FeatureLoading i18nKey="loadingEditor" />}><LazyCodeEditor {...props} /></React.Suspense>;
@@ -145,40 +168,22 @@ function getPreviewRevision(content: string, encoding?: string): string {
 }
 
 function PdfPreview({ filePath, revision, active = true }: { filePath: string; revision: string; active?: boolean }) {
-  const { t } = useTranslation('layout');
   const src = buildPdfServeUrl(filePath, { revision });
-  const downloadSrc = buildPdfServeUrl(filePath, { download: true, revision });
-  const fileName = filePath.split('/').pop() || 'document.pdf';
   const containerClassName = active ? 'absolute inset-0' : 'hidden';
 
   return (
-    <div className={`${containerClassName} flex items-center justify-center bg-surface-950 p-6`}>
-      <div className="max-w-md rounded-2xl border border-surface-700 bg-surface-900/80 p-6 text-center shadow-xl">
-        <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-primary-500/15 text-primary-300">
-          <svg className="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
-          </svg>
-        </div>
-        <h2 className="text-lg font-semibold text-surface-100">{t('pdfOpensInBrowser')}</h2>
-        <p className="mt-2 break-words text-sm text-surface-400">{fileName}</p>
-        <p className="mt-3 text-sm leading-6 text-surface-500">
-          {t('pdfBrowserExplanation')}
-        </p>
-        <div className="mt-5 flex flex-col gap-2 sm:flex-row sm:justify-center">
-          <a href={src} target="_blank" rel="noopener noreferrer" className="rounded-lg bg-primary-600 px-4 py-2 text-sm font-semibold text-white hover:bg-primary-500">
-            {t('openInNewBrowserTab')}
-          </a>
-          <a href={downloadSrc} target="_blank" rel="noopener noreferrer" className="rounded-lg border border-surface-700 px-4 py-2 text-sm font-semibold text-surface-300 hover:bg-surface-800 hover:text-surface-100">
-            {t('download')}
-          </a>
-        </div>
-      </div>
+    <div className={`${containerClassName} min-h-0 bg-surface-950`}>
+      <iframe
+        src={src}
+        title={filePath.split('/').pop() || 'document.pdf'}
+        className="h-full w-full border-0 bg-white"
+      />
     </div>
   );
 }
 
-// PDF tabs stay mounted only as lightweight action cards. We intentionally do
-// not mount native PDF iframes; see workspace/decisions/2026-07-06-pdf-open-in-browser-tab.md.
+// Keep opened PDFs mounted so switching Viewer tabs preserves the native PDF
+// viewer's page and zoom state without opening or reusing browser tabs.
 function PdfPreviewCache({ activeFile }: { activeFile: { path: string; revision: string } | null }) {
   const allTabs = useFileStore((s) => s.tabs);
   const pdfTabs = useMemo(
@@ -280,7 +285,7 @@ function ImagePreview({ filePath }: { filePath: string }) {
     setStatus('loading');
     setBlobUrl(null);
     const token = localStorage.getItem('token') || '';
-    fetch(`/api/files/serve?path=${encodeURIComponent(filePath)}`, {
+    fetch(towerHttpUrl(`/api/files/serve?path=${encodeURIComponent(filePath)}`), {
       headers: { Authorization: `Bearer ${token}` },
     })
       .then((res) => {
@@ -326,7 +331,7 @@ function ImagePreview({ filePath }: { filePath: string }) {
 function VideoPreview({ filePath }: { filePath: string }) {
   const { t } = useTranslation('layout');
   const token = localStorage.getItem('token') || '';
-  const src = `/api/files/serve?path=${encodeURIComponent(filePath)}&token=${encodeURIComponent(token)}`;
+  const src = towerHttpUrl(`/api/files/serve?path=${encodeURIComponent(filePath)}&token=${encodeURIComponent(token)}`);
   const fileName = filePath.split('/').pop() || 'video';
   return (
     <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-black p-4">
@@ -510,7 +515,7 @@ export function ContextPanel({ onSave, onReload, onRenamePersonalFile, onMobileC
   }, [onFileNavigate]);
 
   useEffect(() => {
-    if (openFile && ['markdown', 'agent-draft', 'pdf', 'image', 'video', 'docx', 'xlsx', 'pptx', 'hwp', 'sqlite', 'cad', 'text', 'csv', ...CODE_PREVIEW_FORMATS].includes(openFile.language)) {
+    if (openFile && ['markdown', 'html', 'agent-draft', 'pdf', 'image', 'video', 'docx', 'xlsx', 'pptx', 'hwp', 'sqlite', 'cad', 'text', 'csv', ...CODE_PREVIEW_FORMATS].includes(openFile.language)) {
       setContextPanelTab('preview');
     }
   }, [openFile?.path]);
@@ -785,7 +790,7 @@ export function ContextPanel({ onSave, onReload, onRenamePersonalFile, onMobileC
           return <img src={src} alt={alt} style={{ maxWidth: '100%' }} />;
         }
         const resolvedPath = resolveRelativePath(src, fileDir);
-        const apiUrl = `/api/files/serve?path=${encodeURIComponent(resolvedPath)}&token=${encodeURIComponent(token)}`;
+        const apiUrl = towerHttpUrl(`/api/files/serve?path=${encodeURIComponent(resolvedPath)}&token=${encodeURIComponent(token)}`);
         return <img src={apiUrl} alt={alt} style={{ maxWidth: '100%' }} />;
       },
       code({ children, className, node, ...rest }: any) {
@@ -922,6 +927,7 @@ export function ContextPanel({ onSave, onReload, onRenamePersonalFile, onMobileC
 
   return (
     <div className="h-full flex flex-col bg-surface-950">
+      <FileOperationFeedback scope={saveScope(openFile.path)} />
       {/* Tab bar — always shown when tabs exist */}
       {tabs.length > 0 && !hideTabBar && <TabBar />}
       {showShareModal && !isPersonalFile && <ShareModal filePath={openFile.path} onClose={() => setShowShareModal(false)} />}
@@ -1003,6 +1009,7 @@ export function ContextPanel({ onSave, onReload, onRenamePersonalFile, onMobileC
         </div>
       )}
 
+      {openFile && <KeepDashboard key={openFile.path} filePath={openFile.path} modified={openFile.modified} />}
       {/* File header */}
       <div className={`relative z-20 flex shrink-0 flex-wrap items-center gap-2 overflow-visible whitespace-nowrap px-3 pt-[max(0.5rem,env(safe-area-inset-top,0px))] sm:flex-nowrap sm:overflow-x-auto sm:pt-0 ${isPersonalFile ? 'pb-2.5 min-h-[58px] sm:py-2.5' : 'pb-2 min-h-[48px] sm:py-2 sm:min-h-[38px]'} border-b border-surface-700 bg-surface-950 text-base leading-tight scrollbar-none`}>
         {onMobileClose && (
@@ -1072,7 +1079,7 @@ export function ContextPanel({ onSave, onReload, onRenamePersonalFile, onMobileC
           </span>
         )}
         {openFile.modified && (
-          <span className="shrink-0 text-sm text-primary-300">Modified</span>
+          <span className="shrink-0 text-sm text-primary-300">{t('modified', { defaultValue: '수정됨' })}</span>
         )}
 
         {isScreenPreviewCode && (
@@ -1325,7 +1332,9 @@ export function ContextPanel({ onSave, onReload, onRenamePersonalFile, onMobileC
               </div>
             );
           })}
-          {openFile.language === 'agent-draft' ? (
+          {isPricingAppFile(openFile.path) ? (
+            <PricingFilePreview content={openFile.content} />
+          ) : openFile.language === 'agent-draft' ? (
             <AgentDraftPreview content={openFile.content} />
           ) : openFile.language === 'image' ? (
             <ImagePreview filePath={openFile.path} />
@@ -1336,7 +1345,7 @@ export function ContextPanel({ onSave, onReload, onRenamePersonalFile, onMobileC
             // its contentDocument.scrollingElement once loaded (sandbox is
             // allow-same-origin so this is permitted).
             <div ref={htmlWrapRef} className="absolute inset-0">
-              <HtmlPreviewSurface key={contentRevision} content={openFile.content} className="absolute inset-0" />
+              <HtmlPreviewSurface key={contentRevision} content={openFile.content} filePath={openFile.path} className="absolute inset-0" />
             </div>
           ) : CODE_PREVIEW_FORMATS.has(openFile.language) ? (
             <div className="absolute inset-0 overflow-hidden bg-surface-950">

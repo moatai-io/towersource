@@ -20,7 +20,7 @@
 *현재*: unified-scheduler 가 task + automation + proactive-agent 한 모델로 흡수 중.
 *미래*: task-scheduler 제거 예정.
 
-지금 둘 다 살려둔 이유: 기존 cron 데이터 마이그레이션 미완. unified 로 옮기면 일부 작업 누락 위험. 다만 2026-06-02 점검 기준 legacy `schedules` 테이블은 operator/demo-org/demo 모두 enabled row 가 없어 tick 을 기본 off 로 전환했다 (`ENABLE_LEGACY_SCHEDULE_TICK=true` 일 때만 on). legacy `tasks.scheduled_at` tick 은 실제 자체 호스팅 서버 에 사용 중인 row 가 있어 Task 탭 마이그레이션 완료 전까지 유지한다. Decision: `workspace/decisions/2026-05-02-tower-scheduler-as-first-class.md`.
+과거에는 기존 cron 데이터 마이그레이션 누락 위험 때문에 legacy `schedules` tick을 opt-in으로 보존했다. 2026-09-18 현재 실행 DB에서 legacy `schedules`가 total 0 / enabled 0이고 실행 환경에 enable flag가 없음을 재검증하여 runtime CRUD·executor·tick을 제거했다. migration SQL은 upgrade history로 보존한다. legacy `tasks.scheduled_at`은 별도 migration/audit 경계다. Decision: `workspace/decisions/2026-05-02-tower-scheduler-as-first-class.md`.
 
 `calculateNextRun` 이름 충돌은 의도적 — 둘 다 동일 의도, 다른 cron 형식. 마이그레이션 완료 후 task-scheduler 의 함수 제거.
 
@@ -50,7 +50,7 @@ Node 가 import 한 번 후 캐시하므로 N 번째 호출 cost 무시.
 
 ## 왜 `automations` 를 스케줄 Job Registry 로 확장하나
 
-2026-06-02 스케줄 PRD 에서 Task 탭을 장기적으로 스케줄 탭에 흡수하기로 했다. 새 테이블을 바로 만들기보다 기존 `automations` 가 이미 tasks/schedules migration, `/api/automations`, `AutomationPanel`, `tickAutomations()` 를 갖고 있어 이를 v1 registry 로 승격한다.
+2026-06-02 스케줄 PRD 에서 Task 탭을 스케줄 탭에 흡수하기로 했다. 새 테이블을 만들기보다 기존 `automations` 의 tasks/schedules migration, `/api/automations`, `tickAutomations()`를 v1 registry로 승격했다. 2026-09-18에는 중복 `AutomationPanel`을 제거하고 Automation Registry-backed `SchedulePanel`을 단일 사용자 화면으로 확정했다.
 
 일반화 경계는 “실행 관측 모델”까지다. 공통 필드 (`job_type`, `definition_json`, `risk_level`, run stdout/stderr/summary, runner_kind) 를 추가하되, 모든 자동화를 하나의 거대한 DSL 로 만들지는 않는다. 타입별 실행 차이는 `automation-runners.ts` adapter 가 책임진다.
 
@@ -60,7 +60,7 @@ Shell/script 는 Runtime Box runner 가 붙기 전까지 API 레벨에서 admin/
 
 2026-06-03 결정으로 스케줄 탭은 Task 의 보조 UI 가 아니라 기존 예약 태스크를 흡수하는 사용자-facing 작업 자동화 레이어가 되었다. `tasks.scheduled_at` / `tasks.schedule_cron` 은 자체 호스팅 서버 이관 완료 전까지 compatibility 로 유지하되, 새 생성은 `automations` 로 간다.
 
-자체 호스팅 서버 migration 은 `scripts/migrate-legacy-tasks-to-automations.ts` 를 사용한다. dry-run 이 기본이고, apply 는 automation 을 먼저 만들고 legacy task 의 `schedule_enabled = 0` 으로 중복 실행을 막는다. idempotency key 는 `definition_json.legacyTaskId`. 관련 runbook: `docs/legacy-task-to-schedule-migration-runbook.md`.
+자체 호스팅 서버 migration 은 `scripts/migrate-legacy-tasks-to-automations.ts` 를 사용한다. dry-run 이 기본이다. apply는 새 Automation을 **비활성 상태로 생성**한 뒤 legacy task를 compare-and-set으로 비활성화하고 마지막에 Automation을 활성화한다. 중간 실패 후 재실행하면 `definition_json.legacyTaskId`로 기존 Automation을 찾아 cutover 상태를 복구하며, 둘이 동시에 활성화되는 창을 만들지 않는다. 관련 runbook: `docs/legacy-task-to-schedule-migration-runbook.md`.
 
 ## 왜 Runtime Box 안에 cron 을 두지 않나
 

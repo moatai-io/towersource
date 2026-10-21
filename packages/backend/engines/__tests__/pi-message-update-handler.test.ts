@@ -192,6 +192,29 @@ describe('Pi message_update handler', () => {
     }).content).toEqual([{ type: 'text', text: '안녕' }]);
   });
 
+  it('releases the full withheld prefix when final phase becomes known mid-stream', () => {
+    const accumulator = new ContentAccumulator();
+    const send = (text: string, delta: string, phase?: string) => handlePiMessageUpdate({ accumulator,
+      event: { assistantMessageEvent: { type: 'text_delta', contentIndex: 0, delta,
+        partial: { provider: 'litellm-responses', content: [{ type: 'text', text,
+          textSignature: phase ? JSON.stringify({ v: 1, phase }) : undefined }] } } } });
+    expect(send('안녕', '안녕').content).toEqual([]);
+    expect(send('안녕하세요', '하세요', 'final_answer').content).toEqual([{ type: 'text', text: '안녕하세요' }]);
+    expect(send('안녕하세요!', '!', 'final_answer').content).toEqual([{ type: 'text', text: '안녕하세요!' }]);
+  });
+
+  it('does not release another unsigned block when a final block streams', () => {
+    const result = handlePiMessageUpdate({ accumulator: new ContentAccumulator(), event: {
+      assistantMessageEvent: { type: 'text_delta', contentIndex: 1, delta: '답변', partial: {
+        provider: 'litellm-responses', content: [
+          { type: 'text', text: 'unsigned private material' },
+          { type: 'text', text: '답변', textSignature: JSON.stringify({ v: 1, phase: 'final_answer' }) },
+        ],
+      } },
+    } });
+    expect(result.content).toEqual([{ type: 'text', text: '답변' }]);
+  });
+
   it('keeps user-facing Responses commentary as progress while hiding scratchpad-shaped commentary', () => {
     const commentarySig = JSON.stringify({ v: 1, phase: 'commentary' });
     const finalSig = JSON.stringify({ v: 1, phase: 'final_answer' });

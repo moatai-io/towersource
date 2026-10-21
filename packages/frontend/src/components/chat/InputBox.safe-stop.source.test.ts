@@ -9,7 +9,7 @@ const app = fs.readFileSync(path.resolve(import.meta.dirname, '../../App.tsx'), 
 describe('immediate stop UI contract', () => {
   it('offers one immediate stop action for an active Pi turn', () => {
     expect(input).toContain("const isSafeStopAvailable = isPiStreamingSession");
-    expect(input).toContain('isSafeStopAvailable && onSafeStop');
+    expect(input).toContain('isSafeStopAvailable && onStopImmediately');
     expect(input).not.toMatch(/const isPiStreamingSession[^;]*modelUsed/);
     expect(input).toContain("title={t('stopImmediately')}");
     expect(input).toContain("aria-label={t('stopImmediately')}");
@@ -21,8 +21,8 @@ describe('immediate stop UI contract', () => {
   it('sends force-stop and optimistically marks the turn idle', () => {
     expect(runtime).toContain("type: 'request_turn_stop'");
     expect(runtime).toContain("mode: 'force'");
-    expect(runtime).toMatch(/const requestSafeStop[\s\S]*setStreaming\(false\)/);
-    expect(runtime).toMatch(/const requestSafeStop[\s\S]*markSessionRunFinished\(sessionId, 'stopped'/);
-    expect(app).toContain('onSafeStop={requestSafeStop}');
+    expect(runtime).toMatch(/const requestImmediateStop[\s\S]*setStreaming\(false\)/);
+    expect(runtime).toMatch(/const requestImmediateStop[\s\S]*markSessionRunFinished\(sessionId, 'stopped'/);
+    expect(app).toContain('onStopImmediately={requestImmediateStop}');
   });
 });

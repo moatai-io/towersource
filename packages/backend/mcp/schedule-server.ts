@@ -14,12 +14,12 @@ import { z } from 'zod';
 import {
   createAutomation,
   getAutomationRuns,
-  getAutomations,
   type Automation,
   type CronConfig,
 } from '../services/task/automation-manager.js';
 import { canCreateAutomationJob } from '../services/task/schedule-permissions.js';
 import {
+  type AutomationControlActor,
   archiveAutomationJob,
   requireAutomationCapability,
   runAutomationNow,
@@ -29,6 +29,10 @@ import {
   applyAutomationChangeIntent,
   createAutomationChangeIntent,
 } from '../services/task/automation-change-intent.js';
+import {
+  listScheduleInventory,
+  setLegacyScheduledTaskEnabled,
+} from '../services/task/schedule-inventory.js';
 
 export interface ScheduleMcpContext {
   sessionId: string;
@@ -115,6 +119,8 @@ function errorResult(action: string, message: string) {
 }
 
 export function createScheduleMcpServer(ctx: ScheduleMcpContext) {
+  // Adapt the trusted session identity; MCP context uses userRole, control uses role.
+  const actor: AutomationControlActor = { userId: ctx.userId, role: ctx.userRole };
   return createSdkMcpServer({
     name: 'schedule',
     version: '0.1.0',
@@ -217,13 +223,42 @@ export function createScheduleMcpServer(ctx: ScheduleMcpContext) {
         async (args) => {
           try {
             const projectId = args.projectId || ctx.projectId || undefined;
-            const automations = await getAutomations(ctx.userId, ctx.userRole || undefined, {
+            const inventory = await listScheduleInventory({
+              userId: ctx.userId,
+              role: ctx.userRole,
               projectId,
               includeArchived: args.includeArchived || false,
             });
-            return textResult(automations.map(compactAutomation));
+            return textResult(inventory);
           } catch (err: any) {
             return errorResult('list_automations', err?.message || String(err));
+          }
+        },
+      ),
+      tool(
+        'set_legacy_schedule_enabled',
+        [
+          'Enable or disable one legacy Tower scheduled task owned by the CURRENT user.',
+          'Use ONLY after list_automations returns source="legacy_task" and the user explicitly confirms this exact change.',
+          'This is a compatibility control while legacy tasks are migrated to the Automation registry.',
+        ].join('\n'),
+        {
+          taskId: z.string().min(1),
+          enabled: z.boolean(),
+          confirmed: z.literal(true).describe('Must be true only after explicit user confirmation.'),
+        },
+        async (args) => {
+          try {
+            const changed = await setLegacyScheduledTaskEnabled({
+              id: args.taskId,
+              enabled: args.enabled,
+              userId: ctx.userId,
+              role: ctx.userRole,
+            });
+            if (!changed) return errorResult('set_legacy_schedule_enabled', 'not found');
+            return textResult({ ok: true, source: 'legacy_task', id: args.taskId, enabled: args.enabled });
+          } catch (err: any) {
+            return errorResult('set_legacy_schedule_enabled', err?.message || String(err));
           }
         },
       ),
@@ -233,7 +268,7 @@ export function createScheduleMcpServer(ctx: ScheduleMcpContext) {
         { automationId: z.string().uuid() },
         async (args) => {
           try {
-            const { automation, access } = await requireAutomationCapability(args.automationId, ctx, 'read');
+            const { automation, access } = await requireAutomationCapability(args.automationId, actor, 'read');
             if (!access.allowed || !automation) return errorResult('get_automation', access.message || 'forbidden');
             return textResult(compactAutomation(automation));
           } catch (err: any) {
@@ -250,7 +285,7 @@ export function createScheduleMcpServer(ctx: ScheduleMcpContext) {
         },
         async (args) => {
           try {
-            const { automation, access } = await requireAutomationCapability(args.automationId, ctx, 'read');
+            const { automation, access } = await requireAutomationCapability(args.automationId, actor, 'read');
             if (!access.allowed || !automation) return errorResult('get_automation_runs', access.message || 'forbidden');
             return textResult(await getAutomationRuns(automation.id, args.limit || 10));
           } catch (err: any) {
@@ -272,7 +307,7 @@ export function createScheduleMcpServer(ctx: ScheduleMcpContext) {
         },
         async (args) => {
           try {
-            const { automation, access } = await requireAutomationCapability(args.automationId, ctx, 'propose');
+            const { automation, access } = await requireAutomationCapability(args.automationId, actor, 'propose');
             if (!access.allowed || !automation) return errorResult('propose_automation_change', access.message || 'forbidden');
             return textResult(await createAutomationChangeIntent({
               automation,
@@ -330,7 +365,7 @@ export function createScheduleMcpServer(ctx: ScheduleMcpContext) {
         },
         async (args) => {
           try {
-            const { automation, access } = await requireAutomationCapability(args.automationId, ctx, 'edit');
+            const { automation, access } = await requireAutomationCapability(args.automationId, actor, 'edit');
             if (!access.allowed || !automation) return errorResult('set_automation_enabled', access.message || 'forbidden');
             const updated = await setAutomationEnabled(automation, args.enabled, ctx.userId);
             return textResult({ ok: true, automation: updated ? compactAutomation(updated) : null });
@@ -352,7 +387,7 @@ export function createScheduleMcpServer(ctx: ScheduleMcpContext) {
         },
         async (args) => {
           try {
-            const { automation, access } = await requireAutomationCapability(args.automationId, ctx, 'run');
+            const { automation, access } = await requireAutomationCapability(args.automationId, actor, 'run');
             if (!access.allowed || !automation) return errorResult('run_automation_now', access.message || 'forbidden');
             const { broadcastToAll } = await import('../routes/ws-handler.js');
             const result = await runAutomationNow({
@@ -377,7 +412,7 @@ export function createScheduleMcpServer(ctx: ScheduleMcpContext) {
         },
         async (args) => {
           try {
-            const { automation, access } = await requireAutomationCapability(args.automationId, ctx, 'archive');
+            const { automation, access } = await requireAutomationCapability(args.automationId, actor, 'archive');
             if (!access.allowed || !automation) return errorResult('archive_automation', access.message || 'forbidden');
             return textResult({ ok: await archiveAutomationJob(automation), automationId: automation.id, archived: true });
           } catch (err: any) {

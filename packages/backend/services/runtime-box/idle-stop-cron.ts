@@ -13,7 +13,7 @@
 
 import { query } from '../../db/pg-repo.js';
 import { expireStaleServices, reconcileRuntimeBoxServices } from './service-registry.js';
-import { reconcileStaleWorkbenchJobs } from './workbench-job-registry.js';
+import { reconcileStaleWorkbenchJobs } from '../execution/jobs/job-registry.js';
 import { countRunningBoxes, stopBox, reconcileRuntimeBoxes } from './runtime-box-manager.js';
 import type { BoxRow } from './types.js';
 // Note: countRunningBoxes / countRunningBoxesByUser / assertGlobalBoxBudget / assertUserBoxBudget

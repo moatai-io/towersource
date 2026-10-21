@@ -9,6 +9,8 @@ describe('AI team primary navigation', () => {
     const start = source.indexOf("case 'ai':");
     const end = source.indexOf("case 'files':", start);
     const block = source.slice(start, end);
+    expect(block).toContain('useFileStore.getState().activateChatSlot()');
+    expect(block).toContain('onNavigateSessions?.()');
     expect(block).toContain('store.setAiNavigationSurface()');
     expect(block).toContain('store.setSidebarOpen(true)');
     expect(block).not.toContain("setSidebarTab('sessions')");

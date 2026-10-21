@@ -2,6 +2,36 @@ import { describe, expect, it, vi } from 'vitest';
 import { PiRunContext, buildPiContextSnapshot } from '../pi/run-context.js';
 
 describe('PiRunContext', () => {
+  it('keeps the last measured context through zero-usage failures without changing cost totals', () => {
+    const ctx = new PiRunContext({ modelContextWindow: 353400 });
+    ctx.recordUsage({ input: 120000, output: 10, cacheRead: 5000 });
+    ctx.recordUsage({ input: 0, output: 0 });
+    expect(ctx.actualContextInputTokens()).toBe(125000);
+    expect(ctx.lastIterationInput).toBe(0);
+    expect(ctx.cumulativeInput).toBe(120000);
+    expect(ctx.awaitingPostCompactionMeasurement).toBe(false);
+  });
+
+  it('invalidates pre-compaction usage and restores provider precedence after fresh usage', () => {
+    const ctx = new PiRunContext({ modelContextWindow: 353400 });
+    ctx.recordUsage({ input: 250000 });
+    ctx.recordCompactionSuccess(1);
+    expect(ctx.actualContextInputTokens()).toBe(0);
+    expect(ctx.awaitingPostCompactionMeasurement).toBe(true);
+    ctx.recordUsage({ input: 0 });
+    expect(ctx.awaitingPostCompactionMeasurement).toBe(true);
+    ctx.recordUsage({ input: 30000, cacheRead: 1000 });
+    expect(ctx.actualContextInputTokens()).toBe(31000);
+    expect(ctx.compactionSucceededThisTurn).toBe(true);
+    expect(ctx.awaitingPostCompactionMeasurement).toBe(false);
+    ctx.recordUsage({ input: 0 });
+    expect(ctx.actualContextInputTokens()).toBe(31000);
+    expect(ctx.riskContextEstimateTokens(317000)).toBe(317000);
+    ctx.recordCompactionSuccess(1);
+    expect(ctx.actualContextInputTokens()).toBe(31000);
+    ctx.recordCompactionSuccess(2);
+    expect(ctx.actualContextInputTokens()).toBe(0);
+  });
   it('tracks assistant message identity and rotates per iteration', () => {
     const ids = ['msg-1', 'msg-2'];
     const ctx = new PiRunContext({ modelContextWindow: 200_000, makeId: () => ids.shift()! });
@@ -60,7 +90,7 @@ describe('PiRunContext', () => {
     expect(ctx.actualContextInputTokens()).toBe(325);
     expect(ctx.riskContextEstimateTokens(123)).toBe(325);
 
-    ctx.compactionSucceededThisTurn = true;
+    ctx.recordCompactionSuccess(1);
     expect(ctx.riskContextEstimateTokens(123)).toBe(123);
 
     expect(ctx.usageSummary({

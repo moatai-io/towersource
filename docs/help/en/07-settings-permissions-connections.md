@@ -17,7 +17,7 @@ Open **My Settings** to manage personal options such as:
 - light or dark appearance;
 - font size;
 - notification delivery and event groups;
-- personal external-service Connections when available.
+- other personal options provided by the server. Personal logins are not implicitly inherited by Agent execution.
 
 These settings belong to your user account. They do not automatically change another member's preferences or a Project's authority policy.
 
@@ -32,7 +32,7 @@ Depending on your role, Project settings can control:
 - the Primary AI teammate profile;
 - tool and authority policy;
 - available Skills;
-- which organization or personal Connections the AI teammate may use.
+- which Agent-dedicated or company-shared Connections the AI teammate may use.
 
 Inviting an agent to a collaboration surface does not automatically grant that agent access to another Project's files or Credentials.
 
@@ -50,11 +50,13 @@ Connection readiness has three separate stages:
 
 If a service fails, review the reported stage and next action. A provider authentication error alone does not prove that the Connection was removed.
 
-## Personal and organization Connections
+## Agent-dedicated and company-shared Connections
 
-A personal Connection can be made available to selected Project AI teammates for work that you initiate. It is not automatically passed to other members' Sessions or externally deployed AI services.
+An Agent-dedicated (project) Connection is a work resource for that Agent. Requester personal logins are not implicitly inherited. Before connecting a personal account to a shared Agent, confirm that its users may request work using that account.
 
-An organization Connection is prepared by an administrator and can be granted or blocked for specific AI teammates or Projects according to policy.
+Company-shared (workspace) Connections are prepared by company administrators and made available to ordinary Projects. Use project scope to limit a connection to one Agent. Do not automatically share legacy personal Connections without owner consent.
+
+See [Agent authority and connection operations](./09-agent-authority-connections.md) for account selection, errors, administrator participation, and rollout requirements.
 
 Disconnecting a Connection can immediately stop future use while preserving recoverable metadata or access policy, depending on the server configuration.
 
@@ -80,6 +82,8 @@ Browser push requires both browser permission and server configuration.
 
 ## Administrator and operator actions
 
-Admin and operator surfaces can affect shared users, Projects, providers, and runtime infrastructure. Actions such as deployment, restart, credential policy changes, bulk membership changes, and system configuration should show their impact and require the appropriate role or confirmation.
+Operators administer company Agents, work resources, and shared Connections, not the platform. Operator status does not automatically grant private conversation access, admin/operator promotion, direct password resets for other users, or arbitrary host access.
+
+Admins manage the platform and infrastructure. Deployment, restarts, and system changes require the appropriate platform authority and confirmation. An admin requester does not expand an ordinary Agent's execution scope.
 
 Do not infer authority from the presence of a button or file path. Tower validates the current principal and operation on the backend.

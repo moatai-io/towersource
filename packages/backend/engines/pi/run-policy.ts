@@ -23,8 +23,10 @@ export function formatWatchdogReason(reason: StuckReason, streamIdleMs: number, 
 }
 
 export const TRANSIENT_ABORT_RETRY_MAX = Number(process.env.PI_TRANSIENT_ABORT_RETRY_MAX || 2);
+export const PROVIDER_CAPACITY_RETRY_MAX = Number(process.env.PI_PROVIDER_CAPACITY_RETRY_MAX || 5);
+export const TRANSIENT_CONTINUATION_RETRY_MAX = Number(process.env.PI_TRANSIENT_CONTINUATION_RETRY_MAX || 4);
 const TRANSIENT_ABORT_RETRY_BACKOFF_MS = [1_000, 3_000];
-const PROVIDER_CAPACITY_RETRY_BACKOFF_MS = [30_000, 90_000];
+const PROVIDER_CAPACITY_RETRY_BACKOFF_MS = [30_000, 60_000, 90_000, 120_000, 180_000];
 const ROUTER_RESTART_RETRY_BACKOFF_MS = Number(process.env.PI_ROUTER_RESTART_RETRY_BACKOFF_MS || 60_000);
 
 function isGenericConnectionDrop(message: unknown): boolean {
@@ -34,15 +36,17 @@ function isGenericConnectionDrop(message: unknown): boolean {
 }
 
 export function getTransientAbortRetryMax(message: unknown): number {
+  if (classifyPiFailure(message).kind === 'provider_response_schema') return 2;
   if (isGenericConnectionDrop(message)) return 0;
-  if (isPiCapacityThrottleFailure(message)) return Math.min(TRANSIENT_ABORT_RETRY_MAX, 2);
+  if (isPiCapacityThrottleFailure(message)) return Math.max(1, Math.min(PROVIDER_CAPACITY_RETRY_MAX, 5));
   return TRANSIENT_ABORT_RETRY_MAX;
 }
 
 export function getTransientAbortRetryDelayMs(message: unknown, attempt: number): number {
+  if (classifyPiFailure(message).kind === 'provider_response_schema') return attempt <= 1 ? 30_000 : 90_000;
   if (isGenericConnectionDrop(message)) return ROUTER_RESTART_RETRY_BACKOFF_MS;
   if (isPiCapacityThrottleFailure(message)) {
-    return PROVIDER_CAPACITY_RETRY_BACKOFF_MS[Math.min(attempt - 1, PROVIDER_CAPACITY_RETRY_BACKOFF_MS.length - 1)] || 90_000;
+    return PROVIDER_CAPACITY_RETRY_BACKOFF_MS[Math.min(attempt - 1, PROVIDER_CAPACITY_RETRY_BACKOFF_MS.length - 1)] || 180_000;
   }
   return TRANSIENT_ABORT_RETRY_BACKOFF_MS[Math.min(attempt - 1, TRANSIENT_ABORT_RETRY_BACKOFF_MS.length - 1)] || 3_000;
 }
@@ -53,6 +57,6 @@ export function sleep(ms: number): Promise<void> {
 
 export function isPiTransientAbortError(message: unknown): boolean {
   const kind = classifyPiFailure(message).kind;
-  if (kind === 'provider_capacity') return true;
+  if (kind === 'provider_capacity' || kind === 'provider_response_schema') return true;
   return kind === 'transient_transport' && isPiTransientTransportFailure(message);
 }

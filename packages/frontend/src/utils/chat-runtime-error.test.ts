@@ -25,5 +25,7 @@ describe('presentChatRuntimeError', () => {
   it('follows the active Korean language', async () => {
     await i18n.changeLanguage('ko');
     expect(presentChatRuntimeError('ACCESS_DENIED').message).toBe('현재 권한으로 이 작업을 실행할 수 없습니다.');
+    expect(presentChatRuntimeError('MODEL_NOT_SELECTABLE').message).toContain('선택한 모델');
+    expect(presentChatRuntimeError('MODEL_PRESET_UNAVAILABLE').message).toContain('관리자에게 모델 매핑');
   });
 });

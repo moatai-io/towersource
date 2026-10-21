@@ -21,7 +21,7 @@ describe('retired direct Codex connection contract', () => {
   });
 
   it('keeps current routing and old-session compatibility separate from the removed UI', () => {
-    expect(models.defaults.session).toBe('litellm-responses/smartest');
+    expect(models.defaults.session).toBe('litellm-responses/gpt-6.1-sol');
     expect(models.pi.some((model: { provider: string }) => model.provider === 'openai-codex')).toBe(false);
     expect(configSource).toContain("'openai-codex/gpt-5.5'");
     expect(configSource).toContain('RETIRED_PI_SESSION_MODEL_IDS');

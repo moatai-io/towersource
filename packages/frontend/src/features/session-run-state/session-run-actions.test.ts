@@ -70,6 +70,31 @@ describe('session-run-actions', () => {
     });
   });
 
+  it('keeps unanswered question attention through idle and preparing status updates', () => {
+    markSessionRunAwaitingUser('s1', 'q1');
+    markSessionRunIdle('s1');
+    markSessionRunActive('s1', 'preparing');
+    expect(useChatStore.getState().turnStateBySession.s1).toMatchObject({ phase: 'awaiting_user', pendingQuestionId: 'q1' });
+    markSessionRunActive('s1', 'preparing', { pendingQuestionId: null });
+    expect(useChatStore.getState().turnStateBySession.s1).toMatchObject({ phase: 'preparing', pendingQuestionId: null });
+  });
+
+  it('preserves unanswered AUQ through late completion edges, including direct store updates', () => {
+    markSessionRunAwaitingUser('s1', 'q1');
+    markSessionRunFinished('s1', 'done', { pendingMessageCount: 0 });
+    useChatStore.getState().setTurnPhase('s1', 'done');
+    expect(useChatStore.getState().turnStateBySession.s1).toMatchObject({ phase: 'awaiting_user', pendingQuestionId: 'q1' });
+    markSessionRunActive('s1', 'preparing', { pendingQuestionId: null });
+    markSessionRunFinished('s1', 'done');
+    expect(useChatStore.getState().turnStateBySession.s1).toMatchObject({ phase: 'done', pendingQuestionId: null });
+  });
+
+  it.each(['stopped', 'error'] as const)('clears AUQ when the run actually becomes %s', (phase) => {
+    markSessionRunAwaitingUser('s1', 'q1');
+    markSessionRunFinished('s1', phase);
+    expect(useChatStore.getState().turnStateBySession.s1).toMatchObject({ phase, pendingQuestionId: null });
+  });
+
   it('marks queued as a running sidebar state', () => {
     markSessionRunQueued('s1', 3);
 

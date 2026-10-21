@@ -22,7 +22,7 @@ export function AgentIdentityAvatar({
   project,
   className = 'h-12 w-12',
   variant = 'default',
-  showListAccent = true,
+  showListAccent = false,
 }: AgentIdentityAvatarProps) {
   const characterId = characterFace(project.agent?.face);
   const faceImage = agentFaceImageUrl(project.agent?.face);
@@ -53,7 +53,7 @@ export function AgentIdentityAvatar({
 
   if (portrait && failedSource !== portrait) {
     return (
-      <span className={`${className} relative inline-block overflow-hidden bg-surface-800`}>
+      <span className={`${className} relative inline-block overflow-hidden`}>
         <img
           src={portrait}
           alt=""

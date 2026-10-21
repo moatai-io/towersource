@@ -26,6 +26,8 @@ export async function continuePiNativeLifecycle(session: unknown, reason: string
     throw unavailable(reason);
   }
 
+  // SDK abort() leaves this latch set. A deliberate continuation owns a new run.
+  sdkSession._agentRunAbortRequested = false;
   sdkSession._isAgentRunActive = true;
   try {
     await agent.continue();

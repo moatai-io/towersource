@@ -7,6 +7,7 @@ const apiSource = fs.readFileSync(path.join(routesRoot, 'api.ts'), 'utf8');
 const projectFilesSource = fs.readFileSync(path.join(routesRoot, 'project-files/project-files-router.ts'), 'utf8');
 
 const projectFilesCoreRoutes = [
+  'POST /dashboards/register',
   'GET /directories',
   'GET /files/notes-index',
   'GET /files/knowledge-graph',
@@ -14,6 +15,11 @@ const projectFilesCoreRoutes = [
   'GET /files/tree',
   'GET /files/read',
   'GET /files/exists',
+  'POST /files/scoped-edit/plan',
+  'POST /files/scoped-edit/propose',
+  'GET /files/scoped-edit/multi-file-proposal/:intentId',
+  'POST /files/scoped-edit/multi-file-apply',
+  'POST /files/scoped-edit/apply',
   'POST /files/write',
   'POST /files/create',
   'POST /files/mkdir',
@@ -53,9 +59,10 @@ describe('API route composition contracts', () => {
   it('normalizes and validates session model PATCH values at the route boundary', () => {
     expect(apiSource).toContain("modelUsed must be a string or null");
     expect(apiSource).toContain("const current = await getSession(req.params.id as string)");
-    expect(apiSource).toContain("normalizePiSessionModelId(normalizedModelUsed)");
+    expect(apiSource).toContain("isSelectablePiModelId(normalizedModelUsed)");
+    expect(apiSource).toContain("persistPiSessionChoice(normalizedModelUsed)");
     expect(apiSource).toContain("modelUsed does not match session engine");
-    expect(apiSource.indexOf("normalizePiSessionModelId(normalizedModelUsed)"))
+    expect(apiSource.indexOf("persistPiSessionChoice(normalizedModelUsed)"))
       .toBeLessThan(apiSource.indexOf("await updateSession(req.params.id as string, updates)"));
   });
 });

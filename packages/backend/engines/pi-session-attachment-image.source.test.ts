@@ -10,7 +10,7 @@ describe('Pi session attachment image reading', () => {
     expect(attachmentTool).toContain('prepareFileRepresentation(uri');
     expect(attachmentTool).toContain('readPreparedVisionImage(prepared)');
     expect(attachmentTool).not.toContain('data.toString(\'base64\')');
-    expect(gateway).toContain('resolveSessionAttachment(ctx.userId, ctx.sessionId, source)');
+    expect(gateway).toContain('resolveAuthorizedSessionAttachment(ctx.userId, ctx.sessionId, source)');
     expect(gateway).toContain('decideAttachmentRepresentation({ name, bytes: probe })');
     expect(gateway).toContain('prepared.sizeBytes > maxBytes');
   });

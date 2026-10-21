@@ -30,9 +30,19 @@ describe('Chat recovery surface contract', () => {
   });
 
   it('keeps the existing real continue action', () => {
-    expect(inputBox).toContain("onClick={() => sendQuickReply(t('continueRequest'))}");
-    expect(inputBox).toContain("t('quickContinue')");
+    expect(inputBox).toContain("{ id: 'continue'");
+    expect(inputBox).toContain("message: t('continueRequest')");
+    expect(inputBox).toContain("label: t('quickContinue')");
+    expect(inputBox).toContain('onClick={() => sendQuickReply(action.message)}');
     expect(inputBox).not.toContain("'turn-recovery'");
+  });
+
+  it('sends the concise continue label without imposing a current-plan constraint', () => {
+    for (const locale of ['ko', 'en']) {
+      const copy = JSON.parse(fs.readFileSync(path.resolve(import.meta.dirname, `../../locales/${locale}/chat.json`), 'utf8'));
+      expect(copy.continueRequest).toBe(copy.quickContinue);
+      expect(copy.continueRequest).toBe(locale === 'ko' ? '계속 진행' : 'Continue');
+    }
   });
 
   it('keeps resume_failed out of toast, transcript, and draft recovery surfaces', () => {

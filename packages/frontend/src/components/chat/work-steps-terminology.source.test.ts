@@ -7,17 +7,21 @@ const ko = readFileSync(new URL('../../locales/ko/chat.json', import.meta.url), 
 const parser = readFileSync(new URL('../../utils/message-parser.ts', import.meta.url), 'utf8');
 
 describe('TodoWrite user-facing terminology', () => {
-  it('calls TodoWrite progress 진행 단계 in Korean UI', () => {
+  it('uses 작업 기록 for both live and folded cards', () => {
     expect(bubble).toContain("i18n.t('chat:workSteps')");
-    expect(bubble).toContain("i18n.t('chat:previousWorkSteps')");
+    expect(bubble).not.toContain('chat:workStepsRecord');
+    expect(bubble).toContain("i18n.t('chat:workStepsExpand')");
+    expect(ko).toContain('"workSteps": "작업 기록"');
+    expect(ko).not.toContain('"workStepsRecord"');
+    expect(ko).toContain('"workStepsLastRecorded": "마지막 기록"');
     expect(card).toContain("i18n.t('chat:workSteps')");
-    expect(ko).toContain('"todowrite": "진행 단계"');
-    expect(ko).toContain('"todo": "진행 단계를 정리하고 있습니다"');
+    expect(ko).toContain('"todowrite": "작업 기록"');
+    expect(ko).toContain('"todo": "작업 기록을 정리하고 있습니다"');
   });
 
   it('uses Work steps instead of personal todo language in fallback labels', () => {
     expect(parser).toContain("todowrite: 'Work steps'");
-    expect(parser).toContain("return 'Work steps'");
+    expect(parser).toContain("if (!todos?.length) return getToolLabel(name)");
     expect(parser).not.toContain("todowrite: 'Manage todos'");
   });
 });

@@ -38,12 +38,13 @@ describe('project-manager slug helpers', () => {
     expect(isReservedSystemProjectSlug('general')).toBe(false);
   });
 
-  it('seeds only General regardless of feature flags and never restores legacy system Projects', () => {
+  it('seeds General and gates Introduction on Agent-first without restoring legacy system Projects', () => {
     expect(DEFAULT_PROJECTS).toEqual([
       expect.objectContaining({ slug: 'general', name: 'General' }),
+      expect.objectContaining({ slug: 'introduction', name: 'Introduction', requiresAgentFirst: true }),
     ]);
     expect(DEFAULT_PROJECTS.map((project) => project.slug)).not.toEqual(expect.arrayContaining(['ai-talent-team', 'shared', 'test-project', 'teamskills']));
-    expect(defaultProjectsForVm(false)).toEqual(DEFAULT_PROJECTS);
+    expect(defaultProjectsForVm(false)).toEqual([DEFAULT_PROJECTS[0]]);
     expect(defaultProjectsForVm(true)).toEqual(DEFAULT_PROJECTS);
   });
 

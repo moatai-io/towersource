@@ -1,3 +1,5 @@
+import { FileOperationFeedback } from '../../../features/file-operation-feedback/FileOperationFeedback';
+import { uploadScope, clearFileOperation, reportUploadUnknown } from '../../../features/file-operation-feedback/feedback';
 // Owns: friendly Markdown writing surface for project .md files.
 // Public API: MarkdownEditor.
 
@@ -10,7 +12,7 @@ import { markdown } from '@codemirror/lang-markdown';
 import { EditorView, keymap, type KeyBinding } from '@codemirror/view';
 import type { ChangeSpec, Extension } from '@codemirror/state';
 import { useSettingsStore } from '../../../stores/settings-store';
-import { toastError, toastSuccess } from '../../../utils/toast';
+import { toastSuccess } from '../../../utils/toast';
 
 interface MarkdownEditorProps {
   value: string;
@@ -251,6 +253,7 @@ export function MarkdownEditor({ value, filePath, onChange, onSave, readOnly = f
   const insertFiles = useCallback(async (files: File[], insertAt?: number) => {
     const view = viewRef.current;
     if (!view || files.length === 0 || uploadingRef.current) return;
+    clearFileOperation(uploadScope('markdown', String(filePath)));
     uploadingRef.current = true;
     try {
       const uploadedPaths = await uploadMarkdownAssets(filePath, files);
@@ -262,7 +265,7 @@ export function MarkdownEditor({ value, filePath, onChange, onSave, readOnly = f
       view.focus();
       toastSuccess(t(files.length > 1 ? 'markdownEditor.filesInserted' : 'markdownEditor.fileInserted', { count: files.length }));
     } catch (err) {
-      toastError(err instanceof Error ? err.message : t('markdownEditor.fileInsertFailed'));
+      reportUploadUnknown(uploadScope('markdown', String(filePath)));
     } finally {
       uploadingRef.current = false;
     }
@@ -324,6 +327,7 @@ export function MarkdownEditor({ value, filePath, onChange, onSave, readOnly = f
 
   return (
     <div className="flex h-full flex-col bg-surface-950">
+      <FileOperationFeedback scope={uploadScope('markdown', String(filePath))} />
       <div className="flex shrink-0 flex-wrap items-center gap-1 border-b border-surface-800 bg-surface-950/95 px-3 py-1.5 text-[12px] text-surface-400">
         <button className="rounded px-2 py-1 hover:bg-surface-800 hover:text-surface-100" onClick={() => runCommand((v) => setHeading(v, 1))} title={t('markdownEditor.headingToggle', { level: 1 })}>H1</button>
         <button className="rounded px-2 py-1 hover:bg-surface-800 hover:text-surface-100" onClick={() => runCommand((v) => setHeading(v, 2))} title={t('markdownEditor.headingToggle', { level: 2 })}>H2</button>
@@ -331,14 +335,14 @@ export function MarkdownEditor({ value, filePath, onChange, onSave, readOnly = f
         <span className="mx-1 h-4 w-px bg-surface-800" />
         <button className="rounded px-2 py-1 font-bold hover:bg-surface-800 hover:text-surface-100" onClick={() => runCommand((v) => toggleInlineMarker(v, '**', '**', t('markdownEditor.boldPlaceholder')))} title={t('markdownEditor.boldToggle')}>B</button>
         <button className="rounded px-2 py-1 italic hover:bg-surface-800 hover:text-surface-100" onClick={() => runCommand((v) => toggleInlineMarker(v, '*', '*', t('markdownEditor.italicPlaceholder')))} title={t('markdownEditor.italicToggle')}>I</button>
-        <button className="rounded px-2 py-1 hover:bg-surface-800 hover:text-surface-100" onClick={() => runCommand(insertMarkdownLink)} title={t('markdownEditor.linkAction')}>Link</button>
+        <button className="rounded px-2 py-1 hover:bg-surface-800 hover:text-surface-100" onClick={() => runCommand(insertMarkdownLink)} title={t('markdownEditor.linkAction')}>{t('markdownEditor.link', { defaultValue: '링크' })}</button>
         <span className="mx-1 h-4 w-px bg-surface-800" />
-        <button className="rounded px-2 py-1 hover:bg-surface-800 hover:text-surface-100" onClick={() => runCommand((v) => toggleLinePrefix(v, '- '))} title={t('markdownEditor.listToggle')}>List</button>
-        <button className="rounded px-2 py-1 hover:bg-surface-800 hover:text-surface-100" onClick={() => runCommand(toggleTodo)} title={t('markdownEditor.checkboxToggle')}>Todo</button>
-        <button className="rounded px-2 py-1 hover:bg-surface-800 hover:text-surface-100" onClick={() => runCommand((v) => toggleLinePrefix(v, '> '))} title={t('markdownEditor.quoteToggle')}>Quote</button>
-        <button className="rounded px-2 py-1 hover:bg-surface-800 hover:text-surface-100" onClick={() => runCommand((v) => insertBlock(v, '```\ncode\n```'))} title={t('markdownEditor.codeBlock')}>Code</button>
+        <button className="rounded px-2 py-1 hover:bg-surface-800 hover:text-surface-100" onClick={() => runCommand((v) => toggleLinePrefix(v, '- '))} title={t('markdownEditor.listToggle')}>{t('markdownEditor.list', { defaultValue: '목록' })}</button>
+        <button className="rounded px-2 py-1 hover:bg-surface-800 hover:text-surface-100" onClick={() => runCommand(toggleTodo)} title={t('markdownEditor.checkboxToggle')}>{t('markdownEditor.todo', { defaultValue: '체크박스' })}</button>
+        <button className="rounded px-2 py-1 hover:bg-surface-800 hover:text-surface-100" onClick={() => runCommand((v) => toggleLinePrefix(v, '> '))} title={t('markdownEditor.quoteToggle')}>{t('markdownEditor.quote', { defaultValue: '인용' })}</button>
+        <button className="rounded px-2 py-1 hover:bg-surface-800 hover:text-surface-100" onClick={() => runCommand((v) => insertBlock(v, '```\ncode\n```'))} title={t('markdownEditor.codeBlock')}>{t('markdownEditor.code', { defaultValue: '코드' })}</button>
         <span className="mx-1 h-4 w-px bg-surface-800" />
-        <button className="rounded px-2 py-1 hover:bg-surface-800 hover:text-surface-100" onClick={() => fileInputRef.current?.click()} title={t('markdownEditor.attach')}>Attach</button>
+        <button className="rounded px-2 py-1 hover:bg-surface-800 hover:text-surface-100" onClick={() => fileInputRef.current?.click()} title={t('markdownEditor.attach')}>{t('markdownEditor.attach')}</button>
         <input
           ref={fileInputRef}
           type="file"

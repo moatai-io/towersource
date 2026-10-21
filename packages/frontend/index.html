@@ -1,16 +1,17 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="ko">
   <head>
     <script src="/runtime-config.js"></script>
     <script>
       (function() {
-        var saved = localStorage.getItem('tower:lang');
+        var saved = null;
+        try { saved = localStorage.getItem('tower:lang'); } catch (_) {}
         var configured = window.__TOWER_RUNTIME_CONFIG__ && window.__TOWER_RUNTIME_CONFIG__.defaultLanguage;
         var language = saved === 'ko' || saved === 'en'
           ? saved
           : configured === 'ko' || configured === 'en'
             ? configured
-            : 'en';
+            : 'ko';
         document.documentElement.lang = language;
       })();
     </script>
@@ -26,9 +27,7 @@
     <meta name="apple-mobile-web-app-title" content="Tower" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
-    <link rel="preload" href="/fonts/PretendardVariable.woff2" as="font" type="font/woff2" crossorigin />
-    <link rel="preload" href="https://cdn.jsdelivr.net/gh/JetBrains/JetBrainsMono@2.304/fonts/webfonts/JetBrainsMono-Regular.woff2" as="font" type="font/woff2" crossorigin />
-    <link rel="preload" href="https://cdn.jsdelivr.net/gh/JetBrains/JetBrainsMono@2.304/fonts/webfonts/JetBrainsMono-Medium.woff2" as="font" type="font/woff2" crossorigin />
+    <!-- Fonts load on use with font-display: swap; do not compete with startup JS. -->
     <style>
       @font-face {
         font-family: 'JetBrains Mono';
@@ -56,16 +55,51 @@
         var fs = localStorage.getItem('tower:font-size');
         if (fs) document.documentElement.setAttribute('data-font-size', fs);
       })();
-      // PWA service worker is managed by vite-plugin-pwa (registerType: 'autoUpdate')
-      // Do NOT unregister here — it kills the PWA install prompt & offline caching
+      // PWA service worker is managed by vite-plugin-pwa (registerType: 'autoUpdate').
+      // Deployed hosts keep the PWA registration. Development hosts must remove
+      // registrations left by older builds: merely skipping registerSW() does not
+      // stop an already-active worker from controlling the current browser tab.
+      (function() {
+        var isDevHost = location.hostname === 'app.localhost' || location.hostname.indexOf('desk-dev.') === 0;
+        if (!isDevHost || !('serviceWorker' in navigator)) return;
+
+        var cleanupKey = 'tower:dev-sw-cleanup-v1';
+        var wasControlled = !!navigator.serviceWorker.controller;
+        Promise.all([
+          navigator.serviceWorker.getRegistrations().then(function(regs) {
+            return Promise.all(regs.map(function(reg) { return reg.unregister(); }));
+          }),
+          'caches' in window ? caches.keys().then(function(keys) {
+            return Promise.all(keys.filter(function(key) {
+              return key.indexOf('workbox-precache') === 0 || key.indexOf('js-runtime-cache') !== -1;
+            }).map(function(key) { return caches.delete(key); }));
+          }) : Promise.resolve(),
+        ]).then(function() {
+          if (!wasControlled || sessionStorage.getItem(cleanupKey) === '1') return;
+          sessionStorage.setItem(cleanupKey, '1');
+          var url = new URL(location.href);
+          url.searchParams.delete('__tower_reload');
+          location.replace(url.toString());
+        }).catch(function() {
+          // Dev cleanup is best-effort; Vite can still surface the underlying error.
+        });
+      })();
 
       // Boot watchdog: recover once when an old service worker/runtime cache
       // leaves the page stuck on the static Loading fallback. Healthy mounted
       // tabs are never reloaded by this path.
       (function() {
         if (location.search.indexOf('reset-sw') !== -1 || location.search.indexOf('reset-client') !== -1) return;
+        // Vite development hosts can legitimately spend more than the watchdog
+        // window transforming a changed module graph, and syntax errors are
+        // fixed through HMR. Reloading here restarts the same transform and can
+        // create an endless __tower_reload loop. Boot recovery is only for a
+        // deployed app shell with potentially stale service-worker caches.
+        var isDevHost = location.hostname === 'app.localhost' || location.hostname.indexOf('desk-dev.') === 0;
+        if (isDevHost) return;
         var guardKey = 'tower:boot-recovery-ts';
-        var lastRecovery = parseInt(sessionStorage.getItem(guardKey) || '0', 10);
+        var lastRecovery = 0;
+        try { lastRecovery = parseInt(sessionStorage.getItem(guardKey) || '0', 10); } catch (_) {}
 
         function isRecoverableBootError(value) {
           var message = value && (value.message || value.reason && value.reason.message || String(value.reason || value)) || '';
@@ -74,10 +108,18 @@
 
         function recoverOnce(reason) {
           if (document.documentElement.hasAttribute('data-app-mounted')) return;
-          if (lastRecovery && Date.now() - lastRecovery < 60000) return;
+          var status = document.getElementById('tower-boot-message');
+          if (status) status.textContent = '화면을 불러오지 못했습니다. 아래 버튼으로 화면 캐시를 복구해 주세요.';
+          var retry = document.getElementById('tower-boot-retry');
+          if (retry) retry.hidden = false;
+          // One automatic attempt per window session. Manual recovery remains
+          // available even when storage is blocked or repeated loads fail.
+          if (lastRecovery) return;
           lastRecovery = Date.now();
-          sessionStorage.setItem(guardKey, String(lastRecovery));
-          sessionStorage.setItem('tower:reload-reason', reason);
+          try {
+            sessionStorage.setItem(guardKey, String(lastRecovery));
+            sessionStorage.setItem('tower:reload-reason', reason);
+          } catch (_) { return; }
 
           var cleanup = Promise.resolve();
           if ('caches' in window) {
@@ -127,13 +169,16 @@
           .catch(function() { location.replace('/'); });
       })();
     </script>
-    <div id="root">
-      <!-- Fallback shown before JS loads (or if JS fails) -->
-      <div style="min-height:100vh;display:flex;align-items:center;justify-content:center;flex-direction:column;">
-        <div style="color:#f59e0b;font-size:1.25rem;font-weight:bold;">Tower</div>
-        <div style="color:#7888a0;font-size:0.875rem;margin-top:0.5rem;">Loading...</div>
-      </div>
+    <div id="tower-boot-status" role="status" style="position:fixed;inset:0;z-index:2147483647;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;padding:24px;background:#f8fafc;color:#334155;font:16px/1.6 system-ui;text-align:center">
+      <strong>Tower</strong>
+      <p id="tower-boot-message">화면을 불러오고 있습니다…</p>
+      <a id="tower-boot-retry" hidden href="/api/client-reset" style="color:#0f766e">최신 화면 다시 불러오기</a>
+      <small>화면 캐시만 복구하며 서버에 저장된 대화와 파일은 유지됩니다.</small>
     </div>
+    <script>
+      document.getElementById('tower-boot-retry').href = '/api/client-reset?returnTo=' + encodeURIComponent(location.pathname + location.search + location.hash);
+    </script>
+    <div id="root"></div>
     <noscript><div style="padding:2rem;text-align:center;color:#f59e0b;">JavaScript is required to use Tower.</div></noscript>
     <script type="module" src="/src/main.tsx"></script>
   </body>

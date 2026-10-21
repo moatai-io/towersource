@@ -1,3 +1,6 @@
+import {useOwnDisplayIdentity,visibleSpeakerName} from '../../hooks/useOwnDisplayIdentity';
+import { projectMarkdownArtifact } from '../../utils/markdown-artifact-projection';
+import { AnswerSpeechButton } from './AnswerSpeechButton';
 import React, { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import i18n from '../../i18n';
@@ -24,6 +27,9 @@ import { ToolUseCard, ToolChip } from './ToolUseCard';
 import { getThinkingLabel, getToolActivityLabel, getToolActivityNoun } from '../../utils/message-parser';
 import { ThinkingChip, ThinkingContent } from './ThinkingBlock';
 import { SkillInvocationChip, type SkillInvocationMeta } from './SkillInvocationChip';
+import { ScopedMultiFileEditCard, type ScopedMultiFileProposal } from './ScopedMultiFileEditCard';
+import { SourceReferenceChip } from './SourceReferenceChip';
+import type { ComposerSourceReference } from '../files/source-inspector/sourceReference';
 import { RichContent } from '../shared/RichContent';
 // getToolLabel / getToolSummary used by ToolUseCard.tsx
 import { toastError, toastQuiet } from '../../utils/toast';
@@ -64,7 +70,7 @@ function PdfExportPreview({ resultText, onFileClick }: { resultText: string; onF
   return (
     <div className="mt-2 w-full max-w-[520px] md:max-w-[50%] space-y-2 rounded-xl border border-surface-700/50 bg-surface-900/60 p-3">
       <div className="flex items-center justify-between gap-2 text-sm text-gray-400">
-        <span>PDF preview</span>
+        <span>{i18n.t('pdfPreview', { ns: 'chat', defaultValue: 'PDF 미리보기' })}</span>
         <span>{paths.length} page{paths.length > 1 ? 's' : ''}</span>
       </div>
       <div className="space-y-3">
@@ -78,7 +84,7 @@ function PdfExportPreview({ resultText, onFileClick }: { resultText: string; onF
           >
             <img
               src={fileServeUrl(path)}
-              alt={`PDF preview page ${index + 1}`}
+              alt={i18n.t('pdfPreviewPage', { ns: 'chat', defaultValue: 'PDF 미리보기 {{page}}쪽', page: index + 1 })}
               className="block w-full max-h-[420px] object-contain bg-black/20"
               loading="lazy"
             />
@@ -95,15 +101,16 @@ function PdfExportPreview({ resultText, onFileClick }: { resultText: string; onF
 function ArtifactMarkdownCard({ block, onFileClick }: { block: ContentBlock; onFileClick?: (path: string) => void }) {
   const displayPath = block.portablePath || block.path || '';
   const saved = block.status === 'saved';
+  if (block.status === 'pending') return <div role="status" className="text-[13px] text-surface-400">{i18n.t('chat:documentWriting')}</div>;
   if (!displayPath && !block.error) return null;
 
   if (saved && displayPath) {
     return (
       <div className="mt-2 min-w-0 max-w-full text-[13px] text-surface-400">
-        <span className="text-surface-500">{i18n.t('chat:fileLabel')}: </span>
+        <span className="text-surface-500">{i18n.t(block.operation === 'update' ? 'chat:documentUpdated' : 'chat:documentSaved')} · </span>
         <button
           type="button"
-          className="inline cursor-pointer break-all border-0 bg-transparent p-0 font-mono text-inherit underline decoration-current underline-offset-2 transition-opacity hover:opacity-80"
+          className="inline cursor-pointer break-all border-0 bg-transparent p-0 text-inherit underline decoration-current underline-offset-2 transition-opacity hover:opacity-80"
           onClick={(event) => {
             event.stopPropagation();
             onFileClick?.(displayPath);
@@ -111,27 +118,17 @@ function ArtifactMarkdownCard({ block, onFileClick }: { block: ContentBlock; onF
           title={`Open ${displayPath}`}
           aria-label={i18n.t('chat:openFile', { path: displayPath })}
         >
-          {displayPath}
+          {block.title?.trim() || displayPath.split(/[\\/]/).pop() || displayPath}
         </button>
       </div>
     );
   }
 
   return (
-    <div className="mt-2 min-w-0 max-w-full overflow-hidden rounded-xl border p-3 text-[13px] tone-card tone-warning">
+    <div className="mt-2 min-w-0 max-w-full text-[13px] text-surface-400">
       <div className="min-w-0 max-w-full">
-        <div className="font-semibold tone-text">{i18n.t('chat:fileSaveFailed')}</div>
-        {displayPath && (
-          <button
-            type="button"
-            onClick={() => onFileClick?.(displayPath)}
-            className="mt-2 inline cursor-pointer break-all border-0 bg-transparent p-0 font-mono text-[12px] tone-text underline decoration-current underline-offset-2 opacity-80 transition-opacity hover:opacity-100"
-            title={`Open ${displayPath}`}
-            aria-label={i18n.t('chat:openFile', { path: displayPath })}
-          >
-            {displayPath}
-          </button>
-        )}
+        <div>{i18n.t('chat:fileSaveFailed')}</div>
+        {displayPath && <div className="mt-2 break-all font-mono text-[12px]">{displayPath}</div>}
         {block.error && <div className="mt-2 text-[12px] tone-text opacity-75">{block.error}</div>}
       </div>
     </div>
@@ -281,6 +278,8 @@ function CopyButton({ text, contentRef, className = '' }: {
 
   const handleCopy = useCallback(async (e: React.MouseEvent) => {
     e.stopPropagation();
+    let copiedSuccessfully = false;
+
     try {
       // Build HTML from rendered DOM content (if available), else from plain text
       let html = '';
@@ -294,22 +293,54 @@ function CopyButton({ text, contentRef, className = '' }: {
         html = `<p>${html}</p>`;
       }
 
-      const blob = new Blob([html], { type: 'text/html' });
-      const textBlob = new Blob([text], { type: 'text/plain' });
-      await navigator.clipboard.write([
-        new ClipboardItem({
-          'text/html': blob,
-          'text/plain': textBlob,
-        }),
-      ]);
+      if (navigator.clipboard?.write && typeof ClipboardItem !== 'undefined') {
+        const blob = new Blob([html], { type: 'text/html' });
+        const textBlob = new Blob([text], { type: 'text/plain' });
+        await navigator.clipboard.write([
+          new ClipboardItem({
+            'text/html': blob,
+            'text/plain': textBlob,
+          }),
+        ]);
+        copiedSuccessfully = true;
+      }
     } catch {
-      // Fallback for browsers that don't support ClipboardItem
-      await navigator.clipboard.writeText(text);
+      // Some browsers expose the rich clipboard API but reject HTML writes.
     }
+
+    if (!copiedSuccessfully) {
+      try {
+        if (!navigator.clipboard?.writeText) throw new Error('Clipboard API unavailable');
+        await navigator.clipboard.writeText(text);
+        copiedSuccessfully = true;
+      } catch {
+        // Last resort for non-secure contexts and embedded WebViews.
+        const textarea = document.createElement('textarea');
+        textarea.value = text;
+        textarea.setAttribute('readonly', '');
+        textarea.style.position = 'fixed';
+        textarea.style.opacity = '0';
+        document.body.appendChild(textarea);
+        textarea.select();
+        try {
+          copiedSuccessfully = document.execCommand('copy');
+        } catch {
+          copiedSuccessfully = false;
+        } finally {
+          document.body.removeChild(textarea);
+        }
+      }
+    }
+
+    if (!copiedSuccessfully) {
+      toastError(t('copyFailed'));
+      return;
+    }
+
     toastQuiet(t('copied'));
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
-  }, [text, contentRef]);
+  }, [text, contentRef, t]);
 
   return (
     <button
@@ -334,6 +365,7 @@ function CopyButton({ text, contentRef, className = '' }: {
 
 function getMessageText(content: ContentBlock[]): string {
   return content
+    .map(projectMarkdownArtifact)
     .filter((b) => (b.type === 'text' || b.type === 'artifact_markdown') && b.text)
     .map((b) => b.text!)
     .join('\n');
@@ -466,8 +498,7 @@ interface MessageBubbleProps {
   onCancelQueued?: (messageId: string) => void;
   showMetrics?: boolean;
   isLastAssistant?: boolean;
-  /** Render TodoWrite progress only for the current live assistant turn.
-   *  Old snapshots are transcript noise once a newer assistant message exists. */
+  /** Keep the latest TodoWrite snapshot for each assistant message in the transcript. */
   showTodoSnapshots?: boolean;
   /** True when the previous message is from the same user — group tightly and
    *  hide the repeated name/time header. See GitHub issue #17. */
@@ -554,7 +585,7 @@ function EngineSwitchMarker({ from, to, at }: { from: string; to: string; at?: s
   );
 }
 
-export function MessageBubble({ message, assistantProject, onOpenAssistantHome, onFileClick, onRetry, onCancelQueued, showMetrics, isLastAssistant, showTodoSnapshots = true, isContinuation }: MessageBubbleProps) {
+export const MessageBubble = React.memo(function MessageBubble({ message, assistantProject, onOpenAssistantHome, onFileClick, onRetry, onCancelQueued, showMetrics, isLastAssistant, showTodoSnapshots = true, isContinuation }: MessageBubbleProps) {
   const { t } = useTranslation('chat');
   const turnRewindEnabled = useSettingsStore((state) => state.serverConfig?.turnRewindEnabled === true);
   const isUser = message.role === 'user';
@@ -572,9 +603,25 @@ export function MessageBubble({ message, assistantProject, onOpenAssistantHome, 
   const engineSwitchMeta = (message.metadata as any)?.engineSwitch as
     | { from?: string; to?: string; atTurn?: number; at?: string }
     | undefined;
+  const modelRecoveryMeta = (message.metadata as any)?.modelRecovery as
+    | { from?: string; to?: string }
+    | undefined;
   const skillInvocationMeta = (message.metadata as any)?.skillInvocation as SkillInvocationMeta | undefined;
+  const multiFileProposal = (message.metadata as any)?.multiFileProposal as ScopedMultiFileProposal | undefined;
+  const submittedSourceReference = isUser
+    ? (message.metadata as any)?.sourceReference as ComposerSourceReference | undefined
+    : undefined;
   if (engineSwitchMeta?.from && engineSwitchMeta?.to) {
     return <EngineSwitchMarker from={engineSwitchMeta.from} to={engineSwitchMeta.to} at={engineSwitchMeta.at} />;
+  }
+  if (modelRecoveryMeta?.from && modelRecoveryMeta.to === 'preset/core') {
+    return (
+      <div className="flex justify-center py-1.5 px-2" role="status">
+        <span className="rounded-full border border-surface-700/40 bg-surface-900/60 px-3 py-1 text-xs text-gray-400">
+          {t('modelRecoveredToCore', { model: modelRecoveryMeta.from })}
+        </span>
+      </div>
+    );
   }
 
   if (shouldHideAgentReportBubble(message)) {
@@ -617,7 +664,8 @@ export function MessageBubble({ message, assistantProject, onOpenAssistantHome, 
   const sessionOwnerUsername = activeSessionId
     ? useSessionStore.getState().sessions.find((s) => s.id === activeSessionId)?.ownerUsername || undefined
     : undefined;
-  const displayUsername = isUser
+  const ownDisplayIdentity = useOwnDisplayIdentity(isUser);
+  const speakerUsername = isUser
     ? (
         message.username
         || (message.sendStatus && message.sendStatus !== 'delivered'
@@ -626,6 +674,8 @@ export function MessageBubble({ message, assistantProject, onOpenAssistantHome, 
         || sessionOwnerUsername
       )
     : undefined;
+
+  const displayUsername = visibleSpeakerName(speakerUsername,ownDisplayIdentity);
 
   // Group content blocks: consecutive tool_use blocks become a group
   const groups = useMemo(() => {
@@ -739,7 +789,7 @@ export function MessageBubble({ message, assistantProject, onOpenAssistantHome, 
     ? `flex min-w-0 max-w-full gap-3 ${isContinuation ? 'pt-0.5 pb-0.5' : 'py-5'} justify-end group/message`
     : `flex min-w-0 max-w-full flex-col md:flex-row gap-1 md:gap-3 ${isContinuation ? 'pt-0.5 pb-0.5' : 'py-5'} justify-start group/message`;
   const messageBodyClass = isUser
-    ? 'min-w-0 max-w-[88%] overflow-visible order-first'
+    ? 'min-w-0 max-w-[88%] overflow-hidden order-first'
     : 'min-w-0 w-full max-w-full overflow-hidden md:flex-1';
 
   return (
@@ -759,7 +809,7 @@ export function MessageBubble({ message, assistantProject, onOpenAssistantHome, 
 
       <div className={messageBodyClass}>
         {isUser ? (
-          <div>
+          <div className="min-w-0 max-w-full">
             {/* Speaker + timestamp meta line. Keep speaker visible but quiet even for
                 grouped consecutive user messages; hide only the repeated timestamp. */}
             {(displayUsername || (!isContinuation && message.timestamp)) && (
@@ -798,49 +848,56 @@ export function MessageBubble({ message, assistantProject, onOpenAssistantHome, 
                   aria-label={t('requestEditAria')}
                 />
                 {editError && <p className="tone-danger tone-text mt-2 text-[13px]" role="alert">{editError}</p>}
-                <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:justify-end">
+                <div className="mt-3 flex items-center gap-2">
                   <button
                     type="button"
                     onClick={cancelInlineEdit}
                     disabled={editState === 'sending'}
                     aria-label={t('cancel')}
                     title={t('cancel')}
-                    className="min-h-11 w-full rounded-lg border border-surface-700 px-3 text-[18px] leading-none text-surface-300 transition-colors hover:bg-surface-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 sm:min-h-10 sm:w-11 sm:px-0"
+                    className="flex size-10 shrink-0 items-center justify-center rounded-lg border border-surface-700 text-[18px] leading-none text-surface-300 transition-colors hover:bg-surface-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 disabled:opacity-50"
                   >
                     ×
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => void submitInlineResendCurrent()}
-                    disabled={editState === 'sending' || editText.trim().length === 0}
-                    className="min-h-11 w-full rounded-lg border border-surface-700 px-3 text-[13px] font-medium text-surface-300 transition-colors hover:bg-surface-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 disabled:opacity-50 sm:min-h-10 sm:w-auto"
-                  >
-                    {t('resend')}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => void submitInlineEdit('edit_and_resend')}
-                    disabled={editState === 'sending' || editText.trim().length === 0}
-                    className="tone-accent tone-action min-h-11 w-full rounded-lg px-3 text-[13px] font-semibold disabled:opacity-50 sm:min-h-10 sm:w-auto"
-                  >
-                    {editState === 'sending' ? t('processing') : t('newConversation')}
-                  </button>
+                  <div className="ml-auto flex min-w-0 items-center justify-end gap-1 sm:gap-2">
+                    <button
+                      type="button"
+                      onClick={() => void submitInlineEdit('edit_and_resend')}
+                      disabled={editState === 'sending' || editText.trim().length === 0}
+                      className="min-h-10 rounded-lg px-2 text-[12px] font-medium text-surface-400 transition-colors hover:bg-surface-800 hover:text-surface-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 disabled:opacity-50 sm:px-3 sm:text-[13px]"
+                    >
+                      {t('newConversation')}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void submitInlineResendCurrent()}
+                      disabled={editState === 'sending' || editText.trim().length === 0}
+                      className="tone-accent tone-action min-h-10 shrink-0 rounded-lg px-3 text-[13px] font-semibold disabled:opacity-50 sm:px-4"
+                    >
+                      {editState === 'sending' ? t('processing') : t('resend')}
+                    </button>
+                  </div>
                 </div>
               </div>
             ) : (
-              <div className="relative">
-                <div ref={userContentRef} className={`relative chat-user-bubble rounded-2xl rounded-tr-sm px-4 py-3 text-msg-size leading-relaxed whitespace-pre-wrap ${
+              <div className="flex min-w-0 max-w-full flex-col items-end">
+                <div ref={userContentRef} className={`relative ml-auto w-fit min-w-0 max-w-full overflow-hidden [overflow-wrap:anywhere] chat-user-bubble rounded-2xl rounded-tr-sm px-4 py-3 text-msg-size leading-relaxed whitespace-pre-wrap ${
                   message.sendStatus === 'failed'
                     ? 'chat-user-bubble--failed ring-1 ring-red-500/25'
                     : message.sendStatus === 'queued'
                       ? 'chat-user-bubble--queued'
                       : ''
                 }`}>
+                  {submittedSourceReference && (
+                    <div className="mb-2 max-w-full">
+                      <SourceReferenceChip reference={submittedSourceReference} state="sent" />
+                    </div>
+                  )}
                   {message.content.map((block, i) => (
                     <span key={i}>{renderUserText(safeStr(block.text), onFileClick)}</span>
                   ))}
                 </div>
-                <div className="relative mt-1 flex min-h-11 items-center justify-end gap-1 opacity-100 transition-opacity md:absolute md:right-0 md:top-full md:z-10 md:mt-1 md:min-h-10 md:opacity-0 md:pointer-events-none md:group-hover/message:pointer-events-auto md:group-hover/message:opacity-100 md:group-focus-within/message:pointer-events-auto md:group-focus-within/message:opacity-100" aria-label={t('messageActions')}>
+                <div className="message-actions message-actions--user mt-1 flex min-h-11 w-max max-w-full items-center justify-end gap-1 transition-opacity md:min-h-10" aria-label={t('messageActions')}>
                   {turnRewindEnabled && activeSessionId && canBranchUserMessage && (
                     <ConversationBranchAction sessionId={activeSessionId} messageId={message.id} onEditRequested={beginInlineEdit} />
                   )}
@@ -895,6 +952,9 @@ export function MessageBubble({ message, assistantProject, onOpenAssistantHome, 
               showMetrics={showMetrics}
               showTodoSnapshots={showTodoSnapshots}
             />
+            {multiFileProposal?.intentId && multiFileProposal?.proposalHash && (
+              <ScopedMultiFileEditCard proposal={multiFileProposal} />
+            )}
           </>
         )}
       </div>
@@ -905,14 +965,14 @@ export function MessageBubble({ message, assistantProject, onOpenAssistantHome, 
           // drop the repeated avatar (issue #17).
           <div className="w-7 shrink-0" aria-hidden />
         ) : (
-          <div className="w-7 h-7 rounded-full bg-surface-850 flex items-center justify-center text-[11px] font-bold shrink-0 mt-5 ring-1 ring-surface-700/40 text-surface-300 select-none" title={message.username || 'User'}>
-            {(message.username || 'U').charAt(0).toUpperCase()}
+          <div className="w-7 h-7 rounded-full bg-surface-850 flex items-center justify-center text-[11px] font-bold shrink-0 mt-5 ring-1 ring-surface-700/40 text-surface-300 select-none" title={displayUsername || 'User'}>
+            {(displayUsername || 'U').charAt(0).toUpperCase()}
           </div>
         )
       )}
     </div>
   );
-}
+});
 
 function ToolChipGroup({ blocks, onFileClick, stateKey, isLive = false }: { blocks: ContentBlock[]; onFileClick?: (path: string) => void; stateKey: string; isLive?: boolean }) {
   const { t } = useTranslation('chat');
@@ -936,6 +996,19 @@ function ToolChipGroup({ blocks, onFileClick, stateKey, isLive = false }: { bloc
   useEffect(() => {
     rememberUiState(uiStateStore.toolGroups, stateKey, { expanded, activeToolId });
   }, [stateKey, expanded, activeToolId]);
+
+  // A secure input may arrive after this group was first rendered collapsed.
+  // Reveal each newly arriving request once, without undoing a later manual collapse.
+  const secureRequestId = [...validBlocks].reverse().find(block =>
+    (block.toolUse!.name.split('.').pop() || block.toolUse!.name).replace(/^functions__/, '').toLowerCase() === 'credential_vault_input'
+  )?.toolUse?.id;
+  const seenSecureRequest = useRef(immediatelyVisibleBlock?.toolUse?.id);
+  useEffect(() => {
+    if (!secureRequestId || seenSecureRequest.current === secureRequestId) return;
+    seenSecureRequest.current = secureRequestId;
+    setActiveToolId(secureRequestId);
+    setExpanded(true);
+  }, [secureRequestId]);
 
   if (validBlocks.length === 0) return null;
 
@@ -1139,7 +1212,7 @@ interface TodoInlineItem {
   status: 'pending' | 'in_progress' | 'completed';
 }
 
-function TodoInlineCard({ input, isLive, collapsed }: { input: Record<string, any>; isLive?: boolean; collapsed?: boolean }) {
+function TodoInlineCard({ input, isLive, collapsed, stopReason }: { input: Record<string, any>; isLive?: boolean; collapsed?: boolean; stopReason?: ChatMessage['stopReason'] }) {
   const isStreaming = useActiveSessionStreaming();
   const activeTurn = useActiveSessionTurnState();
   const todos: TodoInlineItem[] = Array.isArray(input.todos) ? input.todos : [];
@@ -1157,37 +1230,36 @@ function TodoInlineCard({ input, isLive, collapsed }: { input: Record<string, an
   const isCurrentLiveCard = !!isLive;
   const showLive = isCurrentLiveCard && !allDone && hasActiveTodo && (activeTurn.phase === 'tool_running' || activeTurn.phase === 'streaming' || isStreaming);
 
-  const cardTone = allDone ? 'tone-success' : showLive ? 'tone-accent' : 'tone-muted';
-  const cardClassName = `tone-card ${cardTone} rounded-xl p-3 space-y-2`;
+  const interrupted = collapsed && (stopReason === 'error' || stopReason === 'aborted');
+  const summary = interrupted
+    ? i18n.t(stopReason === 'error' ? 'chat:workStepsFailed' : 'chat:workStepsStopped')
+    : allDone ? i18n.t('chat:workStepsComplete') : i18n.t('chat:workStepsLastRecorded');
+  const cardTone = interrupted ? 'tone-warning' : allDone ? 'tone-success' : showLive ? 'tone-accent' : 'tone-muted';
+  const cardClassName = 'overflow-hidden rounded-xl border border-surface-700/40 bg-surface-900/30';
+
+  const statusIcon = (
+    <svg aria-hidden="true" className={`h-4 w-4 shrink-0 ${cardTone} tone-text`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75}
+        d={interrupted ? 'M12 8v4m0 4h.01M12 3l10 18H2L12 3Z' : allDone ? 'm5 12 4 4L19 6' : 'M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01'} />
+    </svg>
+  );
 
   const header = (
-    <div className="flex items-center gap-2">
-      <svg className={`w-4 h-4 ${cardTone} tone-text`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
-      </svg>
-      <span className={`text-[13px] font-semibold ${cardTone} tone-text opacity-85`}>{i18n.t('chat:workSteps')}</span>
-      <span className={`text-[12px] font-mono tabular-nums ${cardTone} tone-text opacity-65`}>
-        {completed}/{total}
-      </span>
+    <div className="flex min-w-0 items-center gap-2.5">
+      {statusIcon}
+      <span className="text-[13px] font-medium text-surface-300">{i18n.t('chat:workSteps')}</span>
+      <span className="text-[12px] tabular-nums text-surface-500">{completed}/{total}</span>
     </div>
   );
 
   const progressBar = (
-    <div className="h-1 bg-surface-800/60 rounded-full overflow-hidden">
-      <div
-        className="h-full rounded-full transition-all duration-500 ease-out"
-        style={{
-          width: `${pct}%`,
-          background: allDone || showLive
-            ? 'linear-gradient(90deg, var(--tone-text), color-mix(in srgb, var(--tone-text) 70%, white))'
-            : '#6b7280',
-        }}
-      />
+    <div className="h-0.5 overflow-hidden rounded-full bg-surface-800/60" aria-hidden="true">
+      <div className={`h-full ${cardTone} tone-bg`} style={{ width: `${pct}%` }} />
     </div>
   );
 
   const items = (
-    <div className="space-y-0.5">
+    <div className="space-y-1">
       {todos.map((todo, i) => (
         <div
           key={i}
@@ -1212,7 +1284,7 @@ function TodoInlineCard({ input, isLive, collapsed }: { input: Record<string, an
           )}
           <span className={`text-[14px] leading-relaxed ${
             todo.status === 'completed'
-              ? 'text-gray-500 line-through'
+              ? 'text-surface-400'
               : todo.status === 'in_progress' && showLive
                 ? 'tone-accent tone-text font-medium'
                 : todo.status === 'in_progress'
@@ -1230,16 +1302,19 @@ function TodoInlineCard({ input, isLive, collapsed }: { input: Record<string, an
 
   if (collapsed) {
     return (
-      <details className={cardClassName}>
-        <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-[14px] text-gray-500 marker:hidden">
-          <span className="flex items-center gap-2">
+      <details className={`group/work-steps ${cardClassName}`}>
+        <summary className="flex min-h-11 cursor-pointer list-none flex-wrap items-center justify-between gap-x-3 gap-y-1 px-3 py-2 text-[13px] marker:hidden transition-colors hover:bg-surface-800/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary-500">
+          <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
             {header}
-            <span>{i18n.t('chat:previousWorkSteps')}</span>
+            <span className={`${interrupted ? 'tone-warning tone-text' : 'text-surface-500'} text-[12px]`}>{summary}</span>
+          </div>
+          <span className="flex shrink-0 items-center gap-1.5 text-[12px] text-surface-500">
+            <span className="group-open/work-steps:hidden">{i18n.t('chat:workStepsExpand')}</span>
+            <span className="hidden group-open/work-steps:inline">{i18n.t('chat:workStepsCollapse')}</span>
+            <svg aria-hidden="true" className="h-3.5 w-3.5 transition-transform duration-150 group-open/work-steps:rotate-180 motion-reduce:transition-none" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="m6 9 6 6 6-6" /></svg>
           </span>
-          <span className="text-[13px] tabular-nums text-gray-600">{pct}%</span>
         </summary>
-        <div className="mt-2 space-y-2">
-          {progressBar}
+        <div className="space-y-3 border-t border-surface-700/30 px-3 pb-3 pt-2.5">
           {items}
         </div>
       </details>
@@ -1247,7 +1322,7 @@ function TodoInlineCard({ input, isLive, collapsed }: { input: Record<string, an
   }
 
   return (
-    <div className={cardClassName}>
+    <div className={`${cardClassName} space-y-3 p-3`}>
       {header}
       {progressBar}
       {items}
@@ -1302,20 +1377,17 @@ function MessageBody({ groups, message, onFileClick, isLastAssistant, showMetric
 
   let latestTodoGroupIndex = -1;
   let latestTodoBlockIndex = -1;
-  let latestTodoAllDone = false;
   groups.forEach((group, groupIndex) => {
     group.blocks.forEach((block, blockIndex) => {
       if (block.toolUse?.name === 'TodoWrite') {
         latestTodoGroupIndex = groupIndex;
         latestTodoBlockIndex = blockIndex;
-        const todos = Array.isArray(block.toolUse.input?.todos) ? block.toolUse.input.todos : [];
-        latestTodoAllDone = todos.length > 0 && todos.every((todo: any) => todo.status === 'completed');
       }
     });
   });
 
   return (
-    <div ref={bodyRef} className="relative min-w-0 max-w-full space-y-2">
+    <div ref={bodyRef} data-answer-body className="relative min-w-0 max-w-full space-y-2">
       {groups.flatMap((group, gi) => {
         const previousGroup = groups[gi - 1];
         const nextGroup = groups[gi + 1];
@@ -1328,7 +1400,7 @@ function MessageBody({ groups, message, onFileClick, isLastAssistant, showMetric
         // Tool use blocks — split into agents, todos, and regular tools
         if (group.type === 'tool_use') {
           const agentBlocks = group.blocks.filter(b => isAgentTool(b.toolUse?.name));
-          const todoBlocks = !showTodoSnapshots || latestTodoAllDone
+          const todoBlocks = !showTodoSnapshots
             ? []
             : group.blocks
               .map((block, blockIndex) => ({ block, blockIndex }))
@@ -1360,7 +1432,8 @@ function MessageBody({ groups, message, onFileClick, isLastAssistant, showMetric
                     key={`todo-${gi}-${ti}`}
                     input={block.toolUse!.input}
                     isLive={!!isLastAssistant && isLatestTodo}
-                    collapsed={!isLatestTodo}
+                    collapsed={!isLastAssistant}
+                    stopReason={message.stopReason}
                   />
                 );
               })}
@@ -1378,7 +1451,7 @@ function MessageBody({ groups, message, onFileClick, isLastAssistant, showMetric
           const inlineAgentBlocks = inlineToolGroup
             ? inlineToolGroup.blocks.filter(b => isAgentTool(b.toolUse?.name))
             : [];
-          const inlineTodoBlocks = inlineToolGroup && showTodoSnapshots && !latestTodoAllDone
+          const inlineTodoBlocks = inlineToolGroup && showTodoSnapshots
             ? inlineToolGroup.blocks
               .map((block, blockIndex) => ({ block, blockIndex }))
               .filter(({ block, blockIndex }) => (
@@ -1411,7 +1484,8 @@ function MessageBody({ groups, message, onFileClick, isLastAssistant, showMetric
                     key={`todo-inline-${gi}-${ti}`}
                     input={block.toolUse!.input}
                     isLive={!!isLastAssistant && isLatestTodo}
-                    collapsed={!isLatestTodo}
+                    collapsed={!isLastAssistant}
+                    stopReason={message.stopReason}
                   />
                 );
               })}
@@ -1424,11 +1498,9 @@ function MessageBody({ groups, message, onFileClick, isLastAssistant, showMetric
           return group.blocks.map((block, bi) => {
             if (!block.text) return null;
             return (
-              <RichContent
-                key={`${gi}-${bi}`}
-                text={block.text}
-                onFileClick={onFileClick}
-              />
+              <div key={`${gi}-${bi}`} data-speech-prose>
+                <RichContent text={block.text} onFileClick={onFileClick} />
+              </div>
             );
           });
         }
@@ -1439,8 +1511,17 @@ function MessageBody({ groups, message, onFileClick, isLastAssistant, showMetric
         if (group.type === 'artifact_markdown') {
           return group.blocks.map((block, bi) => (
             <div key={`${gi}-${bi}`} className="min-w-0 max-w-full space-y-2 overflow-hidden">
-              {block.text && <RichContent text={block.text} onFileClick={onFileClick} />}
-              <ArtifactMarkdownCard block={block} onFileClick={onFileClick} />
+              {block.status === 'error' || block.status === 'skipped' ? (
+                <>
+                  <ArtifactMarkdownCard block={block} onFileClick={onFileClick} />
+                  {block.text && <details><summary className="cursor-pointer text-[13px] text-surface-400">{i18n.t('chat:unsavedDocumentDraft', { defaultValue: i18n.language.startsWith('ko') ? '저장되지 않은 초안 보기' : 'View unsaved draft' })}</summary><RichContent text={block.text} onFileClick={onFileClick} /></details>}
+                </>
+              ) : (
+                <>
+                  {block.text && <RichContent text={block.text} onFileClick={onFileClick} />}
+                  <ArtifactMarkdownCard block={block} onFileClick={onFileClick} />
+                </>
+              )}
             </div>
           ));
         }
@@ -1490,13 +1571,19 @@ function MessageBody({ groups, message, onFileClick, isLastAssistant, showMetric
         console.warn('[MessageBubble] unknown block group type:', group.type);
         return [];
       })}
+      {isLastAssistant && (
+        <span data-testid="assistant-running-dots" className="tower-dots-logo tower-dots-logo--compact" aria-label={i18n.t('chat:turnPhase.pendingAssistant')} role="status">
+          <span /><span /><span />
+        </span>
+      )}
       {showMetrics && <TurnMetricsBar message={message} isLast={!!isLastAssistant} />}
       <div
-        className="flex min-h-11 items-center justify-end gap-1 opacity-100 transition-opacity md:min-h-10 md:pointer-events-none md:opacity-0 md:group-hover/message:pointer-events-auto md:group-hover/message:opacity-100 md:group-focus-within/message:pointer-events-auto md:group-focus-within/message:opacity-100"
+        className="message-actions flex min-h-11 items-center justify-end gap-1 transition-opacity md:min-h-10"
         aria-label={i18n.t('chat:aiMessageActions')}
         data-testid="assistant-message-actions"
       >
         <AnchorLinkButton shortId={message.shortId} messageId={message.id} />
+        {(message.completedAt || isLastAssistant) && <AnswerSpeechButton text={getMessageText(message.content)} messageId={message.id} completedAt={message.completedAt} live={!!isLastAssistant} messageTimestamp={message.timestamp} />}
         <CopyButton text={getMessageText(message.content)} contentRef={bodyRef} />
       </div>
     </div>
@@ -1731,7 +1818,8 @@ interface BlockGroup {
 function groupContentBlocks(blocks: ContentBlock[]): BlockGroup[] {
   const groups: BlockGroup[] = [];
 
-  for (const block of blocks) {
+  for (const source of blocks) {
+    const block = projectMarkdownArtifact(source);
     const lastGroup = groups[groups.length - 1];
     if (lastGroup && lastGroup.type === block.type) {
       lastGroup.blocks.push(block);

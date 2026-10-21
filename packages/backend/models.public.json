@@ -12,18 +12,6 @@
       "contextWindow": 200000,
       "maxTokens": 64000,
       "roles": ["full", "managed", "standalone"]
-    },
-    {
-      "provider": "openai-responses-compatible",
-      "modelId": "gpt-5.1",
-      "name": "OpenAI-compatible Responses",
-      "badge": "API",
-      "enabled": true,
-      "api": "openai-responses",
-      "reasoning": true,
-      "contextWindow": 200000,
-      "maxTokens": 64000,
-      "roles": ["full", "managed", "standalone"]
     }
   ],
   "local": [

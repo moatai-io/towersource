@@ -5,6 +5,7 @@
  */
 
 import { query } from '../../db/pg-repo.js';
+import { reconcileSessionProjectAgentCareer } from '../agents/agent-career-promotion.js';
 
 export type WorkLedgerSourceType = 'command_invocation' | 'process_map' | 'todowrite' | 'schedule_run' | 'agent_run' | 'manual';
 export type WorkLedgerStatus = 'running' | 'completed' | 'blocked' | 'failed' | 'cancelled';
@@ -165,36 +166,46 @@ export async function upsertWorkLedgerRecord(input: WorkLedgerInput): Promise<Wo
   const completedAt = input.completedAt ?? (status === 'completed' || status === 'failed' || status === 'cancelled' ? new Date().toISOString() : null);
 
   const rows = await query<any>(`
-    INSERT INTO work_ledger_records (
-      run_id, project_id, session_id, owner_user_id,
-      workstream_key, workstream_title, run_title, outcome, note,
-      source_type, source_id, source_refs, status,
-      artifacts, backlog, questions, todos, activity_at, started_at, completed_at
-    ) VALUES (
-      $1, $2, $3, $4,
-      $5, $6, $7, $8, $9,
-      $10, COALESCE($11, ''), $12::jsonb, $13,
-      $14::jsonb, $15::jsonb, $16::jsonb, $17::jsonb,
-      COALESCE($18::timestamptz, $19::timestamptz, NOW()), COALESCE($19::timestamptz, NOW()), $20::timestamptz
+    WITH previous AS (
+      SELECT status
+        FROM work_ledger_records
+       WHERE run_id=$1 AND source_type=$10 AND source_id=COALESCE($11, '')
+       FOR UPDATE
+    ), upserted AS (
+      INSERT INTO work_ledger_records (
+        run_id, project_id, session_id, owner_user_id,
+        workstream_key, workstream_title, run_title, outcome, note,
+        source_type, source_id, source_refs, status,
+        artifacts, backlog, questions, todos, activity_at, started_at, completed_at
+      ) VALUES (
+        $1, $2, $3, $4,
+        $5, $6, $7, $8, $9,
+        $10, COALESCE($11, ''), $12::jsonb, $13,
+        $14::jsonb, $15::jsonb, $16::jsonb, $17::jsonb,
+        COALESCE($18::timestamptz, $19::timestamptz, NOW()), COALESCE($19::timestamptz, NOW()), $20::timestamptz
+      )
+      ON CONFLICT (run_id, source_type, source_id) DO UPDATE SET
+        project_id = EXCLUDED.project_id,
+        session_id = EXCLUDED.session_id,
+        owner_user_id = EXCLUDED.owner_user_id,
+        workstream_key = EXCLUDED.workstream_key,
+        workstream_title = EXCLUDED.workstream_title,
+        run_title = EXCLUDED.run_title,
+        outcome = EXCLUDED.outcome,
+        note = EXCLUDED.note,
+        source_refs = EXCLUDED.source_refs,
+        status = EXCLUDED.status,
+        artifacts = EXCLUDED.artifacts,
+        backlog = EXCLUDED.backlog,
+        questions = EXCLUDED.questions,
+        todos = EXCLUDED.todos,
+        activity_at = EXCLUDED.activity_at,
+        completed_at = COALESCE(EXCLUDED.completed_at, work_ledger_records.completed_at)
+      RETURNING *
     )
-    ON CONFLICT (run_id, source_type, source_id) DO UPDATE SET
-      project_id = EXCLUDED.project_id,
-      session_id = EXCLUDED.session_id,
-      owner_user_id = EXCLUDED.owner_user_id,
-      workstream_key = EXCLUDED.workstream_key,
-      workstream_title = EXCLUDED.workstream_title,
-      run_title = EXCLUDED.run_title,
-      outcome = EXCLUDED.outcome,
-      note = EXCLUDED.note,
-      source_refs = EXCLUDED.source_refs,
-      status = EXCLUDED.status,
-      artifacts = EXCLUDED.artifacts,
-      backlog = EXCLUDED.backlog,
-      questions = EXCLUDED.questions,
-      todos = EXCLUDED.todos,
-      activity_at = EXCLUDED.activity_at,
-      completed_at = COALESCE(EXCLUDED.completed_at, work_ledger_records.completed_at)
-    RETURNING *
+    SELECT upserted.*,
+           ($13='completed' AND NOT EXISTS (SELECT 1 FROM previous WHERE status='completed')) AS became_completed
+      FROM upserted
   `, [
     runId,
     input.projectId || null,
@@ -217,7 +228,15 @@ export async function upsertWorkLedgerRecord(input: WorkLedgerInput): Promise<Wo
     input.startedAt || null,
     completedAt,
   ]);
-  return mapWorkLedgerRow(rows[0]);
+  const row = rows[0];
+  if (row?.became_completed && row.session_id) {
+    try {
+      await reconcileSessionProjectAgentCareer(row.session_id);
+    } catch (error) {
+      console.error('[work-ledger] Agent career reconciliation failed:', error);
+    }
+  }
+  return mapWorkLedgerRow(row);
 }
 
 export type WorkLedgerTerminalOutcome = 'completed' | 'failed';
@@ -258,6 +277,13 @@ export async function finalizeSessionWorkLedgerRecords(input: {
        AND (${terminalCondition})
     RETURNING id
   `, [sessionId, turnStartedAt, status, completedAt]);
+  if (status === 'completed' && rows.length > 0) {
+    try {
+      await reconcileSessionProjectAgentCareer(sessionId);
+    } catch (error) {
+      console.error('[work-ledger] Agent career reconciliation failed:', error);
+    }
+  }
   return rows.length;
 }
 

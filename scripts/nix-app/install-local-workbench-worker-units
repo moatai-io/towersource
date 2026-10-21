@@ -25,13 +25,9 @@ worker_pool_memory_max="${TOWER_WORKER_POOL_MEMORY_MAX:-8G}"
 worker_pool_tasks_max="${TOWER_WORKER_POOL_TASKS_MAX:-2048}"
 worker_memory_max="${TOWER_LOCAL_WORKER_MEMORY_MAX:-6G}"
 worker_tasks_max="${TOWER_LOCAL_WORKER_TASKS_MAX:-1024}"
-worker_max_runs="${TOWER_LOCAL_WORKER_MAX_RUNS:-4}"
+worker_max_runs="${TOWER_LOCAL_WORKER_MAX_RUNS:-20}"
 [[ "$worker_max_runs" =~ ^[0-9]+$ && "$worker_max_runs" -ge 3 ]] || fail 'TOWER_LOCAL_WORKER_MAX_RUNS must be at least 3 capacity units'
-operator_root="${TOWER_OPERATOR_WORKER_ROOT:-$HOME/workspace/projects/tower/work/operator-plane-root}"
-operator_tower_source="${TOWER_OPERATOR_TOWER_SOURCE:-$HOME/tower}"
-operator_workspace_root="${TOWER_OPERATOR_WORKSPACE_ROOT:-$HOME/workspace}"
-
-[[ "$authority_mode" == "project" || "$authority_mode" == "operator-plane" ]] || fail 'TOWER_LOCAL_WORKER_AUTHORITY_MODE must be project or operator-plane'
+[[ "$authority_mode" == "project" ]] || fail 'Worker authority must be project; Operator access uses the native Operator execution environment'
 [[ -f "$config_file" ]] || fail "Worker config missing: $config_file"
 [[ -f "$env_file" ]] || fail "Worker transport env missing: $env_file"
 [[ -f "$identity_file" ]] || fail "Worker identity missing: $identity_file"
@@ -39,35 +35,10 @@ operator_workspace_root="${TOWER_OPERATOR_WORKSPACE_ROOT:-$HOME/workspace}"
 [[ -n "$read_write_paths" ]] || fail 'TOWER_LOCAL_WORKER_READ_WRITE_PATHS is required'
 
 worker_capabilities='job,service,shell'
-if [[ "$authority_mode" == "operator-plane" ]]; then
-  [[ "$deployment_id" == "production" ]] || fail 'Operator Worker must register in the production deployment'
-  [[ -d "$operator_tower_source" ]] || fail "Operator Tower source missing: $operator_tower_source"
-  [[ -d "$operator_workspace_root" ]] || fail "Operator workspace root missing: $operator_workspace_root"
-  mkdir -p "$operator_root"
-  for mountpoint in tower workspace; do
-    target="$operator_root/$mountpoint"
-    [[ ! -L "$target" ]] || fail "Operator projection mountpoint must not be a symlink: $target"
-    mkdir -p "$target"
-  done
-  node - "$config_file" "$operator_tower_source" "$operator_workspace_root" <<'NODE'
-const fs = require('node:fs');
-const [configFile, towerSource, workspaceRoot] = process.argv.slice(2);
-const config = JSON.parse(fs.readFileSync(configFile, 'utf8'));
-config.projections = {
-  '/workspace/tower': towerSource,
-  '/workspace/workspace': workspaceRoot,
-};
-fs.writeFileSync(configFile, `${JSON.stringify(config, null, 2)}\n`);
-NODE
-  worker_capabilities='job,service,shell,operator-plane'
-  read_write_paths="$operator_root $operator_tower_source $operator_workspace_root"
-fi
 
 unit_dir="$HOME/.config/systemd/user"
 mkdir -p "$unit_dir"
-if [[ "$authority_mode" == "operator-plane" ]]; then
-  unit_prefix="tower-operator-workbench-worker"
-elif [[ "$worker_id" == "tower-prod-local-01" ]]; then
+if [[ "$worker_id" == "tower-prod-local-01" ]]; then
   unit_prefix="tower-prod-workbench-worker"
 else
   unit_prefix="tower-prod-workbench-worker-${worker_id#tower-prod-local-}"

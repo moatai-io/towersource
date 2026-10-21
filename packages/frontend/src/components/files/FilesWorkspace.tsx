@@ -1,3 +1,7 @@
+import { FileOperationFeedback } from '../../features/file-operation-feedback/FileOperationFeedback';
+import { uploadScope, reportUploadUnknown, clearFileOperation } from '../../features/file-operation-feedback/feedback';
+import { pasteCutPaths } from './fileClipboard';
+import { MoveToFolderModal, compactTopLevelPaths } from './SelectionToolbar';
 // Owns: full-screen Finder-like file browser for the Files nav view.
 // Public API: <FilesWorkspace onFileClick onRequestFileTree />.
 // See also: Sidebar's compact FileTree for quick navigation.
@@ -222,6 +226,8 @@ export function FilesWorkspace({
   const activeSessionId = useSessionStore((s) => s.activeSessionId);
   const isMobile = useSessionStore((s) => s.isMobile);
   const setCapabilityProjectId = useSettingsStore((s) => s.setCapabilityProjectId);
+  const fileClipboard = useFileStore((s) => s.fileClipboard);
+  const [pasting, setPasting] = useState(false);
   const showHidden = useFileStore((s) => s.showHidden);
   const toggleShowHidden = useFileStore((s) => s.toggleShowHidden);
   const fileSortMode = useFileStore((s) => s.fileSortMode);
@@ -264,9 +270,11 @@ export function FilesWorkspace({
   const loadedProjectIdRef = React.useRef<string | null>(null);
   const [query, setQuery] = useState("");
   const [searchResults, setSearchResults] = useState<FileEntry[] | null>(null);
+  const [searchPartial, setSearchPartial] = useState(false);
   const [fileHistory, setFileHistory] = useState<
     Array<{ label: string; undo?: () => Promise<void> }>
   >([]);
+  const [moveModalPaths, setMoveModalPaths] = useState<string[] | null>(null);
   const [createMenuOpen, setCreateMenuOpen] = useState(false);
   const [inlineCreate, setInlineCreate] = useState<"file" | "folder" | null>(
     null,
@@ -314,6 +322,7 @@ export function FilesWorkspace({
       sortedProjects[0];
     if (preferred) {
       setSelectedProjectId(preferred.id);
+      setCapabilityProjectId(preferred.id);
       setCurrentPath(preferred.rootPath || "");
     }
   }, [
@@ -423,21 +432,25 @@ export function FilesWorkspace({
     const needle = query.trim();
     if (needle.length < 2) {
       setSearchResults(null);
+      setSearchPartial(false);
       return;
     }
+    const controller = new AbortController();
     const timer = setTimeout(() => {
       fetch(
         `/api/files/search?root=${encodeURIComponent(rootPath)}&q=${encodeURIComponent(needle)}${showHidden ? "&showHidden=true" : ""}`,
-        { headers: authHeaders() },
+        { headers: authHeaders(), signal: controller.signal },
       )
         .then(async (res) => {
           const data = await res.json();
           if (!res.ok) throw new Error(data.error || t('workspace.searchFailed'));
+          if (controller.signal.aborted) return;
           setSearchResults(Array.isArray(data.results) ? data.results : []);
+          setSearchPartial(data.partial === true || data.truncated === true);
         })
-        .catch((error) => toastError(error.message || t('workspace.searchFailed')));
+        .catch((error) => { if (!controller.signal.aborted) toastError(error.message || t('workspace.searchFailed')); });
     }, 250);
-    return () => clearTimeout(timer);
+    return () => { clearTimeout(timer); controller.abort(); };
   }, [query, rootPath, showHidden]);
 
   const displayedEntries = useMemo(() => {
@@ -525,6 +538,7 @@ export function FilesWorkspace({
     targetPath = currentPath,
   ) => {
     if (!items.length) return;
+    clearFileOperation(uploadScope('workspace', String(selectedProject?.id)));
     setBusyAction("upload");
     const totalBytes = items.reduce((sum, item) => sum + item.file.size, 0);
     setUploadProgress({ phase: 'uploading', loadedBytes: 0, totalBytes, percent: 0, completedFiles: 0, totalFiles: items.length, currentFileName: items[0]?.relativePath || t('workspace.fileFallback') });
@@ -535,9 +549,12 @@ export function FilesWorkspace({
       });
       const targetName = targetPath.split("/").filter(Boolean).pop();
       notifyUploadResult(
-        { ok: result.ok, fail: result.fail },
+        result,
         targetPath === currentPath ? undefined : (targetName || t('workspace.selectedFolder')),
+        uploadScope('workspace', String(selectedProject?.id)),
       );
+    } catch {
+      reportUploadUnknown(uploadScope('workspace', String(selectedProject?.id)));
     } finally {
       setBusyAction(null);
       setUploadProgress(null);
@@ -663,11 +680,14 @@ export function FilesWorkspace({
     );
     setSelectedPaths(new Set());
   };
-  const moveSelected = async () => {
-    const targetDir = await prompt({ title: t('workspace.moveTitle'), message: t('workspace.moveMessage'), initialValue: rootPath, confirmLabel: t('workspace.move') });
-    if (!targetDir?.startsWith(rootPath))
-      return toastError(t('workspace.invalidProjectPath'));
-    const moves = [...selectedPaths].map((oldPath) => ({
+  const moveSelected = async (paths: string[] = [...selectedPaths]) => {
+    if (paths.length === 0) return;
+    setMoveModalPaths(compactTopLevelPaths(paths));
+  };
+  const moveToFolder = async (targetDir: string, paths: string[]) => {
+    if (!targetDir || (targetDir !== rootPath && !targetDir.startsWith(`${rootPath}/`)))
+      throw new Error(t('workspace.invalidProjectPath'));
+    const moves = paths.map((oldPath) => ({
       oldPath,
       newPath: `${targetDir}/${oldPath.split("/").pop()}`,
     }));
@@ -703,6 +723,30 @@ export function FilesWorkspace({
       ].slice(0, 8),
     );
     setSelectedPaths(new Set());
+  };
+  const pasteIntoFolder = async (targetDir: string) => {
+    const clipboard = useFileStore.getState().fileClipboard;
+    if (!clipboard?.paths.length || pasting) return;
+    setPasting(true);
+    try {
+      if (clipboard.mode === 'cut') {
+        const result = await pasteCutPaths(clipboard.paths, targetDir, async (oldPath, newPath) => {
+          await runFileMutation({
+            action: () => postJson('/api/files/rename', { oldPath, newPath }),
+            affectedDirectories: [parentDirectory(oldPath), targetDir],
+            pathReplacements: [{ from: oldPath, to: newPath }],
+          });
+        });
+        if (result.failed.length) useFileStore.getState().setFileClipboard(result.failed, 'cut');
+        else useFileStore.getState().clearFileClipboard();
+        if (result.failed.length) toastError(t('tree.pasteFailed', { count: result.failed.length }));
+      } else {
+        const result = await postJson('/api/files/copy', { paths: clipboard.paths, targetDir });
+        await refreshDirectories([targetDir]);
+        if (result.failed) toastError(t('tree.pasteFailed', { count: result.failed }));
+      }
+    } catch (err: any) { toastError(err.message); }
+    finally { setPasting(false); }
   };
   const downloadSelected = () => {
     const paths = [...selectedPaths];
@@ -1114,6 +1158,7 @@ export function FilesWorkspace({
 
   return (
     <div className="relative z-10 flex h-full min-h-0 flex-col bg-surface-950/80">
+      <FileOperationFeedback scope={uploadScope('workspace', String(selectedProject?.id))} />
       <div className="shrink-0 border-b border-surface-800/80 bg-surface-950/90 px-3 py-3 backdrop-blur-xl sm:px-5 sm:py-4">
         {isMobile && (
           <div className="mb-3 flex items-center gap-2.5 rounded-xl border border-surface-800 bg-surface-900/75 p-2.5">
@@ -1141,7 +1186,7 @@ export function FilesWorkspace({
             <div className="flex items-center gap-2 text-[12px] font-semibold text-surface-500">
               <span>{t('workspace.itemCount', { count: displayedEntries.length })}</span>
               <span className="h-1 w-1 rounded-full bg-surface-700" />
-              <span className="truncate font-mono" title={currentPath}>
+              <span translate="no" className="notranslate truncate font-mono" title={currentPath}>
                 {relativePath(currentPath, rootPath)}
               </span>
             </div>
@@ -1326,6 +1371,11 @@ export function FilesWorkspace({
             </button>
           ))}
         </div>
+        {searchPartial && query.trim().length >= 2 && (
+          <p role="status" className="mt-2 text-sm text-surface-500">
+            {t('workspace.searchPartial', { defaultValue: '일부 폴더에 접근할 수 없거나 검색 범위 제한에 도달했습니다. 표시된 결과는 전체가 아닐 수 있습니다.' })}
+          </p>
+        )}
         {selectionMode && (
           <div className="mt-2 flex items-center gap-2 rounded-lg border border-primary-500/25 bg-primary-500/8 px-3 py-2 text-xs">
             <span className="font-bold text-primary-700 dark:text-primary-200">
@@ -1447,11 +1497,12 @@ export function FilesWorkspace({
               <React.Fragment key={crumb.path}>
                 {index > 0 && <span className="text-surface-700">/</span>}
                 <button
+                  translate="no"
                   onClick={() => {
                     setQuery("");
                     setCurrentPath(crumb.path);
                   }}
-                  className="max-w-[220px] truncate rounded-md px-1.5 py-1 text-surface-300 hover:bg-surface-800 hover:text-primary-300"
+                  className="notranslate max-w-[220px] truncate rounded-md px-1.5 py-1 text-surface-300 hover:bg-surface-800 hover:text-primary-300"
                 >
                   {crumb.label}
                 </button>
@@ -1764,7 +1815,7 @@ export function FilesWorkspace({
                   title={inlineCreateTargetPath || currentPath}
                 >
                   {inlineCreate === "folder" ? t('workspace.newFolder') : t('workspace.newFile')}
-                  <span className="ml-1 font-normal text-surface-500">
+                  <span translate="no" className="notranslate ml-1 font-normal text-surface-500">
                     @ {relativePath(inlineCreateTargetPath || currentPath, rootPath)}
                   </span>
                 </span>
@@ -1845,7 +1896,7 @@ export function FilesWorkspace({
                     <span className="grid h-4 w-4 shrink-0 place-items-center text-surface-500">
                       <FileGlyph entry={entry} />
                     </span>
-                    <span className="truncate text-[13px] font-medium text-surface-200">
+                    <span translate="no" className="notranslate truncate text-[13px] font-medium text-surface-200">
                       {entry.name}
                     </span>
                     {dragOverPath === entry.path && (
@@ -1874,6 +1925,20 @@ export function FilesWorkspace({
         )}
       </div>
 
+      {fileClipboard?.paths.length ? (
+        <button disabled={pasting} onClick={() => void pasteIntoFolder(currentPath)} className="rounded px-3 py-2 text-sm text-surface-300 disabled:opacity-40">
+          {t('pasteItemsHere', { count: fileClipboard.paths.length })}
+        </button>
+      ) : null}
+      {moveModalPaths && (
+        <MoveToFolderModal
+          selectedPaths={moveModalPaths}
+          rootPath={rootPath}
+          onMove={(targetDir) => moveToFolder(targetDir, moveModalPaths)}
+          onClose={() => setMoveModalPaths(null)}
+          onComplete={() => setMoveModalPaths(null)}
+        />
+      )}
       {contextMenu && (
         <>
           <div
@@ -1924,10 +1989,30 @@ export function FilesWorkspace({
                   }}
                   className="block w-full rounded px-3 py-2 text-left text-xs text-surface-300 hover:bg-surface-800"
                 >
-                  {t('workspace.moveToFolder')}
+                  {t('workspace.openFolder')}
                 </button>
               </>
             )}
+            <button onClick={() => {
+              useFileStore.getState().setFileClipboard(compactTopLevelPaths(selectedPaths.has(contextMenu.entry.path) ? [...selectedPaths] : [contextMenu.entry.path]), 'cut');
+              setContextMenu(null);
+            }} className="block w-full rounded px-3 py-2 text-left text-xs text-surface-300 hover:bg-surface-800">{t('cutItems')}</button>
+            {contextMenu.entry.isDirectory && fileClipboard?.paths.length ? <button disabled={pasting} onClick={() => {
+              void pasteIntoFolder(contextMenu.entry.path);
+              setContextMenu(null);
+            }} className="block w-full rounded px-3 py-2 text-left text-xs text-surface-300 hover:bg-surface-800">{t('pasteItemsHere', { count: fileClipboard.paths.length })}</button> : null}
+            <button
+              onClick={() => {
+                const paths = selectedPaths.has(contextMenu.entry.path)
+                  ? [...selectedPaths]
+                  : [contextMenu.entry.path];
+                setContextMenu(null);
+                void moveSelected(paths);
+              }}
+              className="block w-full rounded px-3 py-2 text-left text-xs text-surface-300 hover:bg-surface-800"
+            >
+              {t('moveToFolder')}…
+            </button>
             <button
               onClick={() => {
                 setSelectedPaths(new Set([contextMenu.entry.path]));
@@ -1953,7 +2038,7 @@ export function FilesWorkspace({
       {isOperatorOrAdmin() && rootPath && (
         <div className="shrink-0 border-t border-surface-800/80 bg-surface-950/90 px-5 py-2 text-[12px] text-surface-600">
           {t('workspace.currentPath')}:{" "}
-          <span className="font-mono text-surface-400">{currentPath}</span>
+          <span translate="no" className="notranslate font-mono text-surface-400">{currentPath}</span>
         </div>
       )}
     </div>

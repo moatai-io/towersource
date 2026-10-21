@@ -23,7 +23,7 @@ describe("FilesWorkspace row context creation", () => {
     for (const key of [
       'workspace.newFolderHere',
       'workspace.newFileHere',
-      'workspace.moveToFolder',
+      'moveToFolder',
       'workspace.copyPath',
     ]) {
       expect(source).toContain(key);

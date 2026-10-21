@@ -11,8 +11,8 @@ describe('desktop Work control board', () => {
     expect(hub).toContain('<ChallengeTimelinePanel embedded />');
     expect(hub).toContain('<aside');
     expect(hub).toContain('<InboxPanel variant="work-results"');
-    expect(hub).toContain('lg:grid-cols-[minmax(0,1fr)_minmax(320px,380px)]');
-    expect(hub).toContain('lg:border-l');
+    expect(hub).toContain('@min-[64rem]/work:grid-cols-[minmax(0,1fr)_minmax(320px,380px)]');
+    expect(hub).toContain('@min-[64rem]/work:border-l');
   });
 
   it('adapts result-list chrome for the right rail instead of nesting another dashboard card', () => {

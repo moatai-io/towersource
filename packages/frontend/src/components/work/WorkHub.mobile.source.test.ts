@@ -13,9 +13,9 @@ describe('mobile Work hub composition', () => {
     expect(hub).toContain("t('workHub.progressTab')");
     expect(hub).toContain("mobileSection === 'attention' ? 'block' : 'hidden'");
     expect(hub).toContain("mobileSection === 'progress' ? 'block' : 'hidden'");
-    expect(hub).toContain('lg:grid-cols-[minmax(0,1fr)_minmax(320px,380px)]');
-    expect(hub).toContain('lg:block lg:min-h-0');
-    expect(hub).toContain('lg:overflow-y-auto lg:border-l');
+    expect(hub).toContain('@min-[64rem]/work:grid-cols-[minmax(0,1fr)_minmax(320px,380px)]');
+    expect(hub).toContain('@min-[64rem]/work:block @min-[64rem]/work:min-h-0');
+    expect(hub).toContain('@min-[64rem]/work:overflow-y-auto @min-[64rem]/work:border-l');
   });
 
   it('opens attention first when unread results exist without overriding a user tab choice', () => {

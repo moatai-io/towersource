@@ -24,6 +24,8 @@ describe('archiveExpiredEmptySessions', () => {
     expect(sql.trimStart()).toMatch(/^UPDATE sessions s/);
     expect(sql).not.toMatch(/DELETE FROM sessions/);
     expect(sql).toContain('SET archived = 1');
+    expect(sql).toContain('archived_at = now()');
+    expect(sql).not.toContain('updated_at = now()');
     expect(sql).toContain("s.created_at < now() - ($1 * interval '1 hour')");
     expect(sql).toContain("s.updated_at < now() - ($1 * interval '1 hour')");
     expect(sql).toContain("(s.label IS NULL OR s.label IN ('temp', '미분류'))");

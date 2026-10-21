@@ -82,11 +82,11 @@ describe('frontend copy i18n contract', () => {
     expect(projectHome).not.toContain("return '완료'");
   });
 
-  it('routes Admin credential connection formatters through the admin locale', () => {
+  it('routes Admin VM Vault copy through the admin locale', () => {
     const adminPanel = fs.readFileSync(path.join(sourceRoot, 'components/admin/AdminPanel.tsx'), 'utf8');
-    expect(adminPanel).toContain("return adminText(`credentialConnections.purpose.${purpose}`)");
-    expect(adminPanel).toContain("adminText('credentialConnections.usageScope.projectCount'");
-    expect(adminPanel).toContain("adminText('credentialConnections.warning.syncTarget'");
+    for (const key of ['vmVault', 'vmVaultDescription', 'agentCredentials', 'auditTitle', 'promote']) {
+      expect(adminPanel).toContain(`t('credentialConnections.${key}`);
+    }
     expect(adminPanel).not.toContain('이미지 생성, 슬라이드 생성, AI 기반 콘텐츠 제작에 씁니다.');
     expect(adminPanel).not.toContain('비용/권한 영향 큼');
   });
@@ -138,7 +138,7 @@ describe('frontend copy i18n contract', () => {
   });
 
   it('routes shared notification, resize, Viewer, and file-menu copy through layout locale keys', () => {
-    const app = fs.readFileSync(path.join(sourceRoot, 'App.tsx'), 'utf8');
+    const viewerPane = fs.readFileSync(path.join(sourceRoot, 'components/layout/ViewerPane.tsx'), 'utf8');
     const notifications = fs.readFileSync(path.join(sourceRoot, 'components/layout/NotificationBell.tsx'), 'utf8');
     const resizeHandles = fs.readFileSync(path.join(sourceRoot, 'components/layout/ResizeHandle.tsx'), 'utf8');
 
@@ -149,9 +149,9 @@ describe('frontend copy i18n contract', () => {
     expect(resizeHandles).toContain("t('resizePanel')");
     expect(resizeHandles).toContain("t('resizeSidebar')");
     for (const key of ['resizeViewer', 'viewerDescription', 'goToFolder', 'openInNewBrowserTab', 'download', 'share', 'copyPath', 'closeTab']) {
-      expect(app).toContain(`t('layout:${key}')`);
+      expect(viewerPane).toContain(`t('${key}')`);
     }
-    expect(app).not.toContain('aria-label="Viewer 너비 조절"');
+    expect(viewerPane).not.toContain('aria-label="Viewer 너비 조절"');
   });
 
   it('routes ContextPanel loading, empty, and media states through layout locale keys', () => {
@@ -161,8 +161,7 @@ describe('frontend copy i18n contract', () => {
     }
     for (const key of [
       'loadingViewer', 'loadingImage', 'imageLoadFailed', 'loadingSqliteViewer',
-      'loadingCadViewer', 'noFileSelected', 'selectFileToView', 'pdfOpensInBrowser',
-      'pdfBrowserExplanation', 'openInNewBrowserTab', 'downloadVideo',
+      'loadingCadViewer', 'noFileSelected', 'selectFileToView', 'downloadVideo',
     ]) {
       expect(contextPanel).toContain(`t('${key}')`);
     }
@@ -232,13 +231,18 @@ describe('frontend copy i18n contract', () => {
     const mobileTabs = fs.readFileSync(path.join(sourceRoot, 'components/layout/MobileTabBar.tsx'), 'utf8');
     const modelSelector = fs.readFileSync(path.join(sourceRoot, 'components/layout/ModelSelector.tsx'), 'utf8');
     const spaceFilter = fs.readFileSync(path.join(sourceRoot, 'components/layout/SpaceFilter.tsx'), 'utf8');
+    const sidebar = fs.readFileSync(path.join(sourceRoot, 'components/layout/Sidebar.tsx'), 'utf8');
 
-    expect(mobileTabs).toMatch(/t\('(conversationsNav|workHubNav)'\)/);
-    for (const key of ['conversationsNav', 'workHubNav', 'aiTeam', 'settings']) expect(mobileTabs).toContain(`t('${key}')`);
-    for (const key of ['modelSelection', 'localLlm']) expect(modelSelector).toContain(`t('${key}')`);
+    expect(mobileTabs).toContain("t('conversationsNav')");
+    for (const key of ['conversationsNav', 'aiTeam', 'settings']) expect(mobileTabs).toContain(`t('${key}')`);
+    expect(modelSelector).toContain("t('localLlm')");
     expect(spaceFilter).toContain("t('all')");
-    for (const key of ['modelLabel', 'userMessageCount', 'enterPathHint', 'parentDirectory', 'noSubdirectories']) {
-      expect(app).toContain(`t('${key}`);
+    for (const key of ['modelLabel', 'userMessageCount']) {
+      expect(readLocale('en', 'layout')).toHaveProperty(key === 'userMessageCount' ? `${key}_one` : key);
+      expect(readLocale('ko', 'layout')).toHaveProperty(key === 'userMessageCount' ? `${key}_one` : key);
+    }
+    for (const key of ['enterPathHint', 'parentDirectory', 'noSubdirectories']) {
+      expect(`${app}\n${sidebar}`).toContain(`t('${key}`);
     }
     expect(app).not.toContain('placeholder="Enter path and press Enter"');
     expect(modelSelector).not.toContain('>모델 선택</div>');
@@ -251,13 +255,13 @@ describe('frontend copy i18n contract', () => {
     expect(header).not.toContain("const identityLines = t('towerIdentityLines', { returnObjects: true })");
   });
 
-  it('routes Header navigation, model groups, and copy-reference labels through layout locale keys', () => {
+  it('routes Header navigation, model groups, and active-work labels through layout locale keys', () => {
     const header = fs.readFileSync(path.join(sourceRoot, 'components/layout/Header.tsx'), 'utf8');
     for (const key of [
-      'conversationsNav', 'workHubNav', 'ai', 'mySpace', 'myTodo', 'workHistory', 'pendingReplies',
-      'favorites', 'sessionHistory', 'operations', 'automation',
-      'beta', 'skillWorkbench', 'settingsAndManagement', 'personalCredentials',
-      'externalAgentDeployment', 'modelSelection', 'localLlm', 'copied', 'copyReference',
+      'conversationsNav', 'ai', 'mySpace', 'workHistory', 'pendingReplies',
+      'operations', 'automation', 'settingsAndManagement',
+      'externalAgentDeployment', 'localLlm',
+      'reference.titleLabel', 'reference.agentLabel',
     ]) {
       expect(header).toContain(`t('${key}`);
     }
@@ -284,17 +288,19 @@ describe('frontend copy i18n contract', () => {
   });
 
   it('routes Sidebar AI navigation, personal files, and sorting copy through layout locale keys', () => {
-    const sidebar = fs.readFileSync(path.join(sourceRoot, 'components/layout/Sidebar.tsx'), 'utf8');
+    const sidebar = [
+      fs.readFileSync(path.join(sourceRoot, 'components/layout/Sidebar.tsx'), 'utf8'),
+      fs.readFileSync(path.join(sourceRoot, 'components/layout/SidebarFilesSurface.tsx'), 'utf8'),
+      fs.readFileSync(path.join(sourceRoot, 'components/layout/SidebarFilesToolbar.tsx'), 'utf8'),
+      fs.readFileSync(path.join(sourceRoot, 'hooks/usePersonalViewerActions.ts'), 'utf8'),
+    ].join('\n');
     for (const key of [
       'openAiTeamHomeWithCount', 'teamWorkspace', 'rolesToolsPermissionsTogether',
       'buildTeam', 'renameAi', 'aiTeamUsageSummary', 'openNamedHome', 'namedHome',
-      'startNewConversationWith', 'openMyTodoInViewer',
-      'myTodo', 'viewer', 'viewMyFiles', 'loadingMyFiles', 'retry',
-      'noPersonalFilesHint', 'namedFileActions', 'fileActions', 'workspaceFiles',
+      'startNewConversationWith',
+      'myTodo', 'viewMyFiles', 'workspaceFiles',
       'renamePersonalFile', 'open', 'rename', 'copyPath', 'moveToArchive',
-      'sort', 'workspaceSort', 'pinnedThenRecent',
-      'recentActivity', 'nameAz', 'newestCreated', 'fileSort', 'foldersThenName',
-      'recentlyModified', 'byType',
+      'fileSort', 'foldersThenName', 'recentlyModified', 'nameAz', 'byType',
     ]) {
       expect(sidebar).toMatch(new RegExp(`t\\([\"']${key}`));
     }
@@ -315,17 +321,18 @@ describe('frontend copy i18n contract', () => {
     expect(aiPanel).not.toContain('이 채널의 최근 논의를 요약해줘');
   });
 
-  it('routes Chat empty-state prompts, first-task starters, and guide copy through locale collections', () => {
+  it('routes the current session welcome dialogue and guide copy through locale keys', () => {
     const chatPanel = fs.readFileSync(path.join(sourceRoot, 'components/chat/ChatPanel.tsx'), 'utf8');
-    expect(chatPanel).toContain("t('emptyState.prompts', { returnObjects: true })");
-    expect(chatPanel).toContain("t('emptyState.agentStarters', { returnObjects: true })");
-    for (const key of [
-      'visualKnowledge', 'visualTools', 'visualFiles', 'firstTask', 'assignFirstTask',
-      'firstTaskHint', 'headline', 'description', 'descriptionFollowup', 'helpPrefix',
-      'helpMiddle', 'helpSuffix', 'startGuide', 'askInChat',
-    ]) {
-      expect(chatPanel).toContain(`t('emptyState.${key}`);
+    const welcome = fs.readFileSync(path.join(sourceRoot, 'features/session-welcome/SessionWelcome.tsx'), 'utf8');
+    expect(chatPanel).toContain('<SessionWelcome');
+    expect(chatPanel).toContain('useSessionWelcome({');
+    for (const key of ['defaultName', 'question', 'choicesLabel', 'freeInput', 'regionLabel']) {
+      expect(welcome).toContain(`t('welcome.${key}`);
     }
+    expect(welcome).toContain('t(`welcome.choices.${index}.label`)');
+    expect(welcome).toContain('t(`welcome.choices.${index}.message`)');
+    expect(welcome).toContain("t('emptyState.startGuide')");
+    expect(welcome).toContain("t('emptyState.askInChat')");
     expect(chatPanel).not.toContain('EMPTY_STATE_PROMPTS');
     expect(chatPanel).not.toContain('실제 10년차 팀원에게 맡기듯 시켜보세요');
   });
@@ -360,7 +367,7 @@ describe('frontend copy i18n contract', () => {
   it('routes small chat blocks and cards through chat locale keys', () => {
     const files = [
       'FloatingQuestionCard.tsx', 'BrowserLiveBlock.tsx', 'SvgBlock.tsx',
-      'AttachmentChip.tsx', 'BrowserPopupBlock.tsx', 'CadEvidenceBlock.tsx', 'FormBlock.tsx',
+      'AttachmentChip.tsx', 'BrowserPopupBlock.tsx', 'FormBlock.tsx',
     ];
     const combined = files.map((file) => fs.readFileSync(path.join(sourceRoot, 'components/chat', file), 'utf8')).join('\n');
     for (const key of [
@@ -368,7 +375,7 @@ describe('frontend copy i18n contract', () => {
       'remoteBrowser', 'loading', 'shrink', 'expand', 'openInNewTab', 'connectingRemoteBrowser',
       'svgError', 'copySvgSource', 'copy', 'open', 'remove', 'sessionOnlySevenDays', 'sessionOnly',
       'submitted', 'selectPlaceholder', 'submit', 'openBrowser', 'popupOpened', 'focus', 'done',
-      'popupBlocked', 'retry', 'cadEvidence', 'linkedToDrawingPreview', 'evidenceNumber', 'viewInDrawing',
+      'popupBlocked', 'retry',
     ]) {
       expect(combined).toContain(`t('${key}`);
     }
@@ -380,9 +387,8 @@ describe('frontend copy i18n contract', () => {
     const viewer = fs.readFileSync(path.join(sourceRoot, 'components/files/FileViewerPage.tsx'), 'utf8');
     for (const key of [
       'loadingEditor', 'loadingMarkdownEditor', 'loadingQuickEdit', 'loadingHtmlEditor',
-      'pdfOpensInBrowserTab', 'pdfBrowserViewerHint', 'openInNewBrowserTab',
       'downloadVideo', 'noFilePath', 'refreshBlockedByUnsavedChanges',
-      'refreshComplete', 'saved', 'saveFailed', 'reloadFile', 'refresh',
+      'refreshComplete', 'reloadFile', 'refresh',
       'documentWidthAndZoom', 'zoomDocumentOut', 'resetZoomTo100',
       'zoomDocumentIn', 'documentWidth', 'readableWidth', 'wideWidth',
       'fullWidth', 'readAsDocument', 'read', 'editMarkdownDocument', 'edit',
@@ -391,6 +397,11 @@ describe('frontend copy i18n contract', () => {
       'loadingCadViewer', 'loadingViewer', 'loadingSqliteViewer', 'save', 'modified',
     ]) {
       expect(viewer).toContain(`t('${key}`);
+    }
+    expect(viewer).toContain('await saveFileOperation(filePath');
+    const saveOperation = fs.readFileSync(path.join(sourceRoot, 'features/file-operation-feedback/save-operation.ts'), 'utf8');
+    for (const key of ['saving', 'saved', 'saveFailed']) {
+      expect(saveOperation).toContain(`i18n.t('fileOperation.${key}', { ns: 'common' })`);
     }
     expect(viewer).not.toContain('PDF는 브라우저 탭에서 엽니다');
     expect(viewer).not.toContain('title="보기 모드"');
@@ -481,10 +492,8 @@ describe('frontend copy i18n contract', () => {
     for (const key of [
       'runningSessions', 'sessionType', 'chats', 'runs',
       'openAiConversations', 'openNamedActionsMenu', 'more', 'workspaceHasRunningSessions',
-      'newChat', 'goToAgentHome', 'defaultConversationDisplay', 'showOnlyCount',
-      'loadingConnections', 'noProjectConnections', 'githubActions', 'connectionWarnings',
-      'youParenthetical', 'noMembers',
-      'alsoSavedToAgentsMd', 'newChatsUseProjectFolder', 'moveToRoot',
+      'newChat', 'goToAgentHome',
+      'moveToRoot',
       'confirmMoveItemToRoot', 'move', 'openNamedHome', 'newSessionInNamedDeck',
       'confirmArchivePersonalFile', 'membersCount',
     ]) {

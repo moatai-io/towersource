@@ -305,6 +305,7 @@ export async function runAIServicePreview(input: {
         context_input_tokens: metrics.contextInputTokens,
         context_window_size: metrics.contextWindowSize,
         context_estimated_tokens: metrics.contextEstimatedTokens,
+          context_compacted: metrics.contextCompacted,
         next_request_estimated_tokens: metrics.nextRequestEstimatedTokens,
         compact_threshold_tokens: metrics.compactThresholdTokens,
           context_snapshot: metrics.contextSnapshot,

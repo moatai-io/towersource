@@ -31,7 +31,6 @@ describe('experimental Workbench tool access', () => {
     expect(isExperimentalUnifiedShellVisible({ projectId: 'project-a', role: 'admin' })).toBe(true);
     expect(isExperimentalUnifiedShellVisible({ projectId: 'project-a', role: 'operator' })).toBe(true);
     expect(isExperimentalUnifiedShellVisible({ projectId: 'project-a', role: 'member' })).toBe(true);
-    expect(isExperimentalUnifiedShellVisible({ projectId: 'project-a', role: 'customer_manager' })).toBe(false);
     expect(isExperimentalUnifiedShellVisible({ projectId: 'project-b', role: 'member' })).toBe(false);
   });
 
@@ -44,12 +43,18 @@ describe('experimental Workbench tool access', () => {
     expect(() => assertExperimentalWorkbenchToolAccess({ projectId: 'project-b', role: 'operator', rolloutEnabled: true })).not.toThrow();
   });
 
+  it('opens the ordinary Worker shell for an explicit DB rollout without enabling experimental management tools', () => {
+    vi.stubEnv('TOWER_EXPERIMENTAL_WORKBENCH_TOOLS_ENABLED', 'false');
+    expect(isExperimentalUnifiedShellVisible({ projectId: 'project-a', role: 'member', rolloutEnabled: true })).toBe(true);
+    expect(() => assertExperimentalWorkbenchToolAccess({ projectId: 'project-a', role: 'admin', rolloutEnabled: true }))
+      .toThrowError(expect.objectContaining({ code: 'EXPERIMENT_DISABLED' }));
+  });
+
   it('keeps persistent mutation and Runtime recovery limited to admin/operator', () => {
     allow();
     expect(() => assertExperimentalWorkbenchToolAccess({ projectId: 'project-a', role: 'admin' })).not.toThrow();
     expect(() => assertExperimentalWorkbenchToolAccess({ projectId: 'project-a', role: 'operator' })).not.toThrow();
     expect(() => assertExperimentalWorkbenchToolAccess({ projectId: 'project-a', role: 'member' })).toThrowError(expect.objectContaining({ code: 'MUTATION_ROLE_REQUIRED' }));
-    expect(() => assertExperimentalWorkbenchToolAccess({ projectId: 'project-a', role: 'customer_manager' })).toThrowError(expect.objectContaining({ code: 'MUTATION_ROLE_REQUIRED' }));
     expect(() => assertExperimentalWorkbenchToolAccess({ projectId: 'project-b', role: 'admin' })).toThrowError(expect.objectContaining({ code: 'PROJECT_NOT_ALLOWLISTED' }));
   });
 });

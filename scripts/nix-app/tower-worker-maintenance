@@ -1,0 +1,421 @@
+#!/usr/bin/env python3
+"""Root-only local systemd/Nix Worker maintenance. No network release discovery.
+Every mutation is journaled; incomplete switches stay fenced until explicit recover.
+"""
+import sys
+# This payload runs directly from an immutable Nix store. Prevent Python from
+# creating bin/__pycache__ and invalidating the signed store path on import.
+sys.dont_write_bytecode = True
+
+import argparse
+import datetime as dt
+import fcntl
+import json
+import os
+from pathlib import Path
+import re
+import subprocess
+import tempfile
+import time
+import urllib.request
+import uuid
+
+ROOT = Path('/var/lib/tower-worker-maintenance')
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise RuntimeError('REDIRECT_REFUSED')
+
+
+STORE = re.compile(r'^/nix/store/[a-z0-9]{32}-[^/\s]+$')
+
+
+def atomic(path, value, mode=0o644):
+    path = Path(path)
+    fd, temp = tempfile.mkstemp(prefix='.new-', dir=path.parent)
+    try:
+        with os.fdopen(fd, 'w') as f:
+            os.fchmod(f.fileno(), mode)
+            json.dump(value, f); f.write('\n'); f.flush(); os.fsync(f.fileno())
+        os.replace(temp, path)
+        d = os.open(path.parent, os.O_DIRECTORY)
+        try: os.fsync(d)
+        finally: os.close(d)
+    finally:
+        if os.path.exists(temp): os.unlink(temp)
+
+
+def trusted(path):
+    p = Path(path)
+    # No writable parent, symlink, or group writable control input.
+    for item in [p, *p.parents]:
+        st = item.lstat()
+        if item.is_symlink() or st.st_uid != 0 or st.st_mode & 0o022:
+            raise RuntimeError('UNTRUSTED_CONTROL_PATH')
+    return p
+
+
+def command(args):
+    r = subprocess.run(args, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, timeout=60)
+    if r.returncode:
+        # Persist only a bounded executable identity, never argv, stderr, env, or
+        # paths that may carry customer/credential material.
+        executable = Path(str(args[0])).name.upper().replace('-', '_')
+        executable = re.sub(r'[^A-Z0-9_]', '_', executable)[:48] or 'UNKNOWN'
+        raise RuntimeError('COMMAND_FAILED_' + executable)
+    return r.stdout.strip()
+
+
+def next_attempt():
+    # Kept in the state schema for compatibility; there is no scheduled retry.
+    return None
+
+
+class Maintenance:
+    def __init__(self, config):
+        self.config_path = trusted(config)
+        self.c = json.loads(self.config_path.read_text())
+        self.directory = trusted(ROOT / self.c['workerId'])
+        self.state_path = self.directory / 'state.json'
+        self.state = json.loads(trusted(self.state_path).read_text())
+        if self.state.get('version') != 1 or 'owner' not in self.state or not (self.state['owner'] is None or isinstance(self.state['owner'], str) and self.state['owner']):
+            raise RuntimeError('INVALID_DURABLE_STATE')
+        self.initial_config = self.config_path.read_bytes()
+
+    def save(self, **updates):
+        self.state.update(updates, updatedAt=dt.datetime.now(dt.timezone.utc).isoformat(), nextAttempt=next_attempt())
+        atomic(self.state_path, self.state)
+
+    def http(self, route, body=None):
+        headers = {}
+        if route.startswith('/v1/'):
+            # Transport env is interpreted by systemd, never sourced as shell code.
+            # The deployment-triggered oneshot receives the same EnvironmentFile as the Worker.
+            token = os.environ.get('TOWER_REMOTE_WORKER_TOKEN')
+            if not token: raise RuntimeError('TRANSPORT_UNAVAILABLE')
+            headers = {'Authorization': 'Bearer ' + token, 'X-Tower-Maintenance-Owner': self.state.get('owner') or ''}
+        req = urllib.request.Request(self.c['baseUrl'] + route, data=body, headers=headers)
+        with urllib.request.build_opener(NoRedirect).open(req, timeout=25) as r: return r.read().decode()
+
+    def status(self):
+        s = json.loads(self.http('/v1/maintenance/status'))
+        if s.get('version') != 1 or s.get('workerId') != self.c['workerId']: raise RuntimeError('OLD_OR_WRONG_WORKER')
+        return s
+
+    def db(self):
+        # Compiled helper imports only pg, reads DATABASE_URL injected by systemd.
+        s = json.loads(command(['node', self.c['observer'], self.c['workerId'], self.c['deploymentId']]))
+        if s.get('error') or s.get('deploymentId') != self.c['deploymentId']: raise RuntimeError('DB_UNAVAILABLE')
+        return s
+
+    def unit(self, unit):
+        data = command(['systemctl', 'show', unit, '--property=MainPID,ControlGroup,User,ActiveState,KillMode,SendSIGKILL,ExecStart'])
+        return dict(line.split('=', 1) for line in data.splitlines() if '=' in line)
+
+    def live(self, target):
+        u = self.unit(self.c['unit'])
+        pid = int(u['MainPID'])
+        if pid < 1 or u['ActiveState'] != 'active': return False
+        expected = (target + '/lib/tower/dist/backend/packages/backend/services/runtime-box/remote-workbench-worker-entrypoint.js').encode()
+        return expected in Path(f'/proc/{pid}/cmdline').read_bytes().split(b'\0') and self.status().get('pid') == pid and self.status().get('storePath') == target
+
+    def durable_fence_clear(self):
+        return self.state.get('owner') is None
+
+    def process_idle(self, s, d, require_draining=True):
+        # Older Worker builds treated the mere presence of the maintenance state
+        # file as draining. If the durable root-owned fence is clear and there
+        # are no active requests, accept that stale in-memory projection; never
+        # ignore a durable owner or database activity.
+        stale_draining = bool(s.get('draining')) and self.durable_fence_clear() and not s.get('activeRequests')
+        if (require_draining and not (s['draining'] or stale_draining)) or s['activeRequests'] or d['draining'] or d['reservations'] or d['services']: return False
+        u, heartbeat = self.unit(self.c['unit']), self.unit(self.c['heartbeatUnit'])
+        if u['KillMode'] != 'process' or u['SendSIGKILL'] != 'no': raise RuntimeError('UNSAFE_STOP_POLICY')
+        pid = int(u['MainPID'])
+        if pid < 1 or u['ActiveState'] != 'active' or s.get('pid') != pid: raise RuntimeError('NO_OR_WRONG_PROCESS')
+        heartbeat_pid = int(heartbeat['MainPID'])
+        if heartbeat_pid < 1 or heartbeat['ActiveState'] != 'active': raise RuntimeError('NO_HEARTBEAT_PROCESS')
+        allowed = {pid, heartbeat_pid}
+        # Includes detached children and externally supervised services under the
+        # dedicated execution uid. Anything unknown defers; never kill to be idle.
+        import pwd
+        uid = pwd.getpwnam(u['User']).pw_uid
+        if uid == 0: raise RuntimeError('DEDICATED_USER_REQUIRED')
+        for p in Path('/proc').iterdir():
+            if not p.name.isdigit(): continue
+            try:
+                if p.stat().st_uid == uid and int(p.name) not in allowed: return False
+            except FileNotFoundError: pass
+        cg = Path('/sys/fs/cgroup') / u['ControlGroup'].lstrip('/')
+        processes = set()
+        for f in cg.rglob('cgroup.procs'):
+            processes.update(int(x) for x in f.read_text().split())
+        if processes != {pid}: return False
+        return True
+
+    def idle(self):
+        return self.process_idle(self.status(), self.db(), True)
+
+    def activate_gate_if_needed(self, current, database):
+        if current.get('scopeProbeProtocol') is not None: return False
+        live_store = current.get('storePath')
+        # Older Workers cannot advertise scopeProbeProtocol even after systemd has
+        # loaded the maintenance state environment. Persist the exact live store
+        # activated once so retries advance to normal drain instead of restarting
+        # the same idle Worker forever. A changed store must enroll independently.
+        if self.state.get('gateActivatedStore') == live_store: return False
+        if not STORE.fullmatch(live_store or ''): raise RuntimeError('UNKNOWN_LIVE_BUILD')
+        if not self.process_idle(current, database, False): return False
+        self.save(gateActivatedStore=live_store)
+        # First enrollment only: restart the unchanged approved-old executable so
+        # systemd loads the maintenance state/smoke environment. No target switch
+        # occurs here; the next deployment attempt performs the normal drain.
+        command(['systemctl', 'restart', self.c['unit']])
+        command(['systemctl', 'restart', self.c['heartbeatUnit']])
+        return True
+
+    def approval(self):
+        c = json.loads(trusted(self.config_path).read_text())
+        target = c['approvedStore']
+        if self.config_path.read_bytes() != self.initial_config or c['deploymentId'] == 'development' or not STORE.fullmatch(target):
+            raise RuntimeError('APPROVAL_CHANGED')
+        manifest = json.loads((Path(target) / 'share/tower/release-manifest.json').read_text())
+        if manifest['sourceRev'] != c['approvedRev']: raise RuntimeError('MANIFEST_MISMATCH')
+        backend = json.loads(urllib.request.build_opener(NoRedirect).open(c['controlPlaneUrl'] + '/api/health', timeout=5).read())
+        deployment_target = os.environ.get('TOWER_WORKER_DEPLOYMENT_TARGET_REV')
+        expected_backend_rev = deployment_target or c['approvedRev']
+        if deployment_target and deployment_target != c['approvedRev']: raise RuntimeError('DEPLOYMENT_TARGET_MISMATCH')
+        if backend.get('status') != 'ok' or (not deployment_target and backend.get('sourceRev') != expected_backend_rev):
+            raise RuntimeError('BACKEND_IDENTITY_CHANGED')
+        return target
+
+    def prepare(self, target):
+        # Approved deployment already imported this local immutable closure. Verify
+        # contents and root before drain; never follow a channel or Git tip.
+        command(['nix-store', '--verify-path', target])
+        command(['nix-store', '--realise', target, '--add-root', str(self.directory / 'approved-root'), '--indirect'])
+        for launcher in ['tower-workbench-worker', 'tower-workbench-worker-heartbeat']:
+            if not (Path(target) / 'bin' / launcher).is_file(): raise RuntimeError('LAUNCHER_MISSING')
+        protocol = Path(target) / 'share/tower/worker-maintenance-protocol.json'
+        if json.loads(protocol.read_text()).get('version') != 1: raise RuntimeError('UNSUPPORTED_TARGET_PROTOCOL')
+
+    def write_exec_overrides(self, target):
+        # This is deliberately final-priority. Older recovery/approved-build
+        # drop-ins (90/95) may remain as rollback evidence but must never beat an
+        # exact deployment-approved maintenance selection.
+        unit_root = Path('/etc/systemd/system')
+        entries = [
+            (self.c['unit'], 'tower-workbench-worker'),
+            (self.c['heartbeatUnit'], 'tower-workbench-worker-heartbeat'),
+        ]
+        for unit, launcher in entries:
+            override = unit_root / (unit + '.d') / '99-maintenance-exec.conf'
+            override.parent.mkdir(mode=0o755, exist_ok=True)
+            text = '[Service]\nExecStart=\nExecStart=' + target + '/bin/' + launcher + '\n'
+            fd, temp = tempfile.mkstemp(prefix='.new-', dir=override.parent)
+            with os.fdopen(fd, 'w') as f:
+                os.fchmod(f.fileno(), 0o644); f.write(text); f.flush(); os.fsync(f.fileno())
+            os.replace(temp, override)
+            d = os.open(override.parent, os.O_DIRECTORY)
+            try: os.fsync(d)
+            finally: os.close(d)
+
+    def verify(self, target):
+        for _ in range(30):
+            try:
+                d = self.db()
+                if self.live(target) and json.loads(self.http('/ready')).get('ok') and d['heartbeatAge'] < 15 and d['heartbeatAt'] >= self.state.get('switchStartedAt', 0): break
+            except Exception: pass
+            time.sleep(1)
+        else: raise RuntimeError('LIVE_VERIFICATION_FAILED')
+        events = [json.loads(line) for line in self.http('/v1/maintenance/smoke', b'').splitlines()]
+        result = next((e['result']['execResult'] for e in events if e.get('type') == 'result'), None)
+        if not result or result['exit_code'] != 0 or result.get('timed_out') or 'MAINTENANCE_SMOKE_OK' not in result['stdout']:
+            raise RuntimeError('SYNTHETIC_SMOKE_FAILED')
+        if self.status()['activeRequests'] != 0 or not self.live(target): raise RuntimeError('UNSETTLED_PROBE')
+        # The scratch root must not retain a synthetic Credential envelope/file.
+        smoke = Path(self.c['smokeRoot'])
+        if any((smoke / '.tower-run-credentials').glob('*/*')) or list(smoke.glob('roundtrip.*')):
+            raise RuntimeError('SMOKE_CLEANUP_FAILED')
+
+    def run(self, recover=False):
+        if self.state.get('owner') == self.state.get('operation', {}).get('id') and self.state.get('operation', {}).get('kind') == 'scope-assignment':
+            raise RuntimeError('SCOPE_ASSIGNMENT_OPERATION_REQUIRES_SCOPE_RECOVERY')
+        if self.state.get('owner'):
+            if not recover:
+                self.save(result='blocked-recovery-required'); return self.state['result']
+            # Recovery never restarts/rolls back. Only the exact approved already-live
+            # target can be verified and released, otherwise preserve the fence.
+            target = self.approval()
+            if target != self.state.get('target'): raise RuntimeError('RECOVERY_TARGET_CHANGED')
+            phase = self.state.get('failedPhase', self.state.get('phase'))
+            if phase == 'draining' and self.live(self.state.get('oldTarget', '')):
+                self.verify(self.state['oldTarget'])
+            else:
+                self.verify(target)
+            self.approval()
+            self.save(completedOwner=self.state['owner'], owner=None, phase='idle', result='recovered')
+            return 'recovered'
+        target = self.approval()
+        current = self.status()
+        if current['draining'] and not (self.durable_fence_clear() and not current.get('activeRequests')):
+            return self.finish('deferred-existing-maintenance')
+        if self.live(target):
+            self.db()
+            if not json.loads(self.http('/ready')).get('ok'): raise RuntimeError('WORKER_NOT_READY')
+            # Converge configured execution too. A manually recovered live Worker
+            # or stale heartbeat must not regress on the next systemd restart.
+            self.write_exec_overrides(target)
+            command(['systemctl', 'daemon-reload'])
+            command(['systemctl', 'restart', self.c['heartbeatUnit']])
+            return self.finish('unchanged')
+        d = self.db()
+        if self.activate_gate_if_needed(current, d): return self.finish('deferred-existing-maintenance')
+        if current['activeRequests'] or d['draining'] or d['reservations'] or d['services']: return self.finish('deferred-busy')
+        if not STORE.fullmatch(current.get('storePath') or ''): raise RuntimeError('UNKNOWN_LIVE_BUILD')
+        command(['nix-store', '--realise', current['storePath'], '--add-root', str(self.directory / 'previous-root'), '--indirect'])
+        self.prepare(target)
+        self.save(owner=str(uuid.uuid4()), phase='draining', oldTarget=current['storePath'], target=target)
+        # HTTP status acts as a fence acknowledgement after the durable rename.
+        if not self.idle(): return self.finish('deferred-busy', release=True)
+        if self.approval() != target: return self.finish('deferred-target-changed', release=True)
+        self.save(phase='switching', switchStartedAt=time.time())
+        # Recheck under fence immediately before changing executable selection.
+        if not self.idle(): return self.finish('deferred-busy', release=True)
+        self.write_exec_overrides(target)
+        command(['systemctl', 'daemon-reload'])
+        command(['systemctl', 'restart', self.c['unit']])
+        command(['systemctl', 'restart', self.c['heartbeatUnit']])
+        self.save(phase='verifying')
+        self.verify(target)
+        self.approval()
+        return self.finish('updated', release=True)
+
+    def finish(self, result, release=False):
+        self.save(result=result, phase='idle', **({'completedOwner': self.state['owner'], 'owner': None} if release else {}))
+        return result
+
+
+def approve_installed(target, emit=True):
+    """The approved backend deploy calls this on the same VM, never Fleet discovery.
+    Only already enrolled system Workers are changed; no service is restarted.
+    """
+    if not ROOT.exists(): return
+    if not STORE.fullmatch(target): raise RuntimeError('IMMUTABLE_TARGET_REQUIRED')
+    manifest = json.loads((Path(target) / 'share/tower/release-manifest.json').read_text())
+    if not re.fullmatch('[a-f0-9]{40}', manifest['sourceRev']): raise RuntimeError('INVALID_REV')
+    with trusted(ROOT / 'deployment.lock').open('r') as lock:
+        fcntl.flock(lock, fcntl.LOCK_SH | fcntl.LOCK_NB)
+        configs = []
+        for file in ROOT.glob('*/config.json'):
+            c = json.loads(trusted(file).read_text())
+            if c['deploymentId'] == 'development': continue
+            if json.loads(trusted(file.parent / 'state.json').read_text()).get('owner'):
+                raise RuntimeError('OWNED_MAINTENANCE_REQUIRES_RECOVERY')
+            configs.append((file, c))
+        command(['nix-store', '--verify-path', target])
+        for file, c in configs:
+            command(['nix-store', '--realise', target, '--add-root', str(file.parent / 'approved-root'), '--indirect'])
+            c.update(approvedStore=target, approvedRev=manifest['sourceRev'],
+                observer=target + '/lib/tower/dist/backend/packages/backend/scripts/worker-maintenance-observe.js')
+            atomic(file, c)
+    result = {'result': 'approved', 'workers': len(configs), 'workerRestarted': False}
+    if emit: print(json.dumps(result))
+    return result
+
+
+def deployment_launcher():
+    # Nix makeWrapper execs the hidden Python payload with argv[0] pointing at
+    # `.tower-worker-maintenance-wrapped`. Re-enter through the public sibling so
+    # its Nix/systemd/node PATH setup remains available inside systemd-run.
+    invoked = Path(sys.argv[0])
+    suffix = '-wrapped'
+    if invoked.name.startswith('.') and invoked.name.endswith(suffix):
+        public = invoked.with_name(invoked.name[1:-len(suffix)])
+        if public.is_file(): return str(public)
+    return str(invoked)
+
+
+def deployment_attempt(file, c, timeout_seconds=60):
+    """Run one enrollment within the caller's remaining hard deadline."""
+    if timeout_seconds <= 0: raise RuntimeError('WORKER_DEPLOY_IDLE_TIMEOUT')
+    args = ['systemd-run', '--wait', '--collect', '--pipe', '--quiet',
+        '--property=EnvironmentFile=' + c['databaseEnvFile'],
+        '--property=EnvironmentFile=' + c['transportEnvFile'],
+        '--property=Environment=TOWER_WORKER_DEPLOYMENT_TARGET_REV=' + c['approvedRev'],
+        deployment_launcher(), 'run', str(file)]
+    result = subprocess.run(args, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL, text=True, timeout=min(60, max(1, timeout_seconds)))
+    rows = []
+    for line in result.stdout.splitlines():
+        try: rows.append(json.loads(line))
+        except json.JSONDecodeError: pass
+    payload = next((row for row in reversed(rows) if isinstance(row, dict) and 'result' in row), None)
+    if result.returncode or not payload: raise RuntimeError('WORKER_DEPLOY_ATTEMPT_FAILED')
+    return payload['result']
+
+
+def deploy_installed(target, wait_seconds):
+    """Approve exact Backend target and synchronously converge every enrollment."""
+    approval = approve_installed(target, emit=False)
+    deadline = time.monotonic() + wait_seconds
+    rows = []
+    for file in sorted(ROOT.glob('*/config.json')):
+        c = json.loads(trusted(file).read_text())
+        if c['deploymentId'] == 'development': continue
+        for env_path in [c['databaseEnvFile'], c['transportEnvFile']]: trusted(env_path)
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0: raise RuntimeError('WORKER_DEPLOY_IDLE_TIMEOUT')
+            try:
+                result = deployment_attempt(file, c, remaining)
+            except subprocess.TimeoutExpired:
+                raise RuntimeError('WORKER_DEPLOY_IDLE_TIMEOUT') from None
+            if result in ('updated', 'unchanged'):
+                rows.append({'workerId': c['workerId'], 'result': result}); break
+            if result not in ('deferred-busy', 'deferred-existing-maintenance'):
+                raise RuntimeError('WORKER_DEPLOY_BLOCKED_' + result.upper().replace('-', '_'))
+            remaining = deadline - time.monotonic()
+            if remaining <= 0: raise RuntimeError('WORKER_DEPLOY_IDLE_TIMEOUT')
+            time.sleep(min(2, remaining))
+    if not rows: raise RuntimeError('NO_ENROLLED_WORKERS')
+    print(json.dumps({'result': 'deployed', 'target': target, 'approvedWorkers': approval['workers'], 'workers': rows, 'scheduled': False}))
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('action', choices=['run', 'recover', 'status', 'approve-installed', 'deploy-installed'])
+    parser.add_argument('config')
+    parser.add_argument('--wait-seconds', type=int, default=600)
+    args = parser.parse_args()
+    if os.geteuid() != 0: raise SystemExit('root required')
+    if args.action == 'approve-installed': approve_installed(args.config); return
+    if args.action == 'deploy-installed':
+        if not 1 <= args.wait_seconds <= 3600: raise SystemExit('invalid wait')
+        deploy_installed(args.config, args.wait_seconds); return
+    m = Maintenance(args.config)
+    if args.action == 'status': print(json.dumps(m.state)); return
+    # Shared locks in installers/cutover/restart exclude this exclusive owner.
+    with open(trusted(ROOT / 'deployment.lock'), 'r') as lock:
+        try: fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            result = {'result': 'deferred-deployment', 'nextAttempt': next_attempt()}
+            atomic(m.directory / 'last-attempt.json', result)
+            print(json.dumps(result)); return
+        # Re-read AFTER acquiring exclusion; pre-lock status may be stale.
+        m = Maintenance(args.config)
+        try: result = m.run(args.action == 'recover')
+        except Exception as error:
+            raw = str(error)
+            code = raw if re.fullmatch(r'[A-Z][A-Z0-9_]{2,99}', raw) else type(error).__name__
+            m.save(result='blocked-maintenance', failedPhase=m.state.get('failedPhase', m.state.get('phase')),
+                phase='blocked', lastErrorCode=code)
+            result = 'blocked-maintenance'
+        print(json.dumps({'result': result, 'nextAttempt': next_attempt()}))
+        if result.startswith('blocked'): raise SystemExit(1)
+
+
+if __name__ == '__main__':
+    try: main()
+    except Exception:
+        print(json.dumps({'result': 'blocked-input-or-state', 'nextAttempt': next_attempt()}))
+        raise SystemExit(1)

@@ -54,7 +54,7 @@ run('Workbench tool PostgreSQL concurrent apply E2E', () => {
 
   afterAll(async () => {
     await closePgPool().catch(() => undefined);
-    await docker('rm', '-f', pgName).catch(() => undefined);
+    await docker('rm', '-f', '-v', pgName).catch(() => undefined);
     if (root) await fs.rm(root, { recursive: true, force: true });
     delete process.env.DATABASE_URL;
   });

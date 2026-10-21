@@ -28,7 +28,7 @@ describe('inference provider health', () => {
 
     const result = await probeConfiguredInferenceProviders(readiness, fetchImpl);
 
-    expect(fetchImpl).toHaveBeenCalledWith('https://openrouter.example/api/v1/key', expect.objectContaining({
+    expect(fetchImpl).toHaveBeenCalledWith('https://openrouter.ai/api/v1/key', expect.objectContaining({
       headers: { Authorization: 'Bearer test-redacted' },
     }));
     expect(result).toMatchObject({ status: 'ready', checkedProviders: ['openrouter'], failedProviders: [] });

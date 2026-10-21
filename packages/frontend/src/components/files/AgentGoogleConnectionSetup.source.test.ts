@@ -10,9 +10,7 @@ describe('Primary Agent Google setup during creation', () => {
     expect(setup).toContain("t('agentCreation.google.none')");
     expect(setup).toContain("t('agentCreation.google.organization')");
     expect(setup).toContain("t('agentCreation.google.dedicated')");
-    expect(setup).toContain("metadata?.connection_type === 'organization'");
-    expect(setup).toContain("credential?.kind === 'gws'");
-    expect(setup).toContain("credential?.provider === 'google'");
+    expect(setup).toContain("fetch('/api/credential-vault/connections/team-google'");
   });
 
   it('applies product-profile prominence separately from secret-free readiness', () => {
@@ -23,20 +21,23 @@ describe('Primary Agent Google setup during creation', () => {
     expect(preview).toContain("if (googleDisplayMode === 'hidden')");
   });
 
-  it('gates Google choices on secret-free server readiness', () => {
+  it('gates only new dedicated OAuth on server readiness while existing organization accounts remain selectable', () => {
     expect(setup).toContain("fetch('/api/auth/google/readiness'");
-    expect(setup).toContain("disabled={loading || !googleReady || connections.length === 0}");
-    expect(setup).toContain("disabled={loading || !googleReady}");
+    expect(setup).toContain("disabled={loading || connections.length === 0}");
+    expect(setup).toContain('checked={value.mode === \'dedicated\'} disabled={loading}');
+    expect(setup).toContain("value.mode === 'dedicated' && !loading && !googleReady");
+    expect(setup).not.toContain('{!loading && !googleReady && (');
     expect(setup).toContain("readiness?.reason === 'https_required'");
     expect(setup).toContain('readiness.expectedRedirectUri');
-    expect(preview).toContain('setOrganizationGoogleConnections(readiness.ready ? connections : [])');
-    expect(preview).toContain("if (!readiness.ready) setGoogleSetup({ mode: 'none' })");
+    expect(preview).toContain('setOrganizationGoogleConnections(connections)');
+    expect(preview).toContain("current.mode === 'dedicated' ? { mode: 'none' } : current");
+    expect(preview).toContain("googleSetup.mode === 'dedicated' && googleOAuthReadiness?.ready !== true");
   });
 
-  it('allows the selected organization Connection only after the new Project exists', () => {
-    expect(preview.indexOf("fetch('/api/primary-agent-commands/bootstrap'")).toBeLessThan(preview.indexOf('allowOrganizationGoogleConnection(project.id'));
-    expect(setup).toContain("body: JSON.stringify({ mode: 'allow'");
-    expect(setup).toContain("granted_via: 'agent_creation'");
+  it('uses team-shared organization Connections without a removed per-Project policy call', () => {
+    expect(setup).toContain("fetch('/api/credential-vault/connections/team-google'");
+    expect(setup).not.toContain('/policies/');
+    expect(preview).not.toContain('allowOrganizationGoogleConnection');
   });
 
   it('starts the Agent-bound OAuth flow with the newly created Project id', () => {

@@ -2,12 +2,15 @@ import express from 'express';
 import { createServer, type Server } from 'node:http';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { isProjectMember } from '../services/pm/project-membership-manager.js';
+import { listPersistedWorkbenchWorkers } from '../services/execution/worker/worker-repository.js';
+import { query } from '../db/pg-repo.js';
 import { getBoxByProject } from '../services/runtime-box/runtime-box-manager.js';
 import { inspectWorkbenchTools, listWorkbenchToolRevisions } from '../services/runtime-box/workbench-tools.js';
 import { listWorkbenchRollouts, resolveWorkbenchRollout, setWorkbenchRollout } from '../services/runtime-box/workbench-rollout-registry.js';
 
 vi.mock('../services/pm/project-membership-manager.js', () => ({ isProjectMember: vi.fn() }));
 vi.mock('../db/pg-repo.js', () => ({ query: vi.fn(), queryOne: vi.fn() }));
+vi.mock('../services/execution/worker/worker-repository.js', () => ({ listPersistedWorkbenchWorkers: vi.fn() }));
 vi.mock('../services/runtime-box/service-registry.js', () => ({ listServices: vi.fn(), readServiceLogs: vi.fn(), stopService: vi.fn(), formatServiceList: vi.fn() }));
 vi.mock('../services/runtime-box/runtime-box-capacity.js', () => ({ getRuntimeBoxCapacity: vi.fn(), updateRuntimeBoxCapacity: vi.fn() }));
 vi.mock('../services/runtime-box/workbench-rollout-registry.js', () => ({
@@ -51,6 +54,7 @@ beforeEach(() => {
   vi.stubEnv('TOWER_EXPERIMENTAL_WORKBENCH_TOOLS_ENABLED', 'true');
   vi.stubEnv('TOWER_EXPERIMENTAL_WORKBENCH_TOOL_PROJECT_IDS', JSON.stringify(['p']));
   vi.mocked(getBoxByProject).mockResolvedValue({ id: 10, project_id: 'p', project_root: '/tmp/p' } as any);
+  vi.mocked(listPersistedWorkbenchWorkers).mockResolvedValue([]);
   vi.mocked(inspectWorkbenchTools).mockResolvedValue({ projectId: 'p', dbRevision: 1, filesystemRevision: 1, health: 'healthy', reason: 'agree' });
   vi.mocked(listWorkbenchToolRevisions).mockResolvedValue([]);
   vi.mocked(resolveWorkbenchRollout).mockResolvedValue({ enabled: true, status: 'enabled', source: 'database', cohort: 'test' });
@@ -67,6 +71,39 @@ async function call(path: string, init: RequestInit = {}, role?: string) {
   });
 }
 
+describe('read-only environment overview', () => {
+  it('keeps missing storage unresolved and preserves legacy pinned execution facts', async () => {
+    vi.stubEnv('TOWER_DEPLOYMENT_ID', 'production');
+    vi.mocked(query).mockResolvedValue([
+      { id: 'unknown', name: 'Unknown', storage_kind: null, storage_state: null, legacy_workstation_mode: false },
+      { id: 'legacy', name: 'Legacy', storage_kind: null, storage_state: null, legacy_workstation_mode: true, legacy_worker_id: 'pinned' },
+    ]);
+    const response = await call('/environment-overview', {}, 'admin');
+    expect(response.status).toBe(200);
+    expect((await response.json()).projects).toMatchObject([
+      { environmentMode: 'unresolved', storageState: 'unresolved', preferredWorkerId: null },
+      { environmentMode: 'legacy-worker-workspace', storageState: 'unresolved', preferredWorkerId: 'pinned' },
+    ]);
+    expect(query).toHaveBeenCalledWith(expect.stringContaining("cb.project_id IS NULL"), ['production']);
+  });
+
+  it('requires admin/operator and separates storage authority from Worker status', async () => {
+    vi.stubEnv('TOWER_DEPLOYMENT_ID', 'production');
+    expect((await call('/environment-overview')).status).toBe(401);
+    expect((await call('/environment-overview', {}, 'member')).status).toBe(403);
+    expect(query).not.toHaveBeenCalled();
+    vi.mocked(query).mockResolvedValue([{ id: 'intro', name: 'Introduction', storage_kind: 'host', state: 'ready', storage_state: 'ready', storage_worker_id: null }]);
+    vi.mocked(listPersistedWorkbenchWorkers).mockResolvedValue([
+      { workerId: 'worker-a', deploymentId: 'production', status: 'healthy', draining: false, capacity: { activeRuns: 1, maxRuns: 4 } },
+      { workerId: 'worker-b', deploymentId: 'development', status: 'healthy', draining: false, capacity: { activeRuns: 0, maxRuns: 3 } },
+    ] as any);
+    const result = await call('/environment-overview', {}, 'operator');
+    expect(result.status).toBe(200);
+    expect(await result.json()).toMatchObject({ deploymentId: 'production', projects: [{ projectId: 'intro', environmentMode: 'canonical-project-workspace', storageKind: 'host', storageState: 'ready', preferredWorkerId: null }], workers: [{ workerId: 'worker-a', activeRuns: 1, maxRuns: 4 }] });
+    expect(query).toHaveBeenCalledWith(expect.stringContaining('fs.deployment_id = $1'), ['production']);
+  });
+});
+
 describe('Workbench tool Runtime Box HTTP API', () => {
   it('fails closed when the global experiment is disabled or DB rollout is disabled', async () => {
     vi.stubEnv('TOWER_EXPERIMENTAL_WORKBENCH_TOOLS_ENABLED', 'false');
@@ -79,7 +116,7 @@ describe('Workbench tool Runtime Box HTTP API', () => {
     expect((await call('/projects/p/workbench-tools/revisions', {}, 'operator')).status).toBe(403);
   });
 
-  it('rejects member and customer_manager reads', async () => {
+  it('rejects ordinary and removed legacy roles from reads', async () => {
     for (const role of ['member', 'customer_manager']) {
       expect((await call('/projects/p/workbench-tools', {}, role)).status).toBe(403);
       expect((await call('/projects/p/workbench-tools/revisions', {}, role)).status).toBe(403);
@@ -118,7 +155,7 @@ describe('Workbench tool Runtime Box HTTP API', () => {
   it('closes HTTP preview and apply for every role during the PoC', async () => {
     const previewPath = '/projects/p/workbench-tools/change-intents';
     const applyPath = '/projects/p/workbench-tools/change-intents/intent-a/apply';
-    for (const role of ['member', 'customer_manager', 'operator', 'admin']) {
+    for (const role of ['member', 'operator', 'admin']) {
       const preview = await call(previewPath, { method: 'POST', body: '{}' }, role);
       expect(preview.status).toBe(403);
       expect(await preview.json()).toMatchObject({ error: expect.stringContaining('closed on HTTP') });

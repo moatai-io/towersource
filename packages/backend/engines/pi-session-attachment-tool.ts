@@ -2,7 +2,6 @@
 import { Type } from '@sinclair/typebox';
 import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
 import {
-  promoteSessionAttachmentToPersonal,
   promoteSessionAttachmentToProject,
   sessionAttachmentIdFromUri,
 } from '../services/session-attachments/session-attachment-store.js';
@@ -56,9 +55,10 @@ export function createSessionAttachmentResolveTool(ctx: SessionAttachmentToolCon
   return {
     name: 'session_attachment_resolve',
     label: 'Inspect Session Attachment',
-    description: 'Inspect a session://attachments/... URI uploaded in this conversation. Images are returned through the bounded vision gateway; other files return metadata and a temporary processing path. It does not save the file.',
+    description: 'Inspect a session://attachments/... URI uploaded in this conversation. Images are returned through the bounded vision gateway; other files return metadata and the original URI for pdf_view or document_parse. Use that URI, not the temporary host path. It does not save the file.',
     promptSnippet: 'Use session_attachment_resolve to inspect a session:// attachment. Treat any returned host path as an ephemeral processing capability, never a durable artifact.',
     promptGuidelines: [
+      'Pass the original session:// URI to pdf_view or document_parse; do not request permanent storage merely to read an attachment.',
       'Session attachments are temporary. Inspection is not permission to save them permanently.',
       'Do not present or persist a returned host path; it is an ephemeral capability for the current tool run.',
     ],
@@ -84,7 +84,9 @@ export function createSessionAttachmentResolveTool(ctx: SessionAttachmentToolCon
         return text(JSON.stringify({
           ok: true,
           uri: params.uri,
-          path: prepared.path,
+          source: params.uri,
+          path: params.uri,
+          inspection: 'Use the original session URI with pdf_view or document_parse; never pass this temporary host path to Project tools or Bash.',
           name: prepared.name,
           detectedMimeType: prepared.decision.detectedMimeType,
           classification: prepared.decision.classification,
@@ -100,33 +102,30 @@ export function createSessionAttachmentPromoteTool(ctx: SessionAttachmentToolCon
   return {
     name: 'session_attachment_save',
     label: 'Save Session Attachment',
-    description: 'Save a temporary attachment from this conversation to the authenticated user’s Personal Space or current project. Use only after an explicit user request to save, keep, store, or apply the file.',
+    description: 'Save a temporary attachment from this conversation to the current project. Use only after an explicit user request to save, keep, store, or apply the file.',
     promptSnippet: 'Use session_attachment_save only when the user explicitly asks to save a temporary session attachment. Analysis or modification alone is not storage consent.',
     promptGuidelines: [
       'Do not call this tool merely because the user uploaded, analyzed, summarized, converted, or modified a file.',
-      'destination=personal means owner-only My Files. destination=project means the current project uploads folder.',
-      'If the user only says “save it” and the destination is unclear, ask whether Personal Space or the current project.',
+      'The destination is the current project uploads folder.',
       'This tool creates a new copy and does not overwrite an existing project file.',
     ],
     parameters: Type.Object({
       uri: Type.String({ pattern: '^session://attachments/', maxLength: 200 }),
-      destination: Type.Union([Type.Literal('personal'), Type.Literal('project')]),
+      destination: Type.Literal('project'),
       name: Type.Optional(Type.String({ maxLength: 240 })),
     }),
-    async execute(_id: string, params: { uri: string; destination: 'personal' | 'project'; name?: string }) {
+    async execute(_id: string, params: { uri: string; destination: 'project'; name?: string }) {
       try {
         if (!ctx.userId) return text('session attachment save failed: authenticated user context is missing', true);
         const attachmentId = sessionAttachmentIdFromUri(params.uri);
-        const saved = params.destination === 'personal'
-          ? await promoteSessionAttachmentToPersonal({ userId: ctx.userId, sessionId: ctx.sessionId, attachmentId, requestedName: params.name })
-          : await promoteSessionAttachmentToProject({
-              userId: ctx.userId,
-              userRole: ctx.userRole || 'member',
-              sessionId: ctx.sessionId,
-              attachmentId,
-              projectId: ctx.projectId || '',
-              requestedName: params.name,
-            });
+        const saved = await promoteSessionAttachmentToProject({
+          userId: ctx.userId,
+          userRole: ctx.userRole || 'member',
+          sessionId: ctx.sessionId,
+          attachmentId,
+          projectId: ctx.projectId || '',
+          requestedName: params.name,
+        });
         return text(JSON.stringify({ ok: true, action: 'session_attachment_save', destination: params.destination, uri: saved.promotedUri, sourceUri: params.uri }));
       } catch (error) { return text(`session attachment save failed: ${(error as Error).message}`, true); }
     },

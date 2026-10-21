@@ -41,7 +41,7 @@ run('runtime advisory lock PostgreSQL E2E', () => {
 
   afterAll(async () => {
     await closePgPool().catch(() => undefined);
-    await docker('rm', '-f', pgName).catch(() => undefined);
+    await docker('rm', '-f', '-v', pgName).catch(() => undefined);
     if (previousDatabaseUrl === undefined) delete process.env.DATABASE_URL;
     else process.env.DATABASE_URL = previousDatabaseUrl;
   });

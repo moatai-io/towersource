@@ -39,11 +39,13 @@ export async function reconcileClaimedProjectWorkerAssignment(
       try { await prepared.rollback(); }
       catch (rollbackError) {
         const rollbackMessage = rollbackError instanceof Error ? rollbackError.message : String(rollbackError);
-        await dependencies.fail({ assignment, error: `${message}; rollback failed: ${rollbackMessage}` });
+        await dependencies.recoveryRequired({ assignment, error: `${message}; rollback failed: ${rollbackMessage}` });
         return { ok: false, error: `${message}; rollback failed: ${rollbackMessage}` };
       }
     }
-    if (bindingActivated) await dependencies.recoveryRequired({ assignment, error: message });
+    // A rejected prepare may already have rotated identity or written config.
+    // Without a returned rollback handle, never classify it as safely retryable.
+    if (bindingActivated || !prepared) await dependencies.recoveryRequired({ assignment, error: message });
     else await dependencies.fail({ assignment, error: message });
     return { ok: false, error: message };
   }

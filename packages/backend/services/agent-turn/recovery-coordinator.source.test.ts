@@ -52,6 +52,18 @@ describe('root turn recovery ownership', () => {
     );
   });
 
+  it('drains engines and delivery writes before closing PostgreSQL during shutdown', () => {
+    const shutdownBlock = backend.slice(backend.indexOf('function beginShutdown'), backend.indexOf('// Prevent SDK'));
+    expect(shutdownBlock).toContain('if (shutdownPromise) return');
+    expect(shutdownBlock).toContain('await Promise.allSettled([');
+    expect(shutdownBlock).toContain('shutdownEngines()');
+    expect(shutdownBlock).toContain('await stopWsSync()');
+    expect(shutdownBlock).toContain('await closePgPool()');
+    expect(shutdownBlock.indexOf('shutdownEngines()')).toBeLessThan(shutdownBlock.indexOf('await closePgPool()'));
+    expect(shutdownBlock.indexOf('await stopWsSync()')).toBeLessThan(shutdownBlock.indexOf('await closePgPool()'));
+    expect(shutdownBlock).not.toContain('closePgPool().finally');
+  });
+
   it('fails closed when foreground execution or automatic recovery has no durable root identity', () => {
     expect(engine).toContain('if (!opts.rootTurnId)');
     expect(engine).toContain('Pi execution skipped because the durable root turn identity is missing.');

@@ -1,3 +1,4 @@
+import { isNoWorkTask } from './automation-outcome.js';
 /**
  * Owns: execution adapters for generalized schedule jobs.
  * Public API: runAutomationJob(). See services/task/README.md.
@@ -5,9 +6,10 @@
 import { spawn, execFile } from 'node:child_process';
 import path from 'node:path';
 import { promisify } from 'node:util';
-import { config, getModelDefaults } from '../../config.js';
+import { config, resolveLegacyPiModelId } from '../../config.js';
 import { execute } from '../../db/pg-repo.js';
-import { createTask } from './task-manager.js';
+import { createTask, getTask } from './task-manager.js';
+import { resolveAutomationModel } from './automation-model.js';
 import { spawnTask } from './task-runner.js';
 import { fireProactive } from '../ai/proactive-agent.js';
 import { isRuntimeBoxEnabled } from '../runtime-box/policy.js';
@@ -15,10 +17,10 @@ import { getProject } from '../pm/project-manager.js';
 import { getRunnerPolicy } from './runner-policy.js';
 import { runCommandInRuntimeBox } from './runtime-box-schedule-runner.js';
 import type { Automation } from './automation-manager.js';
-import { executeWorkbenchRequest, type WorkbenchExecutionRequest } from '../runtime-box/workbench-execution-broker.js';
+import { executeWorkbenchRequest, type WorkbenchExecutionRequest } from '../execution/execution-broker.js';
 import { createLocalWorkbenchExecutionProvider } from '../runtime-box/workbench-local-execution-provider.js';
 
-export type AutomationRunStatus = 'success' | 'failed' | 'timeout' | 'skipped';
+export type AutomationRunStatus = 'success' | 'none' | 'failed' | 'timeout' | 'skipped' | 'spawned';
 export type BroadcastFn = (type: string, data: any) => void;
 
 export interface AutomationRunResult {
@@ -104,11 +106,12 @@ async function withAutomationRunLock(automation: Automation, fn: () => Promise<A
 async function runAiPromptJob(automation: Automation, broadcast?: BroadcastFn): Promise<AutomationRunResult> {
   const mode = automation.mode || 'spawn';
   const prompt = automation.prompt || String((automation.definitionJson as any).prompt || automation.description || automation.name);
-  const model = automation.model || String((automation.definitionJson as any).model || getModelDefaults().session);
+  const configuredModel = automation.model || String((automation.definitionJson as any).model || 'preset/core');
+  const model = resolveLegacyPiModelId(resolveAutomationModel(configuredModel));
 
   if (mode === 'spawn') {
     if (!broadcast) throw new Error('spawn mode requires scheduler broadcast function');
-    const cwd = automation.cwd || await resolveProjectCwd(automation);
+    const cwd = await resolveAutomationAiCwd(automation);
     const task = await createTask(
       automation.name,
       prompt,
@@ -116,7 +119,7 @@ async function runAiPromptJob(automation: Automation, broadcast?: BroadcastFn): 
       automation.userId,
       model,
       undefined,
-      (automation.workflow || 'auto') as any,
+      (automation.workflow || 'default') as any,
       undefined,
       automation.projectId || undefined,
       undefined,
@@ -128,8 +131,16 @@ async function runAiPromptJob(automation: Automation, broadcast?: BroadcastFn): 
     broadcast('task_created', { task });
     // spawnTask resolves automation.userId's DB role when no live actor role is
     // supplied, preserving scheduled run-as authority instead of defaulting to member.
-    spawnTask(task.id, broadcast, automation.userId);
-    return { status: 'success', resultId: task.id, summaryText: `AI task spawned: ${task.id}`, runnerKind: 'ai', runnerRef: task.id };
+    await spawnTask(task.id, broadcast, automation.userId, undefined, undefined, { waitForCompletion: true });
+    // spawnTask awaits the engine to termination; read its persisted outcome.
+    const completed = await getTask(task.id);
+    const success = completed?.status === 'done';
+    return {
+      status: success ? (isNoWorkTask(completed) ? 'none' : 'success') : 'failed', resultId: task.id,
+      summaryText: completed?.progressSummary?.join('\n') || `AI task ${success ? 'completed' : 'did not complete'}: ${task.id}`,
+      error: success ? null : `AI task ended with status ${completed?.status || 'unknown'}`,
+      runnerKind: 'ai', runnerRef: completed?.sessionId ? `completed-session:${completed.sessionId}` : `completed-task:${task.id}`,
+    };
   }
 
   if (mode === 'inject') {
@@ -266,7 +277,7 @@ async function runGitHubNewIssuesMonitor(automation: Automation, broadcast?: Bro
       buildIssueResearchPrompt(repo, issue),
       automation.cwd || await resolveProjectCwd(automation),
       automation.userId,
-      String(def.model || automation.model || getModelDefaults().ai_task),
+      resolveLegacyPiModelId(resolveAutomationModel(String(def.model || automation.model || 'preset/core'))),
       undefined,
       'auto',
       undefined,
@@ -312,7 +323,7 @@ async function runGitHubNewIssuesMonitor(automation: Automation, broadcast?: Bro
     : `No new issue. Poll ${nextPollCount}${limitRuns ? `/${limitRuns}` : ''}. Fetched ${issues.length}/${fetchLimit}, skipped baseline ${selection.skippedByBaseline.length}, skipped processed ${selection.skippedByProcessed.length}.${shouldDisable ? ' Disabled after reaching test limit.' : ''}${fetchLimitWarning}`;
 
   return {
-    status: 'success',
+    status: newIssues.length > 0 ? 'success' : 'none',
     resultId: taskIds[0] || null,
     stdoutText: JSON.stringify({
       repo,
@@ -573,13 +584,20 @@ async function runShellCommand(automation: Automation, command: string, cwdOverr
   });
 }
 
+/** Shared by legacy and Execution Control Plane AI dispatch. */
+export async function resolveAutomationAiCwd(automation: Automation): Promise<string> {
+  return automation.projectId && automation.scopeType !== 'system'
+    ? resolveSafeCwd(automation, automation.cwd || undefined)
+    : automation.cwd || await resolveProjectCwd(automation);
+}
+
 async function resolveProjectCwd(automation: Automation): Promise<string> {
   if (!automation.projectId) return path.resolve(config.workspaceRoot);
   const project = await getProject(automation.projectId);
-  if (project?.rootPath) return path.resolve(project.rootPath);
-  // Last-resort compatibility fallback. Most projects live at a slug path, not
-  // at projects/<uuid>; callers should prefer the DB root_path above.
-  return path.resolve(config.workspaceRoot, 'projects', automation.projectId);
+  if (!project?.rootPath || project.archived || project.lifecycleStatus === 'retired') {
+    throw new Error('Automation Project is unavailable; refusing to substitute another workspace');
+  }
+  return path.resolve(project.rootPath);
 }
 
 async function resolveSafeCwd(automation: Automation, cwd?: string): Promise<string> {

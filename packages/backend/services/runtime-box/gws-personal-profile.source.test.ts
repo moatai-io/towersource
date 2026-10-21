@@ -5,8 +5,8 @@ const manager = readFileSync(new URL('./runtime-box-manager.ts', import.meta.url
 
 describe('GWS profile selection contract', () => {
   it('does not fall back to another credential kind when personal was requested', () => {
-    expect(manager).toContain('if (wantsPersonal && !encodedConfig)');
-    expect(manager).toContain('PERSONAL_CREDENTIAL_NOT_AVAILABLE');
+    expect(manager).toContain('if (wantsPersonal || isAuthLogin)');
+    expect(manager).toContain('AGENT_GWS_CONNECTION_REQUIRED');
   });
 
   it('does not fall back to another credential kind when finance was requested', () => {
@@ -21,9 +21,9 @@ describe('GWS profile selection contract', () => {
     expect(manager).not.toContain('if (!encodedConfig && !wantsPersonal && !wantsFinance) {\n    try {\n      encodedConfig = await getSecret(GWS_PERSONAL_CONFIG_SECRET_NAME, opts.userId)');
   });
 
-  it('binds the selected personal profile to the authenticated runtime user', () => {
-    expect(manager).toContain('getSecret(GWS_PERSONAL_CONFIG_SECRET_NAME, opts.userId)');
-    expect(manager).toContain('oauthManager.getValidToken(opts.userId, \'google\')');
+  it('never materializes requester-personal credentials into the Agent runtime', () => {
+    expect(manager).not.toContain('getSecret(GWS_PERSONAL_CONFIG_SECRET_NAME, opts.userId)');
+    expect(manager).not.toContain('oauthManager.getValidToken(opts.userId, \'google\')');
     expect(manager).toContain('withRuntimeBoxTowerIdentityEnv(env, req.userId)');
   });
 });

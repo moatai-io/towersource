@@ -38,6 +38,18 @@ A Project can own skills under its workspace:
 
 Use this for instructions that belong to one team, client, workflow, or AI teammate. These files are normal Project assets and should be reviewed like other operational documentation.
 
+### Project-authored slash commands
+
+A Project can also own concise workflow commands beside its skills:
+
+```text
+<project>/commands/<command-name>.command.yaml
+```
+
+These commands describe a named action or workflow with fields such as `id`, `canonical`, `aliases`, `description`, `risk`, and `dispatch.target`. Tower discovers the root `commands/` directory directly; organization sharing or skill materialization is not required. Existing `.project/commands/` and `.tower/commands/` folders remain compatibility locations at lower priority.
+
+The slash picker distinguishes native commands, workflow commands, and AI skills with both a visible glyph and a text badge. If command canonical names or aliases collide, the first higher-priority definition remains available and the conflicting definition is excluded with a server warning. A Project command also takes precedence over a Project skill with the same canonical slash name; authors should resolve the collision rather than rely on that precedence.
+
 ### Organization-managed skills
 
 A self-hosted organization can maintain a reviewed set of shared skills outside individual Projects. Tower materializes the selected set into each Project's managed runtime layer.
@@ -50,6 +62,8 @@ The Project-visible managed state is described by:
 ```
 
 The `.tower/skills` tree is generated runtime state, not the normal authoring location. Do not hand-edit generated managed copies and expect those edits to become the organization source.
+
+The current registry reads the company catalog from `teamskills/skillset.json` and skill bodies from that Project’s `skills/` tree. Project skill CRUD is file-backed. Legacy DB-to-filesystem sync functions are no-ops; personal skill creation is deprecated, and company changes through the DB CRUD API are rejected in favor of the organization sharing flow. User preferences and provider metadata in the DB are separate from skill-body ownership.
 
 ### Compatibility imports
 
@@ -118,6 +132,8 @@ The execution path distinguishes three stages:
 3. **Accepted** — the external provider accepted the authentication.
 
 A provider `401` or “not authenticated” response does not, by itself, prove that the Credential was deleted or never configured.
+
+The legacy `checkSkillReadiness()` helper checks required provider names against user OAuth connection records. Its `ready` result is not evidence of Vault authorization, secret materialization, or successful provider authentication. Static `requires` checks are advisory in this implementation.
 
 Never put API keys, passwords, OAuth tokens, private keys, or credential JSON in:
 
@@ -201,3 +217,7 @@ A good skill makes expert work more repeatable without hiding authority, data, o
 - [Tower architecture](./architecture.md)
 - [Runtime visualization formats](./visual-formats.md)
 - [Installation Guide](../../INSTALL.md)
+
+## Implementation references and review boundary
+
+[Skill module](../../packages/backend/services/skill/README.md) owns the source/registry entry points and test links. This follow-up checked source selection, CRUD compatibility, sync no-ops, and readiness semantics against code. It did not validate the complete catalog UI, rollout, Worker mounts, or external authentication.

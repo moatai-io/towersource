@@ -127,10 +127,6 @@ export function normalizeTowerFilePath(rawPath: string): string {
 
 export function openTowerFile(filePath: string) {
   const normalizedPath = normalizeTowerFilePath(filePath);
-  if (getFileExt(normalizedPath) === 'pdf') {
-    openPdfInBrowserTab(normalizedPath);
-    return;
-  }
   if (typeof window !== 'undefined') {
     const inMainTowerApp = window.location.pathname !== '/file-viewer' && !window.location.pathname.startsWith('/shared/');
     if (inMainTowerApp && (isLinkableTowerPath(normalizedPath) || isTowerLocalPath(normalizedPath))) {
@@ -237,4 +233,26 @@ export function splitFilePathsInText(
   if (lastIndex === 0) return [];
   if (lastIndex < text.length) parts.push(text.slice(lastIndex));
   return parts;
+}
+
+/** Download local files with authenticated fetch; never navigate to a host filesystem URL. */
+export async function downloadTowerFile(filePath: string): Promise<void> {
+  const normalized = normalizeTowerFilePath(filePath);
+  const token = localStorage.getItem('token') || '';
+  const response = await fetch(`/api/files/serve?path=${encodeURIComponent(normalized)}&download=1`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!response.ok) throw new Error(`파일 다운로드에 실패했습니다 (HTTP ${response.status}).`);
+  if ((response.headers.get('content-type') || '').includes('text/html') && getFileExt(normalized) !== 'html') {
+    throw new Error('파일 대신 웹 화면이 반환되었습니다. 다운로드 경로를 확인해야 합니다.');
+  }
+  const blob = await response.blob();
+  const objectUrl = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = objectUrl;
+  anchor.download = normalized.split('/').pop() || 'download';
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
 }

@@ -91,14 +91,14 @@ CLAUDE_ENABLED=false
 # Provider credentials are entered in Tower's first-run secure setup screen.
 # Default routes:
 # - OpenRouter: openrouter/auto
-# - Direct OpenAI Responses: gpt-5.6-terra
+# - LiteLLM Router: litellm-responses/smartest (when configured)
 ```
 
 Claude Code CLI is now an **archived break-glass fallback**. Install/authenticate it only if you explicitly need to test the old Claude engine path, then set both `CLAUDE_ENABLED=true` and `TOWER_ENABLE_ARCHIVED_CLAUDE_ENGINE=true`.
 
 ### 3. Pi Agent Engine / AI Router
 
-Tower supports multiple AI engines simultaneously. Pi Agent is built on the [Pi coding agent SDK](https://github.com/badlogic/pi-mono) and routes requests to **OpenRouter** by default or to any endpoint implementing the OpenAI Responses API.
+Tower supports multiple AI engines simultaneously. Pi Agent is built on the [Pi coding agent SDK](https://github.com/badlogic/pi-mono). Its supported inference routes are the configured **LiteLLM Router** (`litellm-responses/*`) and the official **OpenRouter** endpoint (`openrouter/*`); direct Azure/OpenAI/Codex Pi providers are retired.
 
 ```bash
 # Add to .env:
@@ -110,9 +110,9 @@ PI_ENABLED=true
 # Recommended: OpenRouter — get a key at https://openrouter.ai/keys
 OPENROUTER_API_KEY=sk-or-v1-...
 
-# Alternative: OpenAI-compatible Responses endpoint
-# OPENAI_RESPONSES_BASE_URL=https://api.openai.com/v1
-# OPENAI_RESPONSES_API_KEY=sk-...
+# Alternative: your LiteLLM Router (Responses endpoint)
+# LITELLM_BASE_URL=https://router.example.com/v1
+# LITELLM_API_KEY=...
 
 # Verify that the configured provider matches the default model
 npm run provider:doctor
@@ -126,12 +126,12 @@ Each VM keeps its writable model registry in `data/models.json`. `setup.sh` crea
 {
   "pi": [
     { "provider": "openrouter", "modelId": "openrouter/auto", "name": "OpenRouter Auto", "badge": "OR", "enabled": true, "api": "openai-completions" },
-    { "provider": "openai-responses-compatible", "modelId": "default", "name": "OpenAI-compatible Responses", "badge": "API", "enabled": true, "api": "openai-responses" }
+    { "provider": "litellm-responses", "modelId": "smartest", "name": "Core", "enabled": true, "api": "openai-responses" }
   ]
 }
 ```
 
-> **How it works**: Pi engine uses whichever upstream providers you wire up — usage is metered per token or handled by your router policy. The old Claude engine is archived behind a two-flag break-glass path and is no longer part of the default install.
+> **How it works**: Older `data/models.json` entries for direct providers are ignored at execution even if still enabled. Context compaction normally uses the session model; `PI_COMPACTION_FALLBACK_MODELS` can select a separately tested Router/OpenRouter model. `PI_CODEX_FALLBACK_MODELS` is only for recovery from legacy Codex errors and cannot enable a direct provider. The old Claude engine is archived behind a two-flag break-glass path and is no longer part of the default install.
 
 ### 3b. Pi-Only Install (No Claude)
 
@@ -202,6 +202,32 @@ Before enabling Google connections:
 Tower requires `GOOGLE_REDIRECT_URI` to exactly equal `${PUBLIC_URL}/api/auth/google/callback`. If the client is missing, the callback is HTTP on a remote host, or the URI does not match, Agent creation keeps Google choices disabled and shows the callback URI the administrator must register. Agents can still be created without Google and connected later.
 
 The default scopes include Gmail read/compose/send, Calendar read, Drive read, and basic profile information. Apps left in Google OAuth **Testing** mode may be limited to test users and may receive short-lived refresh-token behavior. Review Google verification requirements before organization-wide production use.
+
+### Separate development Google callback routing
+
+`npm run dev:backend` sets `TOWER_DEPLOYMENT_ID=development`. This mode requires
+an untracked `.env.local` at the repository root with these two public settings:
+
+```env
+PUBLIC_URL=http://localhost:32354
+GOOGLE_REDIRECT_URI=http://localhost:32354/api/auth/google/callback
+```
+
+For a remote development server, use its HTTPS origin in both settings instead.
+Register that callback in the Google Cloud Web OAuth client before connecting.
+The backend reads only these two keys from `.env.local`; it does not load OAuth
+secrets or other settings from this file. These keys override inherited routing
+in development, so a production environment inherited by the shell cannot send
+the development callback to production. Missing or mismatched routing stops the
+development backend with an explicit configuration error.
+
+Production keeps its existing environment / `.env` configuration and never reads
+this development routing file. Do not change the shared `.env` callback to test
+development. Do not mark production with `TOWER_DEPLOYMENT_ID=development`.
+The existing OAuth client credentials may be reused if Google Cloud authorizes
+both callbacks; separate development and production clients remain an optional
+additional isolation measure. Other tools (such as Vite) can also read `.env.local`,
+so keep this file limited to non-secret public routing and never add secret `VITE_` keys.
 
 ### 4. Clone & Install
 
@@ -410,12 +436,12 @@ Add to your `.env`:
 DATABASE_URL=postgresql://tower:your-secure-password@127.0.0.1:5433/tower_chat
 ```
 
-**Alternative: peer-auth over the Unix socket** (no password, the OS user must match the PG role). Useful on single-tenant self-hosted servers where the OS account (`toweradmin`) owns both the app and the DB:
+**Alternative: peer-auth over the Unix socket** (no password, the OS user must match the PG role). Useful on single-tenant self-hosted servers where the OS account (`tower-user`) owns both the app and the DB:
 
 ```bash
 # Create a role named after the OS user
-sudo -u postgres createuser --createdb toweradmin
-sudo -u postgres createdb -O toweradmin tower
+sudo -u postgres createuser --createdb tower-user
+sudo -u postgres createdb -O tower-user tower
 
 # In .env — note the explicit host= for the socket directory.
 # node-postgres won't pick up the socket automatically.

@@ -17,6 +17,7 @@ export class AssistantStreamCoalescer {
   private pendingAssistantEvent: PendingAssistantMsg | null = null;
   private assistantEventTimer: ReturnType<typeof setTimeout> | null = null;
   private lastAssistantEventFlushAt = 0;
+  private textStartedForMsgId: string | null = null;
   private pendingAssistantDbUpdate: { msgId: string; content: TowerContentBlock[] } | null = null;
   private assistantDbTimer: ReturnType<typeof setTimeout> | null = null;
   private lastAssistantDbFlushAt = 0;
@@ -58,16 +59,22 @@ export class AssistantStreamCoalescer {
   }
 
   queueAssistantEvent(content: TowerContentBlock[], immediate = false) {
+    const msgId = this.deps.getMsgId();
+    const startsText = this.textStartedForMsgId !== msgId
+      && content.some((block) => block.type === 'text' && block.text.length > 0);
+    if (startsText) this.textStartedForMsgId = msgId;
     this.pendingAssistantEvent = {
       type: 'assistant',
       sessionId: this.deps.sessionId,
-      msgId: this.deps.getMsgId(),
+      msgId,
       content,
       timestamp: Date.now(),
     };
     this.perf.assistantSnapshotsQueued++;
     const elapsed = Date.now() - this.lastAssistantEventFlushAt;
-    if (immediate || elapsed >= this.deps.streamFlushMs) {
+    // First visible answer bypasses a recent tool/progress flush. Subsequent
+    // chunks retain rate limiting; DB writes keep their independent cadence.
+    if (immediate || startsText || elapsed >= this.deps.streamFlushMs) {
       this.flushAssistantEvent();
       return;
     }
@@ -118,6 +125,7 @@ export class AssistantStreamCoalescer {
   }
 
   resetPending() {
+    this.textStartedForMsgId = null;
     this.pendingAssistantEvent = null;
     this.pendingAssistantDbUpdate = null;
   }

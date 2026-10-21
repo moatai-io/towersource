@@ -3,9 +3,10 @@ import os from 'os';
 import path from 'path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-const { canAccessSession } = vi.hoisted(() => ({ canAccessSession: vi.fn() }));
+const { canAccessSession, canWriteSessionContent } = vi.hoisted(() => ({ canAccessSession: vi.fn(), canWriteSessionContent: vi.fn() }));
 vi.mock('../pm/project-access.js', () => ({
   canAccessSession,
+  canWriteSessionContent,
   canAccessRoom: vi.fn(),
   isPathAccessible: vi.fn(),
   isPathWritableByRole: vi.fn(),
@@ -22,11 +23,11 @@ describe('File Exchange destination validation', () => {
     await expect(assertFileDestination(actor, { scope: 'personal', relativeDirectory: 'files/results' })).resolves.toBeUndefined();
   });
 
-  it('allows a member to target a project-shared session they can access', async () => {
-    canAccessSession.mockResolvedValueOnce({ allowed: true });
+  it('allows the Session owner to target their Session', async () => {
+    canWriteSessionContent.mockResolvedValueOnce({ allowed: true, reason: 'owner_match' });
 
-    await expect(assertFileDestination(actor, { scope: 'session', sessionId: 'admin-created-first-session' })).resolves.toBeUndefined();
-    expect(canAccessSession).toHaveBeenCalledWith('admin-created-first-session', 7, 'member');
+    await expect(assertFileDestination(actor, { scope: 'session', sessionId: 'owned-session' })).resolves.toBeUndefined();
+    expect(canWriteSessionContent).toHaveBeenCalledWith('owned-session', 7, 'member');
   });
 
   it('keeps viewer and guest session destinations read-only', async () => {
@@ -35,7 +36,7 @@ describe('File Exchange destination validation', () => {
   });
 
   it('rejects a session destination when the actor cannot access the session', async () => {
-    canAccessSession.mockResolvedValueOnce({ allowed: false, status: 403, message: 'Access denied: private session' });
+    canWriteSessionContent.mockResolvedValueOnce({ allowed: false, status: 403, message: 'Access denied: Session content write requires Session ownership or admin/operator role' });
 
     await expect(assertFileDestination(actor, { scope: 'session', sessionId: 'private-session' })).rejects.toMatchObject({ code: 'FORBIDDEN' });
   });

@@ -18,7 +18,7 @@ This is a seed, not a finished idea of how your company should work. Make it you
 [![Status](https://img.shields.io/badge/status-research_alpha-orange)]()
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-blue)](package.json)
 
-🌐 [English](README.md) · [한국어](README.ko.md) · [Install](INSTALL.md) · [Architecture](docs/tower-guide/architecture.md)
+🌐 [English](README.md) · [한국어](README.ko.md) · [Install](INSTALL.md) · [Documentation index](docs/index.md) · [Architecture](docs/tower-guide/architecture.md)
 
 <p align="center">
   <img src="capture-chat.png" alt="Tower shared AI workspace" width="760" />
@@ -344,6 +344,12 @@ flowchart TB
     Tower -->|records, artifacts, approvals| Modes
     Modes -->|progress and deliverables| Work
 ```
+
+### Execution vocabulary
+
+A **Workstation** is the persistent environment an agent uses for work; a **Worker** is the execution service that implements assigned compute and file operations. A **Project workspace** is the files/context/access boundary, not a promise of a separate VM or OS account. `runtime-box/` and many `workbench-*` identifiers remain compatibility names in the code; they do not define the preferred product model. Workbench also remains a name for specific authoring UIs.
+
+See the [execution terminology](docs/architecture/execution-terminology.md) for current routing, compatibility limits, and code aliases, and the [code map](docs/architecture/code-map.md) to find the implementation and regression tests. Documentation naming changes do not remove compatibility code or change deployed execution.
 
 ### Core building blocks
 

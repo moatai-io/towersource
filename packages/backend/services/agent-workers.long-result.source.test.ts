@@ -53,3 +53,12 @@ describe("agent-workers long-result artifact contract", () => {
     expect(SRC).toContain("export function stopAgentRunSettlementRecovery");
   });
 });
+
+// Recovery must not mistake a persisted streaming prefix for a final answer.
+describe("active worker settlement guard", () => {
+  it("checks engine activity before reading assistant text", () => {
+    const body = SRC.slice(SRC.indexOf("async function refreshWorkerFromBackingSession"));
+    expect(body.indexOf("getAllRunningSessionIds().includes(worker.backing_session_id)")).toBeGreaterThan(0);
+    expect(body.indexOf("getAllRunningSessionIds().includes(worker.backing_session_id)")).toBeLessThan(body.indexOf("await getLastAssistantMessage"));
+  });
+});

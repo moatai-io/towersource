@@ -1,3 +1,5 @@
+import { useLayoutEffect, useState, type RefObject } from 'react';
+import { createPortal } from 'react-dom';
 import type { SlashCommandInfo } from '../../stores/chat-store';
 
 export function commandNameFields(cmd: SlashCommandInfo): string[] {
@@ -70,6 +72,18 @@ function kindLabel(cmd: SlashCommandInfo) {
   return 'sdk';
 }
 
+function kindGlyph(cmd: SlashCommandInfo) {
+  if (cmd.kind === 'skill' || cmd.source === 'skills') return '✦';
+  if (cmd.kind === 'workflow' || cmd.source === 'workflow') return '▶';
+  return '›_';
+}
+
+function kindTone(cmd: SlashCommandInfo) {
+  if (cmd.kind === 'skill' || cmd.source === 'skills') return 'border-violet-500/20 bg-violet-900/30 text-violet-400';
+  if (cmd.kind === 'workflow' || cmd.source === 'workflow') return 'border-amber-500/20 bg-amber-900/30 text-amber-400';
+  return 'border-blue-500/20 bg-blue-900/30 text-blue-400';
+}
+
 function compactFallbackDescription(description?: string): string {
   if (!description) return '';
   const firstUsefulSegment = description
@@ -82,11 +96,15 @@ function compactFallbackDescription(description?: string): string {
 function pickerDetailText(cmd: SlashCommandInfo): string {
   const body = cmd.summary || compactFallbackDescription(cmd.description);
   if (!body) return '';
-  // Skill argument hints tend to be author-facing contract details (`[path]`,
-  // `[create|audit]`) unless the skill has explicitly provided a picker summary.
-  // Keep them searchable, but avoid leading with them in the visual picker fallback.
   const shouldShowHint = Boolean(cmd.argumentHint && (cmd.summary || cmd.source !== 'skills'));
   return shouldShowHint ? `${cmd.argumentHint} — ${body}` : body;
+}
+
+interface PickerPosition {
+  left: number;
+  width: number;
+  bottom: number;
+  maxHeight: number;
 }
 
 export function CommandPicker({
@@ -94,15 +112,51 @@ export function CommandPicker({
   selectedIndex,
   onSelect,
   onHover,
+  anchorRef,
 }: {
   commands: SlashCommandInfo[];
   selectedIndex: number;
   onSelect: (commandText: string) => void;
   onHover: (index: number) => void;
+  anchorRef: RefObject<HTMLElement | null>;
 }) {
-  if (commands.length === 0) return null;
-  return (
-    <div className="absolute bottom-full left-0 right-0 mb-2 max-h-72 overflow-y-auto rounded-xl border border-surface-700/50 bg-surface-800/90 shadow-xl backdrop-blur-xl">
+  const [position, setPosition] = useState<PickerPosition | null>(null);
+
+  useLayoutEffect(() => {
+    const updatePosition = () => {
+      const anchor = anchorRef.current;
+      if (!anchor) return;
+      const rect = anchor.getBoundingClientRect();
+      const viewportHeight = window.visualViewport?.height || window.innerHeight;
+      const availableAbove = Math.max(160, rect.top - 12);
+      setPosition({
+        left: rect.left,
+        width: rect.width,
+        bottom: Math.max(8, viewportHeight - rect.top + 8),
+        maxHeight: Math.min(768, Math.floor(availableAbove * 0.92)),
+      });
+    };
+
+    updatePosition();
+    window.addEventListener('resize', updatePosition);
+    window.addEventListener('scroll', updatePosition, true);
+    window.visualViewport?.addEventListener('resize', updatePosition);
+    window.visualViewport?.addEventListener('scroll', updatePosition);
+    return () => {
+      window.removeEventListener('resize', updatePosition);
+      window.removeEventListener('scroll', updatePosition, true);
+      window.visualViewport?.removeEventListener('resize', updatePosition);
+      window.visualViewport?.removeEventListener('scroll', updatePosition);
+    };
+  }, [anchorRef]);
+
+  if (commands.length === 0 || !position || typeof document === 'undefined') return null;
+  return createPortal(
+    <div
+      data-testid="slash-command-picker"
+      className="fixed z-[1000] overflow-y-auto overscroll-contain rounded-xl border border-surface-700/50 bg-surface-800/95 shadow-2xl backdrop-blur-xl"
+      style={{ left: position.left, width: position.width, bottom: position.bottom, maxHeight: position.maxHeight }}
+    >
       {commands.map((cmd, idx) => {
         const commandText = cmd.canonical || cmd.name;
         const detailText = pickerDetailText(cmd);
@@ -116,7 +170,12 @@ export function CommandPicker({
             onMouseEnter={() => onHover(idx)}
           >
             <div className="flex items-center gap-2">
-              <span className="shrink-0 font-mono text-primary-500/70 group-hover:text-primary-400">/</span>
+              <span
+                aria-hidden="true"
+                className={`flex h-5 min-w-5 shrink-0 items-center justify-center rounded-md border px-1 font-mono text-[11px] font-semibold ${kindTone(cmd)}`}
+              >
+                {kindGlyph(cmd)}
+              </span>
               <span className="truncate font-medium">{commandText}</span>
               {cmd.displayName && cmd.displayName !== commandText && (
                 <span className="truncate text-[12px] text-gray-500">{cmd.displayName}</span>
@@ -132,13 +191,7 @@ export function CommandPicker({
                   {scopeLabel(cmd.scope)}
                 </span>
               )}
-              <span className={`ml-auto shrink-0 rounded-full px-1.5 py-0.5 text-[11px] font-medium ${
-                cmd.source === 'commands'
-                  ? 'border border-blue-500/20 bg-blue-900/30 text-blue-400'
-                  : cmd.source === 'skills'
-                    ? 'border border-violet-500/20 bg-violet-900/30 text-violet-400'
-                    : 'border border-surface-600/30 bg-surface-700/50 text-gray-500'
-              }`}>
+              <span className={`ml-auto shrink-0 rounded-full border px-1.5 py-0.5 text-[11px] font-medium ${kindTone(cmd)}`}>
                 {kindLabel(cmd)}
               </span>
             </div>
@@ -150,6 +203,7 @@ export function CommandPicker({
           </button>
         );
       })}
-    </div>
+    </div>,
+    document.body,
   );
 }

@@ -1,3 +1,4 @@
+import { preserveAgentExecutionAuthority } from '../services/authority/agent-authority-policy-update.js';
 import { Type } from '@sinclair/typebox';
 import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
 import { execute, query, queryOne } from '../db/pg-repo.js';
@@ -118,8 +119,11 @@ export function createPrimaryAgentProfileTools(ctx: Context): ToolDefinition[] {
       const denied = await assertProfileUpdateContext(ctx, p.targetProjectId); if (denied) return result(denied, true);
       const row = await loadEditableProfile(ctx, p.targetProjectId);
       if (!row?.instruction_version) return result('Target Project has no explicit Primary Agent Profile.', true);
+      let authorityPolicy: Record<string, unknown>;
+      try { authorityPolicy = preserveAgentExecutionAuthority(row.authority_policy || {}, p.changes.authorityPolicy); }
+      catch (error) { return result((error as Error).message, true); }
       const before = { displayName: row.display_name, face: row.face, tagline: row.tagline, role: row.role, promise: row.promise, instruction: row.instruction, authorityPolicy: row.authority_policy || {}, toolPolicy: row.tool_policy || {} };
-      return result(JSON.stringify({ ok: true, targetProjectId: p.targetProjectId, currentVersion: row.instruction_version, before, after: { ...before, ...p.changes }, existingSessionsKeepPinnedVersion: true }, null, 2));
+      return result(JSON.stringify({ ok: true, targetProjectId: p.targetProjectId, currentVersion: row.instruction_version, before, after: { ...before, ...p.changes, authorityPolicy }, existingSessionsKeepPinnedVersion: true }, null, 2));
     },
   } as ToolDefinition;
   const update: ToolDefinition = {
@@ -132,7 +136,20 @@ export function createPrimaryAgentProfileTools(ctx: Context): ToolDefinition[] {
       const denied = await assertProfileUpdateContext(ctx, p.targetProjectId); if (denied) return result(denied, true);
       const row = await loadEditableProfile(ctx, p.targetProjectId);
       if (!row?.instruction_version) return result('Target Project has no explicit Primary Agent Profile.', true);
-      const next = { displayName: row.display_name, face: row.face, tagline: row.tagline, role: row.role, promise: row.promise, instruction: row.instruction, authorityPolicy: row.authority_policy || {}, toolPolicy: row.tool_policy || {}, ...p.changes };
+      let authorityPolicy: Record<string, unknown>;
+      try { authorityPolicy = preserveAgentExecutionAuthority(row.authority_policy || {}, p.changes.authorityPolicy); }
+      catch (error) { return result((error as Error).message, true); }
+      const next = {
+        displayName: row.display_name,
+        face: row.face,
+        tagline: row.tagline,
+        role: row.role,
+        promise: row.promise,
+        instruction: row.instruction,
+        toolPolicy: row.tool_policy || {},
+        ...p.changes,
+        authorityPolicy,
+      };
       try {
         ensureProjectAgentInstruction(row.root_path, next);
       } catch (error: any) {
@@ -255,6 +272,7 @@ export function createPrimaryAgentStaffingTools(ctx: Context): ToolDefinition[] 
         authorityCard: { authorityPolicy: p.authorityPolicy || {}, toolPolicy: p.toolPolicy || {}, approvalConditions: p.capabilityRequirements.approvalConditions || [] },
         operatingPreview: p.instruction,
         firstMission: p.firstMission,
+        initialInterviewNotice: '생성 후 승인된 세션 모델로 짧은 첫 안내를 자동 실행합니다. 모델 사용량이 발생하며 중지할 수 있습니다. 도구·웹 조회 없이 질문 하나 또는 실행안을 표시합니다. 먼저 대화를 시작하면 생략합니다.',
         existingSessionsAffected: false,
         nextAction: 'Show this complete package to the user and call create_primary_agent_project only after explicit approval.',
       }, null, 2));

@@ -374,6 +374,7 @@ function loadPersistedTabs(): PersistedTabs {
   return { chatTabs: [], systemTabs: [], tabs: [], activeTabId: null, activeSystemTabId: null, tabOrder: [] };
 }
 
+const tabsOwnerKey = getTabsKey();
 function savePersistedTabs(state: PersistedTabs): void {
   try {
     const slim: PersistedTabs = {
@@ -387,7 +388,8 @@ function savePersistedTabs(state: PersistedTabs): void {
       activeSystemTabId: state.activeSystemTabId,
       tabOrder: normalizeTabOrder(state.chatTabs, state.tabs, state.systemTabs, state.tabOrder),
     };
-    localStorage.setItem(getTabsKey(), JSON.stringify(slim));
+    // A debounced callback from the old page must not write under a new account.
+    localStorage.setItem(tabsOwnerKey, JSON.stringify(slim));
   } catch { /* quota full → silent */ }
 }
 
@@ -431,6 +433,8 @@ interface FileState {
   // ─── Tab state ───
   tabs: FileTab[];
   activeTabId: string | null;
+  /** Monotonic boundary for async Viewer reads across chat navigation (not persisted). */
+  chatNavigationEpoch: number;
   /** Chat tabs (session bookmarks). The active one = sessionId === activeSessionId while activeTabId===null. */
   chatTabs: ChatTab[];
   /** First-class app/system tabs such as Publishing Hub. */
@@ -451,7 +455,7 @@ interface FileState {
   /** Last clicked path for Shift range selection */
   lastClickedPath: string | null;
   /** In-app file clipboard used by sidebar copy → paste flows */
-  fileClipboard: { paths: string[]; copiedAt: number } | null;
+  fileClipboard: { paths: string[]; copiedAt: number; mode?: 'copy' | 'cut' } | null;
 
   setTree: (entries: FileEntry[]) => void;
   setTreeRoot: (path: string) => void;
@@ -573,7 +577,7 @@ interface FileState {
   /** Set last clicked path (for Shift range base) */
   setLastClickedPath: (path: string) => void;
   /** Store paths for a later paste into a folder */
-  setFileClipboard: (paths: string[]) => void;
+  setFileClipboard: (paths: string[], mode?: 'copy' | 'cut') => void;
   /** Clear the in-app file clipboard */
   clearFileClipboard: () => void;
 }
@@ -620,6 +624,7 @@ export const useFileStore = create<FileState>((set, get) => ({
   // ─── Tab state (hydrated from localStorage at module load) ───
   tabs: _persistedTabs.tabs,
   activeTabId: _persistedTabs.activeTabId,
+  chatNavigationEpoch: 0,
   chatTabs: _persistedTabs.chatTabs,
   systemTabs: _persistedTabs.systemTabs,
   activeSystemTabId: _persistedTabs.activeSystemTabId,
@@ -1026,7 +1031,7 @@ export const useFileStore = create<FileState>((set, get) => ({
     };
   }),
 
-  activateChatSlot: () => set({ activeTabId: null, activeSystemTabId: null, activeFilePane: 'main' }),
+  activateChatSlot: () => set((s) => ({ activeTabId: null, activeSystemTabId: null, activeFilePane: 'main', chatNavigationEpoch: s.chatNavigationEpoch + 1 })),
 
 
   openSystemTab: (kind, options) => set((s) => {
@@ -1071,13 +1076,12 @@ export const useFileStore = create<FileState>((set, get) => ({
   closeSystemTab: (id) => set((s) => {
     const newSystemTabs = s.systemTabs.filter((t) => t.id !== id);
     const isActive = s.activeSystemTabId === id;
-    const fallbackFile = isActive ? s.tabs[0] : null;
     return {
       systemTabs: newSystemTabs,
       tabOrder: normalizeTabOrder(s.chatTabs, s.tabs, newSystemTabs, s.tabOrder),
       activeSystemTabId: isActive ? null : s.activeSystemTabId,
-      activeTabId: isActive && fallbackFile ? fallbackFile.id : s.activeTabId,
-      openFile: isActive && fallbackFile ? { path: fallbackFile.path, content: fallbackFile.content, language: fallbackFile.language, modified: fallbackFile.modified, encoding: fallbackFile.encoding } : s.openFile,
+      // Closing a system tab is not an explicit request to open an old file.
+      activeTabId: s.activeTabId,
     };
   }),
 
@@ -1097,7 +1101,7 @@ export const useFileStore = create<FileState>((set, get) => ({
 
     // Already open → just enter chat mode (no list change).
     if (s.chatTabs.some((t) => t.sessionId === sessionId)) {
-      return { activeTabId: null, activeSystemTabId: null, activeFilePane: 'main' };
+      return { activeTabId: null, activeSystemTabId: null, activeFilePane: 'main', chatNavigationEpoch: s.chatNavigationEpoch + 1 };
     }
 
     const newTab: ChatTab = { id: generateUUID(), sessionId, pinned: false };
@@ -1132,6 +1136,7 @@ export const useFileStore = create<FileState>((set, get) => ({
       tabOrder: normalizeTabOrder(newChatTabs, s.tabs, s.systemTabs, [...s.tabOrder.filter((i) => i.kind !== 'chat' || newChatTabs.some((t) => t.id === i.id)), { kind: 'chat', id: newTab.id }]),
       activeTabId: null,
       activeSystemTabId: null,
+      chatNavigationEpoch: s.chatNavigationEpoch + 1,
     };
   }),
 
@@ -1157,15 +1162,11 @@ export const useFileStore = create<FileState>((set, get) => ({
       tabOrder: normalizeTabOrder(newChatTabs, s.tabs, s.systemTabs, s.tabOrder),
     };
     if (isClosingActiveChat && newChatTabs.length === 0) {
-      const fallbackFile = s.tabs.find((t) => t.id !== s.splitTabId) ?? s.tabs[0] ?? null;
-      if (fallbackFile) {
-        nextState.activeTabId = fallbackFile.id;
-        nextState.activeSystemTabId = null;
-        nextState.activeFilePane = 'main';
-        nextState.openFile = { path: fallbackFile.path, content: fallbackFile.content, language: fallbackFile.language, modified: fallbackFile.modified, encoding: fallbackFile.encoding };
-        nextState.originalContent = fallbackFile.content;
-        nextState.lastOpenedFilePath = fallbackFile.path;
-      }
+      // Keep the empty chat surface. Historical file tabs remain available,
+      // but must not become the foreground just because chat was closed.
+      nextState.activeTabId = null;
+      nextState.activeSystemTabId = null;
+      nextState.activeFilePane = 'main';
     }
     set(nextState);
     return nextSessionId;
@@ -1437,8 +1438,8 @@ export const useFileStore = create<FileState>((set, get) => ({
   setLastClickedPath: (path) =>
     set({ lastClickedPath: path }),
 
-  setFileClipboard: (paths) =>
-    set({ fileClipboard: { paths: [...new Set(paths)], copiedAt: Date.now() } }),
+  setFileClipboard: (paths, mode = 'copy') =>
+    set({ fileClipboard: { paths: [...new Set(paths)], copiedAt: Date.now(), mode } }),
 
   clearFileClipboard: () =>
     set({ fileClipboard: null }),

@@ -33,11 +33,10 @@ describe('internal Channel P6-A dead runtime removal', () => {
     expect(ws).not.toContain('function handleShareToChannel');
   });
 
-  it('keeps retired room sync scope as a no-op rather than a live subscriber registry', () => {
-    expect(ws).not.toContain('const roomClients = new Map');
-    expect(ws).not.toContain('getRoomClientIds(');
-    expect(ws).not.toContain('addRoomClient(');
-    expect(ws).toContain('Internal channel subscriptions are retired');
+  it('removes retired room scope from the shared WS bus', () => {
+    expect(ws).not.toContain('localBroadcastToRoom');
+    expect(ws).not.toContain('broadcastToRoom');
+    expect(ws).not.toContain('room(roomId, data)');
   });
 
   it('owns TowerSeverity outside the removed Tower channel producer', () => {

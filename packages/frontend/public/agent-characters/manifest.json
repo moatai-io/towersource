@@ -1,20 +1,914 @@
 {
-  "version": 1,
+  "version": 4,
   "canonicalLocation": "packages/frontend/public/agent-characters",
   "storagePolicy": "Product-ready WebP assets live here under source control. Database records store only stable character IDs in project.agent.face; generated PNG originals and experimental galleries are not runtime dependencies.",
   "characters": [
-    { "id": "core-talent", "label": "AI 인재 파트너", "group": "core", "file": "core-talent.webp", "listCrop": { "scale": 1.28, "x": 50, "y": 35 }, "listAccent": "#6f8f86" },
-    { "id": "core-editor", "label": "콘텐츠 편집자", "group": "core", "file": "core-editor.webp", "listCrop": { "scale": 1.32, "x": 50, "y": 34 }, "listAccent": "#9b755e" },
-    { "id": "core-engineer", "label": "제품 엔지니어", "group": "core", "file": "core-engineer.webp", "listCrop": { "scale": 1.34, "x": 50, "y": 33 }, "listAccent": "#607f78" },
-    { "id": "korean-diverse-1", "label": "트렌드 리서처", "group": "korean", "file": "korean-diverse-1.webp", "listCrop": { "scale": 1.35, "x": 50, "y": 34 }, "listAccent": "#6e83a1" },
-    { "id": "korean-diverse-5", "label": "AI 프로토타이퍼", "group": "korean", "file": "korean-diverse-5.webp", "listCrop": { "scale": 1.34, "x": 50, "y": 34 }, "listAccent": "#8e7194" },
-    { "id": "korean-diverse-9", "label": "고객 성공 담당자", "group": "korean", "file": "korean-diverse-9.webp", "listCrop": { "scale": 1.34, "x": 50, "y": 34 }, "listAccent": "#9b6f58" },
-    { "id": "korean-diverse-2", "label": "현장 운영 매니저", "group": "korean", "file": "korean-diverse-2.webp", "listCrop": { "scale": 1.36, "x": 50, "y": 33 }, "listAccent": "#778574" },
-    { "id": "korean-diverse-6", "label": "데이터 저널리스트", "group": "korean", "file": "korean-diverse-6.webp", "listCrop": { "scale": 1.35, "x": 50, "y": 34 }, "listAccent": "#547d7d" },
-    { "id": "korean-diverse-8", "label": "법무·계약 검토자", "group": "korean", "file": "korean-diverse-8.webp", "listCrop": { "scale": 1.42, "x": 50, "y": 32 }, "listAccent": "#92706c" },
-    { "id": "korean-diverse-3", "label": "재무·리스크 책임자", "group": "korean", "file": "korean-diverse-3.webp", "listCrop": { "scale": 1.35, "x": 50, "y": 34 }, "listAccent": "#8b6c78" },
-    { "id": "korean-diverse-4", "label": "브랜드 디렉터", "group": "korean", "file": "korean-diverse-4.webp", "listCrop": { "scale": 1.36, "x": 50, "y": 33 }, "listAccent": "#8a765f" },
-    { "id": "korean-diverse-7", "label": "제조 현장 전문가", "group": "korean", "file": "korean-diverse-7.webp", "listCrop": { "scale": 1.36, "x": 50, "y": 33 }, "listAccent": "#947448" },
-    { "id": "korean-diverse-10", "label": "교육·퍼실리테이션 리드", "group": "korean", "file": "korean-diverse-10.webp", "listCrop": { "scale": 1.38, "x": 50, "y": 33 }, "listAccent": "#8f6575" }
-  ]
+    {
+      "id": "core-talent",
+      "label": "AI 인재 파트너",
+      "group": "core",
+      "file": "core-talent.webp",
+      "listCrop": {
+        "scale": 1.01,
+        "x": 50,
+        "y": 50
+      },
+      "listAccent": "#6f8f86",
+      "expression": "empathetic"
+    },
+    {
+      "id": "core-editor",
+      "label": "콘텐츠 편집자",
+      "group": "core",
+      "file": "core-editor.webp",
+      "listCrop": {
+        "scale": 1.01,
+        "x": 50,
+        "y": 50
+      },
+      "listAccent": "#9b755e",
+      "expression": "composed"
+    },
+    {
+      "id": "core-engineer",
+      "label": "제품 엔지니어",
+      "group": "core",
+      "file": "core-engineer.webp",
+      "listCrop": {
+        "scale": 1.01,
+        "x": 50,
+        "y": 50
+      },
+      "listAccent": "#607f78",
+      "expression": "composed"
+    },
+    {
+      "id": "korean-diverse-1",
+      "label": "트렌드 리서처",
+      "group": "korean",
+      "file": "korean-diverse-1.webp",
+      "listCrop": {
+        "scale": 1.01,
+        "x": 50,
+        "y": 50
+      },
+      "listAccent": "#6e83a1",
+      "expression": "composed"
+    },
+    {
+      "id": "korean-diverse-5",
+      "label": "AI 프로토타이퍼",
+      "group": "korean",
+      "file": "korean-diverse-5.webp",
+      "listCrop": {
+        "scale": 1.01,
+        "x": 50,
+        "y": 50
+      },
+      "listAccent": "#8e7194",
+      "expression": "composed"
+    },
+    {
+      "id": "korean-diverse-9",
+      "label": "고객 성공 담당자",
+      "group": "korean",
+      "file": "korean-diverse-9.webp",
+      "listCrop": {
+        "scale": 1.01,
+        "x": 50,
+        "y": 50
+      },
+      "listAccent": "#9b6f58",
+      "expression": "composed"
+    },
+    {
+      "id": "korean-diverse-2",
+      "label": "현장 운영 매니저",
+      "group": "korean",
+      "file": "korean-diverse-2.webp",
+      "listCrop": {
+        "scale": 1.01,
+        "x": 50,
+        "y": 50
+      },
+      "listAccent": "#778574",
+      "expression": "composed"
+    },
+    {
+      "id": "korean-diverse-6",
+      "label": "데이터 저널리스트",
+      "group": "korean",
+      "file": "korean-diverse-6.webp",
+      "listCrop": {
+        "scale": 1.01,
+        "x": 50,
+        "y": 50
+      },
+      "listAccent": "#547d7d",
+      "expression": "composed"
+    },
+    {
+      "id": "korean-diverse-8",
+      "label": "법무·계약 검토자",
+      "group": "korean",
+      "file": "korean-diverse-8.webp",
+      "listCrop": {
+        "scale": 1.01,
+        "x": 50,
+        "y": 50
+      },
+      "listAccent": "#92706c",
+      "expression": "reassuring"
+    },
+    {
+      "id": "korean-diverse-3",
+      "label": "재무·리스크 책임자",
+      "group": "korean",
+      "file": "korean-diverse-3.webp",
+      "listCrop": {
+        "scale": 1.01,
+        "x": 50,
+        "y": 50
+      },
+      "listAccent": "#8b6c78",
+      "expression": "inquisitive"
+    },
+    {
+      "id": "korean-diverse-4",
+      "label": "브랜드 디렉터",
+      "group": "korean",
+      "file": "korean-diverse-4.webp",
+      "listCrop": {
+        "scale": 1.01,
+        "x": 50,
+        "y": 50
+      },
+      "listAccent": "#8a765f",
+      "expression": "composed"
+    },
+    {
+      "id": "korean-diverse-7",
+      "label": "제조 현장 전문가",
+      "group": "korean",
+      "file": "korean-diverse-7.webp",
+      "listCrop": {
+        "scale": 1.01,
+        "x": 50,
+        "y": 50
+      },
+      "listAccent": "#947448",
+      "expression": "composed"
+    },
+    {
+      "id": "korean-diverse-10",
+      "label": "교육·퍼실리테이션 리드",
+      "group": "korean",
+      "file": "korean-diverse-10.webp",
+      "listCrop": {
+        "scale": 1.01,
+        "x": 50,
+        "y": 50
+      },
+      "listAccent": "#8f6575",
+      "expression": "composed"
+    },
+    {
+      "id": "colleague-refined-1",
+      "label": "어번 단발",
+      "group": "korean",
+      "file": "colleague-refined-1.webp",
+      "listAccent": "#858082",
+      "listCrop": {
+        "scale": 1.01,
+        "x": 50,
+        "y": 50
+      },
+      "expression": "composed"
+    },
+    {
+      "id": "colleague-refined-2",
+      "label": "은회색 리더",
+      "group": "korean",
+      "file": "colleague-refined-2.webp",
+      "listAccent": "#436373",
+      "listCrop": {
+        "scale": 1.01,
+        "x": 50,
+        "y": 50
+      },
+      "expression": "composed"
+    },
+    {
+      "id": "colleague-refined-3",
+      "label": "잉크블루 단발",
+      "group": "korean",
+      "file": "colleague-refined-3.webp",
+      "listAccent": "#91604b",
+      "listCrop": {
+        "scale": 1.01,
+        "x": 50,
+        "y": 50
+      },
+      "expression": "composed"
+    },
+    {
+      "id": "colleague-refined-4",
+      "label": "밤색 웨이브",
+      "group": "korean",
+      "file": "colleague-refined-4.webp",
+      "listAccent": "#858082",
+      "listCrop": {
+        "scale": 1.01,
+        "x": 50,
+        "y": 50
+      },
+      "expression": "wry"
+    },
+    {
+      "id": "colleague-refined-5",
+      "label": "실버 단발",
+      "group": "korean",
+      "file": "colleague-refined-5.webp",
+      "listAccent": "#436373",
+      "listCrop": {
+        "scale": 1.01,
+        "x": 50,
+        "y": 50
+      },
+      "expression": "composed"
+    },
+    {
+      "id": "colleague-refined-6",
+      "label": "코퍼 숏컷",
+      "group": "korean",
+      "file": "colleague-refined-6.webp",
+      "listAccent": "#91604b",
+      "listCrop": {
+        "scale": 1.01,
+        "x": 50,
+        "y": 50
+      },
+      "expression": "composed"
+    },
+    {
+      "id": "colleague-refined-7",
+      "label": "블랙 올림머리",
+      "group": "korean",
+      "file": "colleague-refined-7.webp",
+      "listAccent": "#858082",
+      "listCrop": {
+        "scale": 1.01,
+        "x": 50,
+        "y": 50
+      },
+      "expression": "welcoming"
+    },
+    {
+      "id": "colleague-refined-8",
+      "label": "플럼 픽시",
+      "group": "korean",
+      "file": "colleague-refined-8.webp",
+      "listAccent": "#436373",
+      "listCrop": {
+        "scale": 1.01,
+        "x": 50,
+        "y": 50
+      },
+      "expression": "focused"
+    },
+    {
+      "id": "colleague-refined-9",
+      "label": "샴페인 숏컷",
+      "group": "korean",
+      "file": "colleague-refined-9.webp",
+      "listAccent": "#91604b",
+      "listCrop": {
+        "scale": 1.01,
+        "x": 50,
+        "y": 50
+      },
+      "expression": "composed"
+    },
+    {
+      "id": "colleague-expanded-1",
+      "label": "긴 흑발 · 또렷함",
+      "group": "korean",
+      "file": "colleague-expanded-1.webp",
+      "listCrop": {
+        "scale": 1.01,
+        "x": 50,
+        "y": 50
+      },
+      "listAccent": "#719C98"
+    },
+    {
+      "id": "colleague-expanded-2",
+      "label": "밤색 웨이브 · 여유",
+      "group": "korean",
+      "file": "colleague-expanded-2.webp",
+      "listCrop": {
+        "scale": 1.01,
+        "x": 50,
+        "y": 50
+      },
+      "listAccent": "#719C98"
+    },
+    {
+      "id": "colleague-expanded-3",
+      "label": "애쉬 숏컷 · 결단",
+      "group": "korean",
+      "file": "colleague-expanded-3.webp",
+      "listCrop": {
+        "scale": 1.01,
+        "x": 50,
+        "y": 50
+      },
+      "listAccent": "#719C98"
+    },
+    {
+      "id": "colleague-expanded-4",
+      "label": "은발 · 침착",
+      "group": "korean",
+      "file": "colleague-expanded-4.webp",
+      "listCrop": {
+        "scale": 1.01,
+        "x": 50,
+        "y": 50
+      },
+      "listAccent": "#719C98"
+    },
+    {
+      "id": "colleague-expanded-5",
+      "label": "자주 단발 · 재치",
+      "group": "korean",
+      "file": "colleague-expanded-5.webp",
+      "listCrop": {
+        "scale": 1.01,
+        "x": 50,
+        "y": 50
+      },
+      "listAccent": "#719C98"
+    },
+    {
+      "id": "colleague-expanded-6",
+      "label": "검정 가르마 · 호기심",
+      "group": "korean",
+      "file": "colleague-expanded-6.webp",
+      "listCrop": {
+        "scale": 1.01,
+        "x": 50,
+        "y": 50
+      },
+      "listAccent": "#719C98"
+    },
+    {
+      "id": "colleague-expanded-7",
+      "label": "샴페인 단발 · 느긋함",
+      "group": "korean",
+      "file": "colleague-expanded-7.webp",
+      "listCrop": {
+        "scale": 1.01,
+        "x": 50,
+        "y": 50
+      },
+      "listAccent": "#719C98"
+    },
+    {
+      "id": "colleague-expanded-8",
+      "label": "깊은 웨이브 · 자신감",
+      "group": "korean",
+      "file": "colleague-expanded-8.webp",
+      "listCrop": {
+        "scale": 1.01,
+        "x": 50,
+        "y": 50
+      },
+      "listAccent": "#719C98"
+    },
+    {
+      "id": "colleague-expanded-9",
+      "label": "올림머리 · 분석",
+      "group": "korean",
+      "file": "colleague-expanded-9.webp",
+      "listCrop": {
+        "scale": 1.01,
+        "x": 50,
+        "y": 50
+      },
+      "listAccent": "#719C98"
+    },
+    {
+      "id": "colleague-expanded-10",
+      "label": "짧은 흑발 · 친절",
+      "group": "korean",
+      "file": "colleague-expanded-10.webp",
+      "listCrop": {
+        "scale": 1.01,
+        "x": 50,
+        "y": 50
+      },
+      "listAccent": "#719C98"
+    },
+    {
+      "id": "colleague-expanded-11",
+      "label": "구리 숏컷 · 생기",
+      "group": "korean",
+      "file": "colleague-expanded-11.webp",
+      "listCrop": {
+        "scale": 1.01,
+        "x": 50,
+        "y": 50
+      },
+      "listAccent": "#719C98"
+    },
+    {
+      "id": "colleague-expanded-12",
+      "label": "은색 단발 · 통찰",
+      "group": "korean",
+      "file": "colleague-expanded-12.webp",
+      "listCrop": {
+        "scale": 1.01,
+        "x": 50,
+        "y": 50
+      },
+      "listAccent": "#719C98"
+    },
+    {
+      "id": "colleague-expanded-13",
+      "label": "긴 앞머리 · 절제",
+      "group": "korean",
+      "file": "colleague-expanded-13.webp",
+      "listCrop": {
+        "scale": 1.01,
+        "x": 50,
+        "y": 50
+      },
+      "listAccent": "#719C98"
+    },
+    {
+      "id": "colleague-expanded-14",
+      "label": "로즈 단발 · 열린 시선",
+      "group": "korean",
+      "file": "colleague-expanded-14.webp",
+      "listCrop": {
+        "scale": 1.01,
+        "x": 50,
+        "y": 50
+      },
+      "listAccent": "#719C98"
+    },
+    {
+      "id": "colleague-expanded-15",
+      "label": "청회 웨이브 · 유쾌",
+      "group": "korean",
+      "file": "colleague-expanded-15.webp",
+      "listCrop": {
+        "scale": 1.01,
+        "x": 50,
+        "y": 50
+      },
+      "listAccent": "#719C98"
+    },
+    {
+      "id": "colleague-expanded-16",
+      "label": "자주 컬 · 안정",
+      "group": "korean",
+      "file": "colleague-expanded-16.webp",
+      "listCrop": {
+        "scale": 1.01,
+        "x": 50,
+        "y": 50
+      },
+      "listAccent": "#719C98"
+    },
+    {
+      "id": "colleague-expanded-17",
+      "label": "청록 단발 · 집중",
+      "group": "korean",
+      "file": "colleague-expanded-17.webp",
+      "listCrop": {
+        "scale": 1.01,
+        "x": 50,
+        "y": 50
+      },
+      "listAccent": "#719C98"
+    },
+    {
+      "id": "colleague-expanded-18",
+      "label": "밤색 가르마 · 온화",
+      "group": "korean",
+      "file": "colleague-expanded-18.webp",
+      "listCrop": {
+        "scale": 1.01,
+        "x": 50,
+        "y": 50
+      },
+      "listAccent": "#719C98"
+    },
+    {
+      "id": "colleague-expanded-19",
+      "label": "검정 묶음머리 · 정돈",
+      "group": "korean",
+      "file": "colleague-expanded-19.webp",
+      "listCrop": {
+        "scale": 1.01,
+        "x": 50,
+        "y": 50
+      },
+      "listAccent": "#719C98"
+    },
+    {
+      "id": "colleague-expanded-20",
+      "label": "차콜 퀴프 · 질문",
+      "group": "korean",
+      "file": "colleague-expanded-20.webp",
+      "listCrop": {
+        "scale": 1.01,
+        "x": 50,
+        "y": 50
+      },
+      "listAccent": "#719C98"
+    },
+    {
+      "id": "colleague-expanded-21",
+      "label": "라일락 숏컷 · 대담",
+      "group": "korean",
+      "file": "colleague-expanded-21.webp",
+      "listCrop": {
+        "scale": 1.01,
+        "x": 50,
+        "y": 50
+      },
+      "listAccent": "#719C98"
+    },
+    {
+      "id": "colleague-expanded-22",
+      "label": "은색 가르마 · 다정",
+      "group": "korean",
+      "file": "colleague-expanded-22.webp",
+      "listCrop": {
+        "scale": 1.01,
+        "x": 50,
+        "y": 50
+      },
+      "listAccent": "#719C98"
+    },
+    {
+      "id": "colleague-expanded-23",
+      "label": "어번 뱅 · 명료",
+      "group": "korean",
+      "file": "colleague-expanded-23.webp",
+      "listCrop": {
+        "scale": 1.01,
+        "x": 50,
+        "y": 50
+      },
+      "listAccent": "#719C98"
+    },
+    {
+      "id": "colleague-expanded-24",
+      "label": "샌드 컬 · 편안",
+      "group": "korean",
+      "file": "colleague-expanded-24.webp",
+      "listCrop": {
+        "scale": 1.01,
+        "x": 50,
+        "y": 50
+      },
+      "listAccent": "#719C98"
+    },
+    {
+      "id": "colleague-expanded-25",
+      "label": "흑발 웨이브 · 재치",
+      "group": "korean",
+      "file": "colleague-expanded-25.webp",
+      "listCrop": {
+        "scale": 1.01,
+        "x": 50,
+        "y": 50
+      },
+      "listAccent": "#719C98"
+    },
+    {
+      "id": "colleague-expanded-26",
+      "label": "어번 올림 · 경청",
+      "group": "korean",
+      "file": "colleague-expanded-26.webp",
+      "listCrop": {
+        "scale": 1.01,
+        "x": 50,
+        "y": 50
+      },
+      "listAccent": "#719C98"
+    },
+    {
+      "id": "colleague-expanded-27",
+      "label": "은빛 비대칭 · 당당",
+      "group": "korean",
+      "file": "colleague-expanded-27.webp",
+      "listCrop": {
+        "scale": 1.01,
+        "x": 50,
+        "y": 50
+      },
+      "listAccent": "#719C98"
+    },
+    {
+      "id": "colleague-expanded-28",
+      "label": "남색 숏컷 · 사려",
+      "group": "korean",
+      "file": "colleague-expanded-28.webp",
+      "listCrop": {
+        "scale": 1.01,
+        "x": 50,
+        "y": 50
+      },
+      "listAccent": "#719C98"
+    },
+    {
+      "id": "colleague-bold-1",
+      "label": "삭발 수염 · 듬직함",
+      "group": "korean",
+      "file": "colleague-bold-1.webp",
+      "listCrop": {
+        "scale": 1.01,
+        "x": 50,
+        "y": 50
+      },
+      "listAccent": "#719C98"
+    },
+    {
+      "id": "colleague-bold-2",
+      "label": "어번 모히칸 · 대담함",
+      "group": "korean",
+      "file": "colleague-bold-2.webp",
+      "listCrop": {
+        "scale": 1.01,
+        "x": 50,
+        "y": 50
+      },
+      "listAccent": "#719C98"
+    },
+    {
+      "id": "colleague-bold-3",
+      "label": "묶음머리 수염 · 침착함",
+      "group": "korean",
+      "file": "colleague-bold-3.webp",
+      "listCrop": {
+        "scale": 1.01,
+        "x": 50,
+        "y": 50
+      },
+      "listAccent": "#719C98"
+    },
+    {
+      "id": "colleague-bold-4",
+      "label": "드레드록 · 자신감",
+      "group": "korean",
+      "file": "colleague-bold-4.webp",
+      "listCrop": {
+        "scale": 1.01,
+        "x": 50,
+        "y": 50
+      },
+      "listAccent": "#719C98"
+    },
+    {
+      "id": "colleague-bold-5",
+      "label": "은빛 플랫톱 · 강인함",
+      "group": "korean",
+      "file": "colleague-bold-5.webp",
+      "listCrop": {
+        "scale": 1.01,
+        "x": 50,
+        "y": 50
+      },
+      "listAccent": "#719C98"
+    },
+    {
+      "id": "colleague-bold-6",
+      "label": "비대칭 언더컷 · 집중",
+      "group": "korean",
+      "file": "colleague-bold-6.webp",
+      "listCrop": {
+        "scale": 1.01,
+        "x": 50,
+        "y": 50
+      },
+      "listAccent": "#719C98"
+    },
+    {
+      "id": "colleague-bold-7",
+      "label": "긴 머리 수염 · 여유",
+      "group": "korean",
+      "file": "colleague-bold-7.webp",
+      "listCrop": {
+        "scale": 1.01,
+        "x": 50,
+        "y": 50
+      },
+      "listAccent": "#719C98"
+    },
+    {
+      "id": "colleague-bold-8",
+      "label": "플래티넘 버즈컷 · 재치",
+      "group": "korean",
+      "file": "colleague-bold-8.webp",
+      "listCrop": {
+        "scale": 1.01,
+        "x": 50,
+        "y": 50
+      },
+      "listAccent": "#719C98"
+    },
+    {
+      "id": "colleague-distinct-1",
+      "label": "은발 콧수염 · 노련함",
+      "group": "korean",
+      "file": "colleague-distinct-1.webp",
+      "listCrop": {
+        "scale": 1.01,
+        "x": 50,
+        "y": 50
+      },
+      "listAccent": "#719C98"
+    },
+    {
+      "id": "colleague-distinct-2",
+      "label": "어번 컬 · 자유로움",
+      "group": "korean",
+      "file": "colleague-distinct-2.webp",
+      "listCrop": {
+        "scale": 1.01,
+        "x": 50,
+        "y": 50
+      },
+      "listAccent": "#719C98"
+    },
+    {
+      "id": "colleague-distinct-3",
+      "label": "높은 포니테일 · 활력",
+      "group": "korean",
+      "file": "colleague-distinct-3.webp",
+      "listCrop": {
+        "scale": 1.01,
+        "x": 50,
+        "y": 50
+      },
+      "listAccent": "#719C98"
+    },
+    {
+      "id": "colleague-distinct-4",
+      "label": "은색 앞머리 콧수염 · 의구심",
+      "group": "korean",
+      "file": "colleague-distinct-4.webp",
+      "listCrop": {
+        "scale": 1.01,
+        "x": 50,
+        "y": 50
+      },
+      "listAccent": "#719C98"
+    },
+    {
+      "id": "colleague-distinct-5",
+      "label": "검정 올백 · 예리함",
+      "group": "korean",
+      "file": "colleague-distinct-5.webp",
+      "listCrop": {
+        "scale": 1.01,
+        "x": 50,
+        "y": 50
+      },
+      "listAccent": "#719C98"
+    },
+    {
+      "id": "colleague-distinct-6",
+      "label": "둥근 은빛 수염 · 포근함",
+      "group": "korean",
+      "file": "colleague-distinct-6.webp",
+      "listCrop": {
+        "scale": 1.01,
+        "x": 50,
+        "y": 50
+      },
+      "listAccent": "#719C98"
+    },
+    {
+      "id": "colleague-distinct-7",
+      "label": "자주 비대칭 · 독창성",
+      "group": "korean",
+      "file": "colleague-distinct-7.webp",
+      "listCrop": {
+        "scale": 1.01,
+        "x": 50,
+        "y": 50
+      },
+      "listAccent": "#719C98"
+    },
+    {
+      "id": "colleague-distinct-8",
+      "label": "백발 숏컷 · 여유",
+      "group": "korean",
+      "file": "colleague-distinct-8.webp",
+      "listCrop": {
+        "scale": 1.01,
+        "x": 50,
+        "y": 50
+      },
+      "listAccent": "#719C98"
+    },
+    {
+      "id": "colleague-expression-1",
+      "label": "구리 콧수염 · 염려",
+      "group": "korean",
+      "file": "colleague-expression-1.webp",
+      "listCrop": {
+        "scale": 1.01,
+        "x": 50,
+        "y": 50
+      },
+      "listAccent": "#719C98"
+    },
+    {
+      "id": "colleague-expression-2",
+      "label": "어번 컬 · 호기심",
+      "group": "korean",
+      "file": "colleague-expression-2.webp",
+      "listCrop": {
+        "scale": 1.01,
+        "x": 50,
+        "y": 50
+      },
+      "listAccent": "#719C98"
+    },
+    {
+      "id": "colleague-expression-3",
+      "label": "청록 단발 · 의심",
+      "group": "korean",
+      "file": "colleague-expression-3.webp",
+      "listCrop": {
+        "scale": 1.01,
+        "x": 50,
+        "y": 50
+      },
+      "listAccent": "#719C98"
+    },
+    {
+      "id": "colleague-expression-4",
+      "label": "묶음머리 · 결의",
+      "group": "korean",
+      "file": "colleague-expression-4.webp",
+      "listCrop": {
+        "scale": 1.01,
+        "x": 50,
+        "y": 50
+      },
+      "listAccent": "#719C98"
+    },
+    {
+      "id": "colleague-expression-5",
+      "label": "은빛 단발 · 걱정",
+      "group": "korean",
+      "file": "colleague-expression-5.webp",
+      "listCrop": {
+        "scale": 1.01,
+        "x": 50,
+        "y": 50
+      },
+      "listAccent": "#719C98"
+    },
+    {
+      "id": "colleague-expression-6",
+      "label": "은빛 수염 · 느긋함",
+      "group": "korean",
+      "file": "colleague-expression-6.webp",
+      "listCrop": {
+        "scale": 1.01,
+        "x": 50,
+        "y": 50
+      },
+      "listAccent": "#719C98"
+    },
+    {
+      "id": "colleague-expression-7",
+      "label": "포니테일 · 반가움",
+      "group": "korean",
+      "file": "colleague-expression-7.webp",
+      "listCrop": {
+        "scale": 1.01,
+        "x": 50,
+        "y": 50
+      },
+      "listAccent": "#719C98"
+    }
+  ],
+  "visualStandard": {
+    "id": "refined-colleagues-v1",
+    "size": 512,
+    "format": "webp",
+    "background": "transparent",
+    "direction": "frontal",
+    "expressionPolicy": "Varied brows, eyelids and closed mouths; mature proportions; no mandatory smile.",
+    "maxContentSize": 492
+  }
 }

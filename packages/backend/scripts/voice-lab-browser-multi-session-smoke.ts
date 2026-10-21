@@ -8,7 +8,7 @@ const PROJECT_ID = '7d84f926-1fcd-438d-94dc-a36048636bad';
 const USER_ID = 1;
 const USERNAME = 'enterpriseai';
 const ROLE = 'admin';
-const BASE_URL = 'https://desk-dev.tower.example.com/voice-lab';
+const BASE_URL = process.env.TOWER_VOICE_LAB_URL || 'https://desk-dev.tower.example.com/voice-lab';
 
 async function createTestSession(index: number) {
   return createSession(
@@ -29,9 +29,9 @@ async function connectContext(context: BrowserContext, sessionId: string, index:
     token: generateToken({ userId: USER_ID, username: USERNAME, role: ROLE }),
   });
   await page.goto(`${BASE_URL}?sessionId=${encodeURIComponent(sessionId)}`, { waitUntil: 'networkidle' });
-  await page.getByRole('button', { name: '음성 대화 시작' }).click();
-  await page.getByRole('button', { name: '음성 대화 종료' }).waitFor({ state: 'visible', timeout: 30_000 });
-  await page.getByRole('status').filter({ hasText: /출력:\s*(AI 참가|오디오 수신|재생 중)/ }).waitFor({
+  await page.getByRole('button', { name: /음성 대화 시작|Start voice session/ }).click();
+  await page.getByRole('button', { name: /음성 대화 종료|End voice session/ }).waitFor({ state: 'visible', timeout: 30_000 });
+  await page.getByRole('status').filter({ hasText: /(?:출력|Output):\s*(?:AI 참가|오디오 수신|재생 중|AI joined|Receiving audio|Playing)/ }).waitFor({
     state: 'visible', timeout: 20_000,
   });
   const statusText = await page.getByRole('status').innerText();
@@ -44,9 +44,9 @@ async function connectContext(context: BrowserContext, sessionId: string, index:
   const sessionValue = await page.locator('#voice-lab-session').inputValue();
   return {
     index,
-    connected: /연결됨|마이크 게시됨|마이크 소리/.test(statusText),
+    connected: /연결됨|마이크 게시됨|마이크 소리|Connected|Microphone published|Microphone level/.test(statusText),
     sessionMatched: sessionValue === sessionId,
-    playbackState: statusText.match(/출력:\s*([^\n]+)/)?.[1] || 'unknown',
+    playbackState: statusText.match(/(?:출력|Output):\s*([^\n]+)/)?.[1] || 'unknown',
     audio,
     consoleErrors,
   };
@@ -74,9 +74,11 @@ async function main() {
     const connectedPass = results.every((result) => result.connected && result.sessionMatched);
     const consolePass = results.every((result) => result.consoleErrors.length === 0);
     const audioElementsPass = results.every((result) => result.audio.autoplay && !result.audio.muted);
-    const remoteAudioPass = results.every((result) => /AI 참가|오디오 수신|재생 중/.test(result.playbackState));
+    const remoteAudioPass = results.every((result) => result.audio.hasSource && !result.audio.paused);
     const distinctPass = new Set(ids).size === ids.length;
     console.log([
+      'scope=media-connectivity-only',
+      'semantic_roundtrip=not_tested',
       `browser_connections=${connectedPass ? 'pass' : 'fail'}`,
       `distinct_sessions=${distinctPass ? 'pass' : 'fail'}`,
       `console_errors=${consolePass ? 'pass' : 'fail'}`,

@@ -18,6 +18,7 @@ import { __memoryContextTest, buildMemoryContext } from './memory-context.js';
 describe('buildMemoryContext', () => {
   beforeEach(() => {
     queryMock.mockReset();
+    queryMock.mockResolvedValueOnce([{ user_id: 7, visibility: 'private', room_id: null, internally_shared: false }]);
     getMemoryCardsForContextMock.mockReset();
     getMemoryCardsForContextMock.mockResolvedValue([]);
   });
@@ -72,13 +73,13 @@ describe('buildMemoryContext', () => {
     expect(result).not.toContain('[a.ts] old session via Edit');
 
     expect(getMemoryCardsForContextMock).toHaveBeenCalledWith({ userId: 7, projectId: 'p1', sessionId: 's-current', limit: 3 });
-    expect(queryMock).toHaveBeenCalledTimes(2);
-    for (const [, params] of queryMock.mock.calls) {
+    expect(queryMock).toHaveBeenCalledTimes(3);
+    for (const [, params] of queryMock.mock.calls.slice(1)) {
       expect(params).toEqual([7, 's-current', 'p1']);
     }
-    expect(queryMock.mock.calls[0][0]).toContain('s.user_id = $1');
-    expect(queryMock.mock.calls[0][0]).toContain('s.id <> $2');
-    expect(queryMock.mock.calls[0][0]).toContain('s.project_id = $3');
+    expect(queryMock.mock.calls[1][0]).toContain('s.user_id = $1');
+    expect(queryMock.mock.calls[1][0]).toContain('s.id <> $2');
+    expect(queryMock.mock.calls[1][0]).toContain('s.project_id = $3');
   });
 
   it('uses continuity cards before fallback session summaries', async () => {
@@ -121,7 +122,7 @@ describe('buildMemoryContext', () => {
     expect(result).toContain('세션당 continuity card를 만들기로 결정했다.');
     expect(result).toContain('자세한 과거 맥락이 필요하면 memory_search를 사용한다.');
     expect(result).not.toContain('## 최근 산출물/결정');
-    expect(queryMock).toHaveBeenCalledTimes(1);
+    expect(queryMock).toHaveBeenCalledTimes(2);
   });
 
   it('falls back to exact cwd only for project-less sessions', async () => {
@@ -135,10 +136,30 @@ describe('buildMemoryContext', () => {
       projectLabel: 'general',
     });
 
-    expect(queryMock).toHaveBeenCalledTimes(2);
-    expect(queryMock.mock.calls[0][0]).toContain('s.project_id IS NULL');
-    expect(queryMock.mock.calls[0][0]).toContain('s.cwd = $3');
-    expect(queryMock.mock.calls[0][1]).toEqual([7, 's-current', '/home/tower/workspace/projects/general']);
+    expect(queryMock).toHaveBeenCalledTimes(3);
+    expect(queryMock.mock.calls[1][0]).toContain('s.project_id IS NULL');
+    expect(queryMock.mock.calls[1][0]).toContain('s.cwd = $3');
+    expect(queryMock.mock.calls[1][1]).toEqual([7, 's-current', '/home/tower/workspace/projects/general']);
+  });
+
+  it.each([
+    { user_id: 20, visibility: 'private', room_id: null, internally_shared: false },
+    { user_id: 7, visibility: 'project', room_id: null, internally_shared: false },
+    { user_id: 7, visibility: 'private', room_id: 'channel-a', internally_shared: false },
+    { user_id: 7, visibility: 'private', room_id: null, internally_shared: true },
+  ])('does not inject personal memory into an audience-expanded or foreign target: %j', async (target) => {
+    queryMock.mockReset();
+    queryMock.mockResolvedValueOnce([target]);
+    expect(await buildMemoryContext({ sessionId: 'current', userId: 7, projectId: 'p1' })).toBeNull();
+    expect(queryMock).toHaveBeenCalledTimes(1);
+    expect(getMemoryCardsForContextMock).not.toHaveBeenCalled();
+  });
+
+  it('does not load unbounded project-less continuity cards when only exact cwd proves scope', async () => {
+    queryMock.mockResolvedValue([]);
+    await buildMemoryContext({ sessionId: 'current', userId: 7, cwd: '/projects/projectless' });
+    expect(getMemoryCardsForContextMock).not.toHaveBeenCalled();
+    expect(queryMock.mock.calls[1][0]).toContain('s.cwd = $3');
   });
 
   it('does not leak malformed files_edited JSON into output', async () => {

@@ -9,21 +9,24 @@
 import type {
   WorkbenchExecutionProvider,
   WorkbenchExecutionRequest,
-} from './workbench-execution-broker.js';
-import { planWorkbenchExecution } from './workbench-execution-broker.js';
+} from '../execution/execution-broker.js';
+import { planWorkbenchExecution } from '../execution/execution-broker.js';
 import { createLocalWorkbenchExecutionProvider } from './workbench-local-execution-provider.js';
 import { createRemoteWorkbenchExecutionProvider } from './workbench-remote-execution-provider.js';
-import { createRemoteWorkbenchHttpTransport } from './workbench-remote-http-transport.js';
+import { createRemoteWorkbenchHttpTransport } from '../execution/worker/worker-http-transport.js';
 import { createRemoteWorkbenchRsyncBridge } from './workbench-remote-rsync-bridge.js';
 import {
   registerWorkbenchWorker,
   selectWorkbenchWorker,
   type WorkbenchWorkerView,
-} from './workbench-worker-registry.js';
-import { releasePersistedWorkbenchWorkerSlot, reservePersistedWorkbenchWorkerSlot, selectPersistedWorkbenchWorker } from './workbench-worker-repository.js';
-import { resolveWorkbenchWorkerTransportToken } from './workbench-worker-transport-credentials.js';
+} from '../execution/worker/worker-registry.js';
+import { releasePersistedWorkbenchWorkerSlot, reservePersistedWorkbenchWorkerSlot, selectPersistedWorkbenchWorker } from '../execution/worker/worker-repository.js';
+import { resolveWorkbenchWorkerTransportToken } from '../execution/worker/worker-transport-credentials.js';
 import { classifyWorkbenchWorkerCapacityWeight } from './workbench-worker-capacity-weight.js';
 import type { ProjectComputeAuthorityMode } from './workbench-project-compute-settings.js';
+import type { ResolvedProjectExecutionContext } from '../project-environment/project-execution-context.js';
+import { resolveProjectEnvironmentDeploymentId } from '../project-environment/project-environment-deployment.js';
+import { resolveTeamAgentContext } from '../agent-workspaces/team-context.js';
 
 export interface RemoteWorkbenchBinding {
   workerId: string;
@@ -64,6 +67,7 @@ function bootstrapLegacyRemoteWorker(binding: RemoteWorkbenchBinding, deployment
 export interface WorkbenchProviderSelectionInput {
   projectId: string;
   actorUserId?: number;
+  sessionId?: string;
   projectRoot?: string;
   /**
    * Preferred long-lived Worker for this Project. This is a preference, not execution
@@ -73,11 +77,15 @@ export interface WorkbenchProviderSelectionInput {
   defaultWorkerId?: string;
   /** Opt this Project into Worker-local persistent workspace execution. */
   workstationMode?: boolean;
-  /** Explicit execution authority tier; operator-plane requires a privileged actor and Worker capability. */
+  /** Server-resolved Agent execution tier; retired operator-plane is never restored by requester role. */
   authorityMode?: ProjectComputeAuthorityMode;
   actorRole?: string;
   /** Current Tower execution plane. Workers from another deployment are never eligible. */
   deploymentId?: string;
+  /** Whether an unbound Project may execute through the local Runtime Box compatibility provider. */
+  runtimeBoxCompatibilityEnabled?: boolean;
+  /** Current Backend-resolved Project Environment. Required to ignore legacy Worker Project scope. */
+  executionContext?: ResolvedProjectExecutionContext;
   request: WorkbenchExecutionRequest;
   env?: NodeJS.ProcessEnv;
   localProvider?: WorkbenchExecutionProvider;
@@ -87,10 +95,8 @@ export interface WorkbenchProviderSelectionInput {
 }
 
 /** Resolve the migration seam for a Project's long-lived default Worker preference. */
-/** Stable execution-plane identity; explicit env wins over production/development default. */
-export function resolveWorkbenchDeploymentId(env: NodeJS.ProcessEnv = process.env): string {
-  return env.TOWER_DEPLOYMENT_ID?.trim() || (env.NODE_ENV === 'production' ? 'production' : 'development');
-}
+/** Stable execution-plane identity; explicit env wins and the dedicated dev port is a safe fallback. */
+export { resolveProjectEnvironmentDeploymentId as resolveWorkbenchDeploymentId } from '../project-environment/project-environment-deployment.js';
 
 export function resolveDefaultWorkbenchWorkerId(input: {
   defaultWorkerId?: string;
@@ -132,11 +138,20 @@ export function assertWorkbenchDefaultWorkerSelected(input: {
 
 /** Route every supported lifecycle through an allowlisted legacy Worker binding when available. */
 export function selectWorkbenchExecutionProvider(input: WorkbenchProviderSelectionInput): WorkbenchExecutionProvider {
+  // Historical synchronous API cannot load current team facts. Enabled callers
+  // must use the async selector; do not accept a caller-provided admission flag.
+  if (process.env.TOWER_TEAM_WORKSPACES_ENABLED === '1') throw new Error('TEAM_EXECUTOR_NOT_READY');
+  return selectLegacyWorkbenchExecutionProvider(input);
+}
+
+/** Private compatibility branch, reached only after async teamless admission. */
+function selectLegacyWorkbenchExecutionProvider(input: WorkbenchProviderSelectionInput): WorkbenchExecutionProvider {
+  const requiredCapabilities = requiredWorkbenchWorkerCapabilities(input);
   const local = input.localProvider ?? createLocalWorkbenchExecutionProvider();
   const binding = resolveRemoteWorkbenchBinding(input.env);
   if (!binding) return local;
   planWorkbenchExecution(input.request, 'local-runtime');
-  const deploymentId = input.deploymentId ?? resolveWorkbenchDeploymentId(input.env);
+  const deploymentId = input.deploymentId ?? resolveProjectEnvironmentDeploymentId(input.env);
   bootstrapLegacyRemoteWorker(binding, deploymentId, input.now);
   const preferredWorkerId = resolveDefaultWorkbenchWorkerId(input);
   let worker: WorkbenchWorkerView;
@@ -144,7 +159,7 @@ export function selectWorkbenchExecutionProvider(input: WorkbenchProviderSelecti
     worker = (input.selectWorker ?? selectWorkbenchWorker)({
       projectId: input.projectId,
       deploymentId,
-      requiredCapabilities: ['job'],
+      requiredCapabilities,
       preferredWorkerId,
     });
     assertWorkbenchDefaultWorkerSelected({
@@ -181,34 +196,65 @@ export function selectWorkbenchExecutionProvider(input: WorkbenchProviderSelecti
  * DB/auth/workspace error must remain visible rather than silently moving compute to Tower.
  */
 export function requiredWorkbenchWorkerCapabilities(input: Pick<WorkbenchProviderSelectionInput, 'authorityMode' | 'actorRole'>): string[] {
-  if (input.authorityMode !== 'operator-plane') return ['job'];
-  if (!['admin', 'operator'].includes(input.actorRole ?? '')) {
-    throw new Error('OPERATOR_PLANE_ROLE_REQUIRED');
+  if (input.authorityMode === 'operator-plane') {
+    throw new Error('OPERATOR_WORKER_RETIRED: Operator access uses the native Operator execution environment');
   }
-  return ['job', 'operator-plane'];
+  return ['job'];
 }
 
 export async function selectPersistedWorkbenchExecutionProvider(input: WorkbenchProviderSelectionInput & {
-  selectPersistedWorker?: (input: { projectId: string; deploymentId?: string; requiredCapabilities: string[]; preferredWorkerId?: string }) => Promise<WorkbenchWorkerView>;
+  selectPersistedWorker?: (input: { projectId: string; deploymentId?: string; requiredCapabilities: string[]; preferredWorkerId?: string; allowStalePreferredWorker?: boolean; allowCanonicalProject?: boolean }) => Promise<WorkbenchWorkerView>;
   resolvePersistedWorkerToken?: (workerId: string) => Promise<string | null> | string | null;
 }): Promise<WorkbenchExecutionProvider> {
+  // Enforce process policy before provider/credential selection and OUTSIDE the
+  // Worker fallback catch. A supplied executionContext/env is not fresh admission.
+  // No current Project-only executor enforces the team workspace mount contract.
+  if (process.env.TOWER_TEAM_WORKSPACES_ENABLED === '1') {
+    const team = await resolveTeamAgentContext({ userId: input.actorUserId!, agentProjectId: input.projectId });
+    if (team !== null) throw new Error('TEAM_EXECUTOR_NOT_READY');
+  }
   const local = input.localProvider ?? createLocalWorkbenchExecutionProvider();
   planWorkbenchExecution(input.request, 'local-runtime');
   try {
     const preferredWorkerId = resolveDefaultWorkbenchWorkerId(input);
-    const deploymentId = input.deploymentId ?? resolveWorkbenchDeploymentId(input.env);
+    const deploymentId = input.deploymentId ?? resolveProjectEnvironmentDeploymentId(input.env);
     const requiredCapabilities = requiredWorkbenchWorkerCapabilities(input);
     const lifecycle = planWorkbenchExecution(input.request, 'remote-worker').lifecycle;
     const capacityWeight = classifyWorkbenchWorkerCapacityWeight(input.request, lifecycle);
     const reservesSlot = capacityWeight > 0;
+    const env = input.env ?? process.env;
+    const admittedEnvironment = input.executionContext;
+    const environmentAuthorized = Boolean(admittedEnvironment
+      && admittedEnvironment.projectId === input.projectId
+      && admittedEnvironment.deploymentId === deploymentId
+      && admittedEnvironment.projectRoot === input.projectRoot);
+    const canonicalEnvironment = Boolean(environmentAuthorized
+      && admittedEnvironment?.environmentMode === 'canonical-project-workspace');
+    const legacyPinnedEnvironment = Boolean(environmentAuthorized
+      && admittedEnvironment?.environmentMode === 'legacy-worker-workspace'
+      && admittedEnvironment.preferredExecutorId === preferredWorkerId);
+    // A Workstation Project is pinned to one durable Worker. Its heartbeat remains
+    // diagnostic evidence, while the actual dispatch/accept response decides liveness.
+    const allowStalePreferredWorker = Boolean(preferredWorkerId
+      && (legacyPinnedEnvironment || (!input.executionContext && isWorkbenchWorkstationProject(input))));
     const worker = input.selectPersistedWorker
-      ? await input.selectPersistedWorker({ projectId: input.projectId, deploymentId, requiredCapabilities, preferredWorkerId })
+      ? await input.selectPersistedWorker({ projectId: input.projectId, deploymentId, requiredCapabilities, preferredWorkerId, allowStalePreferredWorker, allowCanonicalProject: canonicalEnvironment })
       : reservesSlot
-        ? await reservePersistedWorkbenchWorkerSlot({ projectId: input.projectId, deploymentId, requiredCapabilities, preferredWorkerId, weight: capacityWeight })
-        : await selectPersistedWorkbenchWorker({ projectId: input.projectId, deploymentId, requiredCapabilities, preferredWorkerId });
+        ? await reservePersistedWorkbenchWorkerSlot({
+          projectId: input.projectId,
+          deploymentId,
+          sessionId: input.sessionId,
+          requiredCapabilities,
+          preferredWorkerId,
+          allowStalePreferredWorker,
+          weight: capacityWeight,
+          ttlSeconds: Math.max((input.request.timeoutSec ?? 3_600) + 300, 600),
+          allowCanonicalProject: canonicalEnvironment,
+        })
+        : await selectPersistedWorkbenchWorker({ projectId: input.projectId, deploymentId, requiredCapabilities, preferredWorkerId, allowStalePreferredWorker, allowCanonicalProject: canonicalEnvironment });
     assertWorkbenchDefaultWorkerSelected({
       projectId: input.projectId,
-      workstationMode: input.workstationMode,
+      workstationMode: input.executionContext ? legacyPinnedEnvironment : input.workstationMode,
       env: input.env,
       preferredWorkerId,
       selectedWorkerId: worker.workerId,
@@ -222,12 +268,24 @@ export async function selectPersistedWorkbenchExecutionProvider(input: Workbench
         ? await resolveWorkbenchWorkerTransportToken(worker.workerId, input.actorUserId)
         : null;
     const token = persistedToken ?? (binding?.workerId === worker.workerId ? binding.token : null);
+    const reservationId = 'reservationId' in worker && typeof worker.reservationId === 'string'
+      ? worker.reservationId
+      : undefined;
     if (!token) {
-      if (reservesSlot && !input.selectPersistedWorker) await releasePersistedWorkbenchWorkerSlot(worker.workerId, capacityWeight);
+      if (reservesSlot && !input.selectPersistedWorker && reservationId) await releasePersistedWorkbenchWorkerSlot(reservationId);
       if (input.workstationMode) throw new Error(`WORKSTATION_WORKER_AUTH_UNAVAILABLE: ${worker.workerId}; the Worker is healthy but Tower cannot authorize this command; operator action is required`);
+      if (input.runtimeBoxCompatibilityEnabled === false) {
+        throw new Error(`PROJECT_EXECUTION_PLANE_UNAVAILABLE: Project ${input.projectId} has no authorized Worker and Runtime Box compatibility is disabled`);
+      }
       return local;
     }
-    return createScheduledRemoteProvider({ ...input, worker, token, slotReserved: reservesSlot && !input.selectPersistedWorker, capacityWeight });
+    return createScheduledRemoteProvider({
+      ...input,
+      worker,
+      token,
+      readinessGraceMs: allowStalePreferredWorker && worker.status === 'stale' ? 5_000 : 0,
+      reservationId: reservesSlot && !input.selectPersistedWorker ? reservationId : undefined,
+    });
   } catch (error) {
     if (!(error instanceof Error)) throw error;
     const expectedSelectionFailure = error.message === 'NO_ELIGIBLE_WORKER'
@@ -245,11 +303,19 @@ export async function selectPersistedWorkbenchExecutionProvider(input: Workbench
       }
       throw new Error(`WORKSTATION_WORKER_NOT_ELIGIBLE: ${resolveDefaultWorkbenchWorkerId(input) ?? 'unbound'}; check Worker health, Project scope, deployment, and capabilities; operator action is required`);
     }
-    return selectWorkbenchExecutionProvider(input);
+    if (input.runtimeBoxCompatibilityEnabled === false) {
+      const reason = error.message === 'NO_ELIGIBLE_WORKER'
+        ? 'no eligible pooled Worker is currently healthy and available'
+        : error.message.startsWith('WORKER_BUSY:')
+          ? `eligible pooled Worker capacity is currently exhausted (${error.message})`
+          : `pooled Worker selection failed (${error.message})`;
+      throw new Error(`PROJECT_EXECUTION_PLANE_UNAVAILABLE: Project ${input.projectId} cannot run because ${reason}; Runtime Box compatibility is disabled`);
+    }
+    return selectLegacyWorkbenchExecutionProvider(input);
   }
 }
 
-function createScheduledRemoteProvider(input: WorkbenchProviderSelectionInput & { worker: WorkbenchWorkerView; token: string; slotReserved?: boolean; capacityWeight: number }): WorkbenchExecutionProvider {
+function createScheduledRemoteProvider(input: WorkbenchProviderSelectionInput & { worker: WorkbenchWorkerView; token: string; readinessGraceMs?: number; reservationId?: string }): WorkbenchExecutionProvider {
   const env = input.env ?? process.env;
   const workspaceBridge = createMigrationWorkspaceBridge(input, {
     remote: env.TOWER_REMOTE_WORKER_RSYNC_REMOTE?.trim(),
@@ -257,16 +323,17 @@ function createScheduledRemoteProvider(input: WorkbenchProviderSelectionInput & 
     sshKeyPath: env.TOWER_REMOTE_WORKER_RSYNC_SSH_KEY?.trim(),
   });
   let released = false;
-  const slot = input.slotReserved ? {
+  const slot = input.reservationId ? {
     reserved: true,
     release: async () => {
       if (released) return;
       released = true;
-      await releasePersistedWorkbenchWorkerSlot(input.worker.workerId, input.capacityWeight);
+      await releasePersistedWorkbenchWorkerSlot(input.reservationId!);
     },
   } : undefined;
   const provider = createRemoteWorkbenchExecutionProvider(createRemoteWorkbenchHttpTransport({
-    workerId: input.worker.workerId, baseUrl: input.worker.baseUrl, token: input.token,
+    workerId: input.worker.workerId, baseUrl: input.worker.baseUrl, token: input.token, projectRoot: input.projectRoot,
+    readinessGraceMs: input.readinessGraceMs,
   }), workspaceBridge, slot);
   return slot ? { ...provider, releaseReservation: slot.release } : provider;
 }
@@ -276,6 +343,8 @@ function createMigrationWorkspaceBridge(input: WorkbenchProviderSelectionInput, 
   remoteProjectRoot?: string;
   sshKeyPath?: string;
 }) {
+  if (input.executionContext?.environmentMode === 'canonical-project-workspace'
+    || input.executionContext?.environmentMode === 'legacy-worker-workspace') return undefined;
   if (isWorkbenchWorkstationProject({
     projectId: input.projectId,
     workstationMode: input.workstationMode,

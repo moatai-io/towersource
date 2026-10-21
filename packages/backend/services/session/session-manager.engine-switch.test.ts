@@ -4,6 +4,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 const queryMock = vi.fn();
 const queryOneMock = vi.fn();
 const executeMock = vi.fn();
+const clonePiSessionFileMock = vi.hoisted(() => vi.fn());
 const rehydratePiSessionFromMessagesMock = vi.hoisted(() => vi.fn());
 const getOrPinSessionHarnessSnapshotMock = vi.hoisted(() => vi.fn());
 
@@ -29,6 +30,9 @@ vi.mock('../auth/credential-store.js', () => ({
 vi.mock('../../engines/index.js', () => ({
   getAllRunningSessionIds: vi.fn(() => []),
 }));
+vi.mock('../../engines/pi/clone.js', () => ({
+  clonePiSessionFile: (...args: any[]) => clonePiSessionFileMock(...args),
+}));
 vi.mock('../../engines/pi/rehydrate.js', () => ({
   rehydratePiSessionFromMessages: (...args: any[]) => rehydratePiSessionFromMessagesMock(...args),
 }));
@@ -39,7 +43,30 @@ vi.mock('../../config.js', () => ({
   config: { claudeEnabled: true, piEnabled: true, defaultEngine: 'pi' },
 }));
 
-const { recordEngineSwitch, getEngineSwitchHistory, cloneSession } = await import('./session-manager.js');
+const { recordEngineSwitch, getEngineSwitchHistory, cloneSession, createSession, updateSession } = await import('./session-manager.js');
+
+describe('Introduction conversation visibility', () => {
+  beforeEach(() => { queryOneMock.mockReset(); executeMock.mockReset(); });
+
+  it.each([undefined, 'project', 'private'] as const)('honors normal Introduction visibility (%s)', async (visibility) => {
+    queryOneMock.mockImplementation(async (sql: string) => {
+      if (sql.includes('FROM projects p WHERE')) return { archived: 0, lifecycle_status: 'active', introduction: true };
+      if (sql.includes('SELECT username FROM users')) return { username: 'new-member' };
+      return null;
+    });
+    const session = await createSession('Welcome', '/workspace/projects/introduction', 21, 'intro', 'pi', null, null, null, null, null, { visibility });
+    expect(session.visibility).toBe(visibility ?? 'project');
+    const insert = executeMock.mock.calls.find(([sql]) => sql.includes('INSERT INTO sessions'));
+    expect(insert?.[1][10]).toBe(visibility ?? 'project');
+    expect(insert?.[1][13]).toBe('preset/core');
+    expect(session.modelUsed).toBe('preset/core');
+  });
+
+  it('allows later promotion of an Introduction conversation to shared', async () => {
+    await updateSession('intro-session', { visibility: 'project' });
+    expect(executeMock).toHaveBeenCalledWith(expect.stringContaining('visibility ='), ['project', 'intro-session']);
+  });
+});
 
 describe('recordEngineSwitch', () => {
   beforeEach(() => {
@@ -264,13 +291,14 @@ describe('cloneSession — Pi resume continuity', () => {
     queryMock.mockReset();
     queryOneMock.mockReset();
     executeMock.mockReset();
+    clonePiSessionFileMock.mockReset();
     rehydratePiSessionFromMessagesMock.mockReset();
     getOrPinSessionHarnessSnapshotMock.mockReset();
     getOrPinSessionHarnessSnapshotMock.mockResolvedValue({ id: 'tower-default', version: 1 });
   });
 
-  it('rehydrates copied DB messages into a fresh pi_session_file for Pi clones', async () => {
-    rehydratePiSessionFromMessagesMock.mockResolvedValueOnce('/workspace/project/.pi/sessions/cloned.jsonl');
+  it('forks the native Pi session so clones preserve compaction state', async () => {
+    clonePiSessionFileMock.mockReturnValueOnce('/workspace/project/.pi/sessions/cloned.jsonl');
 
     queryOneMock
       .mockResolvedValueOnce({
@@ -368,7 +396,6 @@ describe('cloneSession — Pi resume continuity', () => {
     expect(copyMessagesCall?.[0]).toContain("COALESCE(metadata->>'contextState', 'active') = 'active'");
     expect(copyMessagesCall?.[0]).toContain('ORDER BY message_seq ASC');
     expect(copyMessagesCall?.[1]).toEqual([clonedSessionId, 'source-sess']);
-    expect(queryMock.mock.calls[0]?.[0]).toContain('ORDER BY message_seq ASC');
 
     expect(executeMock).toHaveBeenCalledWith(
       expect.stringContaining('INSERT INTO session_runtime_snapshots'),
@@ -382,14 +409,11 @@ describe('cloneSession — Pi resume continuity', () => {
       invocationKind: 'session',
     }));
 
-    expect(rehydratePiSessionFromMessagesMock).toHaveBeenCalledWith(
-      clonedSessionId,
-      [
-        expect.objectContaining({ id: 'u-1', role: 'user', content: [{ type: 'text', text: '원본 질문' }] }),
-        expect.objectContaining({ id: 'a-1', role: 'assistant', content: [{ type: 'text', text: '원본 답변' }] }),
-      ],
+    expect(clonePiSessionFileMock).toHaveBeenCalledWith(
+      '/workspace/project/.pi/sessions/source.jsonl',
       '/workspace/project',
     );
+    expect(rehydratePiSessionFromMessagesMock).not.toHaveBeenCalled();
     expect(executeMock).toHaveBeenCalledWith(
       'UPDATE sessions SET pi_session_file = $1 WHERE id = $2',
       ['/workspace/project/.pi/sessions/cloned.jsonl', clonedSessionId],
@@ -397,4 +421,19 @@ describe('cloneSession — Pi resume continuity', () => {
     expect(cloned.engine).toBe('pi');
     expect(cloned.piSessionFile).toBe('/workspace/project/.pi/sessions/cloned.jsonl');
   });
+  it('inserts explicit private visibility atomically for a project session', async () => {
+    queryOneMock.mockImplementation(async (sql: string) => {
+      if (sql.includes('FROM projects')) return { lifecycle_status: 'active', archived: 0, default_engine: 'pi', default_model: null };
+      if (sql.includes('project_agent_harness_bindings')) return { harness_id: 'tower-default', harness_version: 1, runtime_profile_id: 'tower-default', runtime_profile_version: 1 };
+      if (sql.includes('FROM users')) return { username: 'member' };
+      if (sql.includes('FROM sessions')) return { id: 'private-new', visibility: 'private', tags: '[]', files_edited: '[]', created_at: new Date(), updated_at: new Date() };
+      return null;
+    });
+    executeMock.mockResolvedValue({ changes: 1 });
+    await createSession('private', '/projects/example', 1, 'project-1', 'pi', undefined, undefined, undefined, undefined, undefined, { visibility: 'private' });
+    const insert = executeMock.mock.calls.find(([sql]) => sql.includes('INSERT INTO sessions'));
+    expect(insert?.[1][10]).toBe('private');
+    expect(executeMock.mock.calls.some(([sql]) => sql.includes('UPDATE sessions SET visibility'))).toBe(false);
+  });
+
 });

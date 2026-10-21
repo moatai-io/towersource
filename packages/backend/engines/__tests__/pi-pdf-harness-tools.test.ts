@@ -1,10 +1,13 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
-import { analyzePdfFontPostflight, chromiumUserDataDir, createPdfExportTool, exportHtmlToPdf, findChromium, isSnapChromiumShim, resolvePdfExportPath, resolvePdfExportRendererConfig } from '../pi-pdf-export-tool.js';
+import { analyzePdfFontPostflight, chromiumUserDataDir, compactPdfExportPreview, createPdfExportTool, exportHtmlToPdf, findChromium, isSnapChromiumShim, PDF_EXPORT_INLINE_PREVIEW_BYTES, resolvePdfExportPath, resolvePdfExportRendererConfig } from '../pi-pdf-export-tool.js';
 import { renderPdfToCachedImages } from '../pi-pdf-view-tool.js';
 
+// These renderer tests have no database Session. Admission is covered by session-artifact-privacy.test.ts.
+vi.mock('../../services/session/session-artifact-privacy.js', () => ({ assertSessionAllowsSharedArtifactWrite: vi.fn(async () => {}) }));
 const tempDirs: string[] = [];
 
 async function makeTempDir(prefix: string) {
@@ -19,6 +22,38 @@ async function makeTempDir(prefix: string) {
 
 afterEach(async () => {
   await Promise.all(tempDirs.splice(0).map((dir) => fs.rm(dir, { recursive: true, force: true })));
+});
+
+describe('Pi PDF export verification-image reuse guidance', () => {
+  it('reuses returned images while allowing necessary follow-up views', () => {
+    const tool = createPdfExportTool({ cwd: process.cwd(), sessionId: 'test-session' });
+    expect(tool.description).toContain('Reuse returned verification images');
+    const guidance = tool.promptGuidelines!.join(' ');
+    expect(guidance).toContain('instead of calling pdf_view again');
+    expect(guidance).toContain('images were omitted or are no longer available');
+    expect(guidance).toContain('the PDF changed');
+    expect(guidance).toContain('additional pages or higher resolution');
+  });
+});
+
+describe('Pi PDF export automatic preview budget', () => {
+  it('keeps a small preview and replaces an oversized unreadable image with a pdf_view instruction', async () => {
+    const small = { type: 'image' as const, mimeType: 'image/png', data: Buffer.alloc(1024).toString('base64') };
+    const large = { type: 'image' as const, mimeType: 'image/png', data: Buffer.alloc(PDF_EXPORT_INLINE_PREVIEW_BYTES + 1).toString('base64') };
+    const result = await compactPdfExportPreview([small, large]);
+    expect(result[0]).toEqual(small);
+    expect(result[1]).toMatchObject({ type: 'text', text: expect.stringContaining('pdf_view') });
+    expect(result.some((part: any) => part.type === 'image' && part.data === large.data)).toBe(false);
+  });
+
+  it('keeps the aggregate inline images under the PDF export budget across pages', async () => {
+    const images = [1, 2, 3].map((page) => ({ type: 'image' as const, mimeType: 'image/png', data: Buffer.alloc(55 * 1024, page).toString('base64') }));
+    const result = await compactPdfExportPreview(images);
+    const inlineBytes = result.reduce((sum, part: any) => sum + (part.type === 'image' ? Buffer.from(part.data, 'base64').length : 0), 0);
+    expect(inlineBytes).toBeLessThanOrEqual(PDF_EXPORT_INLINE_PREVIEW_BYTES);
+    expect(result.filter((part: any) => part.type === 'image')).toHaveLength(2);
+    expect(result[2]).toMatchObject({ type: 'text', text: expect.stringContaining('pdf_view') });
+  });
 });
 
 describe('Pi PDF harness path handling', () => {
@@ -154,7 +189,23 @@ FAAAAA+LiberationSans                CID TrueType      Identity-H       yes yes 
   });
 });
 
-const pdfExportIt = findChromium() ? it : it.skip;
+// renderPdfToCachedImages / verification spawns plain `python3 -c "import fitz"`.
+// The dev VM's Nix python ships PyMuPDF, but a clean preflight snapshot may not.
+// Gate fitz-dependent cases so a missing PyMuPDF skips instead of failing.
+function hasPythonFitz(): boolean {
+  try {
+    execFileSync('python3', ['-c', 'import fitz'], { stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
+}
+const chromiumAvailable = Boolean(findChromium());
+const fitzAvailable = hasPythonFitz();
+const pdfExportIt = chromiumAvailable ? it : it.skip;
+// These cases both export a PDF and re-render it to verification images, so
+// they need Chromium and PyMuPDF together.
+const pdfVisionIt = chromiumAvailable && fitzAvailable ? it : it.skip;
 
 describe('Pi PDF optional Nix renderer fallback', () => {
   pdfExportIt('falls back to system Chromium when the configured Nix renderer is missing', async () => {
@@ -323,7 +374,7 @@ describe('Pi PDF optional Nix renderer fallback', () => {
 });
 
 describe('Pi PDF harness tools', () => {
-  pdfExportIt('exports Korean print-ready HTML to PDF and returns verification images', async () => {
+  pdfVisionIt('exports Korean print-ready HTML to PDF and returns verification images', async () => {
     const cwd = await makeTempDir('tower-pdf-export-test-');
     const htmlPath = path.join(cwd, 'korean-report.html');
     const pdfPath = path.join(cwd, 'korean-report.pdf');
@@ -375,10 +426,11 @@ describe('Pi PDF harness tools', () => {
     const pdfStat = await fs.stat(pdfPath);
     expect(pdfStat.size).toBeGreaterThan(1000);
     expect(result.content.some((block: any) => block.type === 'image')).toBe(true);
+    expect(result.content.filter((block: any) => block.type === 'image').reduce((sum: number, block: any) => sum + Buffer.from(block.data, 'base64').length, 0)).toBeLessThanOrEqual(PDF_EXPORT_INLINE_PREVIEW_BYTES);
     expect(result.content.map((block: any) => block.text || '').join('\n')).toContain('Verification pages: 1 of 1');
   }, 30000);
 
-  pdfExportIt('reuses the same cache key for identical PDF path/page/dpi requests', async () => {
+  pdfVisionIt('reuses the same cache key for identical PDF path/page/dpi requests', async () => {
     const cwd = await makeTempDir('tower-pdf-cache-test-');
     const htmlPath = path.join(cwd, 'cache-source.html');
     const pdfPath = path.join(cwd, 'cache-source.pdf');
@@ -418,7 +470,7 @@ flowchart LR
     await expect(fs.stat(pdfPath)).rejects.toThrow();
   }, 30000);
 
-  pdfExportIt('rejects PDFs whose extracted text still contains raw Mermaid source', async () => {
+  pdfVisionIt('rejects PDFs whose extracted text still contains raw Mermaid source', async () => {
     const cwd = await makeTempDir('tower-pdf-raw-residue-test-');
     const htmlPath = path.join(cwd, 'raw-flowchart.html');
     const pdfPath = path.join(cwd, 'raw-flowchart.pdf');
@@ -440,7 +492,7 @@ flowchart LR
   }, 30000);
 
 
-  pdfExportIt('exports image-mode PDF with final preview images and preflight warnings', async () => {
+  pdfVisionIt('exports image-mode PDF with final preview images and preflight warnings', async () => {
     const cwd = await makeTempDir('tower-pdf-image-test-');
     const htmlPath = path.join(cwd, 'visual-proposal.html');
     const pdfPath = path.join(cwd, 'visual-proposal.image.pdf');
@@ -484,5 +536,5 @@ flowchart LR
     expect(previewStat.size).toBeGreaterThan(1000);
     expect(result.content.map((block: any) => block.text || '').join('\n')).toContain('mode=image');
     expect(result.content.map((block: any) => block.text || '').join('\n')).toContain('[Final preview images]');
-  }, 30000);
+  }, 90_000); // Image PDF export plus preview rendering contends for Chromium in the full suite.
 });

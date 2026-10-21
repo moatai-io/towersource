@@ -195,9 +195,24 @@ describe("Agent Session unification contract", () => {
     );
   });
 
+  it("requires context-rich delegation briefs rather than terse commands", () => {
+    for (const text of [
+      "자식이 부모 대화를 보지 못해도", "전체 로드맵·현재 단계",
+      "앞뒤 마일스톤", "이번 담당 범위·비범위", "확인된 사실·미확인 가정",
+      "수정 소유 범위", "중간 체크포인트", "완료 기준·검증 방법·증거",
+      "보고 및 중단 조건", "후속 send에도", "보고의 간결함을 지시의 간결함으로 혼동하지 않는다",
+      // Source checks protect instruction assembly only, not actual delegation quality.
+      "판단 책임", "기존 팀의 업무를 이어받는 동료", "기존 검증 경로와 동작 중심 테스트",
+    ]) expect(systemPrompt).toContain(text);
+    expect(agentWorkerMcp).toContain("Self-contained delegation brief");
+    expect(agentWorkerMcp).toContain("roadmap, current stage and milestones");
+    expect(agentWorkerMcp).toContain("Context-rich follow-up");
+    expect(agentWorkerMcp).toContain("do not assume the worker sees the parent conversation");
+  });
+
   it("keeps subagent detail in backing sessions while sending compact parent reports", () => {
     expect(agentWorkers).toContain(
-      "깊은 분석, 툴콜 흔적, 중간 생각, 긴 표는 이 backing session 또는 workspace 산출물에 남긴다",
+      "설계 결정과 대안, 관찰 사실, 재현 명령, 검증 결과는 이 backing session 또는 workspace 산출물에 남긴다",
     );
     expect(agentWorkers).toContain("PARENT_NEXT:");
     expect(agentWorkers).toContain("선택적으로 `DETAIL_ARTIFACTS:`");

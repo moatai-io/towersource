@@ -22,12 +22,12 @@
  *   - MCP handler returns { content: Array<{type:'text', text:string}|{type:'image', data, mimeType}>, isError? }.
  *   - Pi expects AgentToolResult: { content: (TextContent|ImageContent)[], details }.
  *   - Shape is already compatible — just map content blocks 1:1 and stuff
- *     `isError` into a synthetic text block when set so the Pi UI surfaces it.
+ *     failures into rejected executions so Pi preserves the error state.
  *
  * Failure handling:
  *   - Per-tool conversion errors (missing schema, toJSONSchema throw) →
  *     console.warn + skip that tool. Never throw out of this function.
- *   - Handler errors at runtime → forwarded to Pi as {content:[{type:'text',text:'<error>'}]}.
+ *   - Handler exceptions and MCP isError results → rejected execution with error text.
  */
 
 import { Type, type TSchema } from '@sinclair/typebox';
@@ -155,22 +155,23 @@ export function mcpServerToPiTools(servers: Record<string, AnyMcpServer>): ToolD
           params: any,
           signal: AbortSignal | undefined,
         ) {
+          // Pi marks a tool result as failed only when execute rejects. Returning
+          // error text (or details.isError) alone is still a successful tool call.
+          let result: any;
           try {
-            // Preserve Pi's stable tool call id for MCP tools that use it as an
-            // idempotency key across continuation/recovery.
-            const result = await registered.handler(params ?? {}, { signal, toolCallId });
-            const isError = !!(result && (result as any).isError);
-            return {
-              content: mapContent((result as any)?.content, isError),
-              details: undefined,
-            };
+            result = await registered.handler(params ?? {}, { signal, toolCallId });
           } catch (err) {
             const msg = (err as Error)?.message || String(err);
-            return {
-              content: [{ type: 'text' as const, text: `[MCP tool error] ${fullName}: ${msg}` }],
-              details: undefined,
-            };
+            throw new Error(`[MCP tool error] ${fullName}: ${msg}`);
           }
+          const isError = !!result?.isError;
+          const content = mapContent(result?.content, isError);
+          if (isError) {
+            const text = content.filter(block => block.type === 'text')
+              .map(block => block.text).join('\n');
+            throw new Error(text || `[MCP tool error] ${fullName}`);
+          }
+          return { content, details: undefined };
         },
       } as ToolDefinition;
 

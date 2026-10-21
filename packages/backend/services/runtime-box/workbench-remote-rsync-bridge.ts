@@ -11,7 +11,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
-import type { RemoteWorkbenchWorkspaceBridge } from './workbench-remote-job-runner.js';
+import type { RemoteWorkbenchWorkspaceBridge } from '../execution/remote-job-runner.js';
 import { applyRemoteWorkspaceDelta, snapshotWorkspace } from './workbench-remote-workspace-sync.js';
 
 const runFile = promisify(execFile);

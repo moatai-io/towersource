@@ -1,3 +1,4 @@
+import { createSleepMcpServer } from '../mcp/sleep-server.js';
 /**
  * Claude Code engine — wraps @anthropic-ai/claude-agent-sdk.
  *
@@ -13,6 +14,7 @@ import {
   executeQuery,
   abortSession,
   cleanupSession,
+  getSessionAbortSignal,
   getClaudeSessionId,
   getActiveSessionCount,
   getRunningSessionIds as sdkGetRunningSessionIds,
@@ -140,7 +142,9 @@ export class ClaudeEngine implements Engine {
     // 호출 시점에 검사. 비활성 사용자는 도구 호출 시 SandboxDeniedError 받음.
     // self-hosted VM 도 자기 형제 execution VM 이 있으면 활성 (D12).
     // 결정: workspace/decisions/2026-05-02-execution-sandbox-d12-sibling-sandbox-mandatory.md
-    const towerMcpServers: Record<string, any> = {};
+    const towerMcpServers: Record<string, any> = {
+      wait: createSleepMcpServer({ sessionId, rootTurnId: opts.rootTurnId, getSignal: () => getSessionAbortSignal(sessionId) }),
+    };
 
     // Sandbox MCP (D11/D12 — execution isolation, gated by 4 toggles)
     try {

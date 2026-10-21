@@ -1,19 +1,49 @@
-import { describe, expect, it } from 'vitest';
-import { buildSkillWorkbenchPrompt, isSkillWorkbenchEnabled, scoreSkillWorkbenchOutput } from './skill-workbench.js';
-import { config } from '../../config.js';
+import { describe, expect, it, vi } from 'vitest';
+import { buildSkillWorkbenchPrompt, isSkillWorkbenchEnabled, runSkillWorkbenchComparison, scoreSkillWorkbenchOutput } from './skill-workbench.js';
+import { config, getModelDefaults } from '../../config.js';
+import { runUtilityTextTask } from '../ai/utility-agent.js';
+
+vi.mock('../ai/utility-agent.js', () => ({ runUtilityTextTask: vi.fn(async () => 'Synthetic comparison output.') }));
 
 describe('skill-workbench', () => {
-  it('is enabled only on full VM role', () => {
-    const original = config.towerRole;
+  it('uses Core for all three comparison arms without saving history or calling a provider', async () => {
+    const originalRole = config.towerRole;
+    const originalFlag = process.env.SKILL_WORKBENCH_ENABLED;
+    vi.mocked(runUtilityTextTask).mockClear();
     try {
       (config as any).towerRole = 'full';
+      process.env.SKILL_WORKBENCH_ENABLED = 'true';
+      const result = await runSkillWorkbenchComparison({ prompt: 'Synthetic task', saveToHistory: false });
+      expect(result.runs).toHaveLength(3);
+      expect(runUtilityTextTask).toHaveBeenCalledTimes(3);
+      for (const [request] of vi.mocked(runUtilityTextTask).mock.calls) {
+        expect(request.model).toBe(getModelDefaults().session);
+      }
+    } finally {
+      (config as any).towerRole = originalRole;
+      if (originalFlag === undefined) delete process.env.SKILL_WORKBENCH_ENABLED;
+      else process.env.SKILL_WORKBENCH_ENABLED = originalFlag;
+    }
+  });
+  it('stays off by default and requires an explicit full-VM opt-in', () => {
+    const originalRole = config.towerRole;
+    const originalFlag = process.env.SKILL_WORKBENCH_ENABLED;
+    try {
+      (config as any).towerRole = 'full';
+      delete process.env.SKILL_WORKBENCH_ENABLED;
+      expect(isSkillWorkbenchEnabled()).toBe(false);
+      process.env.SKILL_WORKBENCH_ENABLED = 'false';
+      expect(isSkillWorkbenchEnabled()).toBe(false);
+      process.env.SKILL_WORKBENCH_ENABLED = 'true';
       expect(isSkillWorkbenchEnabled()).toBe(true);
       (config as any).towerRole = 'managed';
       expect(isSkillWorkbenchEnabled()).toBe(false);
       (config as any).towerRole = 'standalone';
       expect(isSkillWorkbenchEnabled()).toBe(false);
     } finally {
-      (config as any).towerRole = original;
+      (config as any).towerRole = originalRole;
+      if (originalFlag === undefined) delete process.env.SKILL_WORKBENCH_ENABLED;
+      else process.env.SKILL_WORKBENCH_ENABLED = originalFlag;
     }
   });
 

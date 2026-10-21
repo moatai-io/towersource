@@ -19,14 +19,15 @@
     "i18next": "^26.0.4",
     "katex": "^0.16.38",
     "livekit-client": "^2.15.6",
-    "mermaid": "^11.16.0",
+    "mermaid": "^11.17.2",
+    "parse5": "^7.3.0",
     "pdf-lib": "^1.17.1",
     "prettier": "^3.9.5",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-i18next": "^17.0.2",
     "react-markdown": "^9.0.0",
-    "react-router-dom": "^6.30.4",
+    "react-router-dom": "^7.18.4",
     "react-virtuoso": "^4.18.3",
     "recharts": "^3.8.0",
     "rehype-highlight": "^7.0.0",
@@ -37,13 +38,13 @@
     "remark-math": "^6.0.0",
     "sonner": "^2.0.7",
     "sql.js": "^1.14.1",
-    "xlsx": "^0.18.5",
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz",
     "zustand": "^5.0.0"
   },
   "devDependencies": {
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@types/sql.js": "^1.4.11",
-    "vite": "^6.4.1"
+    "vite": "^6.4.4"
   }
 }

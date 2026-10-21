@@ -36,8 +36,9 @@ async function resolveCallerName(parentSessionId: string): Promise<string> {
 
 const CREATE_DESCRIPTION = [
   'Create a subagent backed by a persistent Tower Agent Session.',
-  'Use this when a task benefits from a separate investigator, reviewer, implementer,',
-  'or long-lived helper that should keep context and can be recalled later.',
+  'Default to handling work directly. Create a subagent only for substantial, independently separable work',
+  'whose clear benefit outweighs the time, cost, context-transfer, and integration overhead.',
+  'Handle short investigations, small edits, and simple checks directly; do not create a reviewer merely to demonstrate thoroughness.',
   '',
   'All subagents are persistent Agent Sessions. There is no separate run-once type:',
   'for one-time work, create a subagent with a bounded task and simply do not reuse it.',
@@ -56,7 +57,9 @@ const SEND_DESCRIPTION = [
   'Use this instead of creating a new sub-agent when the worker should remember',
   'prior decisions, role, and previous runs.',
   '',
-  'Report contract: follow-up runs always report back and wake the supervisor when done.',
+  'Report contract: follow-up runs report back and wake the requesting session when done.',
+  'With user-authorized collaboration, a peer may address another owned worker by exact worker/backing-session ID.',
+  'Peer replies return to the requesting peer, not necessarily the original supervisor. Existing ACL, busy and loop guards still apply.',
   'Persistent worker communication is wake-only; report-only delivery is not exposed on this path.',
 ].join('\n');
 
@@ -80,12 +83,12 @@ export function createAgentWorkerMcpServer(ctx: AgentWorkerMcpContext) {
         CREATE_DESCRIPTION,
         {
           name: z.string().min(1).max(80).describe('Human-readable worker name, e.g. "QA steward".'),
-          role: z.string().min(1).max(1000).describe('Short role description. What this worker is responsible for.'),
-          instruction: z.string().min(1).max(8000).describe('Operating policy for the subagent.'),
+          role: z.string().min(1).max(1000).describe('Judgment responsibility and relevant domain expertise for this team, not merely an impressive job title. Expertise does not grant access or execution authority.'),
+          instruction: z.string().min(1).max(8000).describe('Durable role, expertise, observation and evidence standards, operating principles, authority boundaries, and constraints. Respect the existing team workflow and canonical artifacts; prefer updating their owning locations over creating parallel files, tests, reports or taxonomies. Put the current mission and its full context in task; do not assume the worker sees the parent conversation.'),
           face: z.string().min(1).max(120).optional().describe('Optional emoji or character:<id> identity snapshot shown on cards.'),
           tagline: z.string().min(1).max(300).optional().describe('Optional short identity line shown below the worker name.'),
           goal: z.string().max(1000).optional().describe('Optional goal/state-card goal text. Defaults to role/name.'),
-          task: z.string().max(8000).optional().describe('Optional initial task. If omitted, the subagent only bootstraps and reports its operating approach.'),
+          task: z.string().max(8000).optional().describe('Self-contained delegation brief: user purpose and overall goal; roadmap, current stage and milestones; assigned scope/non-goals, expertise and judgment criteria, existing team conventions, canonical artifact ownership and integration dependencies; known facts, assumptions and source paths; constraints and file ownership; approach/checkpoints; deliverables, acceptance criteria and verification evidence; blocker/escalation conditions. Provide enough context for independent judgment, not a terse command. If omitted, only bootstrap and report operating approach.'),
           visibility: z.enum(['background', 'sidebar', 'team', 'system']).optional().describe('background keeps sidebar clutter low but is still visible via worker list/status.'),
           engine: z.enum(['claude', 'pi']).optional().describe('Engine for backing session. Omit to use server default.'),
           model: z.string().optional().describe('Optional model id for backing session.'),
@@ -140,7 +143,7 @@ export function createAgentWorkerMcpServer(ctx: AgentWorkerMcpContext) {
         SEND_DESCRIPTION,
         {
           worker: z.string().min(1).describe('Worker id, backing session id, id prefix, or exact worker name.'),
-          message: z.string().min(1).describe('Follow-up task/message to send to the persistent agent.'),
+          message: z.string().min(1).describe('Context-rich follow-up: current overall goal and verified progress, changes since the prior brief, next milestone, this assignment, constraints, acceptance criteria, expected evidence and integration into existing team artifacts. Prefer existing verification paths and justify new artifacts. Explicitly retain still-valid prior context; explain changed direction. Concise reports do not justify context-poor instructions.'),
         },
         async (args) => {
           try {
