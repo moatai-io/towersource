@@ -1,5 +1,22 @@
 import { describe, expect, it } from 'vitest';
+import fs from 'node:fs';
+import path from 'node:path';
 import { inspectResponsesFileRepresentations, sanitizeLiteLLMResponsesCommentaryMessages, sanitizeLiteLLMResponsesOrphanFunctionOutputs } from '../pi/provider-safeguards.js';
+
+describe('Responses request estimate boundary', () => {
+  it('does not turn a heuristic context estimate into a synthetic provider failure', () => {
+    const source = fs.readFileSync(path.resolve(import.meta.dirname, '../pi/provider-safeguards.ts'), 'utf8');
+    expect(source).toContain('const bodyEstimatedPromptTokens = estimateOpenAIResponsesRequestTokens(bodyObj)');
+    expect(source).toContain('recordPiResponsesRequestDebugInfo(debugInfo)');
+    expect(source).toContain('const res = await _origFetch(effectiveInput as any, effectiveInit)');
+    expect(source).not.toContain('shouldRejectNearContextOpenAIResponsesRequest');
+    expect(source).not.toContain('preflightFloor=');
+    expect(source).not.toContain('Pi Responses preflight rejected near-context request');
+    expect(source).not.toContain("code: 'context_length_exceeded'");
+    // Actual file-representation size admission remains independent.
+    expect(source).toContain('if (fileRepresentationAdmission.rejected)');
+  });
+});
 
 describe('Responses file representation admission', () => {
   const dataImage = (bytes: number) => `data:image/png;base64,${Buffer.alloc(bytes).toString('base64')}`;
@@ -13,8 +30,10 @@ describe('Responses file representation admission', () => {
   });
 
   it('rejects an accumulated provider request beyond the image count budget', () => {
-    const input = Array.from({ length: 25 }, () => ({ type: 'input_image', image_url: dataImage(1) }));
-    expect(inspectResponsesFileRepresentations({ input })).toMatchObject({ imageItems: 25, rejected: true });
+    const fifty = Array.from({ length: 50 }, () => ({ type: 'input_image', image_url: dataImage(1) }));
+    expect(inspectResponsesFileRepresentations({ input: fifty })).toMatchObject({ imageItems: 50, rejected: false });
+    const input = Array.from({ length: 51 }, () => ({ type: 'input_image', image_url: dataImage(1) }));
+    expect(inspectResponsesFileRepresentations({ input })).toMatchObject({ imageItems: 51, rejected: true });
   });
 });
 

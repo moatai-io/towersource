@@ -2,7 +2,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { readFile, realpath, stat } from 'node:fs/promises';
 import path from 'node:path';
-import { auditCredentialEvent, setProjectCredentialPolicy, upsertApiKeyCredential } from '../credential-vault-service.js';
+import { auditCredentialEvent, upsertApiKeyCredential } from '../credential-vault-service.js';
 
 export interface HostSecretImportRequest {
   sourcePath: string;
@@ -122,10 +122,9 @@ export async function applyHostSecretImport(input: { intentId: string; proposalH
   await upsertApiKeyCredential({
     id: intent.credentialId, provider: intent.provider, displayName: intent.displayName,
     secretName: intent.secretName, secretValue, defaultEnvName: intent.envName ?? intent.secretName,
-    scope: 'project', actorUserId: input.actorUserId,
+    scope: 'project', projectId: intent.projectId, actorUserId: input.actorUserId,
     metadata: { imported_from_host: true, source_key: intent.sourceKey },
   });
-  await setProjectCredentialPolicy({ projectId: intent.projectId, credentialId: intent.credentialId, mode: 'allow', targetEnvName: intent.envName ?? intent.secretName, actorUserId: input.actorUserId });
   await auditCredentialEvent({
     credentialId: intent.credentialId,
     projectId: intent.projectId,

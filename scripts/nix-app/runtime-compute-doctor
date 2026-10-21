@@ -14,12 +14,22 @@ else
     if "$python_bin" -c "import $mod" >/dev/null 2>&1; then echo "OK|python-import|$mod"; else echo "MISS|python-import|$mod"; fail=1; fi
   done < <(jq -r '.pythonImports[]' "$manifest")
 fi
+while IFS= read -r mod; do
+  if node -e "require('$mod')" >/dev/null 2>&1; then echo "OK|node-import|$mod"; else echo "MISS|node-import|$mod"; fail=1; fi
+done < <(jq -r '.nodeImports[]' "$manifest")
 if command -v tesseract >/dev/null 2>&1; then
   langs="$(tesseract --list-langs 2>/dev/null || true)"
   while IFS= read -r lang; do grep -qx "$lang" <<<"$langs" && echo "OK|ocr|$lang" || { echo "MISS|ocr|$lang"; fail=1; }; done < <(jq -r '.ocrLanguages[]' "$manifest")
 fi
 if command -v fc-match >/dev/null 2>&1; then
-  while IFS= read -r family; do match="$(fc-match "$family" 2>/dev/null || true)"; [[ -n "$match" ]] && echo "OK|font|$family|$match" || { echo "MISS|font|$family"; fail=1; }; done < <(jq -r '.fontFamilies[]' "$manifest")
+  while IFS= read -r family; do
+    match="$(fc-match -f '%{family}\n' "$family" 2>/dev/null | head -1 || true)"
+    if grep -Fqi "$family" <<<"$match"; then echo "OK|font|$family|$match"; else echo "MISS|font|$family|matched=${match:-none}"; fail=1; fi
+  done < <(jq -r '.fontFamilies[]' "$manifest")
+  while IFS=$'\t' read -r generic expected; do
+    match="$(fc-match -f '%{family}\n' "$generic" 2>/dev/null | head -1 || true)"
+    if grep -Eqi "$expected" <<<"$match"; then echo "OK|generic-font|$generic|$match"; else echo "MISS|generic-font|$generic|matched=${match:-none}"; fail=1; fi
+  done < <(jq -r '.genericFontFamilies | to_entries[] | [.key,.value] | @tsv' "$manifest")
 else echo 'MISS|font|fc-match'; fail=1; fi
 [[ "$fail" == 0 ]] && echo 'OK|baseline|ready' || echo 'MISS|baseline|incomplete'
 exit "$fail"

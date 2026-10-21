@@ -16,6 +16,7 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { describe, it, expect } from 'vitest';
 import { createAssistantMessageEventStream } from '@earendil-works/pi-ai';
 
@@ -106,4 +107,47 @@ describe('Pi SDK EventStream.end() patch (issue #2352)', () => {
     expect(result).toBeNull();
     await consumer;
   });
+});
+
+// Exercise every reachable SDK copy: a root-only assertion missed production's
+// private dependency beneath pi-coding-agent.
+describe('nested Pi runtime SDK patches', () => {
+  const seen = new Set<string>();
+  const copies: string[] = [];
+  function walk(modules: string) {
+    for (const name of ['pi-ai', 'pi-agent-core', 'pi-coding-agent']) {
+      const candidate = path.join(modules, '@earendil-works', name);
+      if (!fs.existsSync(candidate)) continue;
+      const directory = fs.realpathSync(candidate);
+      if (seen.has(directory)) continue;
+      seen.add(directory);
+      if (name === 'pi-ai') copies.push(directory);
+      walk(path.join(directory, 'node_modules'));
+    }
+  }
+  walk(path.join(process.cwd(), 'node_modules'));
+  walk(path.join(process.cwd(), 'packages/backend/node_modules'));
+  it('discovers at least one SDK', () => expect(copies.length).toBeGreaterThan(0));
+  for (const directory of copies) {
+    it(`preserves early phase and resolves end in ${path.relative(process.cwd(), directory)}`, async () => {
+      const adapter = ['api', 'providers'].map((folder) => path.join(directory, 'dist', folder, 'openai-responses-shared.js'))
+        .find((file) => fs.existsSync(file))!;
+      const { processResponsesStream } = await import(pathToFileURL(adapter).href);
+      const { createAssistantMessageEventStream } = await import(pathToFileURL(path.join(directory, 'dist/utils/event-stream.js')).href);
+      const stream = createAssistantMessageEventStream();
+      stream.end();
+      expect(await stream.result()).toBeNull();
+      const output: any = { content: [], usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: {} } };
+      let earlyPhase: string | undefined;
+      async function* events() {
+        yield { type: 'response.output_item.added', output_index: 0, item: { type: 'message', id: 'fixture', phase: 'final_answer' } };
+        yield { type: 'response.output_text.delta', output_index: 0, delta: 'hello' };
+        yield { type: 'response.completed', response: { status: 'completed', output: [] } };
+      }
+      await processResponsesStream(events(), output, { push(event: any) {
+        if (event.type === 'text_delta') earlyPhase = JSON.parse(event.partial.content[event.contentIndex].textSignature || '{}').phase;
+      } }, { cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } });
+      expect(earlyPhase).toBe('final_answer');
+    });
+  }
 });

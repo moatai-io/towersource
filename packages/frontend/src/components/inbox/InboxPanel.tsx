@@ -1,6 +1,8 @@
 import React, { useEffect, useState, useMemo, useRef, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import i18n from '../../i18n';
+import { useConfirm } from '../../hooks/useDialog';
+import { toastError, toastQuiet } from '../../utils/toast';
 import { useSessionStore } from '../../stores/session-store';
 import { useRoomStore } from '../../stores/room-store';
 import { useProjectStore } from '../../stores/project-store';
@@ -10,7 +12,7 @@ import { RichContent } from '../shared/RichContent';
 import type { SessionMeta } from '@tower/shared';
 import { RunIndicator } from '../common/RunIndicator';
 import { getLatestSessionDismissKey, isLatestSessionDismissed, loadDismissedLatestSessionKeys, saveDismissedLatestSessionKeys } from '../../utils/latest-session-persistence';
-import { loadSessionListFilters, matchesSessionListFilters, SESSION_LIST_FILTERS_UPDATED_EVENT } from '../../utils/session-list-filters';
+import { loadSessionListFilters, isSessionParticipatedByCurrentUser, matchesSessionListFilters, SESSION_LIST_FILTERS_UPDATED_EVENT } from '../../utils/session-list-filters';
 
 interface LastMessage {
   sessionId: string;
@@ -78,6 +80,7 @@ export function extractSemanticLead(text: string, maxChars = 160): string {
 
 export function InboxPanel({ onSelectSession, variant = 'full' }: InboxPanelProps = {}) {
   const { t } = useTranslation('layout');
+  const confirmArchive = useConfirm();
   const sessions = useSessionStore((s) => s.sessions);
   const unreadSessions = useSessionStore((s) => s.unreadSessions);
   const streamingSessions = useSessionStore((s) => s.streamingSessions);
@@ -91,6 +94,8 @@ export function InboxPanel({ onSelectSession, variant = 'full' }: InboxPanelProp
   const projects = useProjectStore((s) => s.projects);
   const tasks = useKanbanStore((s) => s.tasks);
   const taskSessionIds = useMemo(() => new Set(tasks.filter(t => t.sessionId).map(t => t.sessionId!)), [tasks]);
+  const turnStateBySession = useChatStore((s) => s.turnStateBySession);
+  const awaitingSessionIds = useMemo(() => new Set(Object.entries(turnStateBySession).filter(([, state]) => state.phase === 'awaiting_user').map(([sessionId]) => sessionId)), [turnStateBySession]);
 
   const [lastMessages, setLastMessages] = useState<Record<string, LastMessage>>({});
   const [replies, setReplies] = useState<Record<string, string>>({});
@@ -121,11 +126,10 @@ export function InboxPanel({ onSelectSession, variant = 'full' }: InboxPanelProp
 
   const currentUsername = useMemo(() => localStorage.getItem('username') || '', []);
 
-  const isLatestCandidate = useCallback((session: SessionMeta) => {
-    if (!currentUsername) return true;
-    const lastUserUsername = (session as SessionMeta & { lastUserUsername?: string | null }).lastUserUsername;
-    return (lastUserUsername || session.ownerUsername) === currentUsername;
-  }, [currentUsername]);
+  const isLatestCandidate = useCallback(
+    (session: SessionMeta) => isSessionParticipatedByCurrentUser(session, currentUsername),
+    [currentUsername],
+  );
 
   // Animate-then-dismiss helper
   const animateDismiss = useCallback((sessionId: string) => {
@@ -147,15 +151,17 @@ export function InboxPanel({ onSelectSession, variant = 'full' }: InboxPanelProp
   const latestSessions = useMemo(() => {
     return sessions
       .filter((s) => {
+        // Opening an archived conversation must not return it to active results.
+        if (s.archived) return false;
         if (!isLatestCandidate(s)) return false;
         if (isLatestSessionDismissed(dismissedKeys, s)) return false;
         const isStreaming = streamingSessions.has(s.id);
         const isUnread = unreadSessions.has(s.id);
-        if (!matchesSessionListFilters(s, sessionFilters, { currentUsername, isUnread, isStreaming })) return false;
+        if (!matchesSessionListFilters(s, sessionFilters, { currentUsername, isUnread, isStreaming, isAwaiting: awaitingSessionIds.has(s.id) })) return false;
         return isStreaming || isUnread || !!recentlyReadSessionUntil[s.id];
       })
       .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
-  }, [sessions, unreadSessions, streamingSessions, isLatestCandidate, dismissedKeys, recentlyReadSessionUntil, sessionFilters, currentUsername]);
+  }, [sessions, unreadSessions, streamingSessions, awaitingSessionIds, isLatestCandidate, dismissedKeys, recentlyReadSessionUntil, sessionFilters, currentUsername]);
 
   const allVisibleIds = useMemo(() => {
     const ids = new Set<string>();
@@ -321,17 +327,29 @@ export function InboxPanel({ onSelectSession, variant = 'full' }: InboxPanelProp
   // Newest first → no auto-scroll needed (already at top)
 
   const handleArchive = useCallback(async (sessionId: string) => {
+    if (!(await confirmArchive({
+      title: t('moveToArchive'), message: t('sessionTrashSharedWarning'),
+      confirmLabel: t('moveToArchive'), danger: false,
+    }))) return;
     const token = localStorage.getItem('token') || '';
     const headers: Record<string, string> = {};
     if (token) headers['Authorization'] = `Bearer ${token}`;
     try {
-      const res = await fetch(`/api/sessions/${sessionId}`, { method: 'DELETE', headers });
-      if (res.ok) {
-        removeSession(sessionId);
-        markSessionRead(sessionId);
-      }
-    } catch {}
-  }, [removeSession, markSessionRead]);
+      const res = await fetch(`/api/sessions/${sessionId}/archive`, { method: 'POST', headers });
+      if (!res.ok) throw new Error(`archive failed: ${res.status}`);
+      removeSession(sessionId);
+      useChatStore.getState().clearSessionQueue(sessionId);
+      window.dispatchEvent(new CustomEvent('tower-session-archive-changed'));
+      toastQuiet(t('sessionTrashMoved'), {
+        action: {
+          label: t('sessionTrash'),
+          onClick: () => window.dispatchEvent(new CustomEvent('tower-open-session-archive')),
+        },
+      });
+    } catch {
+      toastError(t('sessionTrashDeleteFailed'));
+    }
+  }, [removeSession, confirmArchive, t]);
 
   const openSession = useCallback((session: SessionMeta) => {
     markSessionRead(session.id);
@@ -610,7 +628,7 @@ function InboxCard({
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 5v14m0 0l-5-5m5 5l5-5" />
             </svg>
           </button>
-          <button onClick={onArchive} className="tone-warning p-1 text-surface-500 hover:text-[var(--tone-text)] rounded hover:bg-surface-700/50 transition-colors" title={t('pendingRepliesView.archive')}>
+          <button onClick={onArchive} className="tone-warning p-1 text-surface-500 hover:text-[var(--tone-text)] rounded hover:bg-surface-700/50 transition-colors" title={t('moveToArchive')} aria-label={t('moveToArchive')}>
             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M20.25 7.5l-.625 10.632a2.25 2.25 0 01-2.247 2.118H6.622a2.25 2.25 0 01-2.247-2.118L3.75 7.5m8.25 3v6.75m0 0l-3-3m3 3l3-3M3.375 7.5h17.25c.621 0 1.125-.504 1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125z" />
             </svg>

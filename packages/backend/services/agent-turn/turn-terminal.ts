@@ -9,7 +9,7 @@ export type TurnTerminalOutcome =
   | 'needs_attention'
   | 'claim_denied';
 
-export type EngineTerminalOutcome = 'completed' | 'retryable_failure' | 'failed' | 'claim_denied';
+export type EngineTerminalOutcome = 'completed' | 'retryable_failure' | 'failed' | 'claim_denied' | 'wait_requested';
 export type PiEngineTerminalOutcome = EngineTerminalOutcome;
 
 export interface TurnTerminalEvidence {
@@ -33,6 +33,7 @@ export interface TurnTerminalDecision {
   rootTurnId: string;
   outcome: TurnTerminalOutcome;
   reason:
+    | 'durable_wait_scheduled'
     | 'durable_assistant_completed'
     | 'missing_durable_assistant'
     | 'retryable_engine_failure'
@@ -69,6 +70,8 @@ export function decideTurnTerminal(evidence: TurnTerminalEvidence): TurnTerminal
       error: evidence.error,
     };
   }
+
+  if (evidence.engineOutcome === 'wait_requested') return { ...base, outcome: 'completed', reason: 'durable_wait_scheduled' };
 
   if (evidence.engineOutcome === 'claim_denied') {
     return { ...base, outcome: 'claim_denied', reason: 'recovery_claim_denied', error: evidence.error };

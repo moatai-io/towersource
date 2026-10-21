@@ -47,6 +47,8 @@ describe('AssistantStreamCoalescer', () => {
       updateMessageContent: () => {},
     });
 
+    coalescer.queueAssistantEvent(text('initial'));
+    events.length = 0;
     coalescer.queueAssistantEvent(text('first'));
     coalescer.queueAssistantEvent(text('second'));
     expect(events).toHaveLength(0);
@@ -55,8 +57,27 @@ describe('AssistantStreamCoalescer', () => {
 
     expect(events).toHaveLength(1);
     expect(events[0].content).toEqual(text('second'));
-    expect(coalescer.perf.assistantSnapshotsQueued).toBe(2);
-    expect(coalescer.perf.assistantSnapshotsFlushed).toBe(1);
+    expect(coalescer.perf.assistantSnapshotsQueued).toBe(3);
+    expect(coalescer.perf.assistantSnapshotsFlushed).toBe(2);
+  });
+
+  it('flushes the first answer immediately after progress, including a new message', () => {
+    const events: any[] = [];
+    let msgId = 'm1';
+    const coalescer = new AssistantStreamCoalescer({ sessionId: 's1', getMsgId: () => msgId,
+      streamFlushMs: 150, dbFlushMs: 300, pushAssistantEvent: (m) => events.push(m),
+      trackDbWrite: () => {}, updateMessageContent: () => {} });
+    coalescer.queueAssistantEvent([{ type: 'tool_use', id: 't', name: 'read', input: {} }], true);
+    coalescer.queueAssistantEvent(text('hello'));
+    expect(events).toHaveLength(2);
+    coalescer.queueAssistantEvent(text('hello world'));
+    expect(events).toHaveLength(2);
+    coalescer.flushAssistantEvent();
+    msgId = 'm2';
+    coalescer.queueAssistantEvent(text('next'));
+    expect(events.at(-1)).toMatchObject({ msgId: 'm2', content: text('next') });
+    vi.advanceTimersByTime(150);
+    expect(events).toHaveLength(4);
   });
 
   it('coalesces DB updates and tracks the latest pending write', () => {
@@ -98,6 +119,8 @@ describe('AssistantStreamCoalescer', () => {
       updateMessageContent: (id, content) => ({ id, content }),
     });
 
+    coalescer.queueAssistantEvent(text('initial'));
+    events.length = 0;
     coalescer.queueAssistantEvent(text('pending'));
     coalescer.queueAssistantDbUpdate('m1', text('pending'));
     coalescer.clearAllTimers();

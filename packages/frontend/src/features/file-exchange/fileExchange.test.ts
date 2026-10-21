@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { decodeExchangeDrag, encodeExchangeDrag } from './fileExchange';
+import { decodeExchangeDrag, encodeExchangeDrag } from './fileExchangeDrag';
 
 describe('File Exchange drag codec', () => {
   it('round-trips a versioned opaque personal ref', () => {

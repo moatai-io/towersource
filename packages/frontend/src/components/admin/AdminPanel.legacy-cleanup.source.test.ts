@@ -4,15 +4,14 @@ import { describe, expect, it } from 'vitest';
 const source = readFileSync(new URL('./AdminPanel.tsx', import.meta.url), 'utf8');
 
 describe('Admin legacy UI cleanup', () => {
-  it('shows only connection methods with implemented completion paths', () => {
-    expect(source).not.toContain("| 'cloud'");
-    expect(source).not.toContain("| 'cli'");
-    expect(source).not.toContain("mode: 'cloud'");
-    expect(source).not.toContain("mode: 'cli'");
-    expect(source).not.toContain('이 타입은 아직 저장 동작 전 단계입니다.');
-    expect(source).toContain("mode: 'api_key_simple'");
-    expect(source).toContain("mode: 'oauth'");
-    expect(source).toContain("mode: 'ssh'");
+  it('keeps only the implemented shared API-key registration path', () => {
+    const credentials = source.slice(source.indexOf('function CredentialVaultManagement'), source.indexOf('// ───── System Tab'));
+    expect(credentials).toContain('/credential-vault/credentials/api-key');
+    expect(credentials).not.toContain("mode: 'cloud'");
+    expect(credentials).not.toContain("mode: 'cli'");
+    expect(credentials).not.toContain("mode: 'oauth'");
+    expect(credentials).not.toContain("mode: 'ssh'");
+    expect(credentials).not.toContain('connectionMode');
   });
 
   it('removes the unused legacy AI usage wrapper and dashboard', () => {

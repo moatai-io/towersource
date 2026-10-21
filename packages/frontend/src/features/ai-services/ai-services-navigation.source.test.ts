@@ -9,6 +9,7 @@ const legacyNav = header.split("const list: { key: string; label: string; badge?
 const settingsManagement = header.split('/* ── Settings and management ── */')[1]?.split('/* ── Help ── */')[0] || '';
 const operations = header.split('/* ── Operations ── */')[1]?.split('/* ── Beta ── */')[0] || '';
 const app = fs.readFileSync(path.join(root, 'App.tsx'), 'utf8');
+const contentRouter = fs.readFileSync(path.join(root, 'components/layout/AppContentRouter.tsx'), 'utf8');
 const sessions = fs.readFileSync(path.join(root, 'stores/session-store.ts'), 'utf8');
 
 describe('AI Services navigation', () => {
@@ -24,7 +25,7 @@ describe('AI Services navigation', () => {
 
   it('mounts the operations home only when the full-VM capability is enabled', () => {
     expect(app).toContain("import('./features/ai-services/AIServiceHome')");
-    expect(app).toContain("activeView === 'aiServices' && aiServicesEnabled");
+    expect(contentRouter).toContain("activeView === 'aiServices' && aiServicesEnabled");
     expect(app).toContain("if (!useSettingsStore.getState().serverConfig?.aiServicesEnabled) return");
     expect(app).toContain("if (!aiServicesEnabled && activeView === 'aiServices')");
     expect(sessions).toContain("'aiServices'");

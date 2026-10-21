@@ -100,3 +100,15 @@ PG full-text 기반. 메시지 + 세션 메타 + 파일 (선택적) 한 번에.
 ## 테스트
 
 - 단위 테스트 없음 (대부분 fs / PG 의존성). ws-handler.test.ts 가 file-system 을 vi.mock 으로 stub.
+
+## 검색 안정성과 최신성 계약
+
+- 세션 audience는 모든 TSV/ILIKE 검색에서 후보 LIMIT 전에 적용한다. operator의 회사 프로젝트 접근은 대화 읽기 권한이 아니며 admin 예외만 유지한다. 권한 조회 자체가 실패하면 검색을 실행하지 않는다.
+- 네 TSV 구간은 독립적으로 실패한다. 한 구간의 오류가 다른 성공 결과를 버리지 않는다. 세션/메시지는 기존 부분 문자열 fallback을 유지한다.
+- `search()`는 호환 배열을 반환한다. 부분 장애에서는 비열거 속성 `partial=true`, `failedSections`(session/memory/message/work)를 붙인다. fallback으로 일부 회수해도 최초 경로 실패 표시는 유지한다. 오류 상세·검색어는 실패 로그에 넣지 않는다.
+- `GET /api/search`는 배열 JSON 계약을 유지하고 부분 장애를 `X-Tower-Search-Partial`, `X-Tower-Search-Failed-Sections` 헤더로 전달한다. Pi conversation_search/memory_search는 사용자에게 불완전한 검색임을 경고한다. 기존 웹 UI의 헤더 경고 표시는 아직 구현하지 않았다.
+- 네 TSV 점수는 `관련도 × (1 + 0.2 × 2^(-max(0, 경과일)/60))`를 적용한다. 오늘 1.20배, 60일 전 1.10배, 180일 전 1.025배다. 기존 즐겨찾기·소유자·프로젝트 가중치는 유지한다. 종류 간 통합 점수 정렬은 하지 않는다.
+- 날짜 기준은 세션 updated_at, 기억 covered_message_created_at(없으면 카드 updated_at), 메시지 created_at, 업무 activity_at(없으면 updated_at/created_at)이다. 세션 메타데이터 변경과 카드 재생성을 완전히 분리하는 내용 시각 모델은 후속 과제다.
+- 메시지의 최근 후보 `max(limit×4,100)` 제한과 ILIKE fallback의 최신순은 유지한다. 따라서 오래된 메시지의 후보 누락이나 한국어 형태소 검색 문제까지 해결했다고 보지 않는다.
+
+검증 진입점: `search.behavior.test.ts`, `search.test.ts`, `../pm/session-access-visibility.test.ts`, `../../engines/__tests__/pi-conversation-search-tool.test.ts`, `../../engines/__tests__/pi-memory-search-tool.test.ts`. DB mock 기반 회귀 테스트와 실제 PostgreSQL 실행 계획/검색 품질 측정은 별개이며 운영 배포는 이 변경에 포함되지 않는다.

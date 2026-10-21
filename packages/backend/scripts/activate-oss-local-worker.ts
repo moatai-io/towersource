@@ -4,7 +4,7 @@
  * Public API: CLI configured by TOWER_OSS_* environment variables.
  */
 import { activateProjectWorkerFirst } from '../services/runtime-box/workbench-project-worker-first-activation.js';
-import { getPersistedWorkbenchWorker } from '../services/runtime-box/workbench-worker-repository.js';
+import { getPersistedWorkbenchWorker } from '../services/execution/worker/worker-repository.js';
 import { closePgPool } from '../db/pg.js';
 
 function required(name: string): string {
@@ -32,6 +32,8 @@ async function main(): Promise<void> {
     actorUserId,
     rolloutCohort: 'oss-single-host',
     reason: 'Tower OSS single-host local Worker bootstrap verified by direct execution smoke',
+    fileAuthorityReady: true,
+    verificationEvidence: 'worker-file-roundtrip',
   });
   console.log(JSON.stringify({ status: 'active', ...result }));
 }

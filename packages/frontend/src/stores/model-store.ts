@@ -7,8 +7,21 @@ export interface ModelOption {
   id: string;
   name: string;
   badge: string;
+  /** Tower-managed preset or a directly selected model. */
+  kind?: 'policy' | 'direct';
+  /** Stable user-facing alias. */
+  policyAlias?: 'core' | 'lite';
+  /** Runtime model selected by this alias. */
+  runtimeModelId?: string;
+  /** User-facing maker; not the LiteLLM transport provider. */
+  company?: string;
+  /** LiteLLM-reported USD per million tokens, when both rates are available. */
+  inputPricePerMillion?: number;
+  outputPricePerMillion?: number;
   /** Optional input context window from backend models.json. */
   contextWindow?: number;
+  /** Product-supported reasoning efforts for this exact runtime model. */
+  reasoningEfforts?: EffortLevel[];
 }
 
 export interface ModelDefaults {
@@ -20,7 +33,7 @@ export interface ModelDefaults {
 export type EffortLevel = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 
 const DEFAULT_DEFAULTS: ModelDefaults = {
-  session: 'pi:litellm-responses/smartest',
+  session: 'pi:preset/core',
   ai_reply: 'pi:litellm-responses/mini',
   ai_task: 'pi:litellm-responses/mini',
 };
@@ -65,7 +78,7 @@ export const useModelStore = create<ModelState>((set) => ({
   availableModels: [],
   piModels: [],
   localModels: [],
-  selectedModel: normalizeFrontendModelId(localStorage.getItem('selectedModel')) || DEFAULT_DEFAULTS.session,
+  selectedModel: 'pi:preset/core',
   connectionType: 'MAX',
   defaults: DEFAULT_DEFAULTS,
 
@@ -78,28 +91,24 @@ export const useModelStore = create<ModelState>((set) => ({
     set({ selectedModel: normalized });
   },
   setConnectionType: (type) => set({ connectionType: type }),
-  setDefaults: (defaults) => set((state) => {
-    const normalized = normalizeDefaults(defaults);
-    // First load on a fresh browser: honor server-configured session default.
-    // Server defaults are now Pi-first. If the user has an explicit
-    // localStorage choice, keep it until reconcileSelectedModel() validates it.
-    if (!localStorage.getItem('selectedModel') && normalized.session) {
-      localStorage.setItem('selectedModel', normalized.session);
-      return { defaults: normalized, selectedModel: normalized.session };
-    }
-    return { ...state, defaults: normalized };
-  }),
+  setDefaults: (defaults) => set({ defaults: normalizeDefaults(defaults) }),
 }));
 
 /**
  * Reconcile localStorage-persisted `selectedModel` with the server-side model
  * registry. Called once after `/api/config` loads models + defaults.
  *
- * If the persisted model is no longer registered (e.g. an admin retired
- * `claude-opus-4-6` in models.json), fall back to the admin-configured session
- * default. This prevents footer badges and new-session creation from using a
- * stale model ID that the UI can't render as a pretty name.
+ * New sessions use the current Core preset, regardless of the last model picked
+ * for an existing session.
  */
+export function getNewSessionModel(): string {
+  // A per-session picker choice must not become the next session's default.
+  // Core is a stable preset resolved against the current admin mapping at run time.
+  return useModelStore.getState().piModels.find(model => model.policyAlias === 'core')?.id
+    ?? 'pi:preset/core';
+}
+
+/** Replace a retired picker choice with Core once the registry has loaded. */
 export function reconcileSelectedModel(): void {
   const s = useModelStore.getState();
   const ids = new Set<string>([
@@ -110,10 +119,7 @@ export function reconcileSelectedModel(): void {
   if (ids.size === 0) return; // registry still loading
   if (ids.has(s.selectedModel)) return;
 
-  const defaultSession = normalizeFrontendModelId(s.defaults.session);
-  const fallback = ids.has(defaultSession)
-    ? defaultSession
-    : s.availableModels[0]?.id;
+  const fallback = getNewSessionModel();
   if (!fallback) return;
 
   console.info(
@@ -131,6 +137,7 @@ export function getEngineFromModel(modelId: string): 'claude' | 'pi' | 'local' {
 
 /** Strip engine prefix from model ID for backend. 'pi:openrouter/...' → 'openrouter/...', 'local:foo' → 'foo' */
 export function getModelIdForBackend(modelId: string): string {
+  if (modelId.startsWith('pi:preset/')) return modelId.slice(3);
   if (modelId.startsWith('pi:')) return modelId.slice(3);
   if (modelId.startsWith('local:')) return modelId.slice(6);
   return modelId;
@@ -145,8 +152,10 @@ export function modelIdFromSession(
   session: { engine?: string; modelUsed?: string } | null | undefined,
 ): string | undefined {
   if (!session?.modelUsed) return undefined;
-  if (session.engine === 'pi' && !session.modelUsed.startsWith('pi:')) {
-    return `pi:${session.modelUsed}`;
+  if (session.engine === 'pi') {
+    const model = session.modelUsed.replace(/^pi:/, '');
+    if (model === 'policy/core' || model === 'policy/lite') return `pi:preset/${model.split('/')[1]}`;
+    return `pi:${model}`;
   }
   if (session.engine === 'local' && !session.modelUsed.startsWith('local:')) {
     return `local:${session.modelUsed}`;

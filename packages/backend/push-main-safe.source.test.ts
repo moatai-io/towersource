@@ -6,6 +6,7 @@ const source = fs.readFileSync(path.join(process.cwd(), 'scripts/git/push-main-s
 const coordinator = fs.readFileSync(path.join(process.cwd(), 'scripts/nix-app/prewarm-coordinator'), 'utf8');
 const commitPreflight = fs.readFileSync(path.join(process.cwd(), 'scripts/git/commit-preflight-coordinator'), 'utf8');
 const commitHookInstaller = fs.readFileSync(path.join(process.cwd(), 'scripts/git/install-commit-preflight-hook'), 'utf8');
+const supersessionRehearsal = fs.readFileSync(path.join(process.cwd(), 'scripts/git/rehearse-commit-preflight-supersession'), 'utf8');
 
 describe('push-main-safe source contract', () => {
   it('classifies main synchronization without AI interpretation', () => {
@@ -51,7 +52,12 @@ describe('push-main-safe source contract', () => {
     expect(commitPreflight).toContain('"$verifier" "$observed"');
     expect(commitPreflight).toContain('no automatic retry');
     expect(commitPreflight).toContain('will not retry; continuing with newer candidate');
-    expect(commitPreflight).toContain('set +e; "$verifier" "$observed"; rc=$?; set -e');
+    expect(commitPreflight).toContain('setsid "$verifier" "$observed" & verify_pid=$!');
+    expect(commitPreflight).toContain('while kill -0 "$verify_pid" 2>/dev/null');
+    expect(commitPreflight).toContain('newer revision $latest superseded this preflight');
+    expect(commitPreflight).toContain('kill -TERM -- "-$verify_pid"');
+    expect(commitPreflight).toContain('kill -KILL -- "-$verify_pid"');
+    expect(commitPreflight).toContain('obsolete revision $observed cancelled');
     expect(commitPreflight).toContain('"$verifier" verify-attestation "$status_rev"');
     expect(commitPreflight).toContain('verified after an earlier background failure; no external mutation');
     expect(commitPreflight).not.toContain('git push');
@@ -61,6 +67,8 @@ describe('push-main-safe source contract', () => {
     expect(commitPreflight).not.toContain('fleet-deploy');
     expect(commitPreflight).not.toContain('upgrade-production');
     expect(commitPreflight).not.toContain('pg_dump');
+    expect(supersessionRehearsal).toContain('grep -q "^term $first "');
+    expect(supersessionRehearsal).toContain('grep -q "^done $latest "');
     expect(commitHookInstaller).toContain('.git/hooks/post-commit');
     expect(commitHookInstaller).toContain('enqueue --source-rev "$rev"');
     expect(commitHookInstaller).toContain('|| true');

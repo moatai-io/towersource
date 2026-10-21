@@ -1,7 +1,8 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef, useId } from 'react';
 import { useTranslation } from 'react-i18next';
 import i18n from '../../i18n';
 import { useSettingsStore } from '../../stores/settings-store';
+import { activityStats, fetchUsageView, type UsageView, type UsageDay } from './usage-data';
 
 // ───── Types ─────
 interface ProjectRow {
@@ -19,43 +20,6 @@ interface HeatmapResponse {
   projects: ProjectRow[];
   grandTotal: number;
   dailyTotals: number[];
-}
-
-interface AiBudgetSnapshot {
-  customer: string;
-  ok: boolean;
-  models?: string[];
-  maxBudget?: number | null;
-  budgetDuration?: string | null;
-  budgetResetAt?: string | null;
-  spend?: number | null;
-  remaining?: number | null;
-  usedPct?: number | null;
-  updatedAt: string;
-  error?: string;
-}
-
-interface AiUsageDay {
-  date: string;
-  inputTokens: number;
-  outputTokens: number;
-  cacheReadTokens: number;
-  cacheCreationTokens: number;
-  totalTokens: number;
-  costUsd: number;
-  turns: number;
-}
-
-interface AiUsageResponse {
-  rows: AiBudgetSnapshot[];
-  usage: {
-    days: number;
-    daily: AiUsageDay[];
-    totals: Omit<AiUsageDay, 'date'>;
-    source?: 'litellm-spend-logs' | 'tower-db-metadata' | 'unavailable';
-    note?: string;
-  };
-  capturedAt: string;
 }
 
 // ───── Color scale (log-ish buckets) — theme-aware ─────
@@ -93,26 +57,15 @@ function formatShortDate(iso: string): string {
 }
 
 function formatMoney(value: number | null | undefined): string {
-  if (typeof value !== 'number' || Number.isNaN(value)) return '—';
-  return `$${value.toLocaleString(undefined, { maximumFractionDigits: value >= 100 ? 0 : 2 })}`;
+  if (typeof value !== 'number' || !Number.isFinite(value)) return '—';
+  return `$${value.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}`;
 }
 
 function formatTokens(value: number | null | undefined): string {
-  if (typeof value !== 'number' || Number.isNaN(value)) return '—';
+  if (typeof value !== 'number' || !Number.isFinite(value)) return '—';
   if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
   if (value >= 1_000) return `${(value / 1_000).toFixed(1)}K`;
   return value.toLocaleString();
-}
-
-function formatBudgetWindow(budget: AiBudgetSnapshot | undefined): string {
-  if (!budget?.ok) return tr('usage.budgetUnavailable');
-  const parts: string[] = [];
-  if (budget.budgetDuration) parts.push(tr('usage.budgetDuration', { duration: budget.budgetDuration }));
-  if (budget.budgetResetAt) {
-    const reset = new Date(budget.budgetResetAt);
-    if (!Number.isNaN(reset.getTime())) parts.push(tr('usage.budgetReset', { date: reset.toISOString().slice(0, 10) }));
-  }
-  return parts.join(' · ') || tr('usage.currentBudgetWindow');
 }
 
 function weekdayIdx(iso: string): number {
@@ -131,79 +84,62 @@ export function UsagePanel({ embedded = false }: UsagePanelProps) {
   const [days, setDays] = useState<number>(30);
   const [top, setTop] = useState<number>(20);
   const [data, setData] = useState<HeatmapResponse | null>(null);
-  const [aiUsage, setAiUsage] = useState<AiUsageResponse | null>(null);
+  const [aiUsage, setAiUsage] = useState<UsageView | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [hover, setHover] = useState<{ project: string; date: string; value: number; x: number; y: number } | null>(null);
 
+  const activeRequest = useRef<AbortController | null>(null);
+  const usageForDays = useRef<{ days: number; value: UsageView; fetchedAt: number } | null>(null);
   const load = useCallback(async () => {
+    activeRequest.current?.abort();
+    const controller = new AbortController();
+    activeRequest.current = controller;
     setLoading(true);
     setError(null);
-    try {
-      const token = localStorage.getItem('token');
-      const headers: HeadersInit = token ? { Authorization: `Bearer ${token}` } : {};
-      const [heatmapRes, aiRes] = await Promise.all([
-        fetch(`/api/metrics/usage-heatmap?days=${days}&top=${top}`, { headers }),
-        fetch(`/api/metrics/ai-usage?days=${days}`, { headers }),
-      ]);
-      if (!heatmapRes.ok) throw new Error(`usage heatmap HTTP ${heatmapRes.status}`);
-      const json: HeatmapResponse = await heatmapRes.json();
-      setData(json);
-      if (aiRes.ok) {
-        setAiUsage(await aiRes.json());
-      } else {
-        setAiUsage(null);
-      }
-    } catch (e: any) {
-      setError(e?.message || 'Failed to load');
-    } finally {
-      setLoading(false);
-    }
+    // Never show a prior range's values beneath the new range controls.
+    setData(null);
+    // Top-N changes only affect the heatmap; avoid reloading token usage for the same range.
+    const cachedUsage = usageForDays.current?.days === days &&
+      Date.now() - usageForDays.current.fetchedAt < 60_000 && usageForDays.current.value.kind !== 'unavailable'
+      ? usageForDays.current.value : null;
+    setAiUsage(cachedUsage);
+    setHover(null);
+    const token = localStorage.getItem('token');
+    const headers: HeadersInit = token ? { Authorization: `Bearer ${token}` } : {};
+    await Promise.all([
+      (async () => {
+        try {
+          const response = await fetch(`/api/metrics/usage-heatmap?days=${days}&top=${top}`, { headers, signal: controller.signal });
+          if (!response.ok) throw new Error(`usage heatmap HTTP ${response.status}`);
+          const json: HeatmapResponse = await response.json();
+          if (!controller.signal.aborted) setData(json);
+        } catch (error) {
+          if (!controller.signal.aborted) setError(error instanceof Error ? error.message : 'Failed to load');
+        }
+      })(),
+      (async () => {
+        if (cachedUsage) return;
+        try {
+          const result = await fetchUsageView(days, headers, controller.signal);
+          if (!controller.signal.aborted) {
+            usageForDays.current = { days, value: result, fetchedAt: Date.now() };
+            setAiUsage(result);
+          }
+        } catch (error) {
+          if (!controller.signal.aborted) setError(error instanceof Error ? error.message : 'Failed to load');
+        }
+      })(),
+    ]);
+    if (!controller.signal.aborted) setLoading(false);
   }, [days, top]);
 
   useEffect(() => {
-    load();
+    void load();
+    return () => activeRequest.current?.abort();
   }, [load]);
 
-  // ───── Derived stats ─────
-  const stats = useMemo(() => {
-    if (!data) return null;
-    let peakValue = 0;
-    let peakProject = '';
-    let peakDate = '';
-    let activeDaysOverall = 0;
-    const dayTotals = new Array(data.dates.length).fill(0);
-
-    for (const p of data.projects) {
-      p.values.forEach((v, i) => {
-        dayTotals[i] += v;
-        if (v > peakValue) {
-          peakValue = v;
-          peakProject = p.name;
-          peakDate = data.dates[i];
-        }
-      });
-    }
-    activeDaysOverall = dayTotals.filter((v) => v > 0).length;
-
-    let hottestDayIdx = 0;
-    let hottestDayVal = 0;
-    dayTotals.forEach((v, i) => {
-      if (v > hottestDayVal) {
-        hottestDayVal = v;
-        hottestDayIdx = i;
-      }
-    });
-
-    return {
-      peakValue,
-      peakProject,
-      peakDate,
-      activeDaysOverall,
-      hottestDay: { date: data.dates[hottestDayIdx], value: hottestDayVal },
-      avgPerDay: data.grandTotal / Math.max(1, data.dates.length),
-    };
-  }, [data]);
+  const stats = useMemo(() => data ? activityStats(data) : null, [data]);
 
   // ───── Cell size — shrinks with wider ranges OR larger Top-N to fit ─────
   const cellByDays = days <= 14 ? 28 : days <= 30 ? 22 : days <= 60 ? 14 : 10;
@@ -219,7 +155,7 @@ export function UsagePanel({ embedded = false }: UsagePanelProps) {
         {/* ── Header ── */}
         <div className="flex items-center justify-between mb-6">
           <div>
-            <h1 className="text-2xl font-bold text-gray-100">Usage</h1>
+            <h1 className="text-2xl font-bold text-gray-100">{tr('usage.title', { defaultValue: '사용량' })}</h1>
             <p className="text-[14px] text-gray-500 mt-0.5">
               {tr('usage.description')}
             </p>
@@ -264,9 +200,11 @@ export function UsagePanel({ embedded = false }: UsagePanelProps) {
         </div>
 
         {/* ── AI/API Usage ── */}
-        {aiUsage && (
-          <AiUsageSection aiUsage={aiUsage} isDark={isDark} />
-        )}
+        {aiUsage && <AiUsageSection aiUsage={aiUsage} isDark={isDark} />}
+        {data?.dailyTotals?.length ? <div className="mb-6 border-t border-surface-800 pt-4">
+          <p className="mb-2 text-xs text-gray-500">{tr('usage.activityScopeNote')}</p>
+          <DailyLineChart dates={data.dates} values={data.dailyTotals} isDark={isDark} />
+        </div> : null}
 
         {/* ── Summary cards ── */}
         {data && stats && (
@@ -311,11 +249,6 @@ export function UsagePanel({ embedded = false }: UsagePanelProps) {
           <div className="p-12 text-center text-gray-500 text-[14px]">
             {tr('usage.empty', { days })}
           </div>
-        )}
-
-        {/* ── Daily total line chart ── */}
-        {data && data.dailyTotals && data.dailyTotals.length > 0 && (
-          <DailyLineChart dates={data.dates} values={data.dailyTotals} isDark={isDark} />
         )}
 
         {/* ── Heatmap ── */}
@@ -459,66 +392,227 @@ function Row({
   );
 }
 
-function AiUsageSection({ aiUsage, isDark }: { aiUsage: AiUsageResponse; isDark: boolean }) {
-  const budget = aiUsage.rows?.[0];
-  const totals = aiUsage.usage?.totals;
-  const daily = aiUsage.usage?.daily || [];
-  const budgetPct = budget && typeof budget.usedPct === 'number' && Number.isFinite(budget.usedPct)
-    ? Math.max(0, Math.min(100, budget.usedPct))
-    : null;
-  const budgetColor = !budget?.ok ? 'tone-danger tone-bg' : budgetPct == null ? 'bg-gray-500' : budgetPct >= 90 ? 'tone-danger tone-bg' : budgetPct >= 70 ? 'tone-warning tone-bg' : 'tone-success tone-bg';
-  const usageSourceLabel = aiUsage.usage?.source === 'litellm-spend-logs'
-    ? 'Tower API ledger'
-    : aiUsage.usage?.source === 'tower-db-metadata'
-      ? 'Tower DB fallback'
-      : 'usage unavailable';
+export function AiUsageSection({ aiUsage, isDark }: { aiUsage: UsageView; isDark: boolean }) {
+  const { budget, teamBalance, summary, daily } = aiUsage;
+  const team = aiUsage.kind === 'team';
+  const sourceLabel = tr(team ? 'usage.teamCanonical' : aiUsage.kind === 'fallback'
+    ? aiUsage.fallbackSource === 'key' ? 'usage.keyEstimate' : 'usage.vmEstimate' : 'usage.unavailable');
+  const observed = aiUsage.observedAt ? new Date(aiUsage.observedAt) : null;
+  const monthStart = team && observed && Number.isFinite(observed.getTime())
+    ? new Date(Date.UTC(observed.getUTCFullYear(), observed.getUTCMonth(), 1)).toISOString().slice(0, 10) : null;
+  const monthEnd = team && observed && Number.isFinite(observed.getTime())
+    ? new Date(Date.UTC(observed.getUTCFullYear(), observed.getUTCMonth() + 1, 1)).toISOString().slice(0, 10) : null;
+  const periodLabel = monthStart && monthEnd
+    ? tr('usage.calendarMonthRange', { start: monthStart, end: monthEnd })
+    : tr(team ? 'usage.calendarMonth' : 'usage.selectedWindow', { days: aiUsage.days });
+  const budgetWindow = budget.startsAt && budget.resetsAt
+    ? `${budget.startsAt} – ${budget.resetsAt}` : tr('usage.currentBudgetWindow');
+  const pct = budget.spend !== null && budget.limit !== null && budget.limit > 0
+    ? Math.min(100, Math.max(0, budget.spend / budget.limit * 100)) : null;
 
   return (
-    <div className="mb-6 space-y-3">
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-        <SummaryCard label={tr('usage.apiInputTokens')} value={formatTokens(totals?.inputTokens)} sub={usageSourceLabel} />
-        <SummaryCard label={tr('usage.apiOutputTokens')} value={formatTokens(totals?.outputTokens)} sub={usageSourceLabel} />
-        <SummaryCard label={tr('usage.cacheReads')} value={formatTokens(totals?.cacheReadTokens)} sub={usageSourceLabel} />
-        <SummaryCard label={tr('usage.budgetSpend')} value={formatMoney(budget?.spend)} sub={formatBudgetWindow(budget)} />
-        <SummaryCard label={tr('usage.remainingBudget')} value={formatMoney(budget?.remaining)} sub={formatBudgetWindow(budget)} />
-      </div>
-
-      {daily.length > 0 && (
-        <AiTokenLineChart data={daily} isDark={isDark} />
-      )}
-
-      <div className="bg-surface-900 border border-surface-800 rounded-xl p-4">
-        <div className="flex items-center gap-3">
-          <span className={`w-2 h-2 rounded-full ${budgetColor}`} />
-          <div className="flex-1 min-w-0">
-            <div className="text-[14px] text-gray-300 font-medium">{tr('usage.budgetRemainingTitle', { customer: budget?.customer || 'current VM' })}</div>
-            <div className="text-[12px] text-gray-600 mt-0.5">
-              {tr('usage.budgetDescription')} {tr('usage.periodDescription', { source: usageSourceLabel })}{aiUsage.usage?.note ? ` · ${aiUsage.usage.note}` : ''}.
-            </div>
-          </div>
-          {budget?.ok ? (
-            <div className="text-right shrink-0">
-              <div className="text-[15px] text-gray-100 font-semibold">{formatMoney(budget.spend)} / {formatMoney(budget.maxBudget)}</div>
-              <div className="text-[13px] text-gray-500">remaining {formatMoney(budget.remaining)}</div>
-            </div>
-          ) : (
-            <div className="text-[14px] text-red-300 max-w-[320px] truncate" title={budget?.error}>{budget?.error || 'budget unavailable'}</div>
-          )}
+    <section aria-label={sourceLabel} className="mb-6 space-y-3">
+      <header className="flex flex-wrap items-start justify-between gap-3 pb-2">
+        <div><h2 className="text-lg font-semibold tracking-tight text-gray-200">{tr('usage.overviewTitle')}</h2>
+          <p className="mt-1 text-sm text-gray-400">{aiUsage.teamName || sourceLabel}</p></div>
+        <span className="rounded-md border border-surface-700 px-2.5 py-1 text-xs text-gray-400">{periodLabel}</span>
+      </header>
+      {aiUsage.freshness === 'stale' && <div role="alert" className="rounded-lg border border-surface-700 p-3 text-sm tone-warning tone-text">{tr('usage.staleSnapshot', { time: aiUsage.observedAt })}</div>}
+      {!team && <div role="alert" className="rounded-lg border border-surface-700 bg-surface-900 p-4 space-y-2">
+        <p className="text-sm font-medium tone-warning tone-text">{tr('usage.connectionPending')}</p>
+        <p className="text-sm text-gray-400">{tr('usage.teamUnavailable')}</p>
+        {aiUsage.warning && <details className="text-xs text-gray-500"><summary className="cursor-pointer">{tr('usage.connectionDetails')}</summary><p className="mt-2 font-mono break-words">{aiUsage.warning}</p></details>}
+      </div>}
+      <div className="grid grid-cols-1 lg:grid-cols-[1.3fr_2fr] gap-5 border-y border-surface-800 py-5">
+        <div className="space-y-2">
+          <p className="text-sm text-gray-400">{tr(team ? 'usage.calendarMonthCost' : 'usage.periodCost')}</p>
+          <p className="text-4xl font-semibold tracking-tight tabular-nums text-gray-200">{formatMoney(summary.costUsd)}</p>
+          <p className="text-xs text-gray-500">USD · {sourceLabel}</p>
+          {team && <p className="text-xs text-gray-500">{tr('usage.billingUnverified')}</p>}
         </div>
-        {budget?.ok && budgetPct != null && (
-          <div className="mt-3 h-1.5 rounded-full bg-surface-950 overflow-hidden">
-            <div className={`h-full ${budgetColor}`} style={{ width: `${budgetPct}%` }} />
-          </div>
-        )}
+        <dl className="grid grid-cols-2 gap-x-6 gap-y-4 content-center">
+          {[[tr(`usage.${aiUsage.countKind}`), summary.count?.toLocaleString() ?? '—'], [tr('usage.totalApiTokens'), formatTokens(summary.totalTokens)], [tr('usage.apiInputTokens'), formatTokens(summary.inputTokens)], [tr('usage.apiOutputTokens'), formatTokens(summary.outputTokens)]].map(([label, value]) => <div key={label}><dt className="text-xs text-gray-500">{label}</dt><dd className="mt-1 text-xl font-medium tabular-nums text-gray-300">{value}</dd></div>)}
+        </dl>
       </div>
-    </div>
+      <details className="text-xs text-gray-500">
+        <summary className="cursor-pointer">{tr('usage.dataDetails')}</summary>
+        <div className="mt-2 space-y-1">
+          {aiUsage.rollup && <p>{tr('usage.rollupDescription')}</p>}
+          {aiUsage.rollup && <p>{tr('usage.aggregatedAt', { time: aiUsage.aggregatedAt ?? '—' })}</p>}
+          {aiUsage.observedAt && <p>{tr('usage.observedAt', { time: aiUsage.observedAt })}</p>}
+        </div>
+      </details>
+      <p className="text-[12px] text-gray-500">{tr('usage.requestTurnDifference')}</p>
+      <ModelUsageSection usage={aiUsage} />
+      {teamBalance.remaining !== null && <div className="border-t border-surface-800 pt-4 space-y-3">
+        <h2 className="text-[14px] text-gray-300">{tr('usage.teamBalance')}</h2>
+        <p className="text-[12px] text-gray-500">{tr('usage.teamBalanceDescription')}</p>
+        <div className="grid grid-cols-3 gap-3">
+          <SummaryCard label={tr('usage.teamBudgetSpend')} value={formatMoney(teamBalance.spend)} />
+          <SummaryCard label={tr('usage.teamBudgetLimit')} value={formatMoney(teamBalance.limit)} />
+          <SummaryCard label={tr('usage.remainingBalance')} value={formatMoney(teamBalance.remaining)} />
+        </div>
+      </div>}
+      {aiUsage.rollup ? <p className="text-xs text-gray-500 border-t border-surface-800 pt-3">{tr('usage.rollupBudgetUnsupported')}</p> : <div className="border-t border-surface-800 pt-4 space-y-3">
+        <h2 className="text-[14px] text-gray-300">{tr(team ? 'usage.teamBudget' : 'usage.keyBudget')}</h2>
+        <p className="text-[12px] text-gray-500">{tr(aiUsage.rollup ? 'usage.rollupBudgetUnsupported' : 'usage.budgetDescription')} · {budgetWindow}</p>
+        <div className="grid grid-cols-3 gap-3">
+          <SummaryCard label={tr('usage.budgetSpend')} value={formatMoney(budget.spend)} />
+          <SummaryCard label={tr('usage.budgetLimit')} value={formatMoney(budget.limit)} />
+          <SummaryCard label={tr('usage.remainingBudget')} value={formatMoney(budget.remaining)} />
+        </div>
+        {pct !== null && <div className="h-1.5 rounded-full bg-surface-950 overflow-hidden"><div className="h-full bg-primary-500" style={{ width: `${pct}%` }} /></div>}
+      </div>}
+      {team && <section className="border-t border-surface-800 pt-4 space-y-3">
+        <h2 className="text-[14px] text-gray-300">{tr('usage.monthlyHistory')}</h2>
+        <p className="text-xs text-gray-500">{tr('usage.monthlyHistoryDescription')}</p>
+        {aiUsage.monthly?.length ? <div className="overflow-x-auto"><table className="w-full text-sm text-gray-400">
+          <thead><tr><th className="text-left py-2">{tr('usage.month')}</th><th className="text-right">{tr('usage.monthlyCost')}</th><th className="text-right">{tr('usage.monthlyRequests')}</th></tr></thead>
+          <tbody>{aiUsage.monthly.map(row => <tr key={row.month} className="border-t border-surface-800">
+            <td className="py-2">{row.month}</td><td className="text-right tabular-nums">{formatMoney(row.costUsd)}</td>
+            <td className="text-right tabular-nums">{row.count === null ? '—' : row.count.toLocaleString()}</td>
+          </tr>)}</tbody>
+        </table></div> : <p className="text-xs text-gray-500">{tr('usage.monthlyHistoryUnavailable')}</p>}
+      </section>}
+      {aiUsage.kind !== 'unavailable' && daily.length === 0 && <p className="text-[13px] text-gray-500">{tr('usage.noDailyUsage')}</p>}
+      {daily.length > 0 && <>
+        <p className="text-[12px] text-gray-500">{aiUsage.dailyWindow ? tr('usage.rollupDailyWindow', { start: aiUsage.dailyWindow.startsOn, end: aiUsage.dailyWindow.endsBefore }) : tr(team ? 'usage.routerDailyWindow' : 'usage.fallbackDailyWindow', { days: aiUsage.days })}</p>
+        <details className="text-sm text-gray-400"><summary className="cursor-pointer">{tr('usage.dailyDetails')}</summary>
+        <AiTokenLineChart data={daily} isDark={isDark} />
+        <div className="overflow-auto max-h-72">
+          <table className="w-full text-[13px] text-gray-400 tabular-nums">
+            <caption className="text-left mb-2">{tr('usage.dailyDetails')}</caption>
+            <thead><tr>{['date', 'apiInputTokens', 'apiOutputTokens', 'totalApiTokens', 'periodCost', aiUsage.countKind].map(key => <th key={key} className="text-right p-2">{tr(`usage.${key}`)}</th>)}</tr></thead>
+            <tbody>{daily.map(day => <tr key={day.date}>
+              <td className="text-right p-2">{day.date}</td>
+              <td className="text-right p-2">{day.inputTokens?.toLocaleString() ?? '—'}</td>
+              <td className="text-right p-2">{day.outputTokens?.toLocaleString() ?? '—'}</td>
+              <td className="text-right p-2">{day.totalTokens?.toLocaleString() ?? '—'}</td>
+              <td className="text-right p-2">{formatMoney(day.costUsd)}</td>
+              <td className="text-right p-2">{day.count?.toLocaleString() ?? '—'}</td>
+            </tr>)}</tbody>
+          </table>
+        </div></details>
+      </>}
+    </section>
   );
 }
 
-function AiTokenLineChart({ data, isDark }: { data: AiUsageDay[]; isDark: boolean }) {
+export function ModelUsageSection({ usage }: { usage: UsageView }) {
+  const [expanded, setExpanded] = useState(false);
+  const models = usage.models ?? [];
+  const visible = expanded ? models : models.slice(0, 5);
+  const total = usage.summary.costUsd;
+  const sharesValid = total !== null && total > 0 && models.every(m => m.costUsd !== null && m.costUsd >= 0)
+    && Math.abs(models.reduce((sum, m) => sum + (m.costUsd ?? 0), 0) - total) <= Math.max(0.000001, total * 0.000001);
+  const maximum = Math.max(0, ...models.map(m => m.costUsd ?? 0));
+  return <section className="border-t border-surface-800 pt-5 space-y-3" aria-label={tr('usage.modelDailyTitle')}>
+    {usage.modelDaily && usage.dailyWindow && (() => {
+      const dailyDates = new Set(usage.daily.map(day => day.date));
+      const valid = usage.daily.length > 0 && usage.modelDaily.length > 0
+        && usage.modelDaily.every(row => Number.isFinite(row.costUsd) && row.costUsd >= 0 && Number.isInteger(row.count) && row.count >= 0 && dailyDates.has(row.date)
+        && row.date >= usage.dailyWindow!.startsOn && row.date < usage.dailyWindow!.endsBefore)
+        && usage.daily.every(day => day.costUsd !== null && day.costUsd >= 0 && Math.abs(usage.modelDaily!
+          .filter(row => row.date === day.date).reduce((sum, row) => sum + row.costUsd, 0) - day.costUsd!) < Math.max(0.000001, Math.abs(day.costUsd!) * 0.000001));
+      return <div className="space-y-2">
+        <h2 className="text-sm font-medium text-gray-300">{tr('usage.modelDailyTitle')}</h2>
+        <p className="text-xs text-gray-500">{tr('usage.modelDailyPeriod', { start: usage.dailyWindow.startsOn, end: usage.dailyWindow.endsBefore })}</p>
+        {valid ? <DailyModelCostChart rows={usage.modelDaily} dates={usage.daily.map(day => day.date)} /> : <p role="status" className="text-xs text-gray-500">{tr('usage.modelDailyMismatch')}</p>}
+      </div>;
+    })()}
+    {models.length === 0 && !usage.modelDaily && <p className="text-[13px] text-gray-400">{tr(usage.kind === 'team' ? 'usage.modelsUnavailable' : 'usage.modelsConnectionRequired')}</p>}
+    {models.length > 0 && <details className="text-xs text-gray-400"><summary className="cursor-pointer">{tr('usage.modelDetails')} · {tr('usage.modelPeriod')}</summary><p className="text-xs text-gray-500">{tr('usage.recordedCostNote')}</p><div className="overflow-x-auto">
+        <table className="w-full text-[13px] text-gray-400 tabular-nums">
+          <caption className="sr-only">{tr('usage.modelUsage')}</caption>
+          <thead><tr>{['modelName', 'modelCost', 'costShare', 'requests', 'apiInputTokens', 'apiOutputTokens'].map(key =>
+            <th key={key} scope="col" className="p-2 text-right first:text-left whitespace-nowrap">{tr(`usage.${key}`)}</th>)}</tr></thead>
+          <tbody>{visible.map((model, index) => <tr key={`${model.model}-${index}`} className="border-t border-surface-800">
+            <th scope="row" className="p-2 text-left font-normal min-w-40 max-w-72 break-words">{model.model}
+              <div aria-hidden="true" className="mt-2 h-1 rounded bg-surface-800"><div className="h-1 rounded bg-primary-500" style={{ width: `${maximum > 0 ? Math.max(0, (model.costUsd ?? 0) / maximum * 100) : 0}%` }} /></div>
+            </th>
+            <td className="p-2 text-right whitespace-nowrap font-medium">{formatMoney(model.costUsd)}</td>
+            <td className="p-2 text-right">{sharesValid ? `${((model.costUsd ?? 0) / total! * 100).toFixed(1)}%` : '—'}</td>
+            <td className="p-2 text-right">{model.count?.toLocaleString() ?? '—'}</td>
+            <td className="p-2 text-right">{model.inputTokens?.toLocaleString() ?? '—'}</td>
+            <td className="p-2 text-right">{model.outputTokens?.toLocaleString() ?? '—'}</td>
+          </tr>)}</tbody>
+        </table>
+      </div>
+      {!sharesValid && <p className="text-[12px] text-gray-500">{tr('usage.shareUnavailable')}</p>}
+      {models.length > 5 && <button type="button" aria-expanded={expanded} className="text-[13px] text-primary-400 underline underline-offset-4" onClick={() => setExpanded(!expanded)}>{tr(expanded ? 'usage.fewerModels' : 'usage.allModels', { count: models.length })}</button>}
+      </details>}
+  </section>;
+}
+
+
+function DailyModelCostChart({ rows, dates }: { rows: NonNullable<UsageView['modelDaily']>; dates: string[] }) {
+  const [activeDate, setActiveDate] = useState<string | null>(null);
+  const tooltipId = useId();
+  const detailMoney = (value: number) => `$${value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 6 })}`;
+  const totals = new Map<string, number>();
+  for (const row of rows) totals.set(row.model, (totals.get(row.model) ?? 0) + row.costUsd);
+  const top = [...totals].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, 5).map(([model]) => model);
+  const labels = [...top, ...(totals.size > 5 ? [tr('usage.otherModels')] : [])];
+  const colors = ['#60a5fa', '#34d399', '#fbbf24', '#f472b6', '#a78bfa', '#94a3b8'];
+  const buckets = dates.map(date => {
+    const values = labels.map(() => 0);
+    const requests = labels.map(() => 0);
+    for (const row of rows) if (row.date === date) {
+      const i = top.includes(row.model) ? top.indexOf(row.model) : labels.length - 1;
+      values[i] += row.costUsd;
+      requests[i] += row.count;
+    }
+    return { date, values, requests, total: values.reduce((sum, value) => sum + value, 0) };
+  });
+  const max = Math.max(1, ...buckets.map(bucket => bucket.total));
+  const width = 720, height = 230, left = 58, right = 12, topPad = 12, bottom = 40;
+  const base = height - bottom, chartHeight = base - topPad;
+  const slot = (width - left - right) / Math.max(1, dates.length);
+  const barWidth = Math.max(2, Math.min(24, slot * 0.72));
+  const labelStep = Math.max(1, Math.ceil(dates.length / 8));
+  return <div className="space-y-3">
+    <div className="relative overflow-x-auto" onMouseLeave={() => setActiveDate(null)}><svg role="img" aria-label={tr('usage.modelDailyChart')} viewBox={`0 0 ${width} ${height}`} className="w-full min-w-[520px] max-h-72 text-gray-400">
+      {[0, 0.5, 1].map(tick => <g key={tick}><line x1={left} x2={width - right} y1={base - tick * chartHeight} y2={base - tick * chartHeight} stroke="currentColor" opacity="0.15" /><text x={left - 6} y={base - tick * chartHeight + 4} textAnchor="end" fill="currentColor" fontSize="11">{formatMoney(max * tick)}</text></g>)}
+      {buckets.map((bucket, index) => {
+        const x = left + slot * (index + 0.5);
+        let stacked = 0;
+        return <g key={bucket.date}>
+          <rect x={left + slot * index} y={topPad} width={slot} height={base - topPad}
+            fill="currentColor" opacity={activeDate === bucket.date ? 0.08 : 0} />
+          {bucket.values.map((value, i) => {
+            const h = value / max * chartHeight;
+            const y = base - (stacked + value) / max * chartHeight;
+            stacked += value;
+            return value > 0 ? <rect key={labels[i]} x={x - barWidth / 2} y={y} width={barWidth} height={h} fill={colors[i]}><title>{bucket.date} · {labels[i]}: {formatMoney(value)} · {bucket.requests[i].toLocaleString()} {tr('usage.requests')} · {tr('usage.dayTotal')} {formatMoney(bucket.total)}</title></rect> : null;
+          })}
+          {(index % labelStep === 0 || index === dates.length - 1) && <text x={x} y={height - 12} textAnchor="middle" fill="currentColor" fontSize="10">{formatShortDate(bucket.date)}</text>}
+          <rect x={left + slot * index} y={topPad} width={slot} height={height - topPad}
+            fill="transparent" tabIndex={0} role="button" aria-label={bucket.date}
+            aria-describedby={activeDate === bucket.date ? tooltipId : undefined}
+            onMouseEnter={() => setActiveDate(bucket.date)} onFocus={() => setActiveDate(bucket.date)}
+            onBlur={() => setActiveDate(null)} onClick={() => setActiveDate(bucket.date)}
+            onKeyDown={event => { if (event.key === 'Escape') setActiveDate(null); }} />
+        </g>;
+      })}
+    </svg>
+      {activeDate && <div id={tooltipId} role="tooltip" className="pointer-events-none absolute top-2 right-2 z-10 max-w-[calc(100%-1rem)] rounded-lg border border-surface-700 bg-surface-900 p-3 text-xs text-gray-200 shadow-lg">
+        <div className="mb-2 font-medium">{activeDate} · {tr('usage.dayTotal')} {detailMoney(buckets.find(bucket => bucket.date === activeDate)?.total ?? 0)}</div>
+        <div className="max-h-48 overflow-y-auto pointer-events-auto">
+          {rows.filter(row => row.date === activeDate).sort((a, b) => b.costUsd - a.costUsd || a.model.localeCompare(b.model)).map(row => <div key={row.model} className="flex justify-between gap-4 py-1">
+            <span className="break-all">{row.model}</span><span className="shrink-0 tabular-nums">{detailMoney(row.costUsd)} · {row.count.toLocaleString()} {tr('usage.requests')}</span>
+          </div>)}
+          {!rows.some(row => row.date === activeDate) && <div>0 {tr('usage.requests')}</div>}
+        </div>
+      </div>}
+    </div>
+    <ul className="flex flex-wrap gap-x-4 gap-y-2 text-xs text-gray-400">{labels.map((label, i) => <li key={label} className="flex items-center gap-2"><span aria-hidden="true" className="h-2.5 w-2.5 rounded-sm" style={{ backgroundColor: colors[i] }} />{label}: {formatMoney(buckets.reduce((sum, bucket) => sum + bucket.values[i], 0))}</li>)}</ul>
+  </div>;
+}
+
+function AiTokenLineChart({ data, isDark }: { data: UsageDay[]; isDark: boolean }) {
   const values = data.map(d => d.totalTokens);
   const dates = data.map(d => d.date);
-  const maxVal = Math.max(...values, 1);
+  const maxVal = Math.max(...values.filter((value): value is number => value !== null), 1);
   const palette = isDark
     ? { grid: '#374151', axisText: '#6b7280', line: '#60a5fa', fill: '#60a5fa' }
     : { grid: '#e5e7eb', axisText: '#6b7280', line: '#2563eb', fill: '#2563eb' };
@@ -532,7 +626,7 @@ function AiTokenLineChart({ data, isDark }: { data: AiUsageDay[]; isDark: boolea
   const chartH = height - padT - padB;
   const xScale = (i: number) => padL + (i / Math.max(1, dates.length - 1)) * chartW;
   const yScale = (v: number) => padT + chartH - (v / maxVal) * chartH;
-  const linePath = values.map((v, i) => `${i === 0 ? 'M' : 'L'}${xScale(i).toFixed(1)},${yScale(v).toFixed(1)}`).join(' ');
+  const linePath = values.map((v, i) => v === null ? '' : `${i === 0 || values[i - 1] === null ? 'M' : 'L'}${xScale(i).toFixed(1)},${yScale(v).toFixed(1)}`).join(' ');
   const areaPath = `${linePath} L${xScale(values.length - 1).toFixed(1)},${yScale(0).toFixed(1)} L${xScale(0).toFixed(1)},${yScale(0).toFixed(1)} Z`;
   const xLabelStep = Math.max(1, Math.floor(dates.length / 8));
 
@@ -547,7 +641,8 @@ function AiTokenLineChart({ data, isDark }: { data: AiUsageDay[]; isDark: boolea
           const y = padT + chartH - r * chartH;
           return <line key={r} x1={padL} x2={width - padR} y1={y} y2={y} stroke={palette.grid} strokeWidth={0.5} strokeDasharray={r === 0 ? '' : '3,3'} />;
         })}
-        <path d={areaPath} fill={palette.fill} opacity={0.12} />
+        {values.every(value => value !== null) && <path d={areaPath} fill={palette.fill} opacity={0.12} />}
+        {values.map((value, index) => value === null ? null : <circle key={dates[index]} cx={xScale(index)} cy={yScale(value)} r={2} fill={palette.line}><title>{dates[index]} · {value.toLocaleString()} tokens · {formatMoney(data[index].costUsd)}</title></circle>)}
         <path d={linePath} fill="none" stroke={palette.line} strokeWidth={1.8} strokeLinejoin="round" />
         {dates.map((d, i) => (i % xLabelStep === 0 || i === dates.length - 1) && (
           <text key={d} x={xScale(i)} y={height - 8} textAnchor="middle" fill={palette.axisText} fontSize={9} fontFamily="monospace">

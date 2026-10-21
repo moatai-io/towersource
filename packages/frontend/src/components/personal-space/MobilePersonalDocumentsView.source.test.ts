@@ -3,12 +3,13 @@ import { describe, expect, it } from 'vitest';
 
 const view = readFileSync(new URL('./MobilePersonalDocumentsView.tsx', import.meta.url), 'utf8');
 const context = readFileSync(new URL('../layout/ContextPanel.tsx', import.meta.url), 'utf8');
-const app = readFileSync(new URL('../../App.tsx', import.meta.url), 'utf8');
-const header = readFileSync(new URL('../layout/Header.tsx', import.meta.url), 'utf8');
-
+const app = [
+  readFileSync(new URL('../../App.tsx', import.meta.url), 'utf8'),
+  readFileSync(new URL('../../hooks/usePersonalViewerActions.ts', import.meta.url), 'utf8'),
+  readFileSync(new URL('../../hooks/useViewerDelivery.ts', import.meta.url), 'utf8'),
+].join('\n');
 describe('Mobile personal documents', () => {
-  it('opens a mobile reading-first document home from the hamburger menu', () => {
-    expect(header).toContain("label={isMobile ? t('myDocuments') : t('myMaterials')}");
+  it('opens a mobile reading-first document home through the personal viewer action', () => {
     expect(app).toContain("mobile ? 'personal://documents' : 'personal://materials'");
     expect(context).toContain("openFile?.path === 'personal://documents'");
     expect(context).toContain('return <MobilePersonalDocumentsView />');
@@ -30,7 +31,7 @@ describe('Mobile personal documents', () => {
 
   it('keeps full file management available as a secondary mobile screen', () => {
     expect(view).toContain("openPersonalPath('personal://materials')");
-    expect(app).toContain("store.openTab('personal://materials'");
+    expect(app).toContain("'personal://documents' : 'personal://materials'");
     expect(app).toContain("name: t('myMaterials')");
   });
 });

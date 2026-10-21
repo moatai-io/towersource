@@ -7,7 +7,8 @@ import { useSessionStore } from '../../stores/session-store';
 import { useFileStore } from '../../stores/file-store';
 import { useChatStore } from '../../stores/chat-store';
 import { useConfirm, usePrompt } from '../../hooks/useDialog';
-import { FILE_EXCHANGE_DRAG_TYPE, encodeExchangeDrag, transferFile, type ExchangeDestinationRef, type ExchangeSourceRef } from './fileExchange';
+import { transferFile } from './fileExchange';
+import { FILE_EXCHANGE_DRAG_TYPE, encodeExchangeDrag, type ExchangeDestinationRef, type ExchangeSourceRef } from './fileExchangeDrag';
 import { toastError, toastSuccess } from '../../utils/toast';
 
 interface BrowserItem {

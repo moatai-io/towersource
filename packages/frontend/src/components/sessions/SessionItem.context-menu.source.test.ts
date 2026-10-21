@@ -25,17 +25,18 @@ describe('SessionItem context menu positioning', () => {
     expect(source).not.toContain('mobile={isTouchDevice.current}');
   });
 
-  it('offers a session-local long-context model toggle via modelUsed PATCH', () => {
-    expect(source).toContain(`const LONG_CONTEXT_MODEL_USED = "litellm-responses/smartest-long";`);
-    expect(source).toContain(`const DEFAULT_CONTEXT_MODEL_USED = "litellm-responses/smartest";`);
-    expect(source).toContain("onToggleLongContext={toggleLongContext}");
-    expect(source).toContain(`{longContext ? t("restoreNormalContext") : t("useLongContext")}`);
-    expect(source).toContain('await saveLongContextModel(session.id, nextModel, {');
-    expect(source).toContain('setLongContextPending(true);');
-    expect(source).toContain('setLongContextPending(false);');
-    expect(source).toContain('longContextPending ? (');
-    expect(source).toContain('animate-spin');
-    expect(source).toContain('.getState()\n        .updateSessionMeta(session.id, { modelUsed: nextModel });');
-    expect(source).not.toContain('const previousModel = session.modelUsed;');
+  it('does not expose the legacy project metadata move action', () => {
+    expect(source).not.toContain('SessionProjectSubmenu');
+    expect(source).not.toContain('t("moveToProject")');
+    expect(source).not.toContain('t("addToProject")');
+    expect(source).not.toContain('t("removeFromProject")');
+  });
+
+  it('does not expose the retired long-context toggle or its model mutation wiring', () => {
+    expect(source).not.toContain('t("useLongContext")');
+    expect(source).not.toContain('t("restoreNormalContext")');
+    expect(source).not.toContain('onToggleLongContext');
+    expect(source).not.toContain('saveLongContextModel');
+    expect(source).not.toContain('longContextPending');
   });
 });

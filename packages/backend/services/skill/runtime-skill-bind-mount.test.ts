@@ -2,6 +2,9 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import crypto from 'node:crypto';
+import { computeBundleDigest } from './skill-bundle-resolver.js';
+import { scanSkillBundleForReadOnlyMount } from './skill-materialization-scanner.js';
 
 const tempDirs: string[] = [];
 
@@ -28,7 +31,16 @@ function writeTeamskill(root: string, name: string, extra: Record<string, string
   return skillRoot;
 }
 
-function writeProjectManifest(projectRoot: string, names: string[], schemaVersion = 3): void {
+function sourceDigest(teamskillsRoot: string, name: string): string {
+  const source = path.join(teamskillsRoot, 'skills', name);
+  const scan = scanSkillBundleForReadOnlyMount(source);
+  return computeBundleDigest(scan.filesAllowed.map(relativePath => {
+    const bytes = fs.readFileSync(path.join(source, relativePath));
+    return { relativePath, sizeBytes: bytes.length, sha256: crypto.createHash('sha256').update(bytes).digest('hex') };
+  }));
+}
+
+function writeProjectManifest(projectRoot: string, names: string[], schemaVersion = 3, teamskillsRoot?: string): void {
   const root = path.join(projectRoot, '.tower', 'skills');
   fs.mkdirSync(root, { recursive: true });
   for (const name of names) {
@@ -39,7 +51,7 @@ function writeProjectManifest(projectRoot: string, names: string[], schemaVersio
   fs.writeFileSync(path.join(root, 'manifest.json'), JSON.stringify({
     schemaVersion,
     managedBy: schemaVersion === 3 ? 'tower-project-skill-runtime-layer' : 'tower-project-skill-materializer',
-    skills: names.map((name) => ({ name, ...(schemaVersion === 3 ? { storageMode: 'bind-ro' } : {}) })),
+    skills: names.map((name) => ({ name, ...(schemaVersion === 3 ? { storageMode: 'bind-ro', bundleDigest: sourceDigest(teamskillsRoot!, name) } : {}) })),
   }));
 }
 
@@ -59,7 +71,9 @@ describe('runtime skill bind-ro MVP', () => {
   it('enables schema v3 bind-ro desired state without a canary flag', async () => {
     const teamskillsRoot = tempDir('teamskills-');
     const projectRoot = tempDir('project-');
-    writeProjectManifest(projectRoot, ['gws']);
+    writeProjectManifest(projectRoot, []);
+    const manifestPath = path.join(projectRoot, '.tower/skills/manifest.json');
+    fs.writeFileSync(manifestPath, JSON.stringify({ schemaVersion: 3, managedBy: 'tower-project-skill-runtime-layer', skills: [{ name: 'gws', storageMode: 'bind-ro' }] }));
     const legacyRoot = tempDir('legacy-project-');
     writeProjectManifest(legacyRoot, ['gws'], 2);
     const { projectUsesSkillBindMount } = await loadWithTeamskills(teamskillsRoot);
@@ -72,7 +86,7 @@ describe('runtime skill bind-ro MVP', () => {
     const teamskillsRoot = tempDir('teamskills-');
     const projectRoot = tempDir('project-');
     const source = writeTeamskill(teamskillsRoot, 'gws');
-    writeProjectManifest(projectRoot, ['gws']);
+    writeProjectManifest(projectRoot, ['gws'], 3, teamskillsRoot);
     const { buildRuntimeSkillBindMountPlan, runtimeSkillDockerMountArgs } = await loadWithTeamskills(teamskillsRoot);
 
     const plan = buildRuntimeSkillBindMountPlan(projectRoot);
@@ -90,12 +104,32 @@ describe('runtime skill bind-ro MVP', () => {
     ]);
   });
 
+  it('refuses a source whose bytes changed while mtime and size stayed the same', async () => {
+    const teamskillsRoot = tempDir('teamskills-');
+    const projectRoot = tempDir('project-');
+    const source = writeTeamskill(teamskillsRoot, 'gws');
+    writeProjectManifest(projectRoot, ['gws'], 3, teamskillsRoot);
+    const skillPath = path.join(source, 'SKILL.md');
+    const fixedTime = new Date('2024-01-01T00:00:00.000Z');
+    fs.utimesSync(skillPath, fixedTime, fixedTime);
+    const stat = fs.statSync(skillPath);
+    const before = fs.readFileSync(skillPath, 'utf8');
+    fs.writeFileSync(skillPath, before.replace('test', 'rest'));
+    fs.utimesSync(skillPath, fixedTime, fixedTime);
+    expect(fs.statSync(skillPath).mtimeMs).toBe(stat.mtimeMs);
+    expect(fs.statSync(skillPath).size).toBe(stat.size);
+    const { buildRuntimeSkillBindMountPlan, runtimeSkillDockerMountArgs } = await loadWithTeamskills(teamskillsRoot);
+    const plan = buildRuntimeSkillBindMountPlan(projectRoot);
+    expect(plan).toMatchObject({ enabled: false, mounts: [], skipped: [{ name: 'gws', reason: 'source_manifest_mismatch' }] });
+    expect(runtimeSkillDockerMountArgs(plan)).toEqual([]);
+  });
+
   it('falls back as a whole when a manifest source is unsafe', async () => {
     const teamskillsRoot = tempDir('teamskills-');
     const projectRoot = tempDir('project-');
     writeTeamskill(teamskillsRoot, 'safe');
     writeTeamskill(teamskillsRoot, 'unsafe', { '.env': 'TOKEN=value' });
-    writeProjectManifest(projectRoot, ['safe', 'unsafe']);
+    writeProjectManifest(projectRoot, ['safe', 'unsafe'], 3, teamskillsRoot);
     const { buildRuntimeSkillBindMountPlan, runtimeSkillDockerMountArgs } = await loadWithTeamskills(teamskillsRoot);
 
     const plan = buildRuntimeSkillBindMountPlan(projectRoot);
@@ -110,7 +144,7 @@ describe('runtime skill bind-ro MVP', () => {
     const teamskillsRoot = tempDir('teamskills-');
     const projectRoot = tempDir('project-');
     writeTeamskill(teamskillsRoot, 'warning', { 'scripts/__pycache__/run.pyc': 'compiled' });
-    writeProjectManifest(projectRoot, ['warning']);
+    writeProjectManifest(projectRoot, ['warning'], 3, teamskillsRoot);
     const { buildRuntimeSkillBindMountPlan } = await loadWithTeamskills(teamskillsRoot);
 
     expect(buildRuntimeSkillBindMountPlan(projectRoot)).toMatchObject({
@@ -124,7 +158,7 @@ describe('runtime skill bind-ro MVP', () => {
     const teamskillsRoot = tempDir('teamskills-');
     const projectRoot = tempDir('project-');
     writeTeamskill(teamskillsRoot, 'large', { 'references/large.bin': 'x'.repeat(3 * 1024 * 1024) });
-    writeProjectManifest(projectRoot, ['large']);
+    writeProjectManifest(projectRoot, ['large'], 3, teamskillsRoot);
     const { buildRuntimeSkillBindMountPlan } = await loadWithTeamskills(teamskillsRoot);
 
     expect(buildRuntimeSkillBindMountPlan(projectRoot)).toMatchObject({
@@ -143,7 +177,7 @@ describe('runtime skill bind-ro MVP', () => {
     fs.writeFileSync(manifestPath, JSON.stringify({
       schemaVersion: 3,
       managedBy: 'tower-project-skill-runtime-layer',
-      skills: [{ name: 'gws', storageMode: 'bind-ro' }],
+      skills: [{ name: 'gws', storageMode: 'bind-ro', bundleDigest: sourceDigest(teamskillsRoot, 'gws') }],
     }));
     const { buildRuntimeSkillBindMountPlan } = await loadWithTeamskills(teamskillsRoot);
 
@@ -165,7 +199,7 @@ describe('runtime skill bind-ro MVP', () => {
     fs.writeFileSync(path.join(skillsRoot, 'manifest.json'), JSON.stringify({
       schemaVersion: 3,
       managedBy: 'tower-project-skill-runtime-layer',
-      skills: [{ name: 'gws', storageMode: 'bind-ro' }],
+      skills: [{ name: 'gws', storageMode: 'bind-ro', bundleDigest: sourceDigest(teamskillsRoot, 'gws') }],
     }));
     const { buildRuntimeSkillBindMountPlan } = await loadWithTeamskills(teamskillsRoot);
 

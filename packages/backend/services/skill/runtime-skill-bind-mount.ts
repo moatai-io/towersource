@@ -8,13 +8,15 @@
  */
 import fs from 'fs';
 import path from 'path';
-import { resolveRegistrySkillBundle } from './skill-bundle-resolver.js';
+import crypto from 'node:crypto';
+import { computeBundleDigest, resolveRegistrySkillBundle } from './skill-bundle-resolver.js';
 import { scanSkillBundleForReadOnlyMount } from './skill-materialization-scanner.js';
+import { resolveTrustedTeamskillsSkillSource } from './managed-teamskills-source.js';
 
 interface ProjectSkillManifestLike {
   schemaVersion?: unknown;
   managedBy?: unknown;
-  skills?: Array<{ name?: unknown; storageMode?: unknown }>;
+  skills?: Array<{ name?: unknown; storageMode?: unknown; bundleDigest?: unknown }>;
 }
 
 export interface RuntimeSkillBindMount {
@@ -92,11 +94,9 @@ export function buildRuntimeSkillBindMountPlan(projectRootPath: string): Runtime
     };
   }
 
-  const names = [...new Set(manifest.skills
-    .map((entry) => typeof entry?.name === 'string' ? entry.name.trim() : '')
-    .filter(Boolean))];
-
-  for (const name of names) {
+  const entries = manifest.skills;
+  for (const entry of entries) {
+    const name = typeof entry?.name === 'string' ? entry.name.trim() : '';
     if (!/^[A-Za-z0-9_-]+$/.test(name)) {
       skipped.push({ name, reason: 'invalid_name' });
       continue;
@@ -106,22 +106,25 @@ export function buildRuntimeSkillBindMountPlan(projectRootPath: string): Runtime
       skipped.push({ name, reason: 'source_missing' });
       continue;
     }
-    const scan = scanSkillBundleForReadOnlyMount(bundle.rootPath);
-    if (!scan.ok) {
-      skipped.push({ name, reason: 'source_scan_failed' });
-      continue;
-    }
-
-    let sourcePath: string;
+    const sourcePath = bundle.rootPath;
     try {
-      sourcePath = fs.realpathSync(bundle.rootPath);
-      const declaredRoot = path.resolve(bundle.rootPath);
-      if (sourcePath !== declaredRoot) {
-        skipped.push({ name, reason: 'source_symlink_not_allowed' });
+      const scan = scanSkillBundleForReadOnlyMount(sourcePath);
+      if (!scan.ok) {
+        skipped.push({ name, reason: 'source_scan_failed' });
+        continue;
+      }
+      const digest = computeBundleDigest(scan.filesAllowed.map(relativePath => {
+        const bytes = fs.readFileSync(path.join(sourcePath, relativePath));
+        return { relativePath, sizeBytes: bytes.length, sha256: crypto.createHash('sha256').update(bytes).digest('hex') };
+      }));
+      // Activation can precede Project materialization. Never mount new bytes
+      // against an old manifest, even when the filesystem mtime is unchanged.
+      if (digest !== entry.bundleDigest || resolveTrustedTeamskillsSkillSource(name) !== sourcePath) {
+        skipped.push({ name, reason: 'source_manifest_mismatch' });
         continue;
       }
     } catch {
-      skipped.push({ name, reason: 'source_realpath_failed' });
+      skipped.push({ name, reason: 'source_read_failed' });
       continue;
     }
 

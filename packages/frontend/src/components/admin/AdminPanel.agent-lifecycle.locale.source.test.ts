@@ -14,9 +14,24 @@ describe('AdminPanel agent lifecycle locale routing', () => {
     expect(lifecycleSource).toContain("t('agentLifecycle.errors.verifyWorkstation')");
     expect(lifecycleSource).toContain("t('agentLifecycle.errors.applyWorkstation')");
     expect(lifecycleSource).toContain("t('agentLifecycle.errors.startPurge')");
+    for (const key of ['joinTitle', 'joinConfirm', 'joined', 'joining', 'joinAction', 'errors.joinAgent']) {
+      expect(lifecycleSource).toContain(`t('agentLifecycle.${key}')`);
+    }
     expect(lifecycleSource).toContain("t('agentLifecycle.workstationChangeTitle'");
     expect(lifecycleSource).toContain("t('agentLifecycle.verificationPassed')");
     expect(lifecycleSource).toContain("t('agentLifecycle.credentialImpact'");
+  });
+
+  it('defines the participation UI and failure messages in both supported locales', () => {
+    for (const locale of ['ko', 'en']) {
+      const messages = JSON.parse(readFileSync(new URL(`../../locales/${locale}/admin.json`, import.meta.url), 'utf8')).agentLifecycle;
+      for (const key of ['joinTitle', 'joinConfirm', 'joined', 'joining', 'joinAction']) {
+        expect(messages[key]).toEqual(expect.any(String));
+        expect(messages[key].trim().length).toBeGreaterThan(0);
+      }
+      expect(messages.errors.joinAgent).toEqual(expect.any(String));
+      expect(messages.errors.joinAgent.trim().length).toBeGreaterThan(0);
+    }
   });
 
   it('preserves workstation and purge API contracts without direct Korean UI copy', () => {

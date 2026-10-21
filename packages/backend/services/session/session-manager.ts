@@ -1,3 +1,6 @@
+import { sessionAudienceSql, currentTeamSessionUseSql, activeAdminSql, redactCompanySessionMetadata } from '../pm/session-audience.js';
+import { resolveTeamAgentContext } from '../agent-workspaces/team-context.js';
+import { resolveTeamSessionVisibility } from '../pm/team-session-policy.js';
 import { v4 as uuidv4 } from 'uuid';
 import { query, queryOne, execute } from '../../db/pg-repo.js';
 import fs from 'fs';
@@ -6,12 +9,15 @@ import os from 'os';
 import { getAccessibleProjectIds } from '../pm/project-membership-manager.js';
 import { findJsonlFileForSession } from '../workspace/jsonl-utils.js';
 import { getAllRunningSessionIds } from '../../engines/index.js';
+import { clonePiSessionFile } from '../../engines/pi/clone.js';
 import { rehydratePiSessionFromMessages } from '../../engines/pi/rehydrate.js';
 import type { RehydrateInputMessage } from '../../engines/types.js';
 import { getConfigDir } from '../auth/credential-store.js';
 import { config, normalizePiSessionModelId } from '../../config.js';
+import { persistPiSessionChoice } from '../model-policy/session-alias.js';
 import { generateShortCode } from './short-code.js';
 import { humanTouchedSql } from './agent-session/classification.js';
+import { subscribeSessionParticipant } from './session-user-state.js';
 export type { SessionMeta } from '@tower/shared';
 import type { SessionMeta } from '@tower/shared';
 
@@ -57,7 +63,7 @@ export async function createSession(name: string, cwd: string, userId?: number, 
 
   if (projectId) {
     const project = await queryOne<{ lifecycle_status: string | null; archived: number | null }>(
-      'SELECT lifecycle_status, archived FROM projects WHERE id = $1', [projectId],
+      `SELECT p.lifecycle_status, p.archived FROM projects p WHERE p.id = $1`, [projectId],
     );
     if (!project || project.archived || (project.lifecycle_status ?? 'active') !== 'active') {
       throw new Error('Agent is retired; new sessions are disabled');
@@ -73,9 +79,20 @@ export async function createSession(name: string, cwd: string, userId?: number, 
     throw new Error('Pi engine is disabled. Use Claude engine instead or enable Pi with PI_ENABLED=true');
   }
 
-  // Sessions within a project default to 'project' visibility (shared with members)
-  const visibility = creation?.visibility || (projectId ? 'project' : 'private');
   const normalizedLabel = normalizeSessionDeckLabel(label);
+  const channelBound = Boolean(roomId && (normalizedLabel === 'channel_agent' || normalizedLabel === 'channel_ai'));
+  let visibility = creation?.visibility || (projectId ? 'project' : 'private');
+  if (process.env.TOWER_TEAM_WORKSPACES_ENABLED === '1' && projectId && !channelBound) {
+    if (!Number.isSafeInteger(userId) || userId! <= 0) throw new Error('TEAM_WORKSPACE_CONTEXT_REQUIRED');
+    const teamContext = await resolveTeamAgentContext({ userId: userId!, agentProjectId: projectId });
+    // Explicit Project audience still requires caller-side sharing authorization;
+    // team membership authorizes Agent use, never conversation sharing.
+    visibility = resolveTeamSessionVisibility({
+      hasTeamContext: teamContext !== null,
+      explicitVisibility: creation?.visibility,
+      legacyDefault: projectId ? 'project' : 'private',
+    });
+  }
 
   // Pin the SDK config dir at create time so it remains stable even if the
   // project is later reassigned to a different Claude account. NULL is fine
@@ -86,22 +103,25 @@ export async function createSession(name: string, cwd: string, userId?: number, 
   // Resolve model_used. Priority:
   //   1. explicit `modelUsed` argument from caller (e.g. spawn-rpc, panel creator).
   //   2. parent session's model_used IF engine matches (panel inherits from parent).
-  //   3. NULL — leave it for the first turn to set via engine_done.
-  // Engine-mismatch guard: NEVER write a model that doesn't match the engine
-  // (e.g. claude-sonnet-4-6 into a pi session). Mismatched model_used causes
-  // the ws-handler "model mismatch: dropping ..." path → silent fallback to
-  // customModelKeys[0], which can land on a model with auth issues.
+  //   3. Pi: persist Core selection intent, not the current physical mapping.
+  //      Other engines: NULL — leave it for the first turn to set.
+  // Engine-mismatch guard: NEVER write a model that doesn't match the engine.
+  // Retired Pi choices normalize to Core; runtime readiness checks the mapping.
   // 결정: workspace/decisions/2026-05-17-pi-panel-session-model-used-bug.md
   let resolvedModelUsed: string | null = null;
   if (resolvedEngine === 'pi') {
     if (modelUsed !== undefined && modelUsed !== null) {
-      resolvedModelUsed = normalizePiSessionModelId(modelUsed);
+      resolvedModelUsed = persistPiSessionChoice(modelUsed);
     } else if (parentSessionId) {
       const parentRow = await queryOne<{ model_used: string | null }>(
         'SELECT model_used FROM sessions WHERE id = $1',
         [parentSessionId]
       );
-      resolvedModelUsed = normalizePiSessionModelId(parentRow?.model_used);
+      resolvedModelUsed = parentRow?.model_used?.startsWith('policy/') || parentRow?.model_used?.startsWith('preset/')
+        ? persistPiSessionChoice(parentRow.model_used)
+        : normalizePiSessionModelId(parentRow?.model_used);
+    } else {
+      resolvedModelUsed = 'preset/core';
     }
   } else if (modelMatchesEngine(modelUsed, resolvedEngine)) {
     resolvedModelUsed = modelUsed!;
@@ -131,6 +151,17 @@ export async function createSession(name: string, cwd: string, userId?: number, 
         continue;
       }
       throw err;
+    }
+  }
+
+  // The owner is a participant and waits for future AI final responses by
+  // default. This is additive during rollout: creation must still succeed when
+  // an older database has not applied migration 202 yet.
+  if (userId) {
+    try {
+      await subscribeSessionParticipant(userId, id);
+    } catch (err: any) {
+      console.warn(`[sessions] Initial AI-response subscription deferred for ${id}: ${err?.message || err}`);
     }
   }
 
@@ -214,6 +245,7 @@ export async function createSession(name: string, cwd: string, userId?: number, 
     agentCreationCommandId: creation?.agentCreationCommandId || null,
     configDir,
     modelUsed: resolvedModelUsed || undefined,
+    reasoningEffort: null,
   };
 }
 
@@ -224,9 +256,10 @@ export async function createSession(name: string, cwd: string, userId?: number, 
  *  so anyone can open the room's persistent @ai conversation. */
 export async function getPanelSessions(roomId: string, userId: number): Promise<SessionMeta[]> {
   const rows = await query(
-    `SELECT * FROM sessions
+    `SELECT s.* FROM sessions s
        WHERE room_id = $1
          AND (user_id = $2 OR (user_id IS NULL AND label = 'channel_ai'))
+         AND ${sessionAudienceSql('s', '$2')}
          AND (archived IS NULL OR archived = 0)
        ORDER BY
          CASE WHEN label = 'channel_ai' THEN 0 ELSE 1 END,
@@ -245,7 +278,6 @@ export async function getPanelSessions(roomId: string, userId: number): Promise<
  * to the current parent session instead of leaking across the project.
  */
 export async function getSessionPanelSessions(parentSessionId: string, userId: number, opts: { includeProject?: boolean; role?: string } = {}): Promise<SessionMeta[]> {
-  const accessibleIds = await getAccessibleProjectIds(userId, opts.role || 'member');
   const rows = await query(
     `WITH parent AS (
        SELECT project_id FROM sessions WHERE id = $1
@@ -278,13 +310,13 @@ export async function getSessionPanelSessions(parentSessionId: string, userId: n
           AND (s.user_id = $2 OR s.visibility = 'project')
           AND (s.archived IS NULL OR s.archived = 0)
      )
-     SELECT * FROM scoped
+     SELECT * FROM scoped s
+      WHERE ${sessionAudienceSql('s', '$2')}
       ORDER BY ai_panel_rank ASC, updated_at DESC`,
     [parentSessionId, userId, opts.includeProject === true]
   ) as any[];
   const favs = await getUserFavoriteSessionIds(userId);
   return rows
-    .filter(r => isSessionListVisibleToUser(r, userId, accessibleIds))
     .map(r => ({ ...mapRow(r, favs), aiPanelScope: r.ai_panel_scope }));
 }
 
@@ -330,7 +362,7 @@ async function getUserFavoriteSessionIds(userId: number | undefined): Promise<Se
   return new Set(rows.map(r => r.session_id));
 }
 
-export async function updateSession(id: string, updates: Partial<Pick<SessionMeta, 'name' | 'cwd' | 'claudeSessionId' | 'piSessionFile' | 'totalCost' | 'totalTokens' | 'tags' | 'modelUsed' | 'autoNamed' | 'summary' | 'summaryAtTurn' | 'turnCount' | 'filesEdited' | 'visibility' | 'label' | 'engine' | 'kind'>>) {
+export async function updateSession(id: string, updates: Partial<Pick<SessionMeta, 'name' | 'cwd' | 'claudeSessionId' | 'piSessionFile' | 'totalCost' | 'totalTokens' | 'tags' | 'modelUsed' | 'reasoningEffort' | 'autoNamed' | 'summary' | 'summaryAtTurn' | 'turnCount' | 'filesEdited' | 'visibility' | 'label' | 'engine' | 'kind'>>) {
   const hasActivity = Object.keys(updates).some(k => ACTIVITY_FIELDS.has(k) && (updates as any)[k] !== undefined);
   const sets: string[] = hasActivity ? ['updated_at = CURRENT_TIMESTAMP'] : [];
   const values: any[] = [];
@@ -344,6 +376,7 @@ export async function updateSession(id: string, updates: Partial<Pick<SessionMet
   if (updates.totalTokens !== undefined) { sets.push(`total_tokens = $${paramIndex++}`); values.push(updates.totalTokens); }
   if (updates.tags !== undefined) { sets.push(`tags = $${paramIndex++}`); values.push(JSON.stringify(updates.tags)); }
   if (updates.modelUsed !== undefined) { sets.push(`model_used = $${paramIndex++}`); values.push(updates.modelUsed); }
+  if (updates.reasoningEffort !== undefined) { sets.push(`reasoning_effort = $${paramIndex++}`); values.push(updates.reasoningEffort); }
   if (updates.autoNamed !== undefined) { sets.push(`auto_named = $${paramIndex++}`); values.push(updates.autoNamed); }
   if (updates.summary !== undefined) { sets.push(`summary = $${paramIndex++}`); values.push(updates.summary); }
   if (updates.summaryAtTurn !== undefined) { sets.push(`summary_at_turn = $${paramIndex++}`); values.push(updates.summaryAtTurn); }
@@ -407,33 +440,18 @@ export type SessionListAccessRow = {
 /**
  * Server-side visibility rule for session-list metadata.
  *
- * This is intentionally stricter than "can open messages": private session
- * metadata (title, owner, timestamps) is visible only to its owner, an explicit
- * share recipient handled elsewhere, or privileged roles. Project members see
- * other users' sessions only when visibility='project'.
+ * This helper has no role bypass. SQL listings additionally evaluate explicit
+ * project and room membership before LIMIT via sessionAudienceSql.
  */
 export function isSessionListVisibleToUser(
   row: SessionListAccessRow,
   userId: number | undefined,
   accessibleProjectIds: string[] | null,
 ): boolean {
-  // No-auth/dev and admin/operator paths preserve the legacy full list.
-  if (!userId || accessibleProjectIds === null) return true;
-
-  // System-owned sessions (e.g. channel AI): visible only when the backing
-  // project is accessible, except legacy project-less channel AI.
-  if (row.user_id === null) {
-    if (!row.project_id) return row.label === 'channel_ai';
-    return accessibleProjectIds.includes(row.project_id);
-  }
-
-  // Project-less sessions are personal; never expose other users' legacy/temp
-  // session metadata through the global list.
-  if (!row.project_id) return row.user_id === userId;
-
-  if (!accessibleProjectIds.includes(row.project_id)) return false;
+  if (!userId) return false;
   if (row.user_id === userId) return true;
-  return row.visibility === 'project';
+  if (row.visibility !== 'project' || !row.project_id) return false;
+  return accessibleProjectIds?.includes(row.project_id) === true;
 }
 
 export type GetSessionsOptions = {
@@ -449,29 +467,9 @@ export async function getSessions(userId?: number, role?: string, options: GetSe
   const limit = Number.isInteger(options.limit) && options.limit! > 0 ? Math.min(options.limit!, 1000) : null;
   const params: any[] = [];
   const where: string[] = ['(s.archived IS NULL OR s.archived = 0)'];
-  let accessibleIds: string[] | null = null;
-
-  if (userId) {
-    // Treat missing/legacy JWT role as ordinary member, not as "no auth". The
-    // old `userId && role` guard made role-less tokens fall through to the
-    // admin/no-auth full list, leaking session titles and owners in the sidebar.
-    accessibleIds = await getAccessibleProjectIds(userId, role || 'member');
-    if (accessibleIds !== null) {
-      params.push(accessibleIds);
-      const projectIdsParam = `$${params.length}::text[]`;
-      params.push(userId);
-      const userIdParam = `$${params.length}`;
-      where.push(`(
-        (s.user_id IS NULL AND ((s.project_id IS NULL AND s.label = 'channel_ai') OR s.project_id = ANY(${projectIdsParam})))
-        OR
-        (s.user_id IS NOT NULL AND (
-          (s.project_id IS NULL AND s.user_id = ${userIdParam})
-          OR
-          (s.project_id = ANY(${projectIdsParam}) AND (s.user_id = ${userIdParam} OR s.visibility = 'project'))
-        ))
-      )`);
-    }
-  }
+  const actor = userId ? `$${params.push(userId)}` : null;
+  const audience = !actor ? 'FALSE' : sessionAudienceSql('s', actor);
+  where.push(`(${audience})`);
 
   if (options.projectId) {
     params.push(options.projectId);
@@ -479,6 +477,14 @@ export async function getSessions(userId?: number, role?: string, options: GetSe
   }
 
   if (options.sidebarOnly) {
+    // Legacy Project discovery still requires membership. For a team owner, the
+    // shared audience above already requires current team use before this LIMIT.
+    const teamOwnerDiscovery = process.env.TOWER_TEAM_WORKSPACES_ENABLED === '1' && actor
+      ? `OR (s.user_id = ${actor} AND EXISTS (SELECT 1 FROM agent_team_projects sidebar_team WHERE sidebar_team.project_id = s.project_id))`
+      : '';
+    where.push(actor
+      ? `(s.project_id IS NULL OR ${activeAdminSql(actor)} OR EXISTS (SELECT 1 FROM project_members recent_pm WHERE recent_pm.project_id = s.project_id AND recent_pm.user_id = ${actor}) ${teamOwnerDiscovery})`
+      : 'FALSE');
     where.push(`(s.parent_session_id IS NULL OR s.label IN ('spawned', 'agent', 'conversation_branch'))`);
     where.push(`(s.room_id IS NULL OR s.label = 'channel_ai')`);
   }
@@ -491,7 +497,7 @@ export async function getSessions(userId?: number, role?: string, options: GetSe
   // historical sessions the frontend never received.
   const rows = await query(`
     WITH visible_sessions AS (
-      SELECT s.*
+      SELECT s.*, ${audience} AS transcript_readable
       FROM sessions s
       WHERE ${where.join('\n        AND ')}
       ORDER BY s.updated_at DESC
@@ -500,7 +506,24 @@ export async function getSessions(userId?: number, role?: string, options: GetSe
     SELECT s.*,
            u.username AS owner_username,
            lum.username AS last_user_username,
+           ${actor ? `(s.user_id = ${actor} OR sus.participated_at IS NOT NULL OR EXISTS (
+             SELECT 1
+             FROM messages participant_message
+             JOIN users participant_user ON participant_user.id = ${actor}
+             WHERE participant_message.session_id = s.id
+               AND participant_message.username = participant_user.username
+               AND ${humanTouchedSql('participant_message')}
+           ))` : 'FALSE'} AS current_user_participated,
+           ${actor ? `(sus.subscription_state = 'subscribed')` : 'FALSE'} AS current_user_subscribed,
+           ${actor ? `(sus.subscription_state = 'subscribed'
+             AND s.last_final_ai_sequence > GREATEST(
+               COALESCE(sus.subscribed_from_sequence, 0),
+               COALESCE(sus.last_read_ai_sequence, 0)
+             ))` : 'FALSE'} AS unread_ai_response,
+           s.last_final_ai_sequence,
+           COALESCE(sus.last_read_ai_sequence, 0) AS last_read_ai_sequence,
            COALESCE(utc.cnt, 0)::int AS user_turn_count,
+           COALESCE(pc.cnt, 0)::int AS participant_count,
            aw.id AS agent_worker_id,
            aw.name AS agent_worker_name,
            aw.role AS agent_worker_role,
@@ -510,6 +533,8 @@ export async function getSessions(userId?: number, role?: string, options: GetSe
            COALESCE((aw.metadata->>'humanTouched')::boolean, htc.cnt > 0, false) AS agent_worker_human_touched
     FROM visible_sessions s
     LEFT JOIN users u ON s.user_id = u.id
+    ${actor ? `LEFT JOIN session_user_states sus
+      ON sus.session_id = s.id AND sus.user_id = ${actor}` : 'LEFT JOIN session_user_states sus ON FALSE'}
     LEFT JOIN agent_workers aw ON aw.backing_session_id = s.id
     LEFT JOIN LATERAL (
       SELECT COUNT(*) AS cnt
@@ -518,6 +543,14 @@ export async function getSessions(userId?: number, role?: string, options: GetSe
         AND m.role = 'user'
         AND m.content LIKE '[{"type":"text"%'
     ) utc ON true
+    LEFT JOIN LATERAL (
+      SELECT COUNT(DISTINCT m.username) AS cnt
+      FROM messages m
+      WHERE m.session_id = s.id
+        AND m.username IS NOT NULL
+        AND BTRIM(m.username) <> ''
+        AND ${humanTouchedSql('m')}
+    ) pc ON true
     LEFT JOIN LATERAL (
       SELECT m.username
       FROM messages m
@@ -537,13 +570,10 @@ export async function getSessions(userId?: number, role?: string, options: GetSe
 
   const favs = await getUserFavoriteSessionIds(userId);
 
-  if (userId && accessibleIds === null) {
-    return rows
-      .filter(r => isSessionListVisibleToUser(r, userId, accessibleIds))
-      .map(r => mapRow(r, favs));
-  }
-
-  return rows.map(r => mapRow(r, favs));
+  return rows.map(r => {
+    const session = mapRow(r, favs);
+    return r.transcript_readable === true ? session : redactCompanySessionMetadata(session);
+  });
 }
 
 /**
@@ -570,16 +600,19 @@ function mapRow(row: any, favoriteSet?: Set<string>): SessionMeta {
     cwd: row.cwd,
     tags: JSON.parse(row.tags || '[]'),
     favorite: favoriteSet ? favoriteSet.has(row.id) : false,
+    archived: !!row.archived,
     totalCost: row.total_cost,
     totalTokens: row.total_tokens,
     createdAt: row.created_at instanceof Date ? row.created_at.toISOString() : String(row.created_at),
     updatedAt: row.updated_at instanceof Date ? row.updated_at.toISOString() : String(row.updated_at),
     modelUsed: row.model_used || undefined,
+    reasoningEffort: row.reasoning_effort || null,
     autoNamed: row.auto_named ?? 1,
     summary: row.summary || undefined,
     summaryAtTurn: row.summary_at_turn ?? undefined,
     turnCount: row.turn_count ?? 0,
     userTurnCount: row.user_turn_count ?? 0,
+    participantCount: row.participant_count ?? 0,
     filesEdited: JSON.parse(row.files_edited || '[]'),
     projectId: row.project_id || null,
     engine: row.engine || config.defaultEngine || 'pi',
@@ -589,6 +622,13 @@ function mapRow(row: any, favoriteSet?: Set<string>): SessionMeta {
     sourceMessageId: row.source_message_id || null,
     ownerUsername: row.owner_username || null,
     lastUserUsername: row.last_user_username || null,
+    ...(typeof row.current_user_participated === 'boolean'
+      ? { currentUserParticipated: row.current_user_participated }
+      : {}),
+    currentUserSubscribed: row.current_user_subscribed === true,
+    unreadAiResponse: row.unread_ai_response === true,
+    lastFinalAiSequence: Number(row.last_final_ai_sequence || 0),
+    lastReadAiSequence: Number(row.last_read_ai_sequence || 0),
     label: normalizeSessionDeckLabel(row.label),
     agentCreationCommandId: row.agent_creation_command_id || null,
     agent: row.agent_worker_id ? {
@@ -620,6 +660,17 @@ export async function getSession(id: string, userId?: number): Promise<SessionMe
   const row = await queryOne(`
     SELECT s.*,
            u.username AS owner_username,
+           ${userId ? `(s.user_id = $2 OR EXISTS (
+             SELECT 1 FROM session_user_states participant_state
+             WHERE participant_state.session_id = s.id AND participant_state.user_id = $2
+               AND participant_state.participated_at IS NOT NULL
+           ) OR EXISTS (
+             SELECT 1 FROM messages participant_message
+             JOIN users participant_user ON participant_user.id = $2
+             WHERE participant_message.session_id = s.id
+               AND participant_message.username = participant_user.username
+               AND ${humanTouchedSql('participant_message')}
+           )) AS current_user_participated,` : ''}
            aw.id AS agent_worker_id,
            aw.name AS agent_worker_name,
            aw.role AS agent_worker_role,
@@ -637,7 +688,7 @@ export async function getSession(id: string, userId?: number): Promise<SessionMe
         GROUP BY session_id
       ) htc ON htc.session_id = s.id
      WHERE s.id = $1
-  `, [id]) as any;
+  `, userId ? [id, userId] : [id]) as any;
   if (!row) return null;
   const favs = await getUserFavoriteSessionIds(userId);
   return mapRow(row, favs);
@@ -664,7 +715,9 @@ export async function setLastAutoResumeAt(id: string): Promise<void> {
 export async function deleteSession(id: string): Promise<boolean> {
   // Hide/archive: remove from the default sidebar list, preserve data for History restore.
   // Permanent deletion is intentionally separate: DELETE /api/sessions/:id/permanent.
-  const result = await execute('UPDATE sessions SET archived = 1, updated_at = CURRENT_TIMESTAMP WHERE id = $1', [id]);
+  // Keep updated_at at true last-activity; archived_at carries the archive moment so
+  // History/sidebar dates describe the conversation, not the archiving action.
+  const result = await execute('UPDATE sessions SET archived = 1, archived_at = CURRENT_TIMESTAMP WHERE id = $1', [id]);
   return result.changes > 0;
 }
 
@@ -675,6 +728,8 @@ export async function getArchivedSessions(userId?: number, role?: string): Promi
   // JS filtering. Admin/operator global audit views should use a separate
   // explicit endpoint/UI.
   const ownHistoryClause = userId ? 'AND s.user_id = $1' : '';
+  const teamHistoryClause = process.env.TOWER_TEAM_WORKSPACES_ENABLED === '1'
+    ? (userId ? `AND ${currentTeamSessionUseSql('s', '$1')}` : 'AND FALSE') : '';
   const rows = await query(`
     SELECT s.*,
            u.username AS owner_username,
@@ -696,7 +751,8 @@ export async function getArchivedSessions(userId?: number, role?: string): Promi
       ) htc ON htc.session_id = s.id
      WHERE s.archived = 1
        ${ownHistoryClause}
-     ORDER BY s.updated_at DESC
+       ${teamHistoryClause}
+     ORDER BY COALESCE(s.archived_at, s.updated_at) DESC
   `, userId ? [userId] : []) as any[];
 
   const favs = await getUserFavoriteSessionIds(userId);
@@ -713,7 +769,9 @@ export async function getArchivedSessions(userId?: number, role?: string): Promi
 }
 
 export async function restoreSession(id: string): Promise<boolean> {
-  const result = await execute('UPDATE sessions SET archived = 0, updated_at = CURRENT_TIMESTAMP WHERE id = $1', [id]);
+  // Restore without faking activity: the session returns to its true updated_at
+  // position instead of jumping to "now".
+  const result = await execute('UPDATE sessions SET archived = 0, archived_at = NULL WHERE id = $1', [id]);
   return result.changes > 0;
 }
 
@@ -726,7 +784,7 @@ export async function permanentlyDeleteSession(id: string): Promise<boolean> {
  * Clone a session — produce an independent copy with the same context up to "now".
  *
  * What's copied:
- *   1. sessions row (new id, new engine-specific resume id, name + ' (복제)')
+ *   1. sessions row (new id, new engine-specific resume id, '(복제) ' + name)
  *   2. messages rows (each with a new uuid; session_id rewired)
  *   3. native resume file (.pi session for Pi, Claude .jsonl for Claude)
  *
@@ -739,8 +797,7 @@ export async function permanentlyDeleteSession(id: string): Promise<boolean> {
  *
  * Note: callers (route handler) are responsible for permission checks via
  *       canAccessSession before invoking this function. The clone's owner becomes
- *       the supplied `actorUserId`; visibility is forced to 'private' so a clone of
- *       another user's project-shared session does not auto-republish.
+ *       the supplied `actorUserId`; visibility is inherited from the source session.
  */
 export async function cloneSession(
   sourceId: string,
@@ -764,7 +821,7 @@ export async function cloneSession(
   const sourceEngine = src.engine || config.defaultEngine || 'pi';
   const isPiSource = sourceEngine === 'pi';
   const newClaudeSessionId = !isPiSource && src.claude_session_id ? uuidv4() : null;
-  const newName = `${src.name} (복제)`;
+  const newName = `(복제) ${src.name}`;
 
   // 4. Insert new sessions row — copy almost everything, override identity + audit fields.
   //    config_dir inherits from src so the cloned .jsonl (copied in step 6) lives in
@@ -793,7 +850,7 @@ export async function cloneSession(
           newId, cloneShortCode, newClaudeSessionId, newName, src.cwd, src.tags || '[]', 0, actorUserId,
           src.total_cost ?? 0, src.total_tokens ?? 0, src.model_used, src.auto_named ?? 1, src.summary,
           src.summary_at_turn, src.turn_count ?? 0, src.files_edited || '[]', sourceEngine,
-          'private', src.room_id, src.project_id, src.source_message_id, src.parent_session_id, src.label,
+          src.visibility, src.room_id, src.project_id, src.source_message_id, src.parent_session_id, src.label,
           src.config_dir, null,
         ],
       );
@@ -807,10 +864,10 @@ export async function cloneSession(
   }
 
   // 5. Copy the active conversation — each message gets a fresh uuid and the
-  //    session_id is rewired. Preserve metadata + message_seq because metadata
-  //    controls message visibility/rendering and message_seq is the durable
-  //    conversation ordering authority. Omitting either can revive superseded
-  //    turns or scramble cloned model context when timestamps tie.
+  //    session_id is rewired. Preserve metadata + message_seq because context
+  //    rewind marks superseded turns in metadata and message_seq is the durable
+  //    conversation ordering authority. Omitting either revives superseded turns
+  //    or lets equal timestamps scramble the cloned model context.
   //
   //    short_id is intentionally not copied. The next backfill assigns fresh
   //    per-session ids without colliding with the source session.
@@ -873,42 +930,54 @@ export async function cloneSession(
   // 7. Create/copy the native resume file (best-effort — log on failure but don't roll back).
   if (isPiSource) {
     if (!piHarnessSnapshotReady) {
-      console.warn(`[session-manager] clone: skipping Pi session rehydrate for ${newId} because Harness snapshot is unavailable`);
+      console.warn(`[session-manager] clone: skipping Pi session clone for ${newId} because Harness snapshot is unavailable`);
     } else try {
-      const rows = await query<any>(
-        `SELECT id, role, content, created_at, metadata
-           FROM messages
-          WHERE session_id = $1
-            AND role IN ('user', 'assistant')
-            AND COALESCE(metadata->>'hidden', '') = ''
-            AND NOT (metadata ? 'engineSwitch')
-          ORDER BY message_seq ASC`,
-        [newId],
-      );
-      const rehydrateInput: RehydrateInputMessage[] = [];
-      for (const row of rows) {
-        let content: any;
-        try {
-          content = typeof row.content === 'string' ? JSON.parse(row.content) : row.content;
-        } catch {
-          continue;
+      let piSessionFile: string | undefined;
+      // Prefer a native fork. It preserves Pi compaction summaries and branch state;
+      // rebuilding hundreds of raw DB messages can expand a compacted conversation
+      // beyond the provider/proxy request limit on the clone's first prompt.
+      if (src.pi_session_file) {
+        piSessionFile = clonePiSessionFile(src.pi_session_file, src.cwd);
+      } else {
+        // Legacy Pi rows may have no native file. Rehydrate from the active DB
+        // projection as a compatibility fallback.
+        const rows = await query<any>(
+          `SELECT id, role, content, created_at, metadata
+             FROM messages
+            WHERE session_id = $1
+              AND role IN ('user', 'assistant')
+              AND COALESCE(metadata->>'hidden', '') = ''
+              AND NOT (metadata ? 'engineSwitch')
+            ORDER BY message_seq ASC`,
+          [newId],
+        );
+        const rehydrateInput: RehydrateInputMessage[] = [];
+        for (const row of rows) {
+          let content: any;
+          try {
+            content = typeof row.content === 'string' ? JSON.parse(row.content) : row.content;
+          } catch {
+            continue;
+          }
+          if (!Array.isArray(content)) continue;
+          rehydrateInput.push({
+            id: row.id,
+            role: row.role,
+            content,
+            timestamp: row.created_at ? new Date(row.created_at).getTime() : undefined,
+          });
         }
-        if (!Array.isArray(content)) continue;
-        rehydrateInput.push({
-          id: row.id,
-          role: row.role,
-          content,
-          timestamp: row.created_at ? new Date(row.created_at).getTime() : undefined,
-        });
+        if (rehydrateInput.length > 0) {
+          piSessionFile = await rehydratePiSessionFromMessages(newId, rehydrateInput, src.cwd);
+        }
       }
-      if (rehydrateInput.length > 0) {
-        const piSessionFile = await rehydratePiSessionFromMessages(newId, rehydrateInput, src.cwd);
+      if (piSessionFile) {
         await execute('UPDATE sessions SET pi_session_file = $1 WHERE id = $2', [piSessionFile, newId]);
       }
     } catch (err) {
-      console.warn('[session-manager] clone: Pi session rehydrate failed:', err);
-      // Don't roll back — DB-level clone is still useful; Pi will start a fresh
-      // session file on next turn. User loses raw model history but keeps DB-rendered view.
+      console.warn('[session-manager] clone: native Pi fork failed:', err);
+      // Don't roll back — DB-level clone is still useful. The visible transcript
+      // remains available, and a later repair can restore a native context file.
     }
   } else if (src.claude_session_id && newClaudeSessionId) {
     try {

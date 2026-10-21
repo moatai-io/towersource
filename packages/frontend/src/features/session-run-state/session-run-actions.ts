@@ -59,3 +59,15 @@ export function markSessionRunIdle(sessionId: string, meta: TurnMeta = {}): void
   useSessionStore.getState().setSessionStreaming(sessionId, false);
   useChatStore.getState().setTurnPhase(sessionId, 'idle', meta);
 }
+
+/** Resolve only the question identified by a server edge; stale edges are no-ops. */
+export function resolveSessionQuestion(sessionId: string, questionId?: string): boolean {
+  const store = useChatStore.getState();
+  const current = store.turnStateBySession[sessionId];
+  if (current?.phase !== 'awaiting_user' || !questionId || current.pendingQuestionId !== questionId) return false;
+  const popup = store.pendingQuestion;
+  if (popup?.sessionId === sessionId && popup.questionId === questionId) store.setPendingQuestion(null);
+  markSessionRunActive(sessionId, 'preparing', { pendingQuestionId: null });
+  if (useSessionStore.getState().activeSessionId === sessionId) store.setStreaming(true);
+  return true;
+}

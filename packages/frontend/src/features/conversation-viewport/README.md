@@ -52,3 +52,33 @@
 - `packages/frontend/src/stores/chat-store.ts`
 - `packages/frontend/src/hooks/useChatRuntime.ts`
 - `packages/frontend/src/components/chat/ChatPanel.source.test.ts`
+
+## Layout drift and restoration lifetime
+
+- `observeBottomLayout.ts` observes the plain content wrapper and Virtuoso's measured item list (not only its fixed-height viewport). Late intrinsic image growth follows the bottom only while the caller retains bottom intent. Disposal cancels scheduled DOM writes; scrollbar dragging relinquishes ownership.
+- `ChatPanel` snapshots preserve bottom intent rather than treating temporary geometry drift as history reading. Wheel/touch/keyboard/scrollbar input and explicit navigation own intent transitions.
+- Session restoration depends on session/renderer/readiness, not each messages-array replacement. Anchor indices are resolved from stable message IDs against the latest list, including prepend. Cancellation clears both RAF handles and restoration state.
+- Message-link requests have one hash-state owner. Delayed retries are cancelled on disposal and fenced by session visit and interaction generation. A jump to latest cancels pending history restoration.
+- `ChatPanel.scroll-lifecycle.test.tsx` and `ChatPanel.deep-link-lifecycle.test.ts` execute the current production effect bodies with controlled schedulers. They supplement, not replace, real-browser geometry tests.
+
+## 메시지 링크의 이전 대화 탐색
+
+`useMessageAnchorHistory.ts`는 `/s/:key#m-:shortId`의 대상이 초기 메시지에 없으면
+기존 `onLoadMore`를 순차 호출합니다. 대상이 로드되면 `ChatPanel`의 기존 앵커
+스크롤·강조 처리가 이어받습니다. 초기 로딩 중에는 시작하지 않으며 세션·해시 변경과
+unmount 시 탐색을 중단합니다. 다른 이전 대화 요청이 실행 중이면 완료를 기다립니다.
+끝까지 찾지 못하면 안내하고, 페이지 커서가 진행하지 않으면 실패 안내 후 중단하여
+동일 요청의 무한 반복을 막습니다. 권한 검사와 데이터 조회는 기존 메시지 API를 그대로 사용합니다.
+
+- 동작 검증: `useMessageAnchorHistory.test.tsx` (여러 페이지, 미발견, 요청 실패, 세션 변경, 초기 로딩)
+- 스크롤 수명주기: `../../components/chat/ChatPanel.deep-link-lifecycle.test.ts`
+- 실제 브라우저의 긴 세션 이동·강조는 별도 실기기 확인이 필요합니다.
+
+### 새 탭 진입 시 스크롤 준비 조건
+
+앵커 스크롤은 `renderSessionLoading`이 끝나고 채팅 탭이 foreground인 경우에만
+요청을 처리한 것으로 표시합니다. 초기 로딩 skeleton이나 비활성 탭에서 요청을
+소비하면 실제 스크롤러가 준비된 뒤 재시도가 사라지므로, 두 상태를 effect의
+의존성으로 추적합니다. 예약된 위치 이동이 cleanup으로 취소되면 처리 표시도
+해제하되 사용자가 직접 스크롤한 요청은 되살리지 않습니다.
+`ChatPanel.deep-link-lifecycle.test.ts`에서 초기 로딩 → 준비와 비활성 → 활성 전환을 검증합니다.

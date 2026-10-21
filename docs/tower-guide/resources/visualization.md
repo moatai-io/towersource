@@ -1,6 +1,6 @@
 # Tower Visualization Guide Resource
 
-This resource is loaded on demand by Pi via `guide_read` when exact Tower visual block schemas or Mermaid rules are needed. Keep the system prompt short; update this file when visual formats change.
+This resource is loaded on demand by Pi via `runtime_guide_read` when exact Tower visual block schemas or Mermaid rules are needed. Basic Mermaid flowcharts using the shared core rules do not require a guide read. Keep the system prompt short; update this file when visual formats change.
 
 ## Visualization — PROACTIVE usage
 
@@ -32,8 +32,9 @@ CHART TONE — Tower visuals should be calm and judgment-oriented:
 **```mermaid** — Use for processes, workflows, architecture, relationships, sequences, or any structural explanation.
 Supports: flowchart, sequence, class, ER, gantt, state, pie, mindmap. Raw mermaid syntax (NOT JSON).
 
-LABELS — Always double-quote, every shape, every language:
-  - Every node label gets `"…"` even for plain alphanumeric. `A["Request"]` not `A[Request]`. Applies to ALL shapes (`[]`, `()`, `{}`, `(())`, `[[]]`, `{{}}`, `[/\]`).
+FLOWCHART LABELS — Double-quote node and pipe-delimited edge labels, every flowchart shape and language:
+  - These rules and the LINE BREAKS / EDGES sections below describe flowchart syntax. Do not apply them mechanically to sequence, class, ER, state, gantt, pie, or mindmap diagrams; use each diagram type's grammar. The MINDMAP section below spells out its separate label rules.
+  - Every flowchart node label gets `"…"` even for plain alphanumeric. `A["Request"]` not `A[Request]`. Applies to all flowchart shapes (`[]`, `()`, `{}`, `(())`, `[[]]`, `{{}}`, `[/\]`).
   - Edge labels in pipes: same rule — `A -->|"Yes"| B` not `A -->|Yes| B`.
   - Reserved chars that ALWAYS need quoting: `@` `()` `{}` `:` `,` `#` `"` `/` `.` `—` `+` `&` `*` plus all CJK / emoji / unicode.
   - Reserved word IDs to avoid (case-sensitive): `end`, `graph`, `true`, `false`. Use `END`, `Graph`, `done1`, etc.
@@ -41,7 +42,7 @@ LABELS — Always double-quote, every shape, every language:
 
 LINE BREAKS — `<br/>` only:
   - Inside a quoted label: `A["첫 번째<br/>두 번째 줄"]` ✓
-  - `\n` renders as literal text in mermaid v11 — never use it.
+  - In flowchart labels, `\n` renders as literal text in mermaid v11 — use `<br/>` instead.
   - Each edge on ONE source line. Literal newline inside `|"…"|` aborts the parse — use `<br/>`.
 
 EDGES — limited form set, mix-and-match forbidden:
@@ -73,7 +74,7 @@ MINDMAP — different grammar, opposite quoting rule:
 COMMENTS — `%%` 접두사만. 절대 `//` 또는 `#` 안 됨.
 
 ERROR RECOVERY — mermaid 파싱 에러가 뜨면 거의 항상:
-  1. Unquoted label with special char → 모든 라벨에 `"…"` 박혔는지 확인
+  1. Flowchart unquoted label with special char → flowchart 노드·연결선 라벨에 `"…"` 박혔는지 확인
   2. Edge marker 뒤에 잉여 `>` (`-.x.->`, `-.-x.->`) → `>` 빼기, marker 가 head 임
   3. `|"…"|` 안 literal newline → `<br/>` 로 교체
   4. Mindmap "got NODE_ID" → 자식 노드 standalone `"…"` 제거, 괄호 빼기 (또는 `id["…"]`)
@@ -119,7 +120,7 @@ Security: sanitized via DOMPurify (SVG + svgFilters profile). `<script>`, `<fore
 
 ### Extended formats
 
-**```secure-input** — Use ONLY for saving sensitive values (API keys, tokens) to the server `.env` file. JSON: { "target": ".env", "fields": [{ "key": "API_KEY", "label": "API Key", "required": true }] }. Important: values are written to the server by the frontend — they are NOT delivered back to the AI session. For any user input you need to read yourself, ask in plain text.
+**Credential input is tool-backed, not an authored visual block.** Use `credential_vault_input` after the user explicitly asks to register/rotate a credential or accepts an offer to open secure input. Do not generate a `secure-input` code block, ask for secret values in chat, or direct credential storage to a server `.env` file. If the tool is unavailable, report that limitation without inventing a replacement secret-entry flow. For non-secret questions, follow the shared AskUserQuestion/prose rules.
 
 **```diff** — Use for code before/after comparison. Accepts JSON { "before": "...", "after": "...", "mode": "split" } OR raw unified-diff text (lines prefixed with `+`/`-`/` `, optional `@@` hunk headers). Either form renders the same UI.
 

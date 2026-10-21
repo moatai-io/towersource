@@ -21,6 +21,12 @@ describe('execution gate shadow classifier', () => {
     expect(classifyShellCommand('printenv').actionClass).toBe('secret-read');
   });
 
+  it('classifies trusted Credential Vault tools by their actual authority', () => {
+    expect(classifyToolExecutionAction('credential_vault_store', { scope: 'project' }).actionClass).toBe('credential-admin');
+    expect(classifyToolExecutionAction('credential_vault_access', { action: 'reveal' }).actionClass).toBe('secret-read');
+    expect(classifyToolExecutionAction('credential_vault_access', { action: 'import' }).actionClass).toBe('credential-admin');
+  });
+
   it('adds operation kind for observe-only ops commands', () => {
     expect(classifyShellCommand('pm2 status tower-prod').target?.operation).toBe('status');
     expect(classifyShellCommand('bash ~/tower/scripts/fleet/fleet-status.sh --json').target?.operation).toBe('status');

@@ -1,27 +1,8 @@
-// Owns: typed browser refs, drag codec, and inspect→confirm→execute client flow. See README.md.
+// Owns: inspect→confirm→execute File Exchange client flow. See README.md.
 import i18n from '../../i18n';
+import type { ExchangeDestinationRef, ExchangeSourceRef } from './fileExchangeDrag';
 
-export const FILE_EXCHANGE_DRAG_TYPE = 'application/x-tower-file-exchange';
-
-export type ExchangeSourceRef =
-  | { scope: 'personal'; uri: string }
-  | { scope: 'session'; sessionId: string; attachmentId: string }
-  | { scope: 'channel'; channelId: string; fileId: string }
-  | { scope: 'project'; projectId: string; relativePath: string };
-
-export type ExchangeDestinationRef =
-  | { scope: 'personal'; relativeDirectory?: string }
-  | { scope: 'session'; sessionId: string }
-  | { scope: 'channel'; channelId: string }
-  | { scope: 'project'; projectId: string; relativeDirectory?: string };
-
-export interface ExchangeDragPayload {
-  version: 1;
-  source: ExchangeSourceRef;
-  name: string;
-  sizeBytes?: number;
-  mimeType?: string | null;
-}
+export type { ExchangeDestinationRef, ExchangeSourceRef } from './fileExchangeDrag';
 
 export interface ExchangePlan {
   id: string;
@@ -55,21 +36,6 @@ async function jsonRequest<T>(url: string, init?: RequestInit): Promise<T> {
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || i18n.t('fileExchange.transferFailed', { ns: 'files' }));
   return data as T;
-}
-
-/** Encode only opaque storage refs; never include host paths or file content. */
-export function encodeExchangeDrag(payload: ExchangeDragPayload): string {
-  return JSON.stringify(payload);
-}
-
-/** Decode a versioned File Exchange drag payload and reject legacy/raw-path shapes. */
-export function decodeExchangeDrag(raw: string): ExchangeDragPayload | null {
-  try {
-    const value = JSON.parse(raw) as ExchangeDragPayload;
-    if (value?.version !== 1 || !value.name || !value.source?.scope) return null;
-    if (!['personal', 'session', 'channel', 'project'].includes(value.source.scope)) return null;
-    return value;
-  } catch { return null; }
 }
 
 /** Ask the server to author a short-lived plan after provider ACL checks. */

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { shouldAutoContinueIncompleteTurn, summarizeAssistantContinuationIntent } from '../pi/continuation-intent.js';
+import { classifyPiFailure } from '../pi-failure-classifier.js';
 import { classifyPiRunEndFailure, chooseContextRiskEstimateTokens, normalizeIterationCount } from '../pi/turn-metrics.js';
 
 describe('Pi turn metrics helpers', () => {
@@ -132,6 +133,19 @@ describe('Pi turn metrics helpers', () => {
       abortRequested: true,
       watchdogAborted: false,
     })).toBe(false);
+  });
+
+  it('treats the LiteLLM Responses usage-shape crash as a retryable response schema failure', () => {
+    expect(classifyPiFailure("'dict' object has no attribute 'usage'")).toMatchObject({
+      kind: 'provider_response_schema',
+      visible: true,
+      retryableBeforeSideEffects: true,
+      recoverable: true,
+    });
+  });
+
+  it('preserves response-schema classification in run-end metrics', () => {
+    expect(classifyPiRunEndFailure({ watchdogAborted: null, transientAbortVisibleSuppressed: false, terminalForced: false, errorStopReason: 'error', providerErrorMessage: "'dict' object has no attribute 'usage'" })).toBe('provider_response_schema');
   });
 
   it('classifies run-end failure causes by priority', () => {

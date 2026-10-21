@@ -17,7 +17,13 @@ const livekitAgentSource = fs.readFileSync(path.join(process.cwd(), 'packages/ba
 
 describe('voice feature flag', () => {
   it('keeps the backend voice runtime off unless explicitly enabled', () => {
-    expect(isVoiceRuntimeEnabled(undefined)).toBe(false);
+    const previous = process.env.TOWER_VOICE_ENABLED;
+    delete process.env.TOWER_VOICE_ENABLED;
+    try { expect(isVoiceRuntimeEnabled()).toBe(false); }
+    finally {
+      if (previous === undefined) delete process.env.TOWER_VOICE_ENABLED;
+      else process.env.TOWER_VOICE_ENABLED = previous;
+    }
     expect(isVoiceRuntimeEnabled('false')).toBe(false);
     expect(isVoiceRuntimeEnabled('true')).toBe(true);
   });
@@ -35,33 +41,16 @@ describe('VoiceSessionManager', () => {
   });
 });
 
-describe('voice runtime authority and turn timing', () => {
-  it('uses the token user identity and avoids an aggressive endpointing ceiling', () => {
-    expect(voiceGatewaySource).toContain("SELECT username, role FROM users WHERE id = $1");
-    expect(voiceGatewaySource).toContain("username: actor?.username || 'voice'");
-    expect(voiceGatewaySource).toContain("userRole: actor?.role || 'member'");
-    expect(voiceGatewaySource).not.toContain("userRole: 'member'");
-    expect(livekitAgentSource).toContain("minDelay: 1300, maxDelay: 3000");
-    expect(livekitAgentSource).toContain('minDuration: 500');
-    expect(livekitAgentSource).toContain('minWords: 2');
-    expect(livekitAgentSource).toContain('falseInterruptionTimeout: 2000');
-    expect(livekitAgentSource).toContain('AgentSessionEventTypes.OverlappingSpeech');
-    expect(livekitAgentSource).toContain('VoiceTurnOrchestrator');
-    expect(livekitAgentSource).toContain('stage: \'tower_supersede_requested\'');
-    expect(livekitAgentSource).toContain('requestVoiceTurnCancellation(towerSessionId)');
-    expect(voiceGatewaySource).toContain('requestAgentTurnStop');
-    expect(voiceGatewaySource).toContain('rejectAgentTurnStopRequest');
-    expect(voiceGatewaySource).toContain('requestStopAtBoundary');
-    expect(livekitAgentSource).toContain('signal: requestController.signal');
-    expect(livekitAgentSource).toContain('attempt < 30');
-    expect(livekitAgentSource).not.toContain('잠깐 확인해볼게요.');
-    expect(livekitAgentSource).toContain('turnOrchestrator.hasPendingTranscript()');
-    expect(livekitAgentSource).toContain('turnOrchestrator.takeTranscript()');
-    expect(livekitAgentSource).toContain('VoiceTurnOrchestrator.DEFAULT_SILENCE_MS');
-    expect(livekitAgentSource).not.toContain('pendingTranscripts');
-    expect(livekitAgentSource).toContain('activeRequestController?.abort()');
-    expect(livekitAgentSource).toContain("stage: 'tower_superseded'");
-    expect(livekitAgentSource).not.toContain('tower_cancelled');
+describe('voice worker process boundary', () => {
+  it('keeps backend engine imports out of the LiveKit job and prevents unsolicited replies', () => {
+    expect(livekitAgentSource).not.toContain("from './tower-session-turn-gateway.js'");
+    expect(livekitAgentSource).toContain('VoiceWorkerController');
+    expect(livekitAgentSource).toContain('process.env.TOWER_VOICE_BACKEND_URL');
+    expect(livekitAgentSource).not.toContain('process.env.PORT');
+    expect(livekitAgentSource).toContain('http://127.0.0.1:32355/api');
+    expect(livekitAgentSource).toContain('throw new StopResponse()');
+    expect(livekitAgentSource).not.toContain("session.say('연결됐어요");
+    expect(voiceGatewaySource).not.toContain("model: 'litellm-responses/mini'");
   });
 });
 

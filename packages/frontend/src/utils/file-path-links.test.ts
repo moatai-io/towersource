@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-import { describe, expect, it } from 'vitest';
-import { fileServeUrl, isDirectoryLikeTowerPath, isPreviewableImageFilePath, splitFilePathsInText } from './file-path-links';
+import { describe, expect, it, vi } from 'vitest';
+import { downloadTowerFile, fileServeUrl, isDirectoryLikeTowerPath, isPreviewableImageFilePath, splitFilePathsInText } from './file-path-links';
 
 function extractLinkedPaths(text: string): string[] {
   const paths: string[] = [];
@@ -67,5 +67,30 @@ describe('file path auto-linking', () => {
     expect(isPreviewableImageFilePath('~/workspace/projects/p/icon.svg')).toBe(true);
     expect(isPreviewableImageFilePath('/home/tower/workspace/projects/p/photo.avif')).toBe(true);
     expect(isPreviewableImageFilePath('/home/tower/workspace/projects/p/report.pdf')).toBe(false);
+  });
+});
+
+ describe('artifact handoff formatting contract', () => {
+  it('links each qualified evidence path without guessing a project for bare relative paths', () => {
+    const paths = [
+      '~/workspace/projects/demo/work/voice-runtime/design-audit.md',
+      '~/workspace/projects/demo/work/voice-runtime/integration-test.log',
+      '~/workspace/projects/demo/work/voice-runtime/audit-input-results-after.json',
+    ];
+    expect(extractLinkedPaths(paths.join('\n'))).toEqual(paths);
+    expect(extractLinkedPaths('work/voice-runtime/design-audit.md')).toEqual([]);
+  });
+});
+
+
+describe('authenticated download', () => {
+  it('uses download endpoint and preserves a foreign Project path; rejects denied access', async () => {
+    localStorage.setItem('token', 'synthetic-test-token');
+    const request = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('', { status: 403 }));
+    try {
+      await expect(downloadTowerFile('/home/example/workspace/projects/other/result.zip')).rejects.toThrow('HTTP 403');
+      expect(request).toHaveBeenCalledWith('/api/files/serve?path=%2Fhome%2Fexample%2Fworkspace%2Fprojects%2Fother%2Fresult.zip&download=1',
+        { headers: { Authorization: 'Bearer synthetic-test-token' } });
+    } finally { request.mockRestore(); localStorage.removeItem('token'); }
   });
 });

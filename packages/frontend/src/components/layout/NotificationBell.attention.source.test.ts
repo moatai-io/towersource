@@ -11,6 +11,6 @@ describe('Notification and Session attention alignment', () => {
   });
 
   it('still persists the notification read state through the notification API', () => {
-    expect(source).toContain("fetch(`${API}/api/notifications/${notifId}/read`");
+    expect(source).toContain("fetch(towerHttpUrl(`/api/notifications/${notifId}/read`)");
   });
 });

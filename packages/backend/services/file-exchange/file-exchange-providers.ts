@@ -10,8 +10,9 @@ import { config } from '../../config.js';
 import { resolvePersonalBinaryFile, readPersonalFile } from '../personal-space/personal-space-store.js';
 import { resolveSessionAttachment } from '../session-attachments/session-attachment-store.js';
 import { getChannelSharedFile } from '../room/channel-shared-files.js';
-import { canAccessRoom, canAccessSession, isPathAccessible, isPathWritableByRole } from '../pm/project-access.js';
+import { canAccessRoom, canAccessSession, canWriteSessionContent, isPathAccessible, isPathWritableByRole } from '../pm/project-access.js';
 import { getProject } from '../pm/project-manager.js';
+import { materializeProjectWorkspaceFile, resolveProjectWorkspaceFile, statProjectWorkspaceFile } from '../project-environment/project-workspace-files.js';
 import type { FileDestinationRef, FileExchangeActor, FileSourceRef } from './file-exchange-types.js';
 import { FileExchangeError } from './file-exchange-types.js';
 
@@ -23,6 +24,7 @@ export interface ResolvedFileSource {
   version: string;
   sha256: string | null;
   storagePath: string;
+  cleanup?: () => Promise<void>;
 }
 
 async function digestFile(storagePath: string): Promise<{ sizeBytes: number; sha256: string }> {
@@ -109,9 +111,28 @@ export async function resolveFileSource(
     if (!await isPathAccessible(storagePath, actor.userId, actor.role)) throw new FileExchangeError('FORBIDDEN', 'Project 파일 접근이 거부되었습니다.');
     name = path.basename(storagePath);
     mimeType = null;
-    const stat = await fs.stat(storagePath).catch(() => null);
-    if (!stat?.isFile()) throw new FileExchangeError('NOT_FOUND', 'Project 파일을 찾지 못했습니다.');
-    declaredVersion = `${stat.size}:${stat.mtimeMs}`;
+    const reference = await resolveProjectWorkspaceFile({ projectId: ref.projectId, relativePath });
+    const workspaceStat = reference.workerAuthority ? null : await statProjectWorkspaceFile({ reference, actorUserId: actor.userId }).catch(error => {
+      if (error instanceof Error && error.message.includes('NOT_FOUND')) throw new FileExchangeError('NOT_FOUND', 'Project 파일을 찾지 못했습니다.');
+      throw error;
+    });
+    const materialized = await materializeProjectWorkspaceFile({
+      reference,
+      actorUserId: actor.userId,
+      stagingDirectory: path.join(config.dataDir, 'upload-staging', 'file-exchange-sources'),
+    });
+    storagePath = materialized.path;
+    declaredVersion = materialized.version ?? workspaceStat!.version;
+    try {
+      const measured = options.measureContent === false ? null : await digestFile(storagePath);
+      return {
+        ref, name, mimeType, sizeBytes: measured?.sizeBytes ?? materialized.sizeBytes ?? workspaceStat!.sizeBytes,
+        version: declaredVersion, sha256: measured?.sha256 ?? null, storagePath, cleanup: materialized.cleanup,
+      };
+    } catch (error) {
+      await materialized.cleanup();
+      throw error;
+    }
   }
 
   if (options.measureContent === false) {
@@ -136,7 +157,7 @@ export async function assertFileDestination(actor: FileExchangeActor, destinatio
     if (actor.role === 'viewer' || actor.role === 'guest') {
       throw new FileExchangeError('FORBIDDEN', '대화 첨부 쓰기 권한이 없습니다.');
     }
-    const access = await canAccessSession(destination.sessionId, actor.userId, actor.role);
+    const access = await canWriteSessionContent(destination.sessionId, actor.userId, actor.role);
     if (!access.allowed) throw new FileExchangeError('FORBIDDEN', access.message);
     return;
   }

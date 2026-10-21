@@ -336,6 +336,8 @@ Tower가 만들고자 하는 차이는 바로 이것입니다.
 
 ## 아키텍처 개요
 
+개발을 시작할 때는 [문서 인덱스](docs/index.md) → [코드 변경 지도](docs/architecture/code-map.md) → 담당 모듈과 테스트 순서로 확인하십시오.
+
 Tower는 팀의 실제 업무와 모델 계층 사이에 위치합니다. 단순한 프롬프트 UI도, 단순한 실행 Sandbox도 아닙니다. 업무 맥락, 에이전트 Harness, 권한, Runtime, 자격증명, 기록을 연결하는 운영 레이어입니다.
 
 ```mermaid
@@ -357,6 +359,12 @@ flowchart TB
     Tower -->|기록, 결과물, 승인| Modes
     Modes -->|진행 상황과 결과| Work
 ```
+
+### 실행 개념
+
+**Workstation**은 에이전트가 업무에 사용하는 영속 실행환경이고, **Worker**는 배정된 명령·파일 작업을 수행하는 실행 서비스입니다. **Project workspace**는 파일·맥락·접근 권한의 경계이며, 별도 VM이나 OS 계정을 자동으로 보장하는 말은 아닙니다.
+
+코드의 `runtime-box/`, `workbench-*`에는 호환 이름이 남아 있습니다. 새 제품 설명을 Runtime Box 중심으로 확장하지 않지만, 문서 명칭 정비가 호환 구현 삭제나 운영 전환을 뜻하지는 않습니다. Workbench는 특정 작성·관리 UI의 이름으로도 사용됩니다. 정확한 구분과 코드 검색 alias는 [실행 개념 정본](docs/architecture/execution-terminology.md)을 확인하십시오.
 
 ### 핵심 구성요소
 

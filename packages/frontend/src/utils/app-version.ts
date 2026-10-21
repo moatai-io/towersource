@@ -1,7 +1,13 @@
+import { isAllowedDevHost } from '../config/dev-hosts';
+
 export const RELOAD_ONCE_KEY = 'tower:reload-once';
 export const RELOAD_REASON_KEY = 'tower:reload-reason';
 
 const RELOAD_GUARD_TTL_MS = 60_000;
+
+function isDevelopmentHost(): boolean {
+  return typeof window !== 'undefined' && isAllowedDevHost(window.location.hostname);
+}
 
 interface ReloadOnceOptions {
   /** Delete app-shell JS caches before reloading. Used for stale lazy chunks. */
@@ -63,6 +69,18 @@ function navigateReload(cacheBust?: boolean): void {
   window.location.replace(url.toString());
 }
 
+/** Explicit user consent must not be swallowed by an automatic recovery guard.
+ * Navigate outside the SW's app-shell scope before returning to the current
+ * deep link: a hard reload of /s/... can still be served by an old worker.
+ * The server reset page unregisters workers and clears their caches without
+ * touching auth, drafts, or other localStorage data.
+ */
+export async function reloadForUserUpdate(): Promise<void> {
+  const url = new URL('/api/client-reset', window.location.origin);
+  url.searchParams.set('returnTo', window.location.pathname + window.location.search + window.location.hash);
+  window.location.replace(url.toString());
+}
+
 export function reloadOnce(reason: string, options: ReloadOnceOptions = {}): boolean {
   try {
     if (hasRecentReloadGuard()) return false;
@@ -85,6 +103,10 @@ export function reloadOnce(reason: string, options: ReloadOnceOptions = {}): boo
 }
 
 export function recoverFromChunkLoadError(): boolean {
+  // Vite owns module invalidation in development. A transient transform or HMR
+  // failure must remain visible for diagnosis instead of navigating to the same
+  // source graph with a __tower_reload query parameter.
+  if (isDevelopmentHost()) return false;
   return reloadOnce('chunk-load-error', { clearJsCaches: true, cacheBust: true });
 }
 

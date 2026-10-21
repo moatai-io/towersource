@@ -12,8 +12,8 @@ describe('Publishing Hub project membership scope source contract', () => {
     );
 
     expect(route).toContain('getProjectMembershipIds(user.userId)');
-    expect(route).toContain('status.sites = status.sites.filter');
-    expect(route).toContain('status.apps = status.apps.filter');
+    expect(route).toContain('status.sites = scopePublications(status.sites, folderById, membershipProjectIds, selectedProjectId)' );
+    expect(route).toContain('status.apps = scopePublications(status.apps, folderById, membershipProjectIds, selectedProjectId)' );
     expect(route).not.toContain('getAccessibleProjectIds');
   });
 

@@ -14,6 +14,8 @@ import { promisify } from 'util';
 import os from 'os';
 import { createSdkMcpServer, tool } from '@anthropic-ai/claude-agent-sdk';
 import { z } from 'zod';
+import { clientEnabled, feedbackClient, formatReceipt } from '../services/feedback-intake/client.js';
+import { safeCode } from '../services/feedback-intake/contract.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -43,7 +45,7 @@ const FILE_ISSUE_DESCRIPTION = [
   '',
   'Use when the user asks to register/report/file an issue, bug, improvement, or feedback for the Tower team.',
   'Do not ask the user for GH_TOKEN or API tokens. The backend VM service credential is used automatically.',
-  'The target repo must be private/internal unless allowPublicRepo is explicitly true.',
+  'The server-configured target repository must be private/internal.',
   'The tool scans the body for common secret patterns and refuses to file if one is found.',
 ].join('\n');
 
@@ -67,12 +69,6 @@ const GET_ISSUE_DESCRIPTION = [
 
 function cleanTitle(raw: string): string {
   return raw.replace(/[\r\n\t]+/g, ' ').replace(/\s+/g, ' ').trim();
-}
-
-function cleanLabel(raw: string): string | null {
-  const label = raw.trim();
-  if (!label || label.length > 80) return null;
-  return label.replace(/[\r\n]+/g, ' ');
 }
 
 function serviceRepo(): string {
@@ -174,11 +170,22 @@ function buildContextFooter(ctx: IssueMcpContext): string {
   ].join('\n');
 }
 
-function userSafeErrorMessage(err: any): string {
+export function userSafeErrorMessage(err: any): string {
   const raw = String(err?.stderr || err?.message || err || 'unknown error').trim();
 
   if (/not logged into any GitHub hosts|gh auth login|GH_TOKEN|GITHUB_TOKEN|authentication required|requires authentication|HTTP 401|Bad credentials/i.test(raw)) {
     return 'Tower issue service credential is not configured on this VM. Ask an operator to connect the VM-level GitHub issue credential.';
+  }
+
+  // GitHub deliberately returns 404 for private repositories when the caller
+  // cannot see them. Treat repository-not-found and HTTP 404 alike so users get
+  // an actionable configuration/permission diagnosis instead of raw CLI output.
+  if (/HTTP 404|Could not resolve to a Repository|repository not found|Not Found \(HTTP 404\)/i.test(raw)) {
+    return 'Tower issue repository was not found or the VM service credential cannot access it. Ask an operator to verify GITHUB_ISSUE_REPO and private-repository Issues permission.';
+  }
+
+  if (/HTTP 403|Resource not accessible by integration|must have.*issues.*permission|permission.*issues/i.test(raw)) {
+    return 'Tower issue service can reach GitHub but lacks permission to use this repository. Ask an operator to grant private-repository Issues write access.';
   }
 
   if (/could not resolve host|network is unreachable|connection timed out|TLS|SSL|ECONNRESET|ENOTFOUND/i.test(raw)) {
@@ -195,23 +202,30 @@ export function createIssueMcpServer(ctx: IssueMcpContext) {
     tools: [
       tool(
         'file_issue',
-        FILE_ISSUE_DESCRIPTION,
+        clientEnabled()
+          ? 'Submit feedback to the central Tower inbox using self-hosted instance authentication and closure-bound reporter identity. Accepted is not yet delivered to GitHub. Repository, labels, and idempotency are server-managed. Do not request a GitHub token.'
+          : FILE_ISSUE_DESCRIPTION,
         {
           title: z.string().min(1).max(200).describe('GitHub issue title.'),
           body: z.string().min(1).max(30000).describe('Issue body in markdown. Do not include secrets.'),
-          labels: z.array(z.string()).max(10).optional().describe('Optional labels such as bug, enhancement, ux.'),
-          repo: z.string().regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/).optional().describe('Optional target repo override. Defaults to the server-configured GITHUB_ISSUE_REPO.'),
-          allowPublicRepo: z.boolean().optional().describe('Allow filing to a public repo. Default false.'),
         },
         async (args) => {
+          if (clientEnabled()) {
+            try {
+              const receipt = await feedbackClient().submit(ctx, args);
+              return { content: [{ type: 'text' as const, text: formatReceipt(receipt) }] };
+            } catch (error) {
+              return { content: [{ type: 'text' as const, text: `file_issue failed: ${safeCode(error)}` }], isError: true };
+            }
+          }
           try {
             const title = cleanTitle(args.title);
             if (!title) {
               return { content: [{ type: 'text' as const, text: 'file_issue failed: title is empty after trimming.' }], isError: true };
             }
 
-            const repo = args.repo || serviceRepo();
-            const labels = Array.from(new Set([FORCED_LABEL, ...(args.labels || []).map(cleanLabel).filter(Boolean) as string[]]));
+            const repo = serviceRepo();
+            const labels = [FORCED_LABEL];
             const body = `${args.body.trim()}${buildContextFooter(ctx)}`;
             const secretHits = findSecretHits(`${title}\n${body}`);
             if (secretHits.length > 0) {
@@ -222,7 +236,7 @@ export function createIssueMcpServer(ctx: IssueMcpContext) {
             }
 
             await gh(['auth', 'status'], { timeoutMs: 10_000 });
-            await ensurePrivateRepo(repo, args.allowPublicRepo === true);
+            await ensurePrivateRepo(repo, false);
 
             const baseArgs = ['issue', 'create', '--repo', repo, '--title', title, '--body', body];
             const withLabels = labels.flatMap((label) => ['--label', label]);
@@ -252,9 +266,22 @@ export function createIssueMcpServer(ctx: IssueMcpContext) {
           }
         },
       ),
+      ...(clientEnabled() ? [tool(
+        'get_feedback_status',
+        'Read a central feedback receipt for the closure-bound reporter. Accepted is not the same as delivered to GitHub.',
+        { receipt_id: z.string().uuid().describe('Receipt ID returned by file_issue.') },
+        async (args) => {
+          try {
+            const receipt = await feedbackClient().status(ctx, args.receipt_id);
+            return { content: [{ type: 'text' as const, text: formatReceipt(receipt) }] };
+          } catch (error) {
+            return { content: [{ type: 'text' as const, text: `get_feedback_status failed: ${safeCode(error)}` }], isError: true };
+          }
+        },
+      )] : []),
       tool(
         'get_issue',
-        GET_ISSUE_DESCRIPTION,
+        clientEnabled() ? 'Unavailable in central feedback mode. Use get_feedback_status with the receipt ID instead.' : GET_ISSUE_DESCRIPTION,
         {
           issue_number: z.number().int().positive().describe('GitHub issue number to read.'),
           repo: z.string().regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/).optional().describe('Optional target repo override. Defaults to the server-configured GITHUB_ISSUE_REPO.'),
@@ -262,6 +289,9 @@ export function createIssueMcpServer(ctx: IssueMcpContext) {
           allowPublicRepo: z.boolean().optional().describe('Allow reading from a public repo. Default false.'),
         },
         async (args) => {
+          if (clientEnabled()) return {
+            content: [{ type: 'text' as const, text: 'Central feedback mode: use get_feedback_status with the receipt ID. Direct GitHub readback is disabled.' }], isError: true,
+          };
           try {
             const repo = args.repo || serviceRepo();
             await gh(['auth', 'status'], { timeoutMs: 10_000 });
@@ -303,7 +333,7 @@ export function createIssueMcpServer(ctx: IssueMcpContext) {
       ),
       tool(
         'comment_issue',
-        COMMENT_ISSUE_DESCRIPTION,
+        clientEnabled() ? 'Unavailable in central feedback mode. Direct GitHub comments are disabled for customer isolation.' : COMMENT_ISSUE_DESCRIPTION,
         {
           issue_number: z.number().int().positive().describe('GitHub issue number to comment on.'),
           body: z.string().min(1).max(30000).describe('Comment body in markdown. Do not include secrets.'),
@@ -311,6 +341,9 @@ export function createIssueMcpServer(ctx: IssueMcpContext) {
           allowPublicRepo: z.boolean().optional().describe('Allow commenting on a public repo. Default false.'),
         },
         async (args) => {
+          if (clientEnabled()) return {
+            content: [{ type: 'text' as const, text: 'Central feedback mode: direct GitHub comments are disabled to preserve customer isolation.' }], isError: true,
+          };
           try {
             const repo = args.repo || serviceRepo();
             const body = `${args.body.trim()}${buildContextFooter(ctx)}`;

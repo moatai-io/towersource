@@ -35,18 +35,42 @@ const pdfSmoke = fs.readFileSync(
   path.join(process.cwd(), 'scripts/nix-app/tower-app-pdf-smoke'),
   'utf8',
 );
+const deployVerify = fs.readFileSync(
+  path.join(process.cwd(), 'scripts/nix-app/tower-app-deploy-verify'),
+  'utf8',
+);
 const productionUpgrade = fs.readFileSync(
   path.join(process.cwd(), 'scripts/nix-app/upgrade-production'),
+  'utf8',
+);
+const staleLockRehearsal = fs.readFileSync(
+  path.join(process.cwd(), 'scripts/nix-app/rehearse-upgrade-stale-lock'),
   'utf8',
 );
 
 describe('Phase 6A Nix production launcher source contract', () => {
   it('serializes heavy release work and limits Nix parallelism on small VMs', () => {
     expect(productionUpgrade).toContain('TOWER_HEAVY_WORK_LOCK_FILE');
+    expect(productionUpgrade).toContain('TOWER_PROD_UPGRADE_LOCK_STALE_SEC');
+    expect(productionUpgrade).toContain('acquire_lock_dir "$lock_dir"');
+    expect(productionUpgrade).toContain("os.kill(pid,0)");
+    expect(productionUpgrade).toContain("bootId=%s");
+    expect(productionUpgrade).toContain('if [[ -d "$lock_dir" ]]');
+    expect(productionUpgrade).toContain('printf \'pid=%s\\nbootId=%s\\ncreatedAt=%s\\n\' "$runner_pid"');
+    expect(staleLockRehearsal).toContain('upgrade_stale_lock=ok');
     expect(productionUpgrade).toContain('flock -w "$heavy_wait" 8');
     expect(productionUpgrade).toContain('TOWER_NIX_MAX_JOBS:-1');
     expect(productionUpgrade).toContain('TOWER_NIX_CORES:-2');
     expect(productionUpgrade).toContain('--option max-jobs "$nix_max_jobs" --option cores "$nix_cores"');
+    expect(productionUpgrade).toContain('TOWER_PROD_UPGRADE_PREBUILT_APP_BUILDER');
+    expect(productionUpgrade).toContain('build_tower_app "$target_rev"');
+    expect(productionUpgrade).toContain('verified prebuilt app assembly failed closed');
+    expect(productionUpgrade).toContain('NODE_ENV=production TOWER_DEPLOYMENT_ID=production "$store/bin/tower-app-pdf-smoke"');
+  });
+
+  it('imports backend routes in install check with complete packaged release identity', () => {
+    expect(flake).toContain("TOWER_PACKAGED_RELEASE=true TOWER_VERSION='${releaseVersion}' TOWER_BASE_VERSION='${releaseBaseVersion}' GIT_SHA='${sourceShortRev}' SOURCE_REV='${sourceRev}'");
+    expect(flake).toContain('node -e "import(\'$out/lib/tower/dist/backend/packages/backend/routes/api.js\')"');
   });
 
   it('requires an explicit production acknowledgement before backend startup', () => {
@@ -84,6 +108,17 @@ describe('Phase 6A Nix production launcher source contract', () => {
     expect(launcher).toContain('rollback entrypoint must be a host artifact outside /nix/store');
   });
 
+  it('derives fresh Primary Agent storage readiness from trusted live installation evidence', () => {
+    expect(deployVerify).toContain('TOWER_PRIMARY_WORKER_ID');
+    expect(deployVerify).toContain('tower-workbench-worker-{worker}.service');
+    expect(deployVerify).toContain("re.findall(r'^User=");
+    expect(deployVerify).toContain("os.environ.get('WORKSPACE_ROOT'");
+    expect(deployVerify).toContain('NEW_PROJECT_STORAGE_WORKER_IDENTITY_REQUIRED');
+    expect(deployVerify).toContain('NEW_PROJECT_STORAGE_INSTALLATION_UNTRUSTED');
+    expect(deployVerify).not.toContain('new-project-storage-policy.json');
+    expect(deployVerify.indexOf('NEW_PROJECT_STORAGE_WORKER_IDENTITY_REQUIRED')).toBeLessThan(deployVerify.indexOf('deploy-verify.mjs'));
+  });
+
   it('hands production lifecycle ownership to a detached runner before stopping Host PM2', () => {
     expect(cutover).toContain('merge-base --is-ancestor "$source_rev" "$origin_rev"');
     expect(cutover).toContain('closure SOURCE_REV must remain in origin/main history');
@@ -96,7 +131,8 @@ describe('Phase 6A Nix production launcher source contract', () => {
     expect(cutover).toContain("TOWER_PRODUCTION_ROOT must be an absolute path");
     expect(cutover).toContain('production .env missing');
     expect(cutover).toContain('production rollback entrypoint missing');
-    expect(cutover).toContain('export NODE_ENV=production HOST="${HOST:-0.0.0.0}" PORT=32364');
+    expect(cutover.match(/export NODE_ENV=production TOWER_DEPLOYMENT_ID=production/g)).toHaveLength(2);
+    expect(cutover).toContain('export NODE_ENV=production TOWER_DEPLOYMENT_ID=production HOST="${HOST:-0.0.0.0}" PORT=32364');
     const foreground = cutover.slice(cutover.indexOf('store="${TOWER_APP_ROOT'));
     expect(foreground).not.toContain('pm2 stop "$target"');
   });
@@ -107,6 +143,7 @@ describe('Phase 6A Nix production launcher source contract', () => {
       'stopping-host',
       'starting-nix',
       'verifying',
+      'finalizing',
       'done',
       'rollback-started',
       'rollback-verified',
@@ -121,6 +158,9 @@ describe('Phase 6A Nix production launcher source contract', () => {
     expect(cutover).toContain('nix_verifier="$store/bin/tower-app-deploy-verify"');
     expect(cutover).toContain('host_verifier="$source_root/scripts/deploy-verify.mjs"');
     expect(cutover).toContain('restoring Host PM2 artifact');
+    expect(cutover).toContain('"$post_hook" preflight');
+    expect(cutover).toContain('"$post_hook" apply');
+    expect(cutover).toContain('"$post_hook" rollback');
     expect(cutover).toContain('cp -a "$production_root/dist" "$backup/dist"');
     expect(cutover).toContain('source "$production_root/.env"');
     expect(cutover).toContain('pm2 start "$production_root/ecosystem.config.cjs" --only "$target" --update-env');
@@ -139,7 +179,11 @@ describe('Phase 6A Nix production launcher source contract', () => {
     expect(pinnedRestart).toContain('pm2_exec_path');
     expect(pinnedRestart).toContain('gcCurrentMatchesProduction');
     expect(pinnedRestart).toContain('GC current does not match production');
-    expect(pinnedRestart).toContain('pm2 restart "$target" --update-env');
+    expect(pinnedRestart).toContain('pm2 delete "$target"');
+    expect(pinnedRestart).toContain('pm2 start "$launcher" --name "$target"');
+    expect(pinnedRestart).toContain('export NODE_ENV=production TOWER_DEPLOYMENT_ID=production');
+    expect(pinnedRestart).toContain('unset TOWER_VERSION TOWER_BASE_VERSION GIT_SHA SOURCE_REV TOWER_GIT_SHA TOWER_SOURCE_REV');
+    expect(pinnedRestart).toContain('unset BUILD_TIME FLAKE_LOCK_NAR_HASH TOWER_BUILD_TIME TOWER_COMMITS_SINCE_TAG');
     expect(pinnedRestart).toContain('env -u PDF_EXPORT_RENDERER_MODE -u NIX_RENDERER_BIN "$expected_store/bin/tower-app-pdf-smoke"');
     expect(pinnedRestart).toContain('"timingsMs": json.loads(timings_json)');
     for (const phase of ['pm2Restart', 'deployVerify', 'pdfSmoke', 'healthIdentity', 'total']) {
@@ -207,14 +251,13 @@ describe('Phase 6A Nix production launcher source contract', () => {
     expect(flake).toContain('cp scripts/deploy-verify-lib.mjs "$app/scripts/deploy-verify-lib.mjs"');
     expect(flake).toContain('test -x "$out/bin/tower-app-deploy-verify"');
     expect(flake).toContain('--set TOWER_APP_ROOT "$out"');
-    expect(flake).toContain('cp ${./scripts/nix-app/tower-app-runtime-box-smoke} "$out/bin/tower-app-runtime-box-smoke"');
-    expect(flake).toContain('pkgs.docker-client pkgs.coreutils pkgs.bash pkgs.util-linux');
-    expect(flake).not.toContain('pkgs.docker-client pkgs.coreutils pkgs.bash pkgs.util-linux pkgs.sudo');
-    expect(flake).toContain('test -x "$out/bin/tower-app-runtime-box-smoke"');
+    expect(flake).not.toContain('tower-app-runtime-box-smoke');
+    expect(flake).not.toContain('pkgs.docker-client pkgs.coreutils pkgs.bash pkgs.util-linux');
   });
 
   it('makes the packaged Nix renderer an app-closure dependency and ignores stale host renderer env', () => {
     expect(flake).toContain('ln -s ${towerNixRender}/bin/tower-nix-render "$out/bin/tower-nix-render"');
+    expect(flake).toMatch(/towerNixRender = pkgs\.writeShellApplication[\s\S]*?pkgs\.which/);
     expect(flake).toContain('--set PDF_EXPORT_RENDERER_MODE nix');
     expect(flake).toContain('--set NIX_RENDERER_BIN "$out/bin/tower-nix-render"');
     expect(flake).toContain('"$out/bin/tower-app-pdf-smoke"');
@@ -226,7 +269,7 @@ describe('Phase 6A Nix production launcher source contract', () => {
     expect(pdfSmoke).toContain('result.fallback');
     expect(pdfSmoke).toContain('process.stdout.write = process.stderr.write.bind(process.stderr)');
     expect(pdfSmoke).toContain('process.stdout.write = originalStdoutWrite');
-    expect(productionUpgrade).toContain('env -u PDF_EXPORT_RENDERER_MODE -u NIX_RENDERER_BIN "$store/bin/tower-app-pdf-smoke"');
+    expect(productionUpgrade).toContain('env -u PDF_EXPORT_RENDERER_MODE -u NIX_RENDERER_BIN NODE_ENV=production TOWER_DEPLOYMENT_ID=production "$store/bin/tower-app-pdf-smoke"');
   });
 
   it('injects authoritative packaged release identity', () => {

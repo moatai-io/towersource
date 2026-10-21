@@ -7,8 +7,9 @@ export function extractTextFromContent(content: string): string {
     const parsed = JSON.parse(content);
     if (Array.isArray(parsed)) {
       return parsed
-        .filter((b: any) => b.type === 'text' || b.type === 'artifact_markdown' || b.type === 'agent_run')
+        .filter((b: any) => b.type === 'text' || b.type === 'artifact_markdown' || b.type === 'agent_run' || (b.type === 'tool_use' && ['create_markdown_artifact', 'update_markdown_artifact'].includes(b.name || b.toolUse?.name)))
         .map((b: any) => {
+          if (b.type === 'tool_use') return (b.input || b.toolUse?.input)?.body || '';
           if (b.type === 'agent_run') return [b.workerName, b.summary].filter(Boolean).join(' ');
           return b.text;
         })

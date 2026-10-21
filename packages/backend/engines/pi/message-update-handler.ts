@@ -35,7 +35,17 @@ export function handlePiMessageUpdate(params: {
     const requiresConfirmedPhase = /^(litellm-responses|openai-codex)$/i.test(provider);
     const streamingBlock = Array.isArray(evt.partial?.content) ? evt.partial.content[evt.contentIndex] : undefined;
     const phase = parseTextSignaturePhase(streamingBlock);
-    if (phase === 'final_answer') accumulator.appendText(evt.delta);
+    if (phase === 'final_answer') {
+      // The SDK partial is cumulative. Reconcile it as soon as finality is
+      // known: earlier deltas may have been withheld while phase was missing.
+      // Appending only the latest delta would drop that prefix until text_end.
+      const partial = requiresConfirmedPhase ? {
+        ...evt.partial,
+        content: evt.partial.content.filter((block: any) => block.type !== 'text'
+          || ['final_answer', 'commentary'].includes(parseTextSignaturePhase(block) || '')),
+      } : evt.partial;
+      accumulator.replaceAll(agentMessageToTowerBlocks(partial));
+    }
     else if (phase === 'commentary') accumulator.appendCommentary(evt.delta);
     else if (phase) {
       // Future non-final phases stay hidden unless explicitly modeled.

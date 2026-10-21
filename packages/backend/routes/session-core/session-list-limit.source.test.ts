@@ -30,6 +30,8 @@ describe('session list recent-window contract', () => {
 
   it('does not aggregate message metadata across the entire messages table before LIMIT', () => {
     expect(getSessionsSource).toContain('LEFT JOIN LATERAL (\n      SELECT COUNT(*) AS cnt\n      FROM messages m\n      WHERE m.session_id = s.id');
+    expect(getSessionsSource).toContain('COUNT(DISTINCT m.username) AS cnt');
+    expect(getSessionsSource).toContain('COALESCE(pc.cnt, 0)::int AS participant_count');
     expect(getSessionsSource).not.toContain('FROM messages\n      WHERE role =');
     expect(getSessionsSource).not.toContain('GROUP BY session_id');
   });

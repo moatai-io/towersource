@@ -24,7 +24,17 @@ describe('messages message_seq migration contract', () => {
   it('uses message_seq for canonical reads with a legacy ordering fallback while managed migration is deferred', () => {
     expect(store).toContain("const order = await hasMessageSeq() ? 'message_seq ASC' : 'created_at ASC, id ASC'");
     expect(store).toContain("useMessageSeq ? 'message_seq DESC' : 'created_at DESC, id DESC'");
-    expect(store).toContain('message_seq < $2 ORDER BY message_seq DESC');
-    expect(store).toContain('(created_at, id) < ($2, $3) ORDER BY created_at DESC, id DESC');
+    // Cursor predicates and ordering remain canonical even when active-context
+    // filtering is inserted between them. Check each complete SQL statement so
+    // unrelated reads cannot satisfy the contract and whitespace is irrelevant.
+    const queries = [...store.matchAll(/`(SELECT \* FROM messages[^`]+)`/g)]
+      .map((match) => match[1].replace(/\s+/g, ' ').trim());
+    const activeContext = "AND COALESCE(metadata->>'contextState', 'active') = 'active'";
+    expect(queries).toContain(
+      `SELECT * FROM messages WHERE session_id = $1 AND message_seq < $2 ${activeContext} ORDER BY message_seq DESC LIMIT $3`,
+    );
+    expect(queries).toContain(
+      `SELECT * FROM messages WHERE session_id = $1 AND (created_at, id) < ($2, $3) ${activeContext} ORDER BY created_at DESC, id DESC LIMIT $4`,
+    );
   });
 });

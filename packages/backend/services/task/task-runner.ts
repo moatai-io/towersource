@@ -17,23 +17,25 @@
 import { getEngine } from '../../engines/index.js';
 import type { EngineCallbacks, RunOpts, SavedMessage } from '../../engines/types.js';
 import { claimEngineSessionId, createSession, getEngineSessionId, updateSession, getSession } from '../session/session-manager.js';
-import { updateTask, getTask, getTasks, type ScheduleCron, type WorkflowMode } from './task-manager.js';
+import { updateTask, getTask, getTasks, type WorkflowMode } from './task-manager.js';
 import type { TaskMeta, TaskReportPolicy } from '@tower/shared';
 import { saveMessage, attachToolResultInDb, updateMessageContent as updateMessageContentDb, updateMessageMetrics as updateMessageMetricsDb, markAgentTurnCheckpoint } from '../message-store.js';
 import { type TowerRole } from '../damage-control.js';
 import { buildSystemPrompt } from '../system-prompt.js';
+import { recordPiUsageEvent } from '../ai-usage/usage-ledger.js';
+import { isModelPolicyId } from '../ai/litellm-model-catalog.js';
 import { selectSystemPromptFragmentsForMessage } from '../system-prompt-fragments.js';
 import { getUserAccessiblePaths, buildToolGuard, resolveSessionProjectRoot } from '../pm/project-access.js';
-import { getUserRole } from '../auth/auth.js';
+import { getUserRole, getUserAllowedPath } from '../auth/auth.js';
 import { queryOne } from '../../db/pg-repo.js';
-import { calculateNextRun } from './unified-scheduler.js';
-import { buildWorkflowPrompt } from '../workflow-prompts.js';
+import { buildUnattendedPrompt } from '../workflow-prompts.js';
+import { backgroundTimeoutMessage, createSessionAskUser } from '../session/pending-questions.js';
 import { v4 as uuidv4 } from 'uuid';
 import { execSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import { buildJsonlPath, checkJsonlForCompletion } from '../workspace/jsonl-utils.js';
-import { config as towerConfig, getModelDefaults } from '../../config.js';
+import { config as towerConfig, getModelDefaults, resolveLegacyPiModelId } from '../../config.js';
 
 const MAX_CONCURRENT_TASKS = 30;
 // engineName tracked so abortTask() can dispatch to the right Engine.abort().
@@ -49,49 +51,17 @@ const MONITOR_TIMEOUT = 60 * 60 * 1000; // 60 minutes
  * between system prompt and user prompt). See
  * workspace/decisions/2026-04-20-task-agent-guardrails.md (2026-04-21 update).
  *
- * Three rules for unattended automated work:
- *   1. Architecture pre-check — refuse if the task conflicts with existing project conventions
- *   2. Decision logging — write autonomous design choices to the decisions folder
- *   3. Git commit — commit only when the task actually changes durable project/code state
+ * Only unattended-execution constraints belong here. Domain-specific workflow
+ * and approval policy remain owned by the shared system prompt and project.
  */
 function buildTaskAgentRulesPreamble(): string {
   return [
-    '# Task agent rules (mandatory)',
+    '# Unattended task execution',
     '',
-    'You are running as an automated task agent. No human is reviewing each step as it happens, so follow these three rules for this run.',
-    '',
-    '## 1. Architecture pre-check — FIRST, before any file changes',
-    'Read the project\'s `AGENTS.md` and inspect the existing structure + recent decisions (`workspace/decisions/`, `.project/decisions/`) around whatever you are about to touch. Legacy `CLAUDE.md` may exist only as compatibility input.',
-    'Does this task conflict with the project\'s current architecture, conventions, or earlier decisions?',
-    '- If YES (a real conflict, not a style difference): STOP. Do NOT modify files. Report what conflicts with what and why a human needs to decide the trade-off. End the task.',
-    '- If UNCLEAR: surface the ambiguity and ask the requester instead of guessing.',
-    '- If NO conflict: proceed.',
-    'Silent conformity bias is worse than refusal here — an agent that quietly overrides existing architecture costs the team more than one that declines and asks.',
-    '',
-    '## 2. Record autonomous decisions',
-    'When you make a choice another engineer would want to know about later — library pick, file layout, schema change, API shape, retry/timeout policy, trade-off between two valid approaches — write a short decision record. Do NOT bury the reasoning only in code or commit messages.',
-    '',
-    'Location (pick the right one):',
-    '- Team-wide / cross-project: `workspace/decisions/YYYY-MM-DD-title.md`',
-    '- Project-scoped: `workspace/projects/<project>/.project/decisions/YYYY-MM-DD-title.md`',
-    '',
-    'Use today\'s date. Keep it short: **Context → Options considered → Decision → Consequences**. One page is plenty.',
-    '',
-    'Skip the record only for genuinely trivial edits (typo fix, rename, dependency bump with no API change, test tweak).',
-    '',
-    '## 3. Commit policy — use judgment, not ritual',
-    'Create a git commit before finishing only when this task intentionally modifies durable tracked project/code files and the user did not prohibit commits.',
-    '- Do NOT commit for pure research/analysis tasks unless the user explicitly asks for a repository artifact.',
-    '- Do NOT create files just to satisfy this rule; if the useful output is the chat report, leave it in chat.',
-    '- If the task instructions say “no commit”, “research only”, or otherwise prohibit repository changes, that instruction overrides this rule.',
-    '- If you do commit: stage only the files you actually changed (prefer explicit paths over `git add -A` / `git add .`).',
-    '- If you do commit: write a message focused on *why*, not just *what*. Reference the decision record path if you created one.',
-    '- Never use `--no-verify`, never force-push, never amend an existing commit. If a pre-commit hook fails: fix the root cause, re-stage, and create a NEW commit.',
-    '- Do NOT push to the remote unless the task explicitly requests it.',
-    '',
-    'Leaving intentional code/documentation changes dirty at end-of-task is a failure mode, but unnecessary commits are also noise. Prefer no repository change for read-only research.',
-    '',
-    '---',
+    'Follow the same project instructions, service-specific skills, credential handling, and output contracts as an interactive conversation.',
+    'Execute the requested work, not an assumed software development workflow. Read relevant project context before acting; do not require architecture review, decision records, or Git commits for ordinary business tasks.',
+    'Make small reversible assumptions when safe. If essential input or explicit approval is missing, report the concrete blocker and finish independent authorized work. Unattended execution does not grant additional authority.',
+    'Do not claim success without verification. Distinguish completed work, unverified results, and blocked work in the final report.',
     '',
   ].join('\n');
 }
@@ -141,6 +111,7 @@ async function dispatchReport(input: DispatchReportInput): Promise<void> {
   const { task, status, summaryText } = input;
 
   try {
+    if (task.status === 'done' && task.progressSummary?.some(line => line.startsWith('[TASK NONE]'))) return;
     const { notifyExecutionReport } = await import('../notification-hub.js');
     const { severityFromReportPolicy, routeSeverity } = await import('../tower/severity-router.js');
     const baseSeverity = severityFromReportPolicy(task.reportPolicy);
@@ -416,7 +387,7 @@ export async function resumeOrphanedTaskMonitoring(broadcastFn: BroadcastFn): Pr
         monitoredTasks.delete(taskId);
         runningTasks.delete(taskId);
 
-        const finalSummary = [...monitored.progressStages, 'Completed successfully'];
+        const finalSummary = [...monitored.progressStages, result.noWork ? '[TASK NONE]' : 'Completed successfully'];
         await updateTask(taskId, { status: 'done', progressSummary: finalSummary, completedAt: new Date().toISOString() });
         broadcastFn('task_update', { taskId, status: 'done', sessionId: monitored.sessionId, progressSummary: finalSummary });
         broadcastFn('session_status', { sessionId: monitored.sessionId, status: 'idle' });
@@ -541,28 +512,13 @@ export function stopAllMonitors(): void {
   monitoredTasks.clear();
 }
 
-function buildTaskPromptForWorkflow(
-  title: string,
-  description: string,
-  workflow: WorkflowMode,
-  taskId: string,
-  isResume?: boolean,
-  previousProgress?: string[],
-): string {
-  return buildWorkflowPrompt(title, description, workflow, {
-    taskId,
-    apiBaseUrl: 'http://localhost:32355',
-    isResume,
-    previousProgress,
-  });
-}
-
 export async function spawnTask(
   taskId: string,
   broadcastToAll: BroadcastFn,
   userId?: number,
   userRole?: string,
   allowedPath?: string,
+  options: { waitForCompletion?: boolean } = {},
 ): Promise<void> {
   const task = await getTask(taskId);
   if (!task) throw new Error('Task not found');
@@ -661,6 +617,9 @@ export async function spawnTask(
   });
 
   const authority = await resolveTaskRunAuthority(userId, userRole);
+  const effectiveAllowedPath = allowedPath ?? (authority.userId
+    ? await getUserAllowedPath(authority.userId)
+    : undefined);
 
   // Compute project-based accessible paths for this run-as user. Background
   // schedules derive the role from users.role instead of silently becoming member.
@@ -669,10 +628,16 @@ export async function spawnTask(
     accessiblePaths = await getUserAccessiblePaths(authority.userId, authority.role);
   }
 
-  runTaskAgent(taskId, sessionId, task.title, task.description, task.cwd, broadcastToAll, authority.role, allowedPath, resumeEngineSessionId, task.progressSummary, task.engine, task.model, task.workflow, accessiblePaths, taskProjectId, authority.userId)
-    .catch((err) => {
+  const completion = runTaskAgent(taskId, sessionId, task.title, task.description, task.cwd, broadcastToAll, authority.role, effectiveAllowedPath, resumeEngineSessionId, task.progressSummary, task.engine, task.model, task.workflow, accessiblePaths, taskProjectId, authority.userId);
+  // UI/manual callers keep fire-and-forget semantics; schedules explicitly await
+  // the real runner, including persisted terminal status and report dispatch.
+  if (options.waitForCompletion) {
+    await completion;
+  } else {
+    void completion.catch((err) => {
       console.error(`[task-runner] Task ${taskId} error:`, err.message);
     });
+  }
 }
 
 async function runTaskAgent(
@@ -693,7 +658,6 @@ async function runTaskAgent(
   projectId?: string | null,
   runAsUserId?: number,
 ): Promise<void> {
-  const effectiveWorkflow = workflow || 'auto';
 
   // New task runs always use the canonical project cwd. Existing tasks may resume
   // from a legacy worktree until those historical runs are retired, but workflow
@@ -708,15 +672,17 @@ async function runTaskAgent(
 
   const effectiveRole = normalizeTaskRole(userRole);
 
-  // User prompt = [rules preamble] + [workflow-specific task prompt].
+  // User prompt = [rules preamble] + [unattended task prompt].
   // Rules live here (not in system prompt) so they are visible in the session
   // UI / .jsonl and debuggable in exactly one place.
   const rulesPreamble = buildTaskAgentRulesPreamble();
-  const taskBody = buildTaskPromptForWorkflow(
-    title, description, effectiveWorkflow, taskId,
-    !!resumeEngineSessionId, previousProgress,
-  );
+  const taskBody = buildUnattendedPrompt(title, description, {
+    isResume: !!resumeEngineSessionId, previousProgress,
+  });
   const prompt = `${rulesPreamble}${taskBody}`;
+  // Select on the actual request, not orchestration boilerplate. Both engines
+  // must receive the same optional guidance as interactive user turns.
+  const systemPromptFragments = selectSystemPromptFragmentsForMessage(`${title}\n${description}`);
 
   // Inform user about actual working directory
   const workingDirInfo = agentCwd !== cwd
@@ -800,15 +766,19 @@ async function runTaskAgent(
     // section — tasks rarely render charts/infographics and there's no human to
     // explain things to mid-turn. A minimal result-summary hint replaces them.
     //
-    // Task-specific guardrails (architecture check, decision logging, commit)
+    // Unattended-execution guardrails (scope, blockers, verification)
     // are prepended to the USER prompt above, not here — single source of truth.
+    const runUser = runAsUserId
+      ? await queryOne<{ username: string }>('SELECT username FROM users WHERE id = $1', [runAsUserId])
+      : null;
+    const username = runUser?.username || 'task-agent';
     const baseSystemPrompt = await buildSystemPrompt({
-      username: 'task-agent',
+      username,
       role: effectiveRole,
       allowedPath,
       sessionProjectRoot,
       mode: 'task',
-      optionalFragments: selectSystemPromptFragmentsForMessage(prompt),
+      optionalFragments: systemPromptFragments,
     });
 
     // The retired PM/Ideas feed is no longer injected into task agents.
@@ -893,7 +863,13 @@ async function runTaskAgent(
     const engine = await getEngine(engineName);
 
     const callbacks: EngineCallbacks = {
-      askUser: async () => 'skip', // task agents don't ask users questions
+      askUser: createSessionAskUser({
+        sessionId,
+        recipientUserId: runAsUserId ?? undefined,
+        userMessageId: rootTurnId,
+        logTag: 'task-runner',
+        timeoutMessage: backgroundTimeoutMessage,
+      }),
       claimSessionId: async (engSid: string) => {
         if (engSid && engSid !== engineSessionId) {
           engineSessionId = engSid;
@@ -938,6 +914,7 @@ async function runTaskAgent(
             context_input_tokens: metrics.contextInputTokens,
             context_window_size: metrics.contextWindowSize,
             context_estimated_tokens: metrics.contextEstimatedTokens,
+          context_compacted: metrics.contextCompacted,
             next_request_estimated_tokens: metrics.nextRequestEstimatedTokens,
             compact_threshold_tokens: metrics.compactThresholdTokens,
           context_snapshot: metrics.contextSnapshot,
@@ -953,14 +930,17 @@ async function runTaskAgent(
     // when defined; PiEngine ignores Claude-only fields.
     const runOpts: RunOpts & Record<string, any> = {
       cwd: agentCwd,
-      model: model || (engineName === 'pi' ? getModelDefaults().ai_task : 'claude-opus-4-8'),
+      model: engineName === 'pi' ? resolveLegacyPiModelId(model || getModelDefaults().session) : model || 'claude-opus-4-8',
       accessiblePaths: accessiblePaths ?? null,
       sessionProjectRoot,
       projectId: projectId || undefined,
       userId: runAsUserId,
+      username,
+      allowedPath,
       userRole: effectiveRole,
       engineSessionId: resumeEngineSessionId || getEngineSessionId(taskSessionRow),
       rootTurnId,
+      systemPromptFragments,
       // Claude-only extras — PiEngine ignores these.
       permissionMode: taskPermission,
       canUseTool: taskCanUseTool,
@@ -971,6 +951,19 @@ async function runTaskAgent(
     for await (const towerMsg of engine.run(sessionId, contextualPrompt, runOpts, callbacks)) {
       const running = runningTasks.get(taskId);
       if (!running || running.aborted) break;
+
+      if (towerMsg.type === 'turn_done' && engineName === 'pi') {
+        await recordPiUsageEvent({
+          sessionId,
+          rootTurnId,
+          messageId: towerMsg.msgId,
+          usage: towerMsg.usage,
+          requestedModel: runOpts.model,
+          modelPolicyId: isModelPolicyId(runOpts.model) ? runOpts.model!.split('/')[1] : undefined,
+        }).catch((error: any) => {
+          console.warn(`[task-runner] AI usage ledger write failed: task=${taskId} error=${error?.message || error}`);
+        });
+      }
 
       // Engine session id is now delivered via claimSessionId callback above.
       // Assistant / user-message persistence is via the saveMessage callback.
@@ -1003,18 +996,6 @@ async function runTaskAgent(
         for (const block of textBlocks) {
           const text = (block as any).text || '';
 
-          // Detect triage workflow classification (auto mode only)
-          if (effectiveWorkflow === 'auto') {
-            const workflowMatch = text.match(/\[WORKFLOW:\s*(simple|default|feature|big_task)\]/);
-            if (workflowMatch) {
-              const classified = workflowMatch[1] as WorkflowMode;
-              await updateTask(taskId, { workflow: classified });
-              broadcastToAll('task_update', { taskId, workflow: classified });
-              console.log(`[task-runner] Task "${title}" triage → ${classified}`);
-
-            }
-          }
-
           // Detect stage markers
           const stageMatch = text.match(/\[STAGE:\s*(.+?)\]/);
           if (stageMatch) {
@@ -1034,6 +1015,10 @@ async function runTaskAgent(
           // Keep an explicit boolean instead of inferring final status from the
           // human summary text: failure reasons are often localized and may not
           // contain the English token "FAILED".
+          if (text.includes('[TASK NONE]')) {
+            sawTaskComplete = true;
+            lastSummary = '[TASK NONE]';
+          }
           if (text.includes('[TASK COMPLETE]')) {
             sawTaskComplete = true;
             lastSummary = 'Completed successfully';
@@ -1162,38 +1147,6 @@ async function runTaskAgent(
         });
       }
 
-      // ── Recurring schedule reset ──
-      // If this task has a cron pattern, reset it to 'todo' with next scheduled_at
-      if (completedTask?.scheduleCron) {
-        try {
-          const cronObj: ScheduleCron = JSON.parse(completedTask.scheduleCron);
-          const nextRun = calculateNextRun(cronObj);
-          await updateTask(taskId, {
-            status: 'todo',
-            scheduledAt: nextRun.toISOString(),
-            scheduleEnabled: true,
-            sessionId: null as any,
-            progressSummary: [],
-            completedAt: null as any,
-            worktreePath: null,
-          });
-          broadcastToAll('task_update', {
-            taskId,
-            id: taskId,
-            title: completedTask.title,
-            status: 'todo',
-            scheduledAt: nextRun.toISOString(),
-            scheduleEnabled: true,
-            sessionId: null,
-            projectId: completedTask.projectId,
-            progressSummary: [],
-            worktreePath: null,
-          });
-          console.log(`[task-runner] Recurring task "${completedTask.title}" rescheduled → ${nextRun.toISOString()}`);
-        } catch (err: any) {
-          console.error(`[task-runner] Failed to reschedule recurring task ${taskId.slice(0, 8)}:`, err.message);
-        }
-      }
     }
 
     // Notify viewers: session done streaming (clears isStreaming in chat + sidebar indicator)

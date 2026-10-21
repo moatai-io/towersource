@@ -1,0 +1,9 @@
+import {beforeEach,expect,it,vi} from 'vitest';
+vi.mock('../../services/workspace/search.js',()=>({search:vi.fn()}));
+vi.mock('../../services/secretariat/search-access.js',()=>({secretaryReadableSession:vi.fn()}));
+vi.mock('../pi-session-transcript-tool.js',()=>({createSessionTranscriptReadTool:()=>({execute:vi.fn().mockResolvedValue({content:[{type:'text',text:'visible'}]})})}));
+import {search} from '../../services/workspace/search.js';import {secretaryReadableSession} from '../../services/secretariat/search-access.js';import {secretaryReadingTools} from './secretary-reading-tools.js';
+beforeEach(()=>{vi.resetAllMocks();vi.mocked(search).mockResolvedValue([{sessionId:'s',sessionName:'work',snippet:'text'}] as any);vi.mocked(secretaryReadableSession).mockResolvedValue({projectId:'p',sessionId:'s'});});
+it('filters unauthorized search hits before returning content or recording provenance',async()=>{vi.mocked(secretaryReadableSession).mockResolvedValue(null);const source=vi.fn();const tools=secretaryReadingTools(7,source);const r=await tools[0].execute('x',{query:'work'} as any);expect(JSON.stringify(r)).not.toContain('"snippet":"text"');expect(source).not.toHaveBeenCalled();});
+it('exposes only two bounded read tools and records authorized sources',async()=>{const source=vi.fn();const tools=secretaryReadingTools(7,source);expect(tools.map(t=>t.name)).toEqual(['conversation_search','session_transcript_read']);for(let i=0;i<5;i++)await tools[0].execute('x',{query:'work'} as any);expect(search).toHaveBeenCalledTimes(4);expect(source).toHaveBeenCalledWith({projectId:'p',sessionId:'s'});});
+it('checks participation before transcript read',async()=>{vi.mocked(secretaryReadableSession).mockResolvedValue(null);const tools=secretaryReadingTools(7,vi.fn());expect(JSON.stringify(await tools[1].execute('x',{session_id:'s'} as any))).toContain('not_accessible_or_not_participating');});

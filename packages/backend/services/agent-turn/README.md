@@ -3,7 +3,7 @@
 ## 책임
 원 사용자 메시지(`root_turn_id`) 하나를 하나의 durable workflow로 관리한다. Restart, transient, post-compact, incomplete-turn recovery는 모두 `turn-supervisor.ts`의 동일한 PostgreSQL 상태 행과 fencing token을 사용한다.
 
-상태는 의도적으로 `running`, `waiting_retry`, `completed`, `failed`, `needs_attention` 다섯 개만 둔다. Provider 생성 실패는 제한적으로 `waiting_retry`가 될 수 있지만, 외부 부작용이 불확실하면 `needs_attention`에서 자동 반복을 멈춘다.
+상태는 의도적으로 `running`, `waiting_retry`, `completed`, `failed`, `needs_attention` 다섯 개만 둔다. Provider 생성 실패는 제한적으로 `waiting_retry`가 될 수 있지만, 외부 부작용이 불확실하면 `needs_attention`에서 자동 반복을 멈춘다. Provider capacity는 recovery fencing을 유지한 채 30/60/90/120/180초 간격으로 최대 5회 durable retry할 수 있다. 작업이 시작된 transient failure는 원 prompt를 replay하지 않고, 매번 recovery leaf와 queued message를 다시 검사한 뒤 최대 4회 continuation한다.
 
 Recovery owner는 `owner_token`과 `owner_boot_id`를 함께 가진다. 동일 backend boot에서는 lease를 존중하지만, startup `server-restart` recovery는 이전 boot의 owner가 이미 죽었다는 사실을 이용해 남은 lease를 즉시 fencing/reclaim한다.
 
@@ -39,3 +39,25 @@ Foreground Pi turn도 SDK session을 열기 전에 `claimForegroundAgentTurn`으
 - `workspace/decisions/2026-07-15-issue-176-continuation-recovery-dup-sideeffects.md`
 - `workspace/decisions/2026-06-16-pi-provider-capacity-retry-and-notices.md`
 - `~/workspace/decisions/2026-08-03-tower-codex-lb-terminal-evidence-boundary.md`
+
+### Abandoned-owner recovery
+
+Active dispatcher는 각 scan 전에 `reconcileAbandonedAgentTurns`를 실행한다. 만료된 `running` lease만 행 잠금으로 회수하며, boot ID 차이만으로 살아 있는 lease를 무효화하지 않는다. 최신 24시간 Pi turn 중 사용자 응답 대기는 제외한다. 미확정 side-effect나 소진된 시도 예산은 `needs_attention`, 나머지는 `waiting_retry`로 바꾼 뒤 기존 dispatcher/claim을 사용한다. owner 없는 turn은 180초 유예한다. shutdown-file 이외 discovery는 `durable-retry` reason을 사용한다.
+
+### Superseded restart recovery and client attention
+
+`getActiveAgentTurnTiming` uses `projectRecoveryAttention` to project
+`needs_attention` + `restart_recovery_superseded` with `requiresAttention: false`
+and `recoveryDisposition: superseded`. State and diagnostic are preserved in the
+client snapshot; supersession does not imply successful completion. WebSocket
+snapshots carry these fields as `durableTurnRequiresAttention` and
+`durableTurnRecoveryDisposition`; clients suppress only the attention banner. The durable state,
+failure class and diagnostic remain unchanged for audit. This applies to already
+persisted rows as well as future recoveries and avoids matching English messages.
+Stale recovery, retry exhaustion and actual failures retain their attention state.
+See `recovery-attention.test.ts` and `recovery-timing.test.ts`; these are local
+projection/reconnect-boundary tests, not live restart verification.
+
+## 유한한 도구 대기
+
+`wait`는 Pi에서 최대 30일의 세션 알람을 저장하고 현재 실행을 정상 종료한다. 서버 재시작 뒤에도 알람이 유지되며 기존 admission과 supervisor를 통해 같은 세션을 재개한다. 새 지시와 Stop은 이전 알람을 무효화한다. 이전 `sleep` 기록은 호환 표시하며 구형 타이머 코드는 남겨 두지만 새 Pi 호출은 저장형 알람을 사용한다. 지원 범위와 검증은 [agent-sleep 계약](../agent-sleep/README.md)을 따른다.

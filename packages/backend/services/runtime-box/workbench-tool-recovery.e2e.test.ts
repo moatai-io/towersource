@@ -64,7 +64,7 @@ run('Workbench recovery disposable PostgreSQL + managed-store E2E', () => {
 
   afterAll(async () => {
     await modules?.pg?.closePgPool?.().catch(() => undefined);
-    await docker('rm', '-f', pgName).catch(() => undefined);
+    await docker('rm', '-f', '-v', pgName).catch(() => undefined);
     await fs.rm(workspaceRoot, { recursive: true, force: true });
     await fs.rm(storeRoot, { recursive: true, force: true });
     for (const key of ['DATABASE_URL', 'WORKSPACE_ROOT', 'TOWER_WORKBENCH_TOOL_STORE_ROOT', 'TOWER_EXPERIMENTAL_WORKBENCH_TOOLS_ENABLED', 'TOWER_EXPERIMENTAL_WORKBENCH_TOOL_PROJECT_IDS']) delete process.env[key];

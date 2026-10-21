@@ -4,6 +4,9 @@
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import { query, queryOne } from '../../db/pg-repo.js';
+import { classifyProjectEnvironment, type ProjectEnvironmentMode } from '../project-environment/project-execution-context.js';
+import { resolveProjectEnvironmentDeploymentId } from '../project-environment/project-environment-deployment.js';
+import { listProjectWorkspaceAuthorities } from '../project-environment/project-workspace-authority.js';
 
 export type AdminAgentLifecycleFilter = 'active' | 'retired';
 
@@ -17,7 +20,8 @@ export interface AdminAgentListItem {
   ownerUsername: string | null;
   sessionCount: number;
   runtimeBoxCount: number;
-  workstation: { deploymentId: 'production'; workerId: string | null; enabled: boolean; authorityMode: string };
+  executionEnvironment: { mode: ProjectEnvironmentMode; storageState: string | null };
+  workstation: { deploymentId: string; workerId: string | null; enabled: boolean; authorityMode: string };
 }
 
 export interface AgentPurgeImpact {
@@ -73,6 +77,8 @@ function measureDirectory(rootPath: string | null): AgentPurgeImpact['folder'] {
 /** List registered Agents for the admin lifecycle surface. Orphans are handled by a separate evidence scanner. */
 export async function listAdminAgents(status: AdminAgentLifecycleFilter): Promise<AdminAgentListItem[]> {
   const lifecycle = status === 'retired' ? 'retired' : 'active';
+  const deploymentId = resolveProjectEnvironmentDeploymentId();
+  const authorities = new Map((await listProjectWorkspaceAuthorities(deploymentId)).map(item => [item.project_id, item]));
   const rows = await query<any>(`
     SELECT p.id, p.name, p.root_path, COALESCE(p.lifecycle_status, 'active') AS lifecycle_status,
            p.retired_at, p.retirement_reason, u.username AS owner_username,
@@ -82,18 +88,22 @@ export async function listAdminAgents(status: AdminAgentLifecycleFilter): Promis
            COALESCE(pcb.workstation_mode,FALSE) AS workstation_mode,
            COALESCE(pcb.authority_mode,'project') AS workstation_authority_mode
       FROM projects p
-      LEFT JOIN project_compute_deployment_bindings pcb ON pcb.project_id=p.id AND pcb.deployment_id='production'
+      LEFT JOIN project_compute_deployment_bindings pcb ON pcb.project_id=p.id AND pcb.deployment_id=$2
       LEFT JOIN users u ON u.id = p.user_id
      WHERE COALESCE(p.lifecycle_status, 'active') = $1
      ORDER BY CASE WHEN $1 = 'retired' THEN p.retired_at ELSE p.created_at END DESC NULLS LAST
-  `, [lifecycle]);
+  `, [lifecycle, deploymentId]);
   return rows.map(row => ({
     id: row.id, name: row.name, rootPath: row.root_path ?? null,
     lifecycleStatus: row.lifecycle_status, retiredAt: row.retired_at ?? null,
     retirementReason: row.retirement_reason ?? null, ownerUsername: row.owner_username ?? null,
     sessionCount: Number(row.session_count ?? 0), runtimeBoxCount: Number(row.runtime_box_count ?? 0),
+    executionEnvironment: {
+      mode: classifyProjectEnvironment(authorities.get(row.id)?.storage_kind, Boolean(row.workstation_mode)),
+      storageState: authorities.get(row.id)?.state ?? null,
+    },
     workstation: {
-      deploymentId: 'production', workerId: row.workstation_worker_id ?? null,
+      deploymentId, workerId: row.workstation_worker_id ?? null,
       enabled: Boolean(row.workstation_mode), authorityMode: row.workstation_authority_mode ?? 'project',
     },
   }));
@@ -113,9 +123,9 @@ export async function previewAgentPurge(projectId: string, actorUserId: number) 
       (SELECT COUNT(*)::int FROM agent_workers WHERE project_id=$1) AS agent_workers,
       (SELECT COUNT(*)::int FROM agent_events WHERE project_id=$1) AS agent_events,
       (SELECT COUNT(*)::int FROM ai_services WHERE owner_project_id=$1) AS ai_services,
-      (SELECT COUNT(*)::int FROM workspace_credentials WHERE scope='project' AND metadata->>'agent_project_id'=$1) AS dedicated_credentials,
-      (SELECT COUNT(*)::int FROM workspace_credentials WHERE scope<>'project' AND metadata->>'agent_project_id'=$1) AS shared_credentials,
-      (SELECT COUNT(*)::int FROM workspace_credentials WHERE metadata->>'agent_project_id'=$1 AND (metadata->>'ownership') IS NULL) AS review_credentials
+      (SELECT COUNT(*)::int FROM workspace_credentials WHERE scope='project' AND project_id=$1) AS dedicated_credentials,
+      0::int AS shared_credentials,
+      0::int AS review_credentials
   `, [projectId]);
 
   const blockers: string[] = [];

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { executeWorkbenchRequest, type WorkbenchExecutionProvider } from './workbench-execution-broker.js';
+import { executeWorkbenchRequest, type WorkbenchExecutionProvider } from '../execution/execution-broker.js';
 
 const context = { projectId: 'project-a', userId: 7, sessionId: 'session-a' };
 const runtimeContext = {

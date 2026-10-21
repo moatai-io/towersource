@@ -104,3 +104,11 @@ describe('Pi memory_search tool', () => {
     expect(searchMock).not.toHaveBeenCalled();
   });
 });
+
+describe('partial memory search', () => {
+  it('distinguishes an outage from an empty memory index', async () => {
+    searchMock.mockResolvedValue(Object.assign([], { partial: true, failedSections: ['memory'] }));
+    const result = await createMemorySearchTool({ userId: 7 }).execute('partial', { query: 'needle' });
+    expect(JSON.stringify(result.content)).toContain('결과가 불완전');
+  });
+});

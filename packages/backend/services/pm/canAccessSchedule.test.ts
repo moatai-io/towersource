@@ -24,16 +24,16 @@ describe('canAccessSchedule', () => {
     isProjectMemberMock.mockReset();
   });
 
-  it('admin → allowed without DB lookup', async () => {
+  it('admin → denied without owner or invitation', async () => {
     const result = await canAccessSchedule('s1', 99, 'admin');
-    expect(result.allowed).toBe(true);
-    expect(queryOneMock).not.toHaveBeenCalled();
+    expect(result.allowed).toBe(false);
+    expect(queryOneMock).toHaveBeenCalled();
   });
 
-  it('operator → allowed without DB lookup', async () => {
+  it('operator → denied without owner or invitation', async () => {
     const result = await canAccessSchedule('s1', 99, 'operator');
-    expect(result.allowed).toBe(true);
-    expect(queryOneMock).not.toHaveBeenCalled();
+    expect(result.allowed).toBe(false);
+    expect(queryOneMock).toHaveBeenCalled();
   });
 
   it('owner (user_id matches) → allowed', async () => {

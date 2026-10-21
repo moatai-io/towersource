@@ -54,6 +54,12 @@ type ServicesResponse = {
   summary?: string;
 };
 
+type EnvironmentOverview = {
+  deploymentId: string;
+  projects: { projectId: string; name: string; storageKind: string; storageState: string; environmentMode: string; preferredWorkerId: string | null }[];
+  workers: { workerId: string; status: string; draining: boolean; activeRuns: number; maxRuns: number }[];
+};
+
 type CapacityResponse = {
   host: { cpuThreads: number; totalMemoryMb: number };
   box: { maxMemoryMb: number };
@@ -116,6 +122,8 @@ export function RuntimeBoxPanel() {
   const confirm = useConfirm();
   const canEditCapacity = getCurrentRole() === 'admin';
   const [data, setData] = React.useState<ServicesResponse | null>(null);
+  const [environment, setEnvironment] = React.useState<EnvironmentOverview | null>(null);
+  const [environmentError, setEnvironmentError] = React.useState(false);
   const [loading, setLoading] = React.useState(false);
   const [logs, setLogs] = React.useState<{ service: RuntimeService; text: string } | null>(null);
   const [logsLoading, setLogsLoading] = React.useState<number | null>(null);
@@ -132,6 +140,9 @@ export function RuntimeBoxPanel() {
   const load = React.useCallback(async () => {
     setLoading(true);
     try {
+      const overviewRes = await fetch('/api/runtime-box/environment-overview', { headers: authHeaders() });
+      if (overviewRes.ok) { setEnvironment(await overviewRes.json()); setEnvironmentError(false); }
+      else { setEnvironment(null); setEnvironmentError(true); }
       const res = await fetch('/api/runtime-box/services?status=running,pending,error,expired', {
         headers: authHeaders(),
       });
@@ -146,6 +157,8 @@ export function RuntimeBoxPanel() {
     } catch (err: unknown) {
       emitProductNotice({ code: 'runtime.load.failed', technicalDetail: err });
       setData(null);
+      setEnvironment(null);
+      setEnvironmentError(true);
     } finally {
       setLoading(false);
     }
@@ -283,19 +296,42 @@ export function RuntimeBoxPanel() {
       <div className="mx-auto max-w-6xl p-6 space-y-5">
         <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
           <div>
-            <div className="text-sm uppercase tracking-[0.24em] text-primary-400/80">Project Runtime Box</div>
-            <h1 className="mt-1 text-3xl font-semibold text-gray-100">VM Runtime Services</h1>
+            <div className="text-sm uppercase tracking-[0.24em] text-primary-400/80">{t('runtimeBox.legacyEyebrow')}</div>
+            <h1 className="mt-1 text-3xl font-semibold text-gray-100">{t('runtimeBox.legacyTitle')}</h1>
             <p className="mt-1 text-base text-surface-400">{t('runtimeBox.description')}</p>
+            <p className="mt-2 max-w-3xl text-sm leading-6 text-amber-200">{t('runtimeBox.legacyScope')}</p>
           </div>
           <button onClick={load} disabled={loading} className="rounded-lg border border-surface-700 bg-surface-850 px-3 py-2 text-base text-surface-200 hover:bg-surface-800 disabled:opacity-50">
             {loading ? 'Refreshing…' : 'Refresh'}
           </button>
         </div>
 
+        <section className="rounded-xl border border-surface-800 bg-surface-900/70 p-4 space-y-3">
+          <h2 className="text-lg font-semibold text-surface-100">{t('runtimeBox.environment.title')}</h2>
+          <p className="text-sm text-surface-400">{t('runtimeBox.environment.description')}</p>
+          {environmentError && <p role="alert" className="text-sm text-amber-200">{t('runtimeBox.environment.unavailable')}</p>}
+          {environment && <>
+            <p className="text-xs text-surface-500">{t('runtimeBox.environment.deployment', { id: environment.deploymentId })}</p>
+            <div className="grid gap-2 md:grid-cols-2">
+              {environment.workers.map(worker => <div key={worker.workerId} className="rounded-lg border border-surface-700 p-3 text-sm">
+                <strong>{worker.workerId}</strong> · {worker.status}{worker.draining ? ` · ${t('runtimeBox.environment.draining')}` : ''}
+                <div className="text-surface-400">{t('runtimeBox.environment.workerRuns', { active: worker.activeRuns, max: worker.maxRuns })}</div>
+              </div>)}
+              {environment.workers.length === 0 && <p className="text-sm text-surface-500">{t('runtimeBox.environment.noWorkers')}</p>}
+            </div>
+            <div className="max-h-72 overflow-auto divide-y divide-surface-800">
+              {environment.projects.map(project => <div key={project.projectId} className="flex flex-wrap justify-between gap-2 py-2 text-sm">
+                <span>{project.name}</span><span className="text-surface-400">{project.environmentMode} · {project.storageKind}/{project.storageState}{project.preferredWorkerId ? ` · ${project.preferredWorkerId}` : ''}</span>
+              </div>)}
+              {environment.projects.length === 0 && <p className="py-2 text-sm text-surface-500">{t('runtimeBox.environment.noProjects')}</p>}
+            </div>
+          </>}
+        </section>
+
         <div className="grid gap-3 md:grid-cols-3">
-          <Stat label="Runtime boxes" value={boxes.length} />
-          <Stat label="Running boxes" value={runningBoxes} />
-          <Stat label="Active/problem services" value={services.length} />
+          <Stat label={t('runtimeBox.boxCount')} value={boxes.length} />
+          <Stat label={t('runtimeBox.runningCount')} value={runningBoxes} />
+          <Stat label={t('runtimeBox.serviceCount')} value={services.length} />
         </div>
 
         {capacity && <section className="rounded-xl border border-surface-800 bg-surface-900/70 p-4 space-y-4">
@@ -320,7 +356,7 @@ export function RuntimeBoxPanel() {
         </section>}
 
         <section className="overflow-hidden rounded-xl border border-surface-800 bg-surface-900/70">
-          <div className="border-b border-surface-800 px-4 py-3 text-base font-semibold text-surface-200">Boxes</div>
+          <div className="border-b border-surface-800 px-4 py-3 text-base font-semibold text-surface-200">{t('runtimeBox.boxList')}</div>
           {boxes.length === 0 ? (
             <div className="p-8 text-center text-base text-surface-500">{loading ? t('runtimeBox.loadingBoxes') : t('runtimeBox.noBoxes')}</div>
           ) : (
@@ -368,7 +404,7 @@ export function RuntimeBoxPanel() {
         </section>
 
         <section className="overflow-hidden rounded-xl border border-surface-800 bg-surface-900/70">
-          <div className="border-b border-surface-800 px-4 py-3 text-base font-semibold text-surface-200">Services</div>
+          <div className="border-b border-surface-800 px-4 py-3 text-base font-semibold text-surface-200">{t('runtimeBox.serviceList')}</div>
           {!data || services.length === 0 ? (
             <div className="p-8 text-center text-base text-surface-500">
               {loading ? t('runtimeBox.loadingServices') : t('runtimeBox.noServices')}

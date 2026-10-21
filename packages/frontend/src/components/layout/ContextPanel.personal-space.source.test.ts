@@ -13,4 +13,20 @@ describe('ContextPanel personal file guards', () => {
     expect(source).toContain('showShareModal && !isPersonalFile');
     expect(source).toContain('{!isPersonalFile && (');
   });
+
+  it('keeps conditional personal and preview surfaces behind lazy imports', () => {
+    for (const target of [
+      '../files/ShareModal',
+      '../files/HtmlPreviewSurface',
+      '../files/UrlPreviewSurface',
+      '../files/OpenUrlPreviewDialog',
+      '../personal-space/PersonalTodoView',
+      '../personal-space/PersonalMaterialsView',
+      '../personal-space/PersonalArchiveView',
+      '../personal-space/MobilePersonalDocumentsView',
+    ]) {
+      expect(source).toContain(`import('${target}')`);
+      expect(source).not.toContain(`from '${target}'`);
+    }
+  });
 });

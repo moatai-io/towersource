@@ -60,3 +60,29 @@ services/<your-feature>/
 ```
 
 `claude-sdk.ts` 의 `queryOptions.hooks` 에 wire. 외부 `.claude/hooks/*.mjs` 금지 — 근거는 위 결정문서.
+
+## Canonical owner projection for Hub lists
+
+`GET /api/publish/status` now optionally accepts `projectId` to narrow the same membership-filtered inventory. Returned sites/apps include `ownerProjectId` derived server-side from the legacy Project key. A filter never grants access, including to privileged users. Unknown keys and collisions between folder names or canonical IDs fail closed; they require attribution repair rather than guessing. Manifest storage and public serving are unchanged. This is list attribution, not authenticated protection of a public/unlisted site.
+
+Tests: `project-scope.test.ts` covers identity collisions, unauthorized filter and absent mappings; `routes/publishing-project-scope.source.test.ts` checks route wiring. Real HTTP/browser verification and Agent-specific Hub navigation remain pending. Existing getPublishStatus health work still runs before list scoping; avoid treating this change as a scalable lazy-loading implementation.
+
+The existing PublishPanel now offers an owner-Agent selector over the authorized inventory. Site/app filtering uses `ownerProjectId`, never folder display labels. Legacy gateway items without canonical ownership and shared files without a verified owner projection remain available only in the unfiltered view. This is intentionally conservative and is not a change to serving permissions. A dedicated Agent-home entry, canonical attribution for gateway/shared files, and browser E2E remain pending. The frontend currently fetches the authorized inventory once and filters locally; server-side projectId filtering is available but not yet used by this selector.
+
+## Dashboard refresh execution adapter (not exposed)
+
+`dashboard-refresh.ts` delegates to existing `runAutomationNow` after explicit confirmation, current Project membership, same-Project binding and automation run authorization. Publication visibility alone does not grant execution authority. Return values contain execution IDs/status only, not job output. An execution success must not be promoted to data freshness without a validated dataset snapshot receipt.
+
+The binding must be loaded from trusted server storage; the adapter intentionally has no route and no browser command/automation-ID input. It currently remains an unconnected foundation. Production use requires server-owned binding persistence, binding-version approval, publication ACL, HTTP auth/CSRF, durable duplicate request handling, run-status retrieval and Viewer confirmation wiring. Tests stub the actual runner and do not start jobs. No synthetic script, schedule or persistent service has been registered by this change.
+
+Agent home now opens the same PublishPanel via `initialProjectId`. Opening the panel resets its filter to the requested Agent, and changing Projects closes the old panel. Users can deliberately switch back to the full authorized inventory. This is a discovery convenience, not an ACL boundary. Verified by source wiring checks and frontend typecheck; deployed interaction is not yet verified.
+
+## Registration mutation foundation
+
+`control-room-registration.ts` reuses the workspace adapter's compare-and-swap operation to add a registry entry without silently overwriting a concurrent edit. It preserves unrelated raw metadata and is idempotent for the same entry; changing an existing slug requires an explicit separate update flow. Shared parsing lives in `packages/shared/publishing/control-room-registry.ts`. This primitive is not an API: callers must resolve an authorized reference and validate the target. Registry creation, authenticated registration routes and the registration form are still pending. No production registry was changed by these tests.
+
+### Registration API and form
+
+`POST /api/dashboards/register` in the authenticated project-files router accepts projectId, confirmed=true and a validated entry. It resolves the root server-side, checks Project read/write access, reads the target through the workspace adapter, validates pricing JSON and rejects empty targets. First registry creation is exclusive; existing mutation uses compare-and-swap. It never publishes or starts a job. HTML is not executed/declared safe by registration. The Control room form exposes Agent, slug, title and format with an explicit submit action. Existing target files are required; it does not author a new dashboard.
+
+Current checks: form request/error tests and registry/CAS unit tests; backend/frontend typecheck. Real authenticated HTTP integration, browser deployment and localization of the initial Korean form remain outstanding. No live registry mutation was performed by implementation tests.

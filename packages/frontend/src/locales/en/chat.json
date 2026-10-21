@@ -1,4 +1,25 @@
 {
+  "waitAlarm": {
+    "title": "Wait alarm",
+    "hoursRemaining": "{{hours}}h {{minutes}}m remaining",
+    "minutesRemaining": "{{minutes}}m remaining",
+    "due": "Waiting to resume",
+    "whenIdle": "The scheduled time has passed. Automatic resumption has not started.",
+    "wakeTime": "Resume time (your time zone)",
+    "save": "Save time",
+    "close": "Close",
+    "resumeNow": "Continue now",
+    "changeTime": "Change time",
+    "cancel": "Cancel alarm",
+    "refresh": "Check again",
+    "errors": {
+      "load": "Could not check the alarm. Please check again.",
+      "conflict": "The alarm changed. Review its current state before trying again.",
+      "forbidden": "Only the session owner can change this alarm.",
+      "invalid": "Choose a future time within the next 30 days.",
+      "action": "Could not confirm the request result. Check the current state before trying again."
+    }
+  },
   "voiceLab": {
     "devOnly": "Voice Lab is available only in development.",
     "title": "Test the voice round trip",
@@ -28,6 +49,7 @@
   "cancelMessage": "Cancel this message",
   "addToQueue": "Add to queue",
   "uploadedFile": "Uploaded file:",
+  "sendAfterUpload": "Waiting for uploads before sending…",
   "uploadFailed": "Upload failed",
   "uploadFailedNetwork": "Upload failed: network error",
   "queueAdded": "Added to queue — it will be sent after the current response finishes",
@@ -51,17 +73,24 @@
   "restoreToInput": "Move to input",
   "removeFromQueue": "Remove from queue",
   "pendingSteering": "Pi steering message waiting to be delivered",
+  "pendingSteeringLabel": "Your message · waiting for AI pickup",
   "collapse": "Collapse",
   "hiddenLines": "… +{{count}} lines",
   "cancelSteeringRestore": "Cancel all steering messages and move them to the input",
   "cancelPendingMessage": "Cancel pending message",
   "connectionCancelFailed": "The connection is offline, so the cancel request could not be sent.",
   "quickContinue": "Continue",
-  "quickExplain": "Explain simply",
-  "quickSaveDecision": "Save decision",
-  "continueRequest": "Please continue",
-  "explainRequest": "Please explain this simply",
-  "saveDecisionRequest": "Save the decision we just made as a decision record",
+  "quickPrepareHandoff": "Prepare handoff",
+  "continueRequest": "Continue",
+  "prepareHandoffRequest": "Prepare a concise handoff from this conversation so another session or agent can continue immediately. Include decisions, completed work, remaining work, cautions, relevant files, and recommended skills",
+  "composerActions": "Suggested next actions",
+  "proceedRecommended": "Proceed with recommendation",
+  "jevRecommended": "AI recommended",
+  "jevRecommendedTooltip": "Proceed with the next action recommended by AI",
+  "jevRecommendedTooltipWithConfidence": "Proceed with the next action recommended by AI with {{confidence}}% confidence",
+  "jevObserved": "AI review",
+  "jevObservedTooltipWithConfidence": "AI considered this action with {{confidence}}% confidence, so it is not treated as a recommendation or automatic continuation",
+  "recommendedActionFallbackTooltip": "Continues normally when no AI recommendation is available",
   "streamingAttachDisabled": "Files can be attached after the response finishes",
   "attachFile": "Attach file",
   "messageInput": "Message input",
@@ -80,7 +109,14 @@
   "approve": "Approve",
   "deny": "Deny",
   "thinking": "Thinking",
+  "toolSummary": {
+    "sleepDuration": "Expected wait: {{seconds}} seconds",
+    "workStepsComplete": "Work steps complete ({{total}}/{{total}})",
+    "workStepsProgress": "Work steps {{completed}}/{{total}}",
+    "workStepsPlanned": "{{total}} work steps planned"
+  },
   "toolLabels": {
+    "sleep": "Wait",
     "bash": "Run command",
     "read": "Read file",
     "write": "Create file",
@@ -91,9 +127,10 @@
     "websearch": "Web search",
     "webfetch": "Fetch page",
     "askuserquestion": "Ask user",
+    "credential_vault_input": "Secure credential input",
     "enterplanmode": "Plan mode",
     "exitplanmode": "Plan complete",
-    "todowrite": "Manage todos",
+    "todowrite": "Work log",
     "present_file": "Present file",
     "project_shell": "Run in project",
     "service_start": "Start service",
@@ -112,7 +149,14 @@
     "persistent_agent_create": "Create agent",
     "persistent_agent_send": "Send to agent"
   },
+  "sleep": {
+    "completed": "Wait complete",
+    "cancelled": "Wait cancelled",
+    "failed": "Wait failed",
+    "stopHint": "To cancel the wait, stop the current response."
+  },
   "toolActivity": {
+    "sleep": "Waiting",
     "read": "Reading material",
     "search": "Searching for information",
     "write": "Writing a file",
@@ -168,9 +212,9 @@
     "queued": "Queued",
     "oneRun": "1 run",
     "created": "created {{time}}",
-    "subagentWorking": "Subagent working",
-    "subagentReported": "Subagent reported",
-    "subagentDeployed": "Subagent delegated",
+    "subagentWorking": "Support AI working",
+    "subagentReported": "Support AI reported",
+    "subagentDeployed": "Delegated to support AI",
     "responsePending": "Agent response will appear here when the worker starts replying."
   },
   "newPrompt": "New Prompt",
@@ -227,6 +271,7 @@
   "linkedToDrawingPreview": "Linked to drawing preview",
   "evidenceNumber": "Evidence {{number}}",
   "viewInDrawing": "View in drawing",
+  "secureInputResumeRequest": "Credential saving in the secure input form is complete. Find the existing task that requested this input in the conversation history, verify connection status and credential materialization in the current runtime, then continue the already authorized work. Do not print secret values or ask for them again. Preserve separate approval requirements for actions that need them.",
   "invalidSecureInputJson": "Invalid secure-input JSON",
   "invalidJsonField": "{{field}}: Invalid JSON.",
   "credentialVaultSaveFailed": "Failed to save to Credential Vault ({{id}})",
@@ -319,6 +364,27 @@
     "pendingAssistant": "AI is preparing a response",
     "answerToContinue": "Answer in the input box or question card and AI will continue.",
     "compactingHint": "This is an automatic cleanup step, not an error. Your current work is preserved."
+  },
+  "welcome": {
+    "defaultName": "AI teammate",
+    "regionLabel": "Start a new conversation",
+    "question": "What would you like to work on together today?",
+    "choicesLabel": "Ways to start the conversation",
+    "freeInput": "Have something else in mind? Tell me in the message box below.",
+    "choices": [
+      {
+        "label": "I’m not sure where to start yet.",
+        "message": "I’m not sure where to start yet. Help me find a direction by asking one easy question at a time."
+      },
+      {
+        "label": "I’d like to review my work.",
+        "message": "I’d like to review something I’m working on. I’ll upload it or paste the content."
+      },
+      {
+        "label": "I’m stuck on a problem.",
+        "message": "I’d like to talk through a problem I’m stuck on. I’ll explain the situation so we can find a way forward."
+      }
+    ]
   },
   "emptyState": {
     "prompts": [
@@ -470,6 +536,10 @@
     "connectionFailureDetail": "Connection failed · {{detail}}",
     "checkSettings": "Check your settings."
   },
+  "documentUpdated": "Document updated",
+  "documentSaved": "Saved as document",
+  "documentOpen": "Open",
+  "documentWriting": "Writing document…",
   "fileLabel": "File",
   "openFile": "Open file: {{path}}",
   "fileSaveFailed": "Could not save file",
@@ -479,6 +549,7 @@
   "openAgentHome": "Open {{name}} home",
   "engineSwitched": "Engine switched",
   "engineSwitchedAt": "Engine switched · {{time}}",
+  "modelRecoveredToCore": "{{model}} is no longer available. Switched to Core; your conversation is preserved.",
   "earlierContextSummarized": "Earlier context summarized",
   "contextSummaryNotice": "Earlier context was summarized to keep the session focused.",
   "createConversationFailed": "Could not start a new session.",
@@ -488,8 +559,14 @@
   "messageActions": "Message actions",
   "queuedUntilTurnCompletes": "Queued · Sends automatically after the current response",
   "sendFailed": "Message not sent",
-  "workSteps": "Work steps",
-  "previousWorkSteps": "Previous work steps",
+  "workSteps": "Work log",
+  "previousWorkSteps": "Previous work log",
+  "workStepsComplete": "Complete",
+  "workStepsLastRecorded": "Last recorded",
+  "workStepsStopped": "Stopped",
+  "workStepsFailed": "Ended with an error",
+  "workStepsExpand": "View steps",
+  "workStepsCollapse": "Collapse",
   "aiMessageActions": "AI message actions",
   "stopReasonLength": "Stopped at the output limit",
   "stopReasonToolUse": "Ended with a tool call",
@@ -527,6 +604,11 @@
   "awaitingResponse": "Awaiting response",
   "viewOptions": "View {{count}} options",
   "agentCard": {
+    "communicationRoute": "Communication route",
+    "sender": "Sending session",
+    "recipient": "Receiving session",
+    "senderNamed": "Sending session: {{name}}",
+    "recipientNamed": "Receiving session: {{name}}",
     "yesterdayAt": "Yesterday {{time}}",
     "openSession": "Open session",
     "working": "Working",
@@ -542,7 +624,9 @@
     "openParentSession": "Open parent session",
     "openFullConversation": "Open full session",
     "expandRequest": "Expand request",
-    "collapseRequest": "Collapse request"
+    "collapseRequest": "Collapse request",
+    "openSessionMain": "Open Agent Session in main tab",
+    "openBackingSession": "Open Agent backing session"
   },
   "confirmProceed": "Yes, proceed",
   "confirmStop": "No, stop",
@@ -560,7 +644,15 @@
   },
   "skillInvocation": {
     "applied": "{{name}} was applied to this turn",
-    "naturalSelection": "Automatically selected from an explicit natural-language signal."
+    "naturalSelection": "Automatically selected from an explicit natural-language signal.",
+    "slash": "Slash command",
+    "picker": "Skill picker",
+    "naturalLanguage": "Natural language",
+    "skill": "Skill",
+    "name": "Name",
+    "command": "Command",
+    "source": "Source",
+    "trigger": "Trigger"
   },
   "branch": {
     "openPoint": "Open the branch point in {{name}}",
@@ -588,8 +680,69 @@
     "compactComplete": "✂️ Long session summarized. Continuing here.",
     "compactFailed": "Automatic session cleanup failed. Send again in this session to retry.",
     "questionTimedOut": "The response window expired, so the AI will ask again in chat.",
+    "questionAnswerFailed": "The approval response could not be delivered. Try again from the question card.",
     "open": "Open",
     "steeringRestoredAfterFailure": "Could not deliver the additional instruction, so it was restored to the input.",
     "websocketNotReady": "The connection is not ready, so the message was not sent. Try again shortly."
-  }
+  },
+  "jevReviewPending": "AI review pending",
+  "jevReviewFailed": "AI review failed",
+  "jevReviewSkipped": "AI review unavailable",
+  "jevReviewComplete": "AI review · complete",
+  "jevReviewWaiting": "AI review · waiting for user",
+  "jevReviewRecommended": "AI review · recommendation ready",
+  "jevReviewNoRecommendation": "AI review · no recommendation",
+  "sessionReasoning": "Reasoning for this session",
+  "reasoningDefault": "Model default",
+  "reasoning_low": "Low",
+  "reasoning_medium": "Medium",
+  "reasoning_high": "High",
+  "reasoning_xhigh": "Extra high",
+  "reasoning_max": "Maximum",
+  "sessionReasoningDescription": "Applies to the selected model from the next response.",
+  "diagram": {
+    "viewer": "Diagram viewer",
+    "fit": "Fit to screen (0)",
+    "fitLabel": "Fit",
+    "actualSize": "Actual size (1)",
+    "zoomOut": "Zoom out (-)",
+    "zoom": "Zoom",
+    "zoomIn": "Zoom in (+)",
+    "close": "Close (Esc)",
+    "controls": "Drag: move · Wheel: pan · Ctrl/Cmd+Wheel: zoom · 0: fit · 1: 100% · Esc: close",
+    "rendering": "Rendering diagram…",
+    "expand": "Expand",
+    "downloadSvg": "Download SVG",
+    "downloadJpg": "Download JPG"
+  },
+  "terminal": {
+    "title": "Terminal",
+    "copyCommand": "Click to copy command",
+    "showOutput": "Show output",
+    "hideOutput": "Hide output"
+  },
+  "sessionSummary": {
+    "title": "Summary",
+    "empty": "No summary yet",
+    "turns": "Conversation turns",
+    "turnCount": "{{count}} turns",
+    "files": "Files edited",
+    "fileCount": "{{count}} files",
+    "refresh": "Refresh summary",
+    "generate": "Generate summary",
+    "stale": "{{count}} more turns since the last summary"
+  },
+  "sourceReference": {
+    "exactDescription": "Exact static HTML source reference",
+    "sent": "Sent",
+    "exact": "Source reference",
+    "remove": "Remove source reference"
+  },
+  "scopedEdit": {
+    "confirmation": "Multi-file scoped edit confirmation"
+  },
+  "blockLoading": "Loading {{type}} content…",
+  "jsonResponse": "JSON response",
+  "pdfPreview": "PDF preview",
+  "pdfPreviewPage": "PDF preview page {{page}}"
 }

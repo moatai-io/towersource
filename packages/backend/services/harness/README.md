@@ -28,7 +28,7 @@ Harness는 Agent identity와 별개이며 다음 실행 요소의 상한을 정�
 
 Published Harness는 등록된 capability와 versioned Prompt Component만 참조하며, compiler가 `prompt.bundleHash`를 만든다. Session runtime snapshot은 이 hash를 별도 column에도 고정하고, runtime fingerprint는 prompt bundle과 tool set을 함께 식별한다.
 
-`quick-web-research@1`은 대표 조사, 권한 경계, 모호성, tool 실패, prompt injection을 포함한 고정 behavioral eval pack을 가진다. Eval runner는 실제 Harness runtime invoker를 주입받아 반복 실행하며, capability assertion은 관측 tool surface로 결정론적으로 채점하고 behavioral assertion은 독립 utility model이 strict JSON으로 채점한다. Grader 오류는 fail-closed하며, run report와 differential recommendation은 DB에 보존한다. 실제 운영 실행은 별도 명시 호출이며 코드 배포만으로 모델 평가를 자동 시작하지 않는다.
+`quick-web-research@1`은 대표 조사, 권한 경계, 모호성, tool 실패, prompt injection을 포함한 고정 behavioral eval pack을 가진다. `tower-default@1`의 인턴 Career Policy도 질문 우선, 스캐폴딩 비례성, 기초 자료 provenance, 반복 프로세스, 기록 품질, 권한 경계와 긴급 복구 예외를 검증하는 별도 eval pack을 가진다. 위임 업무 완수와 완료 후 적극적인 새 업무 추천을 평가할 [별도 criteria pack](delegated-work-completion.eval-pack.ts)도 정의했다. 구조 테스트는 합성 관측만 사용하며 실제 모델 평가나 운영 API 등록을 의미하지 않는다. Eval runner는 실제 Harness runtime invoker를 주입받아 반복 실행하며, capability assertion은 관측 tool surface로 결정론적으로 채점하고 behavioral assertion은 독립 utility model이 strict JSON으로 채점한다. Grader 오류는 fail-closed하며, run report와 differential recommendation은 DB에 보존한다. 실제 운영 실행은 별도 명시 호출이며 코드 배포만으로 모델 평가를 자동 시작하지 않는다.
 
 ## 불변 조건
 

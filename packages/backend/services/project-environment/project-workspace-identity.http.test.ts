@@ -1,0 +1,78 @@
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import type http from 'node:http';
+import { createHash } from 'node:crypto';
+import { afterEach, expect, it, vi } from 'vitest';
+const fixture = vi.hoisted(() => ({ rows: [] as any[], worker: {} as any, root: '', member: true, role: 'member' as string }));
+vi.mock('../../db/pg-repo.js', () => ({ query: vi.fn(async (sql: string) => sql.includes('FROM projects ') ? fixture.rows : []) }));
+vi.mock('./adapters/legacy-project-compute-adapter.js', () => ({ readLegacyProjectComputePlacement: vi.fn(async () => ({ defaultWorkerId: 'w', workstationMode: true, source: 'binding' })) }));
+vi.mock('./project-environment-deployment.js', () => ({ resolveProjectEnvironmentDeploymentId: () => 'test' }));
+vi.mock('../execution/worker/worker-repository.js', () => ({ getPersistedWorkbenchWorker: vi.fn(async () => fixture.worker) }));
+vi.mock('../execution/worker/worker-transport-credentials.js', () => ({ resolveWorkbenchWorkerTransportToken: async () => 'synthetic-identity-token' }));
+vi.mock('../auth/auth.js', () => ({ getUserAuthState: async () => ({ role: fixture.role, approvalStatus: 'active', disabled: false }) }));
+vi.mock('../pm/project-membership-manager.js', () => ({ isProjectMember: async () => fixture.member }));
+vi.mock('../pm/project-manager.js', () => ({ getProject: async () => ({ id: 'live', rootPath: fixture.root, userId: 9 }) }));
+vi.mock('../runtime-box/workbench-project-derived-mirror.js', () => ({ mirrorWorkerProjectMutation: async () => {} }));
+import { createRemoteWorkbenchWorkerServer } from '../execution/worker/worker-server.js';
+import { commitProjectWorkspaceFile, resolveProjectWorkspaceFile, readProjectWorkspaceFileBytes, compareAndSwapProjectWorkspaceText } from './project-workspace-files.js';
+let root: string | undefined;
+let server: http.Server | undefined;
+afterEach(async () => {
+  if (server) { server.closeIdleConnections(); await new Promise<void>(resolve => server!.close(() => resolve())); server = undefined; }
+  if (root) await fs.rm(root, { recursive: true, force: true });
+  fixture.member = true;
+});
+
+it('imports an attachment-like source, reads and CAS edits via live Project Worker HTTP despite retired same-root alias', async () => {
+  root = await fs.mkdtemp(path.join(os.tmpdir(), 'tower-file-identity-'));
+  fixture.root = path.join(root, 'host'); const workerRoot = path.join(root, 'worker');
+  await fs.mkdir(fixture.root); await fs.mkdir(path.join(workerRoot, 'uploads'), { recursive: true });
+  fixture.rows = [{ project_id: 'retired', root_path: fixture.root, archived: 1, lifecycle_status: 'retired' },
+    { project_id: 'live', root_path: fixture.root, archived: 0, lifecycle_status: 'active' }];
+  server = createRemoteWorkbenchWorkerServer({ workerId: 'w', token: 'synthetic-identity-token', projects: { live: workerRoot } });
+  const requests: string[] = []; server.on('request', req => requests.push(`${req.method} ${req.url}`));
+  await new Promise<void>(resolve => server!.listen(0, '127.0.0.1', resolve));
+  const address = server.address(); if (!address || typeof address === 'string') throw new Error('listen');
+  fixture.worker = { workerId: 'w', baseUrl: `http://127.0.0.1:${address.port}`, deploymentId: 'test', status: 'healthy', projectIds: ['live'] };
+  const source = path.join(root, 'ephemeral.txt'); const content = 'synthetic attachment\n한글 원본\n'; await fs.writeFile(source, content);
+  const saved = await commitProjectWorkspaceFile({ projectId: 'live', relativeDirectory: 'uploads', requestedName: 'fixture.txt', sourcePath: source, sizeBytes: Buffer.byteLength(content), actorUserId: 7 });
+  const reference = await resolveProjectWorkspaceFile({ projectId: 'live', relativePath: saved.relativePath });
+  expect(reference.workerAuthority?.projectId).toBe('live');
+  const bytes = await readProjectWorkspaceFileBytes({ reference, actorUserId: 7, maxBytes: 1024 });
+  expect(createHash('sha256').update(bytes.bytes).digest('hex')).toBe(createHash('sha256').update(content).digest('hex'));
+  await compareAndSwapProjectWorkspaceText({ reference, actorUserId: 7, expectedContent: content, content: content + 'edited\n' });
+  expect(await fs.readFile(path.join(workerRoot, saved.relativePath), 'utf8')).toBe(content + 'edited\n');
+  await expect(fs.stat(path.join(fixture.root, saved.relativePath))).rejects.toMatchObject({ code: 'ENOENT' });
+  expect(await fs.readFile(source, 'utf8')).toBe(content);
+  expect(requests.some(r => r.includes('/v1/files/live/'))).toBe(true);
+  expect(requests.some(r => r.includes('retired'))).toBe(false);
+  // Actual authenticated Worker upload/download routes, not browser E2E.
+  const endpoint = `${fixture.worker.baseUrl}/v1/files/live/content?path=${encodeURIComponent(saved.relativePath)}`;
+  const replacement = 'uploaded replacement\n한글 교체\n';
+  const anonymous = await fetch(endpoint);
+  expect(anonymous.status).toBe(401);
+  const denied = await fetch(endpoint, { method: 'PUT', headers: { authorization: 'Bearer wrong-synthetic-token', 'content-length': String(Buffer.byteLength(replacement)) }, body: replacement });
+  expect(denied.status).toBe(401);
+  expect(await fs.readFile(path.join(workerRoot, saved.relativePath), 'utf8')).toBe(content + 'edited\n');
+  const upload = await fetch(endpoint, { method: 'PUT', headers: { authorization: 'Bearer synthetic-identity-token', 'content-length': String(Buffer.byteLength(replacement)) }, body: replacement });
+  expect(upload.ok).toBe(true);
+  const download = await fetch(endpoint, { headers: { authorization: 'Bearer synthetic-identity-token' } });
+  expect(download.ok).toBe(true);
+  const downloaded = Buffer.from(await download.arrayBuffer());
+  expect(createHash('sha256').update(downloaded).digest('hex')).toBe(createHash('sha256').update(replacement).digest('hex'));
+  expect((await readProjectWorkspaceFileBytes({ reference, actorUserId: 7, maxBytes: 1024 })).bytes.equals(downloaded)).toBe(true);
+  const beforeRoleChange = requests.length;
+  fixture.role = 'viewer';
+  expect((await readProjectWorkspaceFileBytes({ reference, actorUserId: 7, maxBytes: 1024 })).bytes.equals(downloaded)).toBe(true);
+  const afterViewerRead = requests.length;
+  expect(afterViewerRead).toBeGreaterThan(beforeRoleChange);
+  await expect(compareAndSwapProjectWorkspaceText({ reference, actorUserId: 7, expectedContent: replacement, content: 'viewer-write' })).rejects.toThrow('WRITE_ACCESS_DENIED');
+  expect(requests).toHaveLength(afterViewerRead);
+  fixture.role = 'member';
+  const before = requests.length; fixture.member = false;
+  await expect(readProjectWorkspaceFileBytes({ reference, actorUserId: 7, maxBytes: 1024 })).rejects.toThrow('ACCESS_REVOKED');
+  await expect(compareAndSwapProjectWorkspaceText({ reference, actorUserId: 7, expectedContent: replacement, content: 'unauthorized' })).rejects.toThrow('ACCESS_REVOKED');
+  expect(requests).toHaveLength(before);
+  expect(await fs.readFile(path.join(workerRoot, saved.relativePath), 'utf8')).toBe(replacement);
+}, 20000);

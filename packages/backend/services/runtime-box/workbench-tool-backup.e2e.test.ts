@@ -69,7 +69,7 @@ run('Workbench minimal backup/restore PostgreSQL + filesystem E2E', () => {
 
   afterAll(async () => {
     await modules?.pg?.closePgPool?.().catch(() => undefined);
-    await docker('rm', '-f', pgName).catch(() => undefined);
+    await docker('rm', '-f', '-v', pgName).catch(() => undefined);
     await fs.rm(root, { recursive: true, force: true });
     for (const key of ['DATABASE_URL', 'WORKSPACE_ROOT', 'TOWER_WORKBENCH_TOOL_STORE_ROOT']) delete process.env[key];
   }, 120_000);

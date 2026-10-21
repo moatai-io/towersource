@@ -4,6 +4,7 @@ import i18n from '../../i18n';
 import type { Project } from '@tower/shared';
 import { AgentIdentityAvatar } from '../agent-profile/AgentIdentityAvatar';
 import { useConfirm } from '../../hooks/useDialog';
+import { getCurrentRole } from '../../utils/auth';
 import { useAIServiceStore, type AIServiceChannelAccessMode, type AIServiceChannelUsageSummary, type AIServiceConversationSummary, type AIServicePublicUiConfig, type AIServiceSummary } from './ai-services-store';
 
 const FILTER_IDS = ['all', 'active', 'draft', 'review', 'paused'] as const;
@@ -490,54 +491,54 @@ function ChannelCredentialPanel({ service, channel }: { service: AIServiceSummar
     finally { setStatus('idle'); }
   };
   return (
-    <div className="mt-4 rounded-2xl border border-emerald-200 bg-white p-4 shadow-sm dark:border-emerald-500/20 dark:bg-surface-950/35">
-      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+    <div className="@container/access min-w-0 [word-break:keep-all] [overflow-wrap:anywhere] mt-4 rounded-2xl border border-emerald-200 bg-white p-4 shadow-sm dark:border-emerald-500/20 dark:bg-surface-950/35">
+      <div className="flex flex-col gap-3 @min-[48rem]/access:flex-row @min-[48rem]/access:items-start @min-[48rem]/access:justify-between">
         <div>
           <div className="text-sm font-bold text-slate-950 dark:text-surface-100">{i18n.t('aiServices.home.copy.externalLink')}</div>
           <p className="mt-1 text-xs leading-5 text-slate-600 dark:text-surface-500">{i18n.t('aiServices.home.copy.externalLinkDescription')}</p>
         </div>
-        <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
+        <div className="flex flex-wrap gap-2 [&>button]:shrink-0 [&>button]:whitespace-nowrap">
           <button type="button" disabled={!canIssue} onClick={() => void sharePublicLink()} className="rounded-xl border border-emerald-300 bg-emerald-600 px-4 py-3 text-sm font-bold text-white shadow-sm hover:bg-emerald-500 disabled:border-emerald-200 disabled:bg-emerald-100 disabled:text-emerald-500 disabled:shadow-none dark:border-emerald-400/35 dark:bg-emerald-500/15 dark:text-emerald-100 dark:hover:bg-emerald-500/25 dark:disabled:border-emerald-900 dark:disabled:bg-emerald-950 dark:disabled:text-emerald-700">{i18n.t('aiServices.home.ui.share')}</button>
           <button type="button" disabled={!canIssue} onClick={() => void copyPublicLink()} className="rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm font-bold text-slate-700 hover:bg-slate-50 disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400 dark:border-surface-700 dark:bg-transparent dark:text-surface-200 dark:hover:bg-surface-800/50 dark:disabled:border-surface-800 dark:disabled:bg-surface-900 dark:disabled:text-surface-600">{linkCopied ? i18n.t('aiServices.home.ui.copied') : i18n.t('aiServices.home.ui.copyLink')}</button>
           <button type="button" disabled={!canIssue} onClick={() => window.open(publicWebsiteUrl, '_blank', 'noopener,noreferrer')} className="col-span-2 rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400 dark:border-surface-700 dark:bg-transparent dark:text-surface-200 dark:hover:bg-surface-800/50 dark:disabled:border-surface-800 dark:disabled:bg-surface-900 dark:disabled:text-surface-600 sm:col-span-1">{i18n.t('aiServices.home.ui.openAgent')}</button>
           {credential && <button type="button" disabled={status !== 'idle'} onClick={() => void revoke()} className="rounded-xl border border-red-200 bg-white px-3 py-2.5 text-xs font-semibold text-red-700 hover:bg-red-50 disabled:opacity-40 dark:border-red-500/25 dark:bg-transparent dark:text-red-200">{i18n.t('aiServices.home.ui.revokeAdvancedLink')}</button>}
         </div>
       </div>
-      <div className="mt-4 grid gap-3 rounded-xl border border-emerald-200 bg-white/80 p-3 dark:border-surface-800 dark:bg-surface-950/60 md:grid-cols-[220px_minmax(0,1fr)_auto] md:items-end">
+      <div className="mt-4 grid gap-3 rounded-xl border border-emerald-200 bg-white/80 p-3 dark:border-surface-800 dark:bg-surface-950/60 grid-cols-[repeat(auto-fit,minmax(min(100%,14rem),1fr))] items-end [&>label]:min-w-0">
         <label className="text-[11px] font-semibold text-slate-700 dark:text-surface-400">{i18n.t('aiServices.home.ui.accessMethod')}<select value={accessMode} onChange={(event) => setAccessMode(event.target.value as AIServiceChannelAccessMode)} disabled={!channel || status !== 'idle'} className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-2 py-2 text-xs font-semibold text-slate-900 outline-none focus:border-teal-500 disabled:bg-slate-100 disabled:text-slate-400 dark:border-surface-700 dark:bg-surface-950 dark:text-surface-100 dark:focus:border-primary-500 dark:disabled:bg-surface-900 dark:disabled:text-surface-600">{accessMode === 'login_required' && <option value="login_required" disabled>{accessModeLabel('login_required')}</option>}{(['unlisted', 'password', 'disabled', 'public'] as const).map((mode) => <option key={mode} value={mode}>{accessModeLabel(mode)}</option>)}</select></label>
         <label className={`text-[11px] font-semibold ${accessMode === 'password' ? 'text-slate-700 dark:text-surface-400' : 'text-slate-400 dark:text-surface-700'}`}>{i18n.t('aiServices.home.ui.sharePassword')}<input value={accessPassword} onChange={(event) => { setAccessPassword(event.target.value); setPasswordCopied(false); }} disabled={!channel || accessMode !== 'password' || status !== 'idle'} type="text" placeholder={channel?.hasPassword ? i18n.t('aiServices.home.ui.keepPassword') : i18n.t('aiServices.home.ui.passwordOrGenerate')} className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-2 py-2 text-xs text-slate-900 outline-none placeholder:text-slate-400 focus:border-teal-500 disabled:bg-slate-100 disabled:text-slate-400 dark:border-surface-700 dark:bg-surface-950 dark:text-surface-100 dark:placeholder:text-surface-600 dark:focus:border-primary-500 dark:disabled:bg-surface-900 dark:disabled:text-surface-600" /></label>
         <div className="flex flex-wrap gap-2">
           <button type="button" disabled={!channel || status !== 'idle'} onClick={() => void createPassword()} className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:bg-slate-100 disabled:text-slate-400 dark:border-surface-700 dark:bg-transparent dark:text-surface-300 dark:hover:bg-surface-800/50 dark:disabled:bg-surface-900 dark:disabled:text-surface-600">{passwordCopied ? i18n.t('aiServices.home.ui.passwordCreated') : i18n.t('aiServices.home.ui.createPassword')}</button>
           <button type="button" disabled={!channel || status !== 'idle' || accessMode === 'login_required' || (accessMode === 'password' && !channel?.hasPassword && !accessPassword.trim())} onClick={() => void saveAccess()} className="rounded-lg border border-teal-300 bg-teal-600 px-3 py-2 text-xs font-bold text-white hover:bg-teal-500 disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400 dark:border-primary-400/35 dark:bg-primary-500/15 dark:text-primary-100 dark:hover:bg-primary-500/25 dark:disabled:border-surface-800 dark:disabled:bg-surface-900 dark:disabled:text-surface-600">{status === 'saving-access' ? i18n.t('aiServices.home.ui.saving') : i18n.t('aiServices.home.ui.save')}</button>
         </div>
-        <div className="md:col-span-3 grid gap-2 rounded-lg border border-slate-200 bg-slate-50 p-2 dark:border-surface-800 dark:bg-surface-900/35 sm:grid-cols-4">
+        <div className="col-span-full grid gap-2 rounded-lg border border-slate-200 bg-slate-50 p-2 dark:border-surface-800 dark:bg-surface-900/35 grid-cols-[repeat(auto-fit,minmax(min(100%,8rem),1fr))]">
           {[
             ['showInfoPanel', i18n.t('aiServices.home.ui.showInfoPanel')], ['showTools', i18n.t('aiServices.home.ui.showTools')], ['showMaterials', i18n.t('aiServices.home.ui.showMaterials')], ['showTiming', i18n.t('aiServices.home.ui.showTiming')],
-          ].map(([key, label]) => <label key={key} className="flex items-center gap-2 text-[11px] font-semibold text-slate-700 dark:text-surface-400"><input type="checkbox" checked={Boolean(accessUi[key as keyof typeof accessUi])} onChange={(event) => setAccessUi((current) => ({ ...current, [key]: event.target.checked }))} disabled={!channel || status !== 'idle'} className="h-3.5 w-3.5 rounded border-slate-300 accent-teal-600 disabled:opacity-45 dark:border-surface-700 dark:bg-surface-950 dark:accent-primary-500" />{label}</label>)}
+          ].map(([key, label]) => <label key={key} className="flex items-center gap-2 text-[11px] font-semibold text-slate-700 dark:text-surface-400"><input type="checkbox" checked={Boolean(accessUi[key as keyof typeof accessUi])} onChange={(event) => setAccessUi((current) => ({ ...current, [key]: event.target.checked }))} disabled={!channel || status !== 'idle'} className="h-3.5 w-3.5 shrink-0 rounded border-slate-300 accent-teal-600 disabled:opacity-45 dark:border-surface-700 dark:bg-surface-950 dark:accent-primary-500" />{label}</label>)}
         </div>
-        <p className="md:col-span-3 text-[11px] leading-5 text-slate-500 dark:text-surface-600">{i18n.t('aiServices.home.copy.passwordGuidance')}</p>
+        <p className="col-span-full text-[11px] leading-5 text-slate-500 dark:text-surface-600">{i18n.t('aiServices.home.copy.passwordGuidance')}</p>
       </div>
       {!canIssue && <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800 dark:border-amber-500/25 dark:bg-amber-500/10 dark:text-amber-200">{i18n.t('aiServices.home.copy.notPublishedHint')}</div>}
       {error && <div className="mt-3 rounded-xl border border-red-200 bg-red-50 p-3 text-xs text-red-700 dark:border-red-500/25 dark:bg-red-500/10 dark:text-red-200">{error}</div>}
-      {canIssue && <section className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-surface-800 dark:bg-surface-900/35" aria-label={i18n.t('aiServices.home.copy.currentAnswerCheck')}><div className="text-xs font-bold text-slate-800 dark:text-surface-200">{i18n.t('aiServices.home.copy.currentAnswerCheck')}</div><p className="mt-1 text-[11px] leading-5 text-slate-500 dark:text-surface-500">{i18n.t('aiServices.home.copy.currentAnswerCheckDescription')}</p><div className="mt-3 flex flex-col gap-2 sm:flex-row"><input value={testQuestion} onChange={(event) => setTestQuestion(event.target.value)} disabled={testStatus === 'running'} className="min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 dark:border-surface-700 dark:bg-surface-950 dark:text-surface-100" aria-label={i18n.t('aiServices.home.ui.testQuestion')} /><button type="button" disabled={!testQuestion.trim() || testStatus === 'running'} onClick={() => void testCurrentDeployment()} className="rounded-lg border border-teal-300 bg-white px-4 py-2.5 text-sm font-bold text-teal-800 disabled:opacity-50 dark:border-primary-500/35 dark:bg-transparent dark:text-primary-200">{testStatus === 'running' ? i18n.t('aiServices.home.ui.checkingAnswer') : i18n.t('aiServices.home.ui.sendTest')}</button></div>{testAnswer && <div className="mt-3 rounded-lg border border-emerald-200 bg-white p-3 text-sm leading-6 text-slate-800 dark:border-emerald-500/20 dark:bg-surface-950 dark:text-surface-200"><div className="mb-1 text-[11px] font-bold text-emerald-700 dark:text-emerald-300">{i18n.t('aiServices.home.ui.validAnswer')}</div>{testAnswer}</div>}{testError && <div className="mt-3 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-500/25 dark:bg-red-500/10 dark:text-red-200"><div className="mb-1 text-[11px] font-bold">{i18n.t('aiServices.home.copy.testFailure')}</div>{testError}</div>}</section>}
+      {canIssue && <section className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-surface-800 dark:bg-surface-900/35" aria-label={i18n.t('aiServices.home.copy.currentAnswerCheck')}><div className="text-xs font-bold text-slate-800 dark:text-surface-200">{i18n.t('aiServices.home.copy.currentAnswerCheck')}</div><p className="mt-1 text-[11px] leading-5 text-slate-500 dark:text-surface-500">{i18n.t('aiServices.home.copy.currentAnswerCheckDescription')}</p><div className="mt-3 flex flex-col gap-2 @min-[32rem]/access:flex-row"><input value={testQuestion} onChange={(event) => setTestQuestion(event.target.value)} disabled={testStatus === 'running'} className="min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 dark:border-surface-700 dark:bg-surface-950 dark:text-surface-100" aria-label={i18n.t('aiServices.home.ui.testQuestion')} /><button type="button" disabled={!testQuestion.trim() || testStatus === 'running'} onClick={() => void testCurrentDeployment()} className="rounded-lg border border-teal-300 bg-white px-4 py-2.5 text-sm font-bold text-teal-800 disabled:opacity-50 dark:border-primary-500/35 dark:bg-transparent dark:text-primary-200">{testStatus === 'running' ? i18n.t('aiServices.home.ui.checkingAnswer') : i18n.t('aiServices.home.ui.sendTest')}</button></div>{testAnswer && <div className="mt-3 rounded-lg border border-emerald-200 bg-white p-3 text-sm leading-6 text-slate-800 dark:border-emerald-500/20 dark:bg-surface-950 dark:text-surface-200"><div className="mb-1 text-[11px] font-bold text-emerald-700 dark:text-emerald-300">{i18n.t('aiServices.home.ui.validAnswer')}</div>{testAnswer}</div>}{testError && <div className="mt-3 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-500/25 dark:bg-red-500/10 dark:text-red-200"><div className="mb-1 text-[11px] font-bold">{i18n.t('aiServices.home.copy.testFailure')}</div>{testError}</div>}</section>}
       {canIssue ? <div className="mt-4 rounded-xl border border-emerald-200 bg-white p-3 shadow-sm dark:border-surface-800 dark:bg-surface-950/70">
         <div className="flex flex-wrap items-center justify-between gap-2"><span className="text-xs font-bold text-emerald-700 dark:text-emerald-200">{i18n.t('aiServices.home.ui.shareLink')}</span><span className="text-[11px] text-slate-500 dark:text-surface-600">{i18n.t('aiServices.home.copy.publishedAuto')}</span></div>
         <button type="button" onClick={() => void copyPublicLink()} className="mt-2 block w-full break-all rounded-lg bg-emerald-50 px-3 py-3 text-left text-xs text-emerald-800 dark:bg-surface-900 dark:text-emerald-200" aria-label={i18n.t('aiServices.home.copy.copyShareLink')}>{publicWebsiteUrl}</button>
-        <div className="mt-3 grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
+        <div className="mt-3 flex flex-wrap gap-2 [&>button]:shrink-0 [&>button]:whitespace-nowrap">
           <button type="button" onClick={() => void sharePublicLink()} className="rounded-lg border border-primary-300 bg-primary-50 px-3 py-3 text-sm font-bold text-primary-800 dark:border-primary-400/35 dark:bg-transparent dark:text-primary-200">{i18n.t('aiServices.home.ui.share')}</button>
           <button type="button" onClick={() => void copyPublicLink()} className="rounded-lg border border-slate-200 px-3 py-3 text-sm font-bold text-slate-700 dark:border-surface-700 dark:text-surface-300">{linkCopied ? i18n.t('aiServices.home.ui.copied') : i18n.t('aiServices.home.ui.copyLink')}</button>
           <button type="button" onClick={() => window.open(publicWebsiteUrl, '_blank', 'noopener,noreferrer')} className="col-span-2 rounded-lg border border-slate-200 px-3 py-3 text-sm font-semibold text-slate-700 dark:border-surface-700 dark:text-surface-300 sm:col-span-1">{i18n.t('aiServices.home.ui.openAgent')}</button>
         </div>
       </div> : <div className="mt-4 rounded-xl border border-dashed border-slate-300 bg-white/70 p-4 text-sm text-slate-500 dark:border-surface-700 dark:bg-surface-950/35 dark:text-surface-500">{i18n.t('aiServices.home.copy.noPublishedAgent')}</div>}
       <button type="button" onClick={() => setAdvancedOpen((value) => !value)} className="mt-3 text-xs font-semibold text-slate-500 hover:text-slate-800 dark:text-surface-500 dark:hover:text-surface-300">{advancedOpen ? i18n.t('aiServices.home.ui.closeAdvanced') : i18n.t('aiServices.home.ui.openAdvanced')}</button>
-      {advancedOpen && <div className="mt-3 grid gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-surface-800 dark:bg-surface-950/45 md:grid-cols-3">
+      {advancedOpen && <div className="mt-3 grid gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-surface-800 dark:bg-surface-950/45 @min-[40rem]/access:grid-cols-3">
         <label className="text-[11px] font-semibold text-slate-700 dark:text-surface-400">Tenant key<input value={tenantKey} onChange={(event) => setTenantKey(event.target.value)} className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-2 py-2 text-xs text-slate-900 outline-none focus:border-teal-500 dark:border-surface-700 dark:bg-surface-950 dark:text-surface-100 dark:focus:border-primary-500" /></label>
         <label className="text-[11px] font-semibold text-slate-700 dark:text-surface-400">User key<input value={userKey} onChange={(event) => setUserKey(event.target.value)} className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-2 py-2 text-xs text-slate-900 outline-none focus:border-teal-500 dark:border-surface-700 dark:bg-surface-950 dark:text-surface-100 dark:focus:border-primary-500" /></label>
         <label className="text-[11px] font-semibold text-slate-700 dark:text-surface-400">Exposure<select value={exposure} onChange={(event) => setExposure(event.target.value as typeof exposure)} className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-2 py-2 text-xs text-slate-900 outline-none focus:border-teal-500 dark:border-surface-700 dark:bg-surface-950 dark:text-surface-100 dark:focus:border-primary-500"><option value="auth-required">auth-required</option><option value="unlisted">unlisted</option><option value="public">public</option></select></label>
-        <div className="md:col-span-3 flex flex-wrap items-center gap-2">
+        <div className="col-span-full flex flex-wrap items-center gap-2">
           <button type="button" disabled={!canIssue || status !== 'idle'} onClick={() => void issue()} className="rounded-lg border border-teal-300 bg-white px-3 py-2 text-xs font-semibold text-teal-800 hover:bg-teal-50 disabled:bg-slate-100 disabled:text-slate-400 dark:border-primary-400/35 dark:bg-transparent dark:text-primary-200 dark:disabled:opacity-40">{status === 'issuing' ? i18n.t('aiServices.home.ui.issuingAdvanced') : i18n.t('aiServices.home.ui.issueAdvanced')}</button>
         </div>
-        {credential && <div className="md:col-span-3 grid gap-2 text-[11px]">
+        {credential && <div className="col-span-full grid gap-2 text-[11px]">
           <div className="grid gap-1"><span className="text-slate-500 dark:text-surface-600">Credential Chat URL</span><code className="break-all rounded bg-white px-2 py-1 text-emerald-800 ring-1 ring-slate-200 dark:bg-surface-900 dark:text-emerald-200 dark:ring-0">{hostedChatUrl}</code></div>
           <div className="grid gap-1"><span className="text-slate-500 dark:text-surface-600">Session API URL</span><code className="break-all rounded bg-white px-2 py-1 text-teal-800 ring-1 ring-slate-200 dark:bg-surface-900 dark:text-primary-200 dark:ring-0">{credential.serving?.conversationUrl}</code><button type="button" onClick={() => void copyText(credential.serving?.conversationUrl || '')} className="justify-self-start text-teal-700 dark:text-primary-300">{i18n.t('aiServices.home.ui.copyApi')}</button></div>
           <div className="grid gap-1"><span className="text-slate-500 dark:text-surface-600">Message API URL template</span><code className="break-all rounded bg-white px-2 py-1 text-teal-800 ring-1 ring-slate-200 dark:bg-surface-900 dark:text-primary-200 dark:ring-0">{credential.serving?.messageUrlTemplate}</code></div>
@@ -625,7 +626,7 @@ function ServiceListItem({ service, selected, onSelect }: { service: AIServiceSu
   </button>;
 }
 
-function ServiceRow({ service }: { service: AIServiceSummary }) {
+function ServiceRow({ service, canManage }: { service: AIServiceSummary; canManage: boolean }) {
   const confirm = useConfirm();
   const retire = useAIServiceStore((s) => s.retire);
   const updateService = useAIServiceStore((s) => s.updateService);
@@ -655,7 +656,7 @@ function ServiceRow({ service }: { service: AIServiceSummary }) {
     await retire(service.id);
   };
   return (
-    <article className="grid min-w-0 grid-cols-1 gap-4 border-t border-slate-200 px-4 py-5 first:border-t-0 dark:border-surface-800 sm:px-5" lang={i18n.resolvedLanguage || i18n.language}>
+    <article className="@container/service grid min-w-0 grid-cols-1 gap-4 border-t border-slate-200 px-4 py-5 first:border-t-0 dark:border-surface-800 sm:px-5" lang={i18n.resolvedLanguage || i18n.language}>
       <div className="min-w-0">
         <div className="flex items-start gap-3">
           <AgentIdentityAvatar project={baseAgentProject(service)} variant="list" showListAccent={false} className="h-12 w-12 shrink-0 rounded-xl" />
@@ -668,7 +669,7 @@ function ServiceRow({ service }: { service: AIServiceSummary }) {
           <span>{i18n.t('aiServices.home.ui.externalAccessMeta', { status: operationalState === 'active' ? i18n.t('aiServices.home.available') : operationalState === 'paused' ? i18n.t('aiServices.home.stopped') : i18n.t('aiServices.home.preparing') })}</span>
           <span>{knowledgeRefs.length ? i18n.t('aiServices.home.ui.knowledgeMeta', { count: knowledgeRefs.length }) : i18n.t('aiServices.home.notConnected')}</span>
         </div>
-        <div className="mt-4 grid gap-4 border-y border-slate-200 py-4 text-xs dark:border-surface-800 md:grid-cols-[1fr_1fr_1.2fr]">
+        <div className="mt-4 grid gap-4 border-y border-slate-200 py-4 text-xs dark:border-surface-800 @min-[42rem]/service:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.2fr)] [&>div]:min-w-0 [overflow-wrap:anywhere]">
           <div><div className="text-[11px] font-semibold text-slate-500 dark:text-surface-600">{i18n.t('aiServices.home.ui.executionConfig')}</div><div className="mt-1 font-semibold text-slate-800 dark:text-surface-200">{service.currentDeployment?.policySnapshot?.harnessBinding?.harnessId || i18n.t('aiServices.home.noHarness')}{service.currentDeployment?.policySnapshot?.harnessBinding?.harnessVersion ? ` @v${service.currentDeployment.policySnapshot.harnessBinding.harnessVersion}` : ''}</div><div className="mt-1 text-[11px] text-slate-500 dark:text-surface-600">{service.currentDeployment?.policySnapshot?.harnessBinding?.model || i18n.t('aiServices.home.harnessDefaultModel')}</div></div>
           <div><div className="text-[11px] font-semibold text-slate-500 dark:text-surface-600">{i18n.t('aiServices.home.ui.currentVersion')}</div><div className="mt-1 font-semibold text-slate-800 dark:text-surface-200">{service.currentDeployment ? `${i18n.t('aiServices.home.published')} v${service.currentDeployment.version}` : i18n.t('aiServices.home.notYet')}</div><div className="mt-1 text-[11px] text-slate-500 dark:text-surface-600">{shortDate(service.currentDeployment?.deployedAt || service.currentDeployment?.createdAt)}</div></div>
           <div><div className="flex items-center justify-between gap-2"><div className="text-[11px] font-semibold text-slate-500 dark:text-surface-600">{i18n.t('aiServices.home.ui.fixedKnowledge')}</div><span className="text-[10px] font-bold text-teal-700 dark:text-primary-300">{knowledgeRefs.length}</span></div>{knowledgeRefs.length ? <ul className="mt-1 space-y-1">{knowledgeRefs.slice(0, 3).map((ref) => <li key={ref.path} className="truncate font-mono text-[11px] text-slate-700 dark:text-surface-300">{ref.path}</li>)}</ul> : <div className="mt-1 text-[11px] text-slate-500 dark:text-surface-600">{i18n.t('aiServices.home.ui.noPinnedKnowledge')}</div>}{knowledgeRefs.length > 3 && <div className="mt-1 text-[10px] text-slate-500 dark:text-surface-600">{i18n.t('aiServices.home.ui.additionalCount', { count: knowledgeRefs.length - 3 })}</div>}</div>
@@ -683,7 +684,7 @@ function ServiceRow({ service }: { service: AIServiceSummary }) {
         <div><dt className="text-[11px] text-slate-500 dark:text-surface-600">{i18n.t('aiServices.home.ui.unresolved')}</dt><dd className="mt-1 font-bold text-amber-600 dark:text-amber-300">{service.metrics?.unresolved || 0}</dd></div>
         <div><dt className="text-[11px] text-slate-500 dark:text-surface-600">{i18n.t('aiServices.home.ui.cost')}</dt><dd className="mt-1 font-bold text-slate-900 dark:text-surface-200">${(service.metrics?.cost || 0).toFixed(2)}</dd></div>
       </dl>
-      <div className="min-w-0 rounded-2xl border border-slate-200 bg-slate-50 p-3 dark:border-surface-800 dark:bg-surface-950/35">
+      {canManage && <div className="min-w-0 rounded-2xl border border-slate-200 bg-slate-50 p-3 dark:border-surface-800 dark:bg-surface-950/35">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div><div className="text-xs font-bold text-slate-800 dark:text-surface-200">{i18n.t('aiServices.home.ui.managementOptions')}</div><p className="mt-1 text-[11px] text-slate-500 dark:text-surface-600">{i18n.t('aiServices.home.copy.managementDescription')}</p></div>
           <div className="flex flex-wrap gap-2">
@@ -694,12 +695,12 @@ function ServiceRow({ service }: { service: AIServiceSummary }) {
             <button disabled={mutating} onClick={() => void deleteService()} className="rounded-lg border border-red-200 bg-white px-3 py-2 text-xs font-semibold text-red-700 hover:bg-red-50 disabled:opacity-50 dark:border-red-500/25 dark:bg-transparent dark:text-red-200">{i18n.t('aiServices.home.ui.deleteAgent')}</button>
           </div>
         </div>
-        {editOpen && <div className="mt-3 grid gap-2 md:grid-cols-[240px_minmax(0,1fr)_auto] md:items-end">
+        {editOpen && <div className="mt-3 grid gap-2 grid-cols-[repeat(auto-fit,minmax(min(100%,14rem),1fr))] items-end [&>label]:min-w-0">
           <label className="text-[11px] font-semibold text-slate-700 dark:text-surface-400">{i18n.t('aiServices.home.ui.name')}<input value={editName} onChange={(event) => setEditName(event.target.value)} className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-2 py-2 text-xs text-slate-900 outline-none focus:border-teal-500 dark:border-surface-700 dark:bg-surface-950 dark:text-surface-100 dark:focus:border-primary-500" /></label>
           <label className="text-[11px] font-semibold text-slate-700 dark:text-surface-400">{i18n.t('aiServices.home.ui.description')}<input value={editDescription} onChange={(event) => setEditDescription(event.target.value)} className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-2 py-2 text-xs text-slate-900 outline-none focus:border-teal-500 dark:border-surface-700 dark:bg-surface-950 dark:text-surface-100 dark:focus:border-primary-500" /></label>
           <button disabled={mutating || !editName.trim()} onClick={() => void saveEdit()} className="rounded-lg border border-teal-300 bg-teal-600 px-3 py-2 text-xs font-bold text-white hover:bg-teal-500 disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400 dark:border-primary-400/35 dark:bg-primary-500/15 dark:text-primary-100">{i18n.t('aiServices.home.ui.save')}</button>
         </div>}
-      </div>
+      </div>}
       <section className="min-w-0 rounded-3xl border border-emerald-200 bg-emerald-50/70 p-4 dark:border-emerald-500/20 dark:bg-emerald-500/5" aria-label={i18n.t('aiServices.home.ui.externalDeployTest')}>
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
@@ -708,12 +709,17 @@ function ServiceRow({ service }: { service: AIServiceSummary }) {
           </div>
           <span className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${isExternallyAccessible(service, channel) ? 'border-emerald-300 bg-white text-emerald-800 dark:border-emerald-500/25 dark:bg-surface-950/50 dark:text-emerald-200' : channelAccessMode(channel) === 'disabled' ? 'border-amber-300 bg-amber-50 text-amber-800 dark:border-amber-500/25 dark:bg-amber-500/8 dark:text-amber-200' : 'border-slate-300 bg-white text-slate-700 dark:border-surface-700 dark:bg-surface-950/50 dark:text-surface-300'}`}>{isExternallyAccessible(service, channel) ? i18n.t('aiServices.home.ui.running') : channelAccessMode(channel) === 'disabled' ? i18n.t('aiServices.home.ui.accessStopped') : service.status === 'paused' ? i18n.t('aiServices.home.ui.paused') : i18n.t('aiServices.home.ui.beforeDeployment')}</span>
         </div>
-        <DeploymentFlowPanel service={service} channel={channel} />
-        <DeploymentVersionPanel service={service} />
-        {service.status === 'active' && <>
-          <ChannelCredentialPanel service={service} channel={channel} />
-          <ChannelUsagePanel service={service} channel={channel} />
-        </>}
+        {canManage ? <>
+          <DeploymentFlowPanel service={service} channel={channel} />
+          <DeploymentVersionPanel service={service} />
+          {service.status === 'active' && <>
+            <ChannelCredentialPanel service={service} channel={channel} />
+            <ChannelUsagePanel service={service} channel={channel} />
+          </>}
+        </> : channel ? <div className="mt-4 rounded-xl border border-emerald-200 bg-white p-3 dark:border-surface-800 dark:bg-surface-950/70">
+          <div className="text-xs font-bold text-emerald-700 dark:text-emerald-200">{i18n.t('aiServices.home.ui.shareLink')}</div>
+          <a href={`/ai/${encodeURIComponent(channel.id)}`} target="_blank" rel="noreferrer" className="mt-2 block break-all text-xs text-emerald-800 underline-offset-2 hover:underline dark:text-emerald-200">{`${window.location.origin}/ai/${encodeURIComponent(channel.id)}`}</a>
+        </div> : null}
       </section>
       <div className="min-w-0"><ConversationHistoryPanel service={service} /></div>
     </article>
@@ -808,6 +814,7 @@ function HarnessDraftHandoff({ projectId, baseHarness, onClose, onPublished }: {
 
 export function AIServiceHome() {
   const { t } = useTranslation('common');
+  const canManage = getCurrentRole() === 'admin';
   const { services, loading, error, filter, setFilter, load } = useAIServiceStore();
   const [createOpen, setCreateOpen] = React.useState(false);
   const [name, setName] = React.useState('');
@@ -936,11 +943,11 @@ export function AIServiceHome() {
   const preparing = services.filter((service) => operationalFilter(service) === 'draft').length;
 
   return (
-    <main className="h-full overflow-auto bg-slate-50 px-4 py-5 text-slate-950 dark:bg-surface-950 dark:text-surface-100 sm:px-6 lg:px-8" lang={i18n.resolvedLanguage || i18n.language}>
+    <main className="@container/deployment min-w-0 h-full overflow-auto bg-slate-50 px-4 py-5 text-slate-950 dark:bg-surface-950 dark:text-surface-100 sm:px-6 lg:px-8" lang={i18n.resolvedLanguage || i18n.language}>
       <div className="mx-auto max-w-7xl">
         <header className="flex flex-col gap-4 border-b border-slate-200 pb-5 dark:border-surface-800 sm:flex-row sm:items-end sm:justify-between">
           <div><div className="text-[11px] font-bold uppercase tracking-[0.18em] text-teal-700 dark:text-primary-300">{i18n.t('aiServices.home.ui.externalDeployment')}</div><h1 className="mt-1 text-2xl font-bold tracking-tight text-slate-950 dark:text-surface-100 [text-wrap:balance]">{i18n.t('aiServices.home.ui.externalDeployment')}</h1><p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600 dark:text-surface-500 [word-break:keep-all]">{i18n.t('aiServices.home.copy.homeDescription')}</p></div>
-          <button type="button" onClick={() => setCreateOpen(true)} className="self-start rounded-xl border border-teal-300 bg-teal-50 px-4 py-2.5 text-sm font-bold text-teal-800 hover:bg-teal-100 dark:border-primary-400/35 dark:bg-primary-500/15 dark:text-primary-100 dark:hover:bg-primary-500/20">{i18n.t('aiServices.home.ui.newDeployment')}</button>
+          {canManage && <button type="button" onClick={() => setCreateOpen(true)} className="self-start rounded-xl border border-teal-300 bg-teal-50 px-4 py-2.5 text-sm font-bold text-teal-800 hover:bg-teal-100 dark:border-primary-400/35 dark:bg-primary-500/15 dark:text-primary-100 dark:hover:bg-primary-500/20">{i18n.t('aiServices.home.ui.newDeployment')}</button>}
         </header>
 
         <section className="grid grid-cols-2 gap-x-5 gap-y-4 border-b border-slate-200 py-5 dark:border-surface-800 sm:grid-cols-4">
@@ -962,18 +969,18 @@ export function AIServiceHome() {
           {loading ? <div className="p-12 text-center text-sm text-slate-500 dark:text-surface-500">{i18n.t('aiServices.home.copy.loadingDeployments')}</div>
             : error ? <div className="p-10 text-center"><p className="text-sm text-red-700 dark:text-red-300">{error}</p><button onClick={() => void load()} className="mt-3 text-xs font-semibold text-primary-700 dark:text-primary-300">{i18n.t('aiServices.home.ui.retry')}</button></div>
             : visible.length === 0 ? <div className="p-12 text-center"><h2 className="font-bold text-slate-800 dark:text-surface-200">{services.length ? i18n.t('aiServices.home.copy.emptyFiltered') : i18n.t('aiServices.home.copy.emptyFirst')}</h2><p className="mt-2 text-sm text-slate-500 dark:text-surface-500">{i18n.t('aiServices.home.copy.emptyDescription')}</p></div>
-            : <div className="grid min-h-[520px] lg:grid-cols-[300px_minmax(0,1fr)]">
-              <aside className="border-b border-slate-200 dark:border-surface-800 lg:border-b-0 lg:border-r" aria-label={i18n.t('aiServices.home.ui.externalDeployment')}>
+            : <div className="grid min-h-[520px] @min-[64rem]/deployment:grid-cols-[280px_minmax(0,1fr)]">
+              <aside className="border-b border-slate-200 dark:border-surface-800 @min-[64rem]/deployment:border-b-0 @min-[64rem]/deployment:border-r" aria-label={i18n.t('aiServices.home.ui.externalDeployment')}>
                 <div className="border-b border-slate-200 px-4 py-3 text-xs font-bold text-slate-700 dark:border-surface-800 dark:text-surface-300">{i18n.t('aiServices.home.ui.deployedAgentCount', { count: visible.length })}</div>
                 <div className="max-h-[72vh] overflow-y-auto">{visible.map((service) => <ServiceListItem key={service.id} service={service} selected={service.id === selectedService?.id} onSelect={() => setSelectedServiceId(service.id)} />)}</div>
               </aside>
-              <div className="min-w-0 overflow-hidden">{selectedService && <ServiceRow key={selectedService.id} service={selectedService} />}</div>
+              <div className="min-w-0 overflow-hidden">{selectedService && <ServiceRow key={selectedService.id} service={selectedService} canManage={canManage} />}</div>
             </div>}
         </section>
       </div>
 
       {knowledgePickerOpen && (() => { const project = projects.find((item) => item.id === projectId); return project?.rootPath ? <KnowledgeFilePicker project={{ rootPath: project.rootPath, name: project.agent?.displayName || project.name }} selected={knowledgePaths.split(/\r?\n/).map((value) => value.trim()).filter(Boolean)} onApply={(paths) => { setKnowledgePaths(paths.join('\n')); setKnowledgePickerOpen(false); }} onClose={() => setKnowledgePickerOpen(false)} /> : null; })()}
-      {createOpen && <div className="fixed inset-0 z-[120] grid place-items-center bg-black/65 p-4 backdrop-blur-sm" onClick={closeCreate}>
+      {canManage && createOpen && <div className="fixed inset-0 z-[120] grid place-items-center bg-black/65 p-4 backdrop-blur-sm" onClick={closeCreate}>
         <section className="relative max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-slate-200 bg-white p-5 text-slate-950 shadow-2xl dark:border-surface-700 dark:bg-surface-900 dark:text-surface-100" onClick={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="create-ai-service-title">
           <div className="text-[11px] font-bold uppercase tracking-[0.18em] text-teal-700 dark:text-primary-300">New External Deployment</div>
           <h2 id="create-ai-service-title" className="mt-1 text-xl font-bold text-slate-950 dark:text-surface-100 [text-wrap:balance]">{i18n.t('aiServices.home.copy.createTitle')}</h2>

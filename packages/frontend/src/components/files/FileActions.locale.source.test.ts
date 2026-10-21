@@ -3,24 +3,25 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const rich = fs.readFileSync(path.resolve(__dirname, '../shared/RichContent.tsx'), 'utf8');
+const exchange = fs.readFileSync(path.resolve(__dirname, '../../features/file-exchange/FileExchangeSurface.tsx'), 'utf8');
 const tree = fs.readFileSync(path.resolve(__dirname, 'FileTree.tsx'), 'utf8');
 
 describe('file action locale contract', () => {
   it('routes RichContent file path actions and feedback through files locale keys', () => {
     for (const key of [
       'files:richContent.pathCopied',
-      'files:richContent.savePersonalFailed',
       'files:richContent.pathMenu',
       'files:richContent.openNewTab',
-      'files:richContent.savePersonal',
+      'files:richContent.download',
+      'files:richContent.copyPath',
       'files:richContent.revealFile',
       'files:richContent.copyFailedFallback',
     ]) expect(rich).toContain(key);
   });
 
-  it('preserves browser open, personal file upload, clipboard, and sidebar reveal behavior', () => {
+  it('preserves browser open, personal file upload, clipboard, and sidebar reveal behavior across the owning surfaces', () => {
     expect(rich).toContain('openTowerFileInBrowserTab(filePath)');
-    expect(rich).toContain("fetch('/api/personal-space/files/upload'");
+    expect(exchange).toContain("fetch('/api/personal-space/files/upload'");
     expect(rich).toContain('navigator.clipboard.writeText(normalizedPath)');
     expect(rich).toContain('revealTowerFileInSidebar(filePath)');
   });

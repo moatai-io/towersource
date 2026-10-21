@@ -8,13 +8,19 @@ app_root="$(realpath "$app_root")"
 reconciler="$app_root/bin/tower-workbench-assignment-reconciler"
 [[ -x "$reconciler" ]] || fail 'Assignment reconciler launcher is missing from Nix closure'
 
-worker_id="${TOWER_ASSIGNMENT_PRIMARY_WORKER_ID:-tower-prod-local-01}"
+worker_id="${TOWER_PRIMARY_WORKER_ID:-}"
+[[ -n "$worker_id" ]] || fail 'TOWER_PRIMARY_WORKER_ID is required'
+[[ "$worker_id" =~ ^[a-zA-Z0-9_-]+$ ]] || fail 'invalid primary Worker id'
+[[ -z "${TOWER_ASSIGNMENT_PRIMARY_WORKER_ID:-}" || "$TOWER_ASSIGNMENT_PRIMARY_WORKER_ID" == "$worker_id" ]] || fail 'PRIMARY_WORKER_CONFIGURATION_MISMATCH'
 deployment_id="${TOWER_ASSIGNMENT_DEPLOYMENT_ID:-production}"
 working_directory="${TOWER_ASSIGNMENT_WORKING_DIRECTORY:-$PWD}"
 environment_file="${TOWER_ASSIGNMENT_ENVIRONMENT_FILE:-$working_directory/.env}"
 workspace_root="${TOWER_ASSIGNMENT_WORKSPACE_ROOT:-${WORKSPACE_ROOT:-$HOME/workspace}}"
 actor_user_id="${TOWER_ASSIGNMENT_ACTOR_USER_ID:-1}"
-worker_max_runs="${TOWER_ASSIGNMENT_PRIMARY_MAX_RUNS:-5}"
+worker_max_runs="${TOWER_ASSIGNMENT_PRIMARY_MAX_RUNS:-20}"
+worker_port="${TOWER_ASSIGNMENT_WORKER_PORT:-43325}"
+service_manager="${TOWER_ASSIGNMENT_SERVICE_MANAGER:-user}"
+auto_backfill="${TOWER_ASSIGNMENT_AUTO_BACKFILL:-false}"
 config_file="${TOWER_ASSIGNMENT_WORKER_CONFIG:-$HOME/.config/tower-workers/$worker_id.json}"
 identity_file="${TOWER_ASSIGNMENT_WORKER_IDENTITY:-$HOME/.config/tower-workers/$worker_id.identity.jwt}"
 
@@ -27,8 +33,20 @@ workspace_root="$(realpath -e "$workspace_root")"
 [[ -f "$config_file" && -f "$identity_file" ]] || fail 'Primary Worker config and identity are required'
 [[ "$actor_user_id" =~ ^[1-9][0-9]*$ ]] || fail 'TOWER_ASSIGNMENT_ACTOR_USER_ID must be a positive integer'
 [[ "$worker_max_runs" =~ ^[1-9][0-9]*$ ]] || fail 'TOWER_ASSIGNMENT_PRIMARY_MAX_RUNS must be a positive integer'
+[[ "$worker_port" =~ ^[1-9][0-9]*$ && "$worker_port" -le 65535 ]] || fail 'TOWER_ASSIGNMENT_WORKER_PORT must be a valid port'
+[[ "$service_manager" == user || "$service_manager" == system ]] || fail 'TOWER_ASSIGNMENT_SERVICE_MANAGER must be user or system'
+[[ "$auto_backfill" == true || "$auto_backfill" == false ]] || fail 'TOWER_ASSIGNMENT_AUTO_BACKFILL must be true or false'
 
-unit_dir="$HOME/.config/systemd/user"
+if [[ "$service_manager" == system ]]; then
+  [[ "${EUID:-$(id -u)}" -eq 0 ]] || fail 'system service manager requires root'
+  unit_dir=/etc/systemd/system
+  systemctl_prefix=(systemctl)
+  config_parent="$(dirname "$config_file")"
+else
+  unit_dir="$HOME/.config/systemd/user"
+  systemctl_prefix=(systemctl --user)
+  config_parent="$HOME/.config/tower-workers"
+fi
 mkdir -p "$unit_dir"
 cat >"$unit_dir/tower-workbench-assignment-reconciler.service" <<EOF
 [Unit]
@@ -43,17 +61,20 @@ EnvironmentFile=$environment_file
 Environment=NODE_ENV=production
 Environment=WORKSPACE_ROOT=$workspace_root
 Environment=TOWER_ASSIGNMENT_DEPLOYMENT_ID=$deployment_id
-Environment=TOWER_ASSIGNMENT_PRIMARY_WORKER_ID=$worker_id
+# Primary Worker is read from EnvironmentFile, shared with the Backend.
 Environment=TOWER_ASSIGNMENT_WORKER_CONFIG=$config_file
 Environment=TOWER_ASSIGNMENT_WORKER_IDENTITY=$identity_file
 Environment=TOWER_ASSIGNMENT_PRIMARY_MAX_RUNS=$worker_max_runs
+Environment=TOWER_ASSIGNMENT_WORKER_PORT=$worker_port
+Environment=TOWER_ASSIGNMENT_SERVICE_MANAGER=$service_manager
+Environment=TOWER_ASSIGNMENT_AUTO_BACKFILL=$auto_backfill
 Environment=TOWER_ASSIGNMENT_ACTOR_USER_ID=$actor_user_id
 ExecStart=$reconciler
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths=$HOME/.config/tower-workers $HOME/.config/systemd/user $workspace_root/projects
+ReadWritePaths=$config_parent $unit_dir $workspace_root/projects
 EOF
 
 cat >"$unit_dir/tower-workbench-assignment-reconciler.timer" <<EOF
@@ -71,6 +92,6 @@ Unit=tower-workbench-assignment-reconciler.service
 WantedBy=timers.target
 EOF
 
-systemctl --user daemon-reload
-systemctl --user enable tower-workbench-assignment-reconciler.timer
+"${systemctl_prefix[@]}" daemon-reload
+"${systemctl_prefix[@]}" enable tower-workbench-assignment-reconciler.timer
 printf '{"status":"installed","timer":"tower-workbench-assignment-reconciler.timer","started":false}\n'

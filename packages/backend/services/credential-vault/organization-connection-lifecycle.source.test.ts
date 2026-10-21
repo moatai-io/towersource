@@ -1,31 +1,21 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
-const api = readFileSync(new URL('../../routes/credential-vault-api.ts', import.meta.url), 'utf8');
+const route = readFileSync(new URL('../../routes/credential-vault-api.ts', import.meta.url), 'utf8');
+const service = readFileSync(new URL('./credential-vault-service.ts', import.meta.url), 'utf8');
 
-describe('Organization Connection lifecycle contract', () => {
-  const route = api.slice(api.indexOf("router.patch('/credentials/:credentialId/connection'"), api.indexOf("router.post('/credentials/:credentialId/rotate/preview'"));
-
-  it('requires Admin and limits lifecycle changes to organization Credentials', () => {
-    expect(route).toContain('assertAdmin(req)');
-    expect(route).toContain("scope IN ('workspace', 'internal-default')");
-    expect(route).toContain("['disconnect', 'restore']");
+describe('team-shared Credential lifecycle contract', () => {
+  it('requires a company manager for create, rotate, enable-disable, and delete', () => {
+    expect(route).toContain("router.post('/credentials/api-key'");
+    expect(route).toContain("router.post('/credentials/:credentialId/rotate'");
+    expect(route).toContain("router.patch('/credentials/:credentialId'");
+    expect(route).toContain("router.delete('/credentials/:credentialId'");
+    expect(route.match(/assertOperator\(req\)/g)?.length).toBeGreaterThanOrEqual(4);
   });
 
-  it('safely disconnects by disabling the Credential without deleting secret or policies', () => {
-    expect(route).toContain("lifecycle === 'disconnect' ? false");
-    expect(route).toContain('UPDATE workspace_credentials');
-    expect(route).not.toContain('DELETE FROM workspace_credentials');
-    expect(route).not.toContain('DELETE FROM project_credential_policies');
-    expect(route).not.toContain('deleteSecret');
-    expect(route).toContain('policiesPreserved: true');
-    expect(route).toContain('secretPreserved: true');
-  });
-
-  it('records rename, disconnect, and restore in the audit ledger without secret material', () => {
-    expect(route).toContain('connection_safely_disconnected');
-    expect(route).toContain('connection_restored');
-    expect(route).toContain('connection_renamed');
-    expect(route).toContain("target_type, status, message, metadata");
+  it('applies workspace scope atomically instead of using disconnect policies', () => {
+    expect(route).toContain("scope: 'workspace'");
+    expect(service).toContain('enabled = COALESCE($2, enabled)');
+    expect(route).not.toMatch(/project_credential_policies|lifecycle|disconnect|restore/);
   });
 });

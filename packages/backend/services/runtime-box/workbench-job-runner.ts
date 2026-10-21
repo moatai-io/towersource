@@ -1,3 +1,4 @@
+import { isManagedDownloadCommand } from '../execution/downloads/download-contract.js';
 /**
  * Owns: In-process Local Runtime background runners for durable Workbench Jobs.
  * Public API: enqueueLocalWorkbenchJob, requestLocalWorkbenchJobCancel, shutdownLocalWorkbenchJobRunners.
@@ -15,7 +16,7 @@ import {
   heartbeatWorkbenchJob,
   runClaimedWorkbenchJob,
   type WorkbenchJobRow,
-} from './workbench-job-registry.js';
+} from '../execution/jobs/job-registry.js';
 
 const RUNNER_ID = `tower-local-${process.pid}`;
 const HEARTBEAT_MS = 5_000;
@@ -53,8 +54,8 @@ async function runLocalJob(job: WorkbenchJobRow): Promise<void> {
           boxId: Number(box.id), userId: job.requested_by_user_id, sessionId: job.requested_by_session_id,
           cmd: job.command, cwd: job.cwd ?? undefined, timeout_sec: job.timeout_seconds ?? undefined,
           // Secret values are intentionally process-local and are not persisted in the Job row.
-          env: inputEnv.get(job.id), signal: controller.signal,
-          onStdout: chunk => { void appendWorkbenchJobOutput({ jobId: job.id, projectId: job.project_id, claimToken: claimed.claim_token!, stream: 'stdout', chunk }); },
+          env: inputEnv.get(job.id), credentialMode: isManagedDownloadCommand(job.command) ? 'none' : 'auto', signal: controller.signal,
+          onStdout: chunk => { void appendWorkbenchJobOutput({ jobId: job.id, projectId: job.project_id, claimToken: claimed.claim_token!, stream: 'stdout', chunk, preserveTail: isManagedDownloadCommand(job.command) }); },
           onStderr: chunk => { void appendWorkbenchJobOutput({ jobId: job.id, projectId: job.project_id, claimToken: claimed.claim_token!, stream: 'stderr', chunk }); },
         });
       },

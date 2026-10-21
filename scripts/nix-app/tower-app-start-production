@@ -77,12 +77,30 @@ done
 [[ "$DEFAULT_CWD" = "$WORKSPACE_ROOT" || "$DEFAULT_CWD" = "$WORKSPACE_ROOT"/* ]] \
   || fail 'DEFAULT_CWD must be within WORKSPACE_ROOT'
 
-required TOWER_HOST_ROLLBACK_ENTRYPOINT
-[[ "$TOWER_HOST_ROLLBACK_ENTRYPOINT" = /* ]] || fail 'TOWER_HOST_ROLLBACK_ENTRYPOINT must be an absolute path'
-TOWER_HOST_ROLLBACK_ENTRYPOINT="$(realpath "$TOWER_HOST_ROLLBACK_ENTRYPOINT")"
-[[ "$TOWER_HOST_ROLLBACK_ENTRYPOINT" != /nix/store/* ]] || fail 'rollback entrypoint must be a host artifact outside /nix/store'
-[[ -f "$TOWER_HOST_ROLLBACK_ENTRYPOINT" ]] || fail 'rollback entrypoint must exist before Nix production startup'
-export TOWER_HOST_ROLLBACK_ENTRYPOINT
+# Fresh installation has no previous generation. The external lifecycle owner
+# must stop the exact candidate service and preserve data on failure; this
+# launcher neither performs rollback nor certifies external readiness.
+recovery_mode="${TOWER_NIX_RECOVERY_MODE:-host-rollback}"
+rollback_ready=false
+case "$recovery_mode" in
+  host-rollback)
+    required TOWER_HOST_ROLLBACK_ENTRYPOINT
+    [[ "$TOWER_HOST_ROLLBACK_ENTRYPOINT" = /* ]] || fail 'TOWER_HOST_ROLLBACK_ENTRYPOINT must be an absolute path'
+    TOWER_HOST_ROLLBACK_ENTRYPOINT="$(realpath "$TOWER_HOST_ROLLBACK_ENTRYPOINT")"
+    [[ "$TOWER_HOST_ROLLBACK_ENTRYPOINT" != /nix/store/* ]] || fail 'rollback entrypoint must be a host artifact outside /nix/store'
+    [[ -f "$TOWER_HOST_ROLLBACK_ENTRYPOINT" ]] || fail 'rollback entrypoint must exist before Nix production startup'
+    export TOWER_HOST_ROLLBACK_ENTRYPOINT
+    rollback_ready=true
+    ;;
+  fresh-install)
+    [[ "$TOWER_NIX_PRODUCTION_PROFILE" = canary ]] || fail 'fresh-install currently requires loopback canary profile'
+    [[ -z "${TOWER_HOST_ROLLBACK_ENTRYPOINT:-}" ]] || fail 'fresh-install must not claim a host rollback entrypoint'
+    required TOWER_FRESH_INSTALL_ACK
+    required TOWER_FRESH_RECOVERY_POLICY
+    [[ "$TOWER_FRESH_RECOVERY_POLICY" = stop-and-preserve ]] || fail 'fresh-install recovery policy must equal stop-and-preserve'
+    ;;
+  *) fail 'TOWER_NIX_RECOVERY_MODE must equal host-rollback or fresh-install' ;;
+esac
 
 # A Git-less closure must report its own immutable identity. Refuse conflicting
 # operator overrides rather than allowing health to claim a different release.
@@ -114,12 +132,15 @@ for name, value in fields.items():
 PY
 )
 export TOWER_PACKAGED_RELEASE=true
+if [[ "$recovery_mode" = fresh-install ]]; then
+  [[ "$TOWER_FRESH_INSTALL_ACK" = "$SOURCE_REV" ]] || fail 'TOWER_FRESH_INSTALL_ACK must equal the closure SOURCE_REV'
+fi
 
 action="${1:-check}"
 case "$action" in
   check)
-    printf '{"status":"ok","action":"check","profile":"%s","sourceRev":"%s","entrypoint":"%s","runtimeCwd":"%s","rollbackReady":true,"pdfRendererMode":"nix","pdfRendererBin":"%s"}\n' \
-      "$TOWER_NIX_PRODUCTION_PROFILE" "$SOURCE_REV" "$entrypoint" "$TOWER_RUNTIME_CWD" "$renderer_bin"
+    printf '{"status":"ok","action":"check","profile":"%s","sourceRev":"%s","entrypoint":"%s","runtimeCwd":"%s","rollbackReady":%s,"recoveryMode":"%s","pdfRendererMode":"nix","pdfRendererBin":"%s"}\n' \
+      "$TOWER_NIX_PRODUCTION_PROFILE" "$SOURCE_REV" "$entrypoint" "$TOWER_RUNTIME_CWD" "$rollback_ready" "$recovery_mode" "$renderer_bin"
     ;;
   run)
     required TOWER_NIX_PRODUCTION_ACK

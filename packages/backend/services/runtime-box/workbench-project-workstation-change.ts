@@ -4,9 +4,9 @@
  */
 import { createHash } from 'node:crypto';
 import { queryOne, transaction } from '../../db/pg-repo.js';
-import { getPersistedWorkbenchWorker } from './workbench-worker-repository.js';
-import { createRemoteWorkbenchHttpTransport } from './workbench-remote-http-transport.js';
-import { getWorkbenchWorkerTransportCredentialBinding, resolveWorkbenchWorkerTransportToken } from './workbench-worker-transport-credentials.js';
+import { getPersistedWorkbenchWorker } from '../execution/worker/worker-repository.js';
+import { createRemoteWorkbenchHttpTransport } from '../execution/worker/worker-http-transport.js';
+import { getWorkbenchWorkerTransportCredentialBinding, resolveWorkbenchWorkerTransportToken } from '../execution/worker/worker-transport-credentials.js';
 import type { ProjectComputeAuthorityMode } from './workbench-project-compute-settings.js';
 
 export class ProjectWorkstationChangeError extends Error {
@@ -46,8 +46,18 @@ type IntentRow = {
   smoke_verified_at?: string | null;
 };
 
+function canonicalize(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalize);
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, item]) => [key, canonicalize(item)]));
+  }
+  return value;
+}
+
 function digest(value: unknown): string {
-  return createHash('sha256').update(JSON.stringify(value)).digest('hex');
+  return createHash('sha256').update(JSON.stringify(canonicalize(value))).digest('hex');
 }
 
 function targetConfigurationDigest(target: TargetSnapshot): string {
@@ -86,10 +96,18 @@ async function readBinding(projectId: string, deploymentId: string): Promise<Bin
   return row ? normalizeBinding(row) : null;
 }
 
+function assertSupportedWorkerMode(mode: ProjectComputeAuthorityMode): void {
+  if (mode === 'operator-plane') throw new ProjectWorkstationChangeError(
+    'OPERATOR_WORKER_RETIRED', 'Operator access uses native host execution; do not assign an operator Worker',
+  );
+  if (!['project', 'sandbox'].includes(mode)) throw new ProjectWorkstationChangeError('WORKER_AUTHORITY_MODE_INVALID', 'Unsupported Worker authority mode');
+}
+
 async function readTarget(projectId: string, deploymentId: string, workerId: string, authorityMode: ProjectComputeAuthorityMode): Promise<TargetSnapshot> {
+  assertSupportedWorkerMode(authorityMode);
   const worker = await getPersistedWorkbenchWorker(workerId);
   if (!worker) throw new ProjectWorkstationChangeError('TARGET_WORKER_NOT_REGISTERED', 'Target Workstation is not registered');
-  const requiredCapabilities = ['job', ...(authorityMode === 'operator-plane' ? ['operator-plane'] : [])];
+  const requiredCapabilities = ['job'];
   const missing = requiredCapabilities.filter(capability => !worker.capabilities.includes(capability));
   const transportConfigured = Boolean(await getWorkbenchWorkerTransportCredentialBinding(workerId));
   const target: TargetSnapshot = {
@@ -123,6 +141,7 @@ export async function previewProjectWorkstationChange(input: {
   assertOperator(input.actor.role);
   if (!input.reason.trim()) throw new ProjectWorkstationChangeError('REASON_REQUIRED', 'Workstation change reason required');
   const authorityMode = input.authorityMode ?? 'project';
+  assertSupportedWorkerMode(authorityMode);
   const binding = await readBinding(input.projectId, input.deploymentId);
   if (binding?.defaultWorkerId === input.targetWorkerId && binding.workstationMode && binding.authorityMode === authorityMode) {
     throw new ProjectWorkstationChangeError('TARGET_ALREADY_ACTIVE', 'Target Workstation is already active');
@@ -176,7 +195,7 @@ export async function verifyProjectWorkstationChangeSmoke(input: {
   let stdout = '';
   let stderr = '';
   const command = `set -eu
-printf 'user=%s\\n' "$(id -un)"
+printf 'uid=%s\\n' "$(id -u)"
 printf 'home=%s\\n' "$HOME"
 printf 'cwd=%s\\n' "$PWD"
 command -v node >/dev/null
@@ -185,13 +204,20 @@ test -n "$HOME"
 test -d "$HOME"
 test -w "$HOME"
 for k in DATABASE_URL JWT_SECRET SECRET_STORE_MASTER_KEY TOWER_REMOTE_WORKER_TOKEN; do test -z "$(printenv "$k" 2>/dev/null || true)"; done
-printf smoke > .tower-workstation-change-smoke
-test "$(cat .tower-workstation-change-smoke)" = smoke
-rm .tower-workstation-change-smoke
+smoke_dir=.tower-workstation-change-smoke-dir
+mkdir "$smoke_dir"
+printf smoke > "$smoke_dir/probe"
+test "$(cat "$smoke_dir/probe")" = smoke
+# Worker-created artifacts must remain writable by the Project's shared group;
+# otherwise the control plane/next Workstation session receives EACCES.
+test "$(stat -c %A "$smoke_dir" | cut -c6)" = w
+test "$(stat -c %A "$smoke_dir/probe" | cut -c6)" = w
+getfacl -cp "$smoke_dir" | grep -qx 'default:group::rwx'
+rm -rf "$smoke_dir"
 printf 'workstation-smoke-ok\\n'`;
   const result = await transport.execute({
     spec: {
-      jobId: Date.now(), projectId: input.projectId, command,
+      jobId: Date.now(), projectId: input.projectId, actorUserId: input.actor.userId, command,
       cwd: '/workspace', timeoutSec: 30, workbenchRevision: null, environmentKeys: [], artifacts: [],
     },
     signal: AbortSignal.timeout(35_000),

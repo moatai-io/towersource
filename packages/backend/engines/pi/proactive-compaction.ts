@@ -1,4 +1,6 @@
-// Owns Tower-side compaction advisory signals for Pi sessions.
+import type { MessageMetrics } from '../types.js';
+import { resolvePiCompactionBudget } from './compaction-budget.js';
+// Tower pre-prompt compaction policy. The SDK remains an overflow safety net.
 // Public API: estimatePiCompactionPressure, shouldProactivelyCompactPiSession.
 
 import { calculateContextTokens, estimateTokens, getLastAssistantUsage, shouldCompact } from '@earendil-works/pi-coding-agent';
@@ -6,14 +8,15 @@ import { getPiContextTokenHint, getPiResponsesRequestDebugInfo } from './provide
 
 export interface PiProactiveCompactionPressure {
   contextWindow: number;
-  compactionReason: 'proactive-authoritative' | 'proactive-corroborated-risk' | 'none';
-  /** Effective token signal used to decide whether compaction is advisable now. */
+  displayPressure?: NonNullable<MessageMetrics['contextSnapshot']>['pressure'];
+  compactionReason: 'proactive-authoritative' | 'none';
+  /** Current-session usage signal used for normal pre-prompt compaction. */
   probeTokens: number;
   /** Effective pressure = probeTokens / contextWindow. */
   pressure: number;
-  /** Most faithful signal: latest provider usage and current live transcript estimate. */
+  /** Latest provider usage or live transcript estimate; the latter is not a provider measurement. */
   authoritativeTokens: number;
-  /** Diagnostic/risk signal: outgoing request estimate and provider hint cache. */
+  /** Diagnostic only: last outgoing request estimate and provider hint cache. */
   riskProbeTokens: number;
   lastUsageTokens: number;
   messageEstimate: number;
@@ -22,9 +25,11 @@ export interface PiProactiveCompactionPressure {
   sdkSessionHint: number;
   riskProbeSource: 'requestBody' | 'towerHint' | 'sdkHint' | 'none';
   riskProbeInflated: boolean;
+  /** Compatibility diagnostic; previous-request risk never triggers normal compaction. */
   riskProbeAccepted: boolean;
-  triggerSource: 'authoritative' | 'corroborated-risk' | 'none';
+  triggerSource: 'authoritative' | 'none';
   settings: any;
+  /** SDK threshold applied to Tower's probe; NOT an SDK execution decision. */
   sdkWouldCompact: boolean | null;
   towerWouldCompact: boolean;
   latestEntryType: string | null;
@@ -53,6 +58,47 @@ function safeLastAssistantContextTokens(entries: any[] | undefined): number {
   }
 }
 
+/** Use only active projected messages and usage newer than the last context rewrite. */
+export function estimatePiProjectedPressure(projection: any, branch: any[]): number {
+  const messages = projection.messages || [];
+  const entries = projection.entries || [];
+  const branchIndex = new Map(branch.map((entry: any, index: number) => [entry.id, index]));
+  // A context edit invalidates provider usage only if it changes an entry the
+  // provider had already measured. Edits to messages after that usage are
+  // accounted for by estimating the trailing projection instead.
+  let latestUsageIndex = -1;
+  let latestUsageSourceIndex = -1;
+  let usageTokens = 0;
+  let index = 0;
+  for (const entry of entries) {
+    const sourceIndex = branchIndex.get(entry.sourceEntry?.id) ?? -1;
+    for (const message of entry.messages || []) {
+      if (message.role === 'assistant' && message.stopReason !== 'error'
+        && message.stopReason !== 'aborted' && message.usage) {
+        const tokens = calculateContextTokens(message.usage);
+        if (Number.isFinite(tokens) && tokens > 0) {
+          latestUsageIndex = index;
+          latestUsageSourceIndex = sourceIndex;
+          usageTokens = tokens;
+        }
+      }
+      index++;
+    }
+  }
+  // A compaction checkpoint supersedes earlier usage, even if the kept range
+  // contains old assistant messages. Edits to measured entries do the same.
+  const invalidatesUsage = branch.some((entry: any, index: number) =>
+    index > latestUsageSourceIndex && (
+      entry.type === 'compaction'
+      || (entry.type === 'context_edit' && (branchIndex.get(entry.targetId) ?? Infinity) <= latestUsageSourceIndex)
+    ));
+  if (invalidatesUsage) {
+    return messages.reduce((sum: number, message: any) => sum + estimateTokens(message), 0);
+  }
+  return usageTokens + messages.slice(latestUsageIndex + 1)
+    .reduce((sum: number, message: any) => sum + estimateTokens(message), 0);
+}
+
 function chooseRiskProbeSource(signals: {
   requestBodyTokens: number;
   hintedTokens: number;
@@ -63,11 +109,6 @@ function chooseRiskProbeSource(signals: {
   if (signals.requestBodyTokens === max) return 'requestBody';
   if (signals.hintedTokens === max) return 'towerHint';
   return 'sdkHint';
-}
-
-function wouldCompactByTowerPolicy(tokens: number, contextWindow: number, threshold: number, minReserveTokens: number): boolean {
-  if (!Number.isFinite(tokens) || tokens <= 0 || !Number.isFinite(contextWindow) || contextWindow <= 0) return false;
-  return (tokens / contextWindow) >= threshold || (contextWindow - tokens) <= minReserveTokens;
 }
 
 export function estimatePiCompactionPressure(params: {
@@ -99,62 +140,51 @@ export function estimatePiCompactionPressure(params: {
     sdkSessionHint = 0;
   }
 
-  // Provider usage from the last completed assistant response is the most
-  // faithful signal. The live transcript estimate is next best because it tracks
-  // messages already present in the Pi agent state before the next provider call.
-  // Request-body/hint signals are useful diagnostics and output-clamp inputs, but
-  // they can be stale after compaction or tool-heavy turns. Do not let an
-  // uncorroborated risk hint compact a session that is only ~30-60% full.
-  const authoritativeTokens = Math.max(lastUsageTokens, messageEstimate);
+  // The request-body estimate is captured during the previous provider call.
+  // At this pre-prompt boundary it is not a measurement of the next request.
+  // Use current session usage/transcript for normal compaction; Pi's actual
+  // provider-overflow handling and Tower's bounded 413 recovery remain separate.
+  // Canonical SDK projection invalidates usage from before context edits or
+  // compaction and includes trailing tool results. Never resurrect raw history.
+  const projection = session?.sessionManager?.buildSessionProjection?.();
+  const authoritativeTokens = projection
+    ? estimatePiProjectedPressure(projection, session.sessionManager.getBranch())
+    : Math.max(lastUsageTokens, messageEstimate);
   const riskProbeTokens = Math.max(requestBodyTokens, hintedTokens, sdkSessionHint);
   const riskProbeSource = chooseRiskProbeSource({ requestBodyTokens, hintedTokens, sdkSessionHint });
-  // Keep Tower ahead of provider/SDK auto-compaction. The SDK compactor can
-  // itself fail when started too close to the Responses context edge, especially
-  // after long multi-turn tool runs. Default to a modestly earlier Tower-side
-  // trigger and accept request-body risk hints once live usage is already in the
-  // upper-70% band, not only at the old 90% edge.
-  const proactiveThreshold = Number(process.env.PI_PROACTIVE_COMPACTION_PRESSURE || 0.72);
-  const minReserveTokens = Number(process.env.PI_PROACTIVE_COMPACTION_MIN_RESERVE_TOKENS || 96_000);
-  const riskCorroborationMinPressure = Number(process.env.PI_PROACTIVE_COMPACTION_RISK_MIN_PRESSURE || 0.55);
+  // Start before the SDK's near-window threshold, leaving room for long
+  // tool loops and a summarization request. This is a token-pressure trigger,
+  // not a byte-limit guarantee; the router must independently accept the body.
+  // Do not restore the old 96k absolute floor (which compacted 200k sessions
+  // near 52%) or trigger on stale outgoing-request token estimates.
+  const budget = resolvePiCompactionBudget(contextWindow, settings);
   const riskInflationMultiplier = Number(process.env.PI_PROACTIVE_COMPACTION_RISK_INFLATION_MULTIPLIER || 4.0);
   const riskInflationAbsoluteTokens = Number(process.env.PI_PROACTIVE_COMPACTION_RISK_INFLATION_ABSOLUTE_TOKENS || 256_000);
-
-  const authoritativePressure = contextWindow > 0 ? authoritativeTokens / contextWindow : 0;
   const riskProbeInflated = authoritativeTokens > 0
     && riskProbeTokens > authoritativeTokens * riskInflationMultiplier
     && (riskProbeTokens - authoritativeTokens) > riskInflationAbsoluteTokens;
-  const riskWouldCompact = wouldCompactByTowerPolicy(riskProbeTokens, contextWindow, proactiveThreshold, minReserveTokens);
-  const riskProbeAccepted = Boolean(
-    riskWouldCompact
-    && riskProbeTokens > authoritativeTokens
-    && (
-      authoritativePressure >= riskCorroborationMinPressure
-      // A full outgoing Responses request is more actionable than a stale hint.
-      // Accept it directly once it crosses the preflight floor unless it is an
-      // obvious multi-x estimator explosion.
-      || (riskProbeSource === 'requestBody' && riskProbeTokens / contextWindow >= 0.90)
-    )
-    && !riskProbeInflated
-  );
-
-  const probeTokens = riskProbeAccepted ? riskProbeTokens : authoritativeTokens;
+  const probeTokens = authoritativeTokens;
+  // The SDK may also compact independently at its configured reserve.
   const sdkWouldCompact = settings && contextWindow
     ? shouldCompact(probeTokens, contextWindow, settings)
     : null;
   const pressure = contextWindow > 0 ? probeTokens / contextWindow : 0;
-  const towerWouldCompact = wouldCompactByTowerPolicy(probeTokens, contextWindow, proactiveThreshold, minReserveTokens);
+  const towerWouldCompact = probeTokens > 0 && probeTokens >= budget.towerThresholdTokens;
   const latestEntryType = latestPiBranchEntryType(session);
   const triggerSource: PiProactiveCompactionPressure['triggerSource'] = towerWouldCompact
-    ? (riskProbeAccepted ? 'corroborated-risk' : 'authoritative')
+    ? 'authoritative'
     : 'none';
 
   return {
     contextWindow,
-    compactionReason: triggerSource === 'authoritative'
-      ? 'proactive-authoritative'
-      : triggerSource === 'corroborated-risk'
-        ? 'proactive-corroborated-risk'
-        : 'none',
+    displayPressure: process.env.PI_TOWER_PROACTIVE_COMPACTION_EXECUTION !== '0'
+      && Number.isFinite(probeTokens) && probeTokens > 0
+      && Number.isFinite(budget.towerThresholdTokens) && budget.towerThresholdTokens > 0
+      && budget.towerThresholdTokens <= contextWindow
+      ? { tokens: probeTokens, thresholdTokens: budget.towerThresholdTokens,
+          policy: 'tower-pre-prompt', source: projection ? 'projection' : 'usage-or-transcript', observedAt: Date.now() }
+      : undefined,
+    compactionReason: triggerSource === 'authoritative' ? 'proactive-authoritative' : 'none',
     probeTokens,
     pressure,
     authoritativeTokens,
@@ -166,7 +196,7 @@ export function estimatePiCompactionPressure(params: {
     sdkSessionHint,
     riskProbeSource,
     riskProbeInflated,
-    riskProbeAccepted,
+    riskProbeAccepted: false,
     triggerSource,
     settings,
     sdkWouldCompact,
@@ -190,12 +220,8 @@ export function shouldProactivelyCompactPiSession(params: {
     pressure.towerWouldCompact
   );
 
-  // 2026-06-24: Tower executes pre-prompt compaction when the reliable pressure
-  // signal crosses the proactive threshold. 2026-07-03 lowers the default runway
-  // from the old 90% edge to a slightly earlier trigger because Responses
-  // summarization can stream-truncate if compaction starts too late. Request-body
-  // / hint-only spikes remain advisory unless corroborated by high live usage,
-  // preserving the guard against confusing low-actual “왜 compact?” cases.
+  // Tower executes pre-prompt compaction at the configured current-session
+  // pressure. Previous request-body estimates never authorize normal compaction.
   // Operators can temporarily disable this if SDK behavior changes unexpectedly.
   const executionDisabled = process.env.PI_TOWER_PROACTIVE_COMPACTION_EXECUTION === '0';
   return { ...pressure, shouldAdvise, shouldCompact: !executionDisabled && shouldAdvise };

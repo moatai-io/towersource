@@ -31,6 +31,16 @@ describe('credential input normalizer', () => {
     expect(() => normalizeSecretInput('not a key', policy)).toThrow('header or footer');
   });
 
+  it('recognizes non-SSH PEM env names before the generic api_key field', () => {
+    const policy = inferSecretPolicy({ provider: 'github', fieldId: 'api_key', envName: 'TOWER_FEEDBACK_GITHUB_PRIVATE_KEY' });
+    expect(policy.inputKind).toBe('private_key');
+    const pem = ['-----BEGIN RSA ' + 'PRIVATE KEY-----', 'synthetic-test-body', '-----END RSA ' + 'PRIVATE KEY-----'].join('\n');
+    expect(normalizeSecretInput(pem, policy).value).toBe(pem);
+    expect(() => normalizeSecretInput('not a PEM', policy)).toThrow('header or footer');
+    expect(inferSecretPolicy({ credentialType: 'private_key', fieldId: 'api_key' }).inputKind).toBe('private_key');
+    expect(inferSecretPolicy({ provider: 'github', fieldId: 'api_key', envName: 'GH_TOKEN' }).rejectInternalWhitespace).toBe(true);
+  });
+
   it('canonicalizes JSON credentials without exposing values in metadata', () => {
     const policy = inferSecretPolicy({ fieldId: 'credentials_json' });
     const result = normalizeSecretInput(' { "token": "secret" } ', policy);

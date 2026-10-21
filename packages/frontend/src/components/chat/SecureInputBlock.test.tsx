@@ -22,6 +22,11 @@ function renderSecureInput(raw: string) {
   );
 }
 
+const enqueueMessage = vi.fn();
+vi.mock('../../stores/chat-store', () => ({
+  useChatStore: { getState: () => ({ enqueueMessage }) },
+}));
+
 let sessionState: { activeSessionId: string | null; sessions: Array<{ id: string; projectId: string | null }> };
 
 vi.mock('../../stores/session-store', () => ({
@@ -45,6 +50,7 @@ function spec(scope: 'personal' | 'project' | 'workspace') {
 }
 
 beforeEach(() => {
+  enqueueMessage.mockReset();
   sessionState = {
     activeSessionId: 'session-1',
     sessions: [{ id: 'session-1', projectId: 'project-1' }],
@@ -56,6 +62,22 @@ afterEach(() => {
 });
 
 describe('SecureInputBlock Credential Vault endpoint routing', () => {
+  it('isolates secret fields from browser credential autofill heuristics', () => {
+    const { container } = renderSecureInput(spec('project'));
+    const secretInput = screen.getByPlaceholderText('TEST_API_KEY');
+    const secureBlock = secretInput.closest('[data-form-type="other"]');
+
+    expect(secretInput).toHaveAttribute('type', 'password');
+    expect(secretInput).toHaveAttribute('name', 'tower-secret-value-TEST_API_KEY');
+    expect(secretInput).toHaveAttribute('autocomplete', 'new-password');
+    expect(secretInput).toHaveAttribute('data-1p-ignore', 'true');
+    expect(secretInput).toHaveAttribute('data-bwignore', 'true');
+    expect(secretInput).toHaveAttribute('data-lpignore', 'true');
+    expect(secretInput).toHaveAttribute('data-protonpass-ignore', 'true');
+    expect(secureBlock).toBeInTheDocument();
+    expect(container.querySelector('[data-form-type="other"]')).toHaveAttribute('data-1p-ignore', 'true');
+  });
+
   it('uses the personal credential endpoint for personal scope', async () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
       ok: true,
@@ -132,5 +154,43 @@ describe('SecureInputBlock Credential Vault endpoint routing', () => {
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());
     expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/credential-vault/credentials/api-key');
+  });
+});
+
+ describe('secure credential continuation', () => {
+  it('queues one secret-free continuation after all fields save, even if the active session changes', async () => {
+    let finish!: () => void;
+    const gate = new Promise<void>(resolve => { finish = resolve; });
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
+      await gate;
+      return { ok: true, json: async () => ({}) } as Response;
+    });
+    const multi = JSON.parse(spec('project'));
+    multi.fields.push({ key: 'SECOND_KEY', required: true });
+    renderSecureInput(JSON.stringify(multi));
+    fireEvent.change(screen.getByPlaceholderText('TEST_API_KEY'), { target: { value: 'private-first-value' } });
+    fireEvent.change(screen.getByPlaceholderText('SECOND_KEY'), { target: { value: 'private-second-value' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save to Vault' }));
+    expect(enqueueMessage).not.toHaveBeenCalled();
+    sessionState.activeSessionId = 'session-2';
+    finish();
+    await waitFor(() => expect(enqueueMessage).toHaveBeenCalledTimes(1));
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(enqueueMessage).toHaveBeenCalledWith('session-1', chatEn.secureInputResumeRequest);
+    expect(JSON.stringify(enqueueMessage.mock.calls)).not.toContain('private-');
+  });
+
+  it('does not continue after a partial save failure', async () => {
+    vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce({ ok: true, json: async () => ({}) } as Response)
+      .mockResolvedValueOnce({ ok: false, json: async () => ({ error: 'Save rejected' }) } as Response);
+    const multi = JSON.parse(spec('project'));
+    multi.fields.push({ key: 'SECOND_KEY', required: true });
+    renderSecureInput(JSON.stringify(multi));
+    fireEvent.change(screen.getByPlaceholderText('TEST_API_KEY'), { target: { value: 'private-first-value' } });
+    fireEvent.change(screen.getByPlaceholderText('SECOND_KEY'), { target: { value: 'private-second-value' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save to Vault' }));
+    await screen.findByText('Save rejected');
+    expect(enqueueMessage).not.toHaveBeenCalled();
   });
 });

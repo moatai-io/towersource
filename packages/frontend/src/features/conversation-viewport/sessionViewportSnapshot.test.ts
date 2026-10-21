@@ -26,6 +26,26 @@ describe('sessionViewportSnapshot', () => {
     expect(getSessionViewportSnapshot('session-a')).toEqual(historySnapshot);
   });
 
+  it('rejects an older deferred sample after a newer leave-time capture', () => {
+    const latest = { ...historySnapshot, anchorMessageId: 'm-latest', capturedAt: 200 };
+    const stale = { ...historySnapshot, anchorMessageId: 'm-stale', capturedAt: 150 };
+
+    captureSessionViewportSnapshot('session-a', latest);
+    captureSessionViewportSnapshot('session-a', stale);
+
+    expect(getSessionViewportSnapshot('session-a')).toEqual(latest);
+  });
+
+  it('allows a same-timestamp synchronous capture to replace an earlier sample', () => {
+    const first = { ...historySnapshot, anchorMessageId: 'm-first', capturedAt: 200 };
+    const second = { ...historySnapshot, anchorMessageId: 'm-second', capturedAt: 200 };
+
+    captureSessionViewportSnapshot('session-a', first);
+    captureSessionViewportSnapshot('session-a', second);
+
+    expect(getSessionViewportSnapshot('session-a')).toEqual(second);
+  });
+
   it('restores a valid history anchor by stable message ID', () => {
     expect(chooseSessionViewportRestorePlan({
       snapshot: historySnapshot,

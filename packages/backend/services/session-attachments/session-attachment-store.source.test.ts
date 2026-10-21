@@ -15,11 +15,11 @@ describe('session-scoped attachment contract', () => {
     expect(store).toContain('owner_user_id = $2 AND session_id = $3');
   });
 
-  it('requires project-connected chat uploads and returns permanent project paths', () => {
+  it('stores chat uploads in session storage without requiring project write access', () => {
     expect(input).toContain('/api/session-attachments/');
     expect(input).not.toContain("fetch('/api/files/finalize-uploads'");
-    expect(api).toContain("throw new SessionAttachmentError('CONFLICT', 'Chat uploads require a project-connected session')");
-    expect(api).toContain('const attachment = await commitStagedProjectUpload');
+    expect(api).not.toContain('Chat uploads require a project-connected session');
+    expect(api).toContain('const attachment = await createSessionAttachmentFromPath');
     expect(api).not.toContain('const created = await createSessionAttachmentFromPath');
     expect(api).not.toContain('const attachment = await promoteSessionAttachmentToProject');
     expect(input).toContain('content: attachment.promotedUri || attachment.uri');
@@ -36,10 +36,6 @@ describe('session-scoped attachment contract', () => {
     expect(api).toContain("upload.array('files', 20)");
     expect(api).toContain('multer.diskStorage');
     expect(api).not.toContain('multer.memoryStorage');
-    expect(api).toContain('commitStagedProjectUpload');
-    expect(api).toContain('COPYFILE_EXCL');
-    expect(api).toContain('await fs.rename(temporaryTarget, target)');
-    expect(api).toContain('await fs.rm(temporaryTarget, { force: true })');
     expect(api).toContain('sourcePath: file.path');
     expect(api).toContain('await fs.rm(file.path, { force: true })');
     expect(api).toContain("res.once('finish', cleanup)");
@@ -49,7 +45,7 @@ describe('session-scoped attachment contract', () => {
     expect(api).toContain("res.status(413).json({ error: 'Upload batch is too large; send fewer files per request' })");
     expect(input).toContain('currentBatch.length >= 20 || currentBatchBytes + file.size > maxBatchBytes');
     expect(input).toContain('const maxBatchBytes = 200 * 1024 * 1024');
-    expect(input).toContain('uploadedAttachments.push(...(data.attachments || []))');
+    expect(input).toContain('for (const attachment of (data.attachments || []))');
   });
 
   it('keeps upload references path-only so a PPTX container cannot trigger compaction by itself', () => {
@@ -64,7 +60,8 @@ describe('session-scoped attachment contract', () => {
     expect(api).toContain('const status = failures.length > 0 ? 207 : 200');
     expect(api).toContain('res.status(status).json({ attachments, failures })');
     expect(input).toContain('uploadFailures.push(...(data.failures || []))');
-    expect(input).toContain("label: t('partialUploadFailed')");
+    expect(input).toContain("reportUploadFailure(uploadScope('attachment', String(activeSessionId))");
+    expect(input).not.toMatch(/toastError\([^\n]*partialUploadFailed/);
   });
 
   it('bounds request disk staging and reports per-file partial success', () => {
@@ -73,7 +70,8 @@ describe('session-scoped attachment contract', () => {
     expect(api).toContain('const failures: Array<{ name: string; error: string }> = []');
     expect(api).toContain('const status = failures.length > 0 ? 207 : 200');
     expect(input).toContain('uploadFailures.push(...(data.failures || []))');
-    expect(input).toContain("label: t('partialUploadFailed')");
+    expect(input).toContain("reportUploadFailure(uploadScope('attachment', String(activeSessionId))");
+    expect(input).not.toMatch(/toastError\([^\n]*partialUploadFailed/);
   });
 
   it('avoids multiplying a large PDF batch through client-side chunking', () => {

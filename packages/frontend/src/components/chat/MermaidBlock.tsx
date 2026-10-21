@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
+import { useTranslation } from 'react-i18next';
 import mermaid from 'mermaid';
 import { useSettingsStore } from '../../stores/settings-store';
 import { isChunkLoadError, recoverFromChunkLoadError } from '../../utils/app-version';
@@ -451,6 +452,7 @@ function makeSvgFixedSize(svg: string, metrics: SvgMetrics): string {
 }
 
 function MermaidLightbox({ svgContent, onClose }: { svgContent: string; onClose: () => void }) {
+  const { t } = useTranslation('chat');
   const metrics = useMemo(() => readSvgMetrics(svgContent), [svgContent]);
   const canvasSvg = useMemo(() => makeSvgFixedSize(svgContent, metrics), [svgContent, metrics]);
   const [scale, setScale] = useState(1);
@@ -641,25 +643,25 @@ function MermaidLightbox({ svgContent, onClose }: { svgContent: string; onClose:
         onClick={e => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
-        aria-label="Diagram viewer"
+        aria-label={t('diagram.viewer', { defaultValue: '다이어그램 보기' })}
       >
         {/* Top toolbar */}
         <div className="absolute left-3 right-3 top-3 z-20 flex flex-wrap items-center justify-between gap-2 pointer-events-none">
           <div className="flex items-center gap-1.5 pointer-events-auto rounded-xl border border-surface-700/50 bg-surface-950/80 p-1 shadow-xl backdrop-blur-md">
-            <button onClick={fitToView} className={btnClass} title="Fit to screen (0)">
-              Fit
+            <button onClick={fitToView} className={btnClass} title={t('diagram.fit', { defaultValue: '화면에 맞추기 (0)' })}>
+              {t('diagram.fitLabel', { defaultValue: '화면에 맞추기' })}
             </button>
-            <button onClick={setActualSize} className={btnClass} title="Actual size (1)">
+            <button onClick={setActualSize} className={btnClass} title={t('diagram.actualSize', { defaultValue: '원래 크기 (1)' })}>
               100%
             </button>
             <div className="mx-1 h-5 w-px bg-surface-700/60" />
-            <button onClick={() => zoomFromCenter(1 / 1.2)} className={iconBtnClass} title="Zoom out (-)">
+            <button onClick={() => zoomFromCenter(1 / 1.2)} className={iconBtnClass} title={t('diagram.zoomOut', { defaultValue: '축소 (-)' })}>
               <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM7 10h6" />
               </svg>
             </button>
             <input
-              aria-label="Zoom"
+              aria-label={t('diagram.zoom', { defaultValue: '확대 비율' })}
               className="h-1.5 w-28 accent-blue-400"
               min="0.05"
               max="8"
@@ -671,7 +673,7 @@ function MermaidLightbox({ svgContent, onClose }: { svgContent: string; onClose:
                 setViewMode('free');
               }}
             />
-            <button onClick={() => zoomFromCenter(1.2)} className={iconBtnClass} title="Zoom in (+)">
+            <button onClick={() => zoomFromCenter(1.2)} className={iconBtnClass} title={t('diagram.zoomIn', { defaultValue: '확대 (+)' })}>
               <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM10 7v6m3-3H7" />
               </svg>
@@ -681,7 +683,7 @@ function MermaidLightbox({ svgContent, onClose }: { svgContent: string; onClose:
             </span>
           </div>
 
-          <button onClick={onClose} className={`${iconBtnClass} pointer-events-auto`} title="Close (Esc)">
+          <button onClick={onClose} className={`${iconBtnClass} pointer-events-auto`} title={t('diagram.close', { defaultValue: '닫기 (Esc)' })}>
             <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
             </svg>
@@ -742,7 +744,7 @@ function MermaidLightbox({ svgContent, onClose }: { svgContent: string; onClose:
 
         {/* Hint */}
         <div className="pointer-events-none absolute bottom-4 left-1/2 z-20 hidden -translate-x-1/2 select-none rounded-full border border-surface-700/50 bg-surface-950/75 px-3 py-1.5 text-[13px] text-gray-500 shadow-lg backdrop-blur-md lg:block">
-          Drag: move · Wheel: pan · Ctrl/Cmd+Wheel: zoom · 0: fit · 1: 100% · Esc: close
+          {t('diagram.controls', { defaultValue: '드래그: 이동 · 휠: 스크롤 · Ctrl/Cmd+휠: 확대·축소 · 0: 화면에 맞추기 · 1: 100% · Esc: 닫기' })}
         </div>
       </div>
     </div>,
@@ -755,6 +757,7 @@ interface MermaidBlockProps {
 }
 
 export const MermaidBlock = React.memo(function MermaidBlock({ code }: MermaidBlockProps) {
+  const { t } = useTranslation('chat');
   const [svgContent, setSvgContent] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(false);
@@ -887,7 +890,7 @@ export const MermaidBlock = React.memo(function MermaidBlock({ code }: MermaidBl
             <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
             <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
           </svg>
-          Rendering diagram…
+          {t('diagram.rendering', { defaultValue: '다이어그램을 그리는 중…' })}
         </div>
       </div>
     );
@@ -901,7 +904,7 @@ export const MermaidBlock = React.memo(function MermaidBlock({ code }: MermaidBl
           <button
             onClick={() => setExpanded(true)}
             className="p-1.5 rounded-md bg-surface-800/90 border border-surface-700/50 text-gray-400 hover:text-gray-200 hover:bg-surface-700/80 transition-all"
-            title="Expand"
+            title={t('diagram.expand', { defaultValue: '확대하여 보기' })}
           >
             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
@@ -910,7 +913,7 @@ export const MermaidBlock = React.memo(function MermaidBlock({ code }: MermaidBl
           <button
             onClick={handleDownloadSvg}
             className="p-1.5 rounded-md bg-surface-800/90 border border-surface-700/50 text-gray-400 hover:text-gray-200 hover:bg-surface-700/80 transition-all"
-            title="Download SVG"
+            title={t('diagram.downloadSvg', { defaultValue: 'SVG 다운로드' })}
           >
             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
@@ -920,7 +923,7 @@ export const MermaidBlock = React.memo(function MermaidBlock({ code }: MermaidBl
           <button
             onClick={handleDownloadJpg}
             className="p-1.5 rounded-md bg-surface-800/90 border border-surface-700/50 text-gray-400 hover:text-gray-200 hover:bg-surface-700/80 transition-all"
-            title="Download JPG"
+            title={t('diagram.downloadJpg', { defaultValue: 'JPG 다운로드' })}
           >
             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />

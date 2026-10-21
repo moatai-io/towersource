@@ -6,6 +6,11 @@ const route = fs.readFileSync(path.resolve(import.meta.dirname, './ai-service-ap
 const api = fs.readFileSync(path.resolve(import.meta.dirname, './api.ts'), 'utf8');
 
 describe('AI service authenticated API', () => {
+  it('keeps reads available while restricting every deployment management mutation to Admin', () => {
+    expect(route).toContain("if(req.method==='GET'||req.method==='HEAD')return next()");
+    expect(route).toContain("if(a.role!=='admin')return res.status(403).json({error:'Admin required for external deployment management'})");
+  });
+
   it('mounts public credential serving above auth and management routes behind auth', () => {
     expect(api.indexOf("router.use('/ai-service-public', aiServicePublicRouter)")).toBeLessThan(api.indexOf('router.use(authMiddleware)'));
     expect(api.indexOf('router.use(authMiddleware)')).toBeLessThan(api.indexOf("router.use('/ai-services', aiServiceRouter)"));

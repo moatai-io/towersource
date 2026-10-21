@@ -12,6 +12,7 @@ describe('Pi cached tool authority context', () => {
     expect(engine).toContain('userRole: opts.userRole');
     expect(engine).toContain('projectId: opts.projectId');
     expect(engine).toContain('workbenchRolloutEnabled: opts.projectId');
+    expect(engine).toContain('operatorHostAccess: assembledOperatorHostAccess');
   });
 
   it('rebuilds a cached SDK Session before a turn when authority or Workbench rollout changes', () => {
@@ -22,4 +23,21 @@ describe('Pi cached tool authority context', () => {
     expect(engine).toContain('await resolveWorkbenchRollout(opts.projectId)');
     expect(engine).toContain('this.dispose(sessionId);');
   });
+
+  it('rebuilds a cached SDK Session when Operator access is granted or revoked', () => {
+    expect(engine).toContain('const operatorHostAccess = await resolveOperatorHostAccess');
+    expect(engine).toContain('entry.toolContext?.operatorHostAccess ?? false');
+    expect(entry).toContain('operatorHostAccess?: boolean');
+  });
+});
+
+it('manual compact refreshes authority before reusing the cached session', () => {
+  const compact = engine.slice(engine.indexOf("prompt = 'The user explicitly requested /compact."));
+  expect(compact).toContain('await resolveOperatorHostAccess');
+  expect(compact).toContain('entry.toolContext?.operatorHostAccess ?? false');
+  expect(compact.indexOf('await resolveOperatorHostAccess')).toBeLessThan(compact.indexOf('await entry.session.compact(prompt)'));
+});
+it('records the assembled authority rather than a second policy read', () => {
+  expect(engine).toContain('operatorHostAccess: assembledOperatorHostAccess');
+  expect(engine).not.toContain('operatorHostAccess: await resolveOperatorHostAccess');
 });

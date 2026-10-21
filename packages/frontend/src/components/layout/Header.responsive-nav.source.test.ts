@@ -20,6 +20,6 @@ describe('Header responsive navigation density', () => {
     expect(source).toContain('<AppMenu');
     expect(source).toContain('relative z-50 h-12');
     expect(source).toContain('w-64 max-h-[calc(100dvh-4.5rem)]');
-    expect(source).toContain('w-4 h-4 shrink-0 flex items-center justify-center');
+    expect(source).toContain('mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center');
   });
 });

@@ -2,6 +2,7 @@
 // Public API: registerAgentTurn, claimAgentTurn, settleAgentTurn. See README.md.
 
 import { query, queryOne } from '../../db/pg-repo.js';
+import { projectRecoveryAttention } from './recovery-attention.js';
 
 export type AgentTurnState = 'running' | 'stop_requested' | 'waiting_retry' | 'completed' | 'stopped_clean' | 'stopped_forced' | 'failed' | 'needs_attention';
 
@@ -27,6 +28,8 @@ export type AgentTurnTiming = {
   waitingUserMs: number;
   terminalAt: string | null;
   lastError: string | null;
+  requiresAttention: boolean;
+  recoveryDisposition: 'superseded' | null;
 };
 
 export type DueAgentTurnRetry = {
@@ -62,9 +65,10 @@ export async function getActiveAgentTurnTiming(sessionId: string): Promise<Agent
     waiting_user_ms: string | number;
     terminal_at: string | null;
     last_error: string | null;
+    last_failure_class: string | null;
   }>(
     `SELECT root_turn_id, state, accepted_at::text, execution_started_at::text,
-            waiting_user_started_at::text, waiting_user_ms, terminal_at::text, last_error
+            waiting_user_started_at::text, waiting_user_ms, terminal_at::text, last_error, last_failure_class
        FROM agent_turns
       WHERE session_id = $1
       ORDER BY accepted_at DESC
@@ -74,13 +78,12 @@ export async function getActiveAgentTurnTiming(sessionId: string): Promise<Agent
   if (!row) return null;
   return {
     rootTurnId: row.root_turn_id,
-    state: row.state,
+    ...projectRecoveryAttention(row.state, row.last_failure_class, row.last_error),
     acceptedAt: row.accepted_at,
     executionStartedAt: row.execution_started_at,
     waitingUserStartedAt: row.waiting_user_started_at,
     waitingUserMs: Number(row.waiting_user_ms || 0),
     terminalAt: row.terminal_at,
-    lastError: row.last_error,
   };
 }
 
@@ -139,6 +142,7 @@ export async function expireUnsafeRestartRecoveryTurns(params: {
          FROM agent_turns t
         WHERE t.state IN ('running', 'waiting_retry', 'stop_requested')
           AND t.waiting_user_started_at IS NULL
+        AND COALESCE(t.last_failure_class,'') <> 'wait_requested'
           AND (
             COALESCE(t.accepted_at, t.created_at) < NOW() - ($1::int * INTERVAL '1 hour')
             OR EXISTS (
@@ -223,6 +227,8 @@ export async function findDueAgentTurnRetries(params: {
        FROM agent_turns t
        JOIN sessions s ON s.id = t.session_id
       WHERE t.state = 'waiting_retry'
+        AND t.waiting_user_started_at IS NULL
+        AND COALESCE(t.last_failure_class,'') <> 'wait_requested'
         AND (t.next_attempt_at IS NULL OR t.next_attempt_at <= NOW())
         AND t.owner_token IS NULL
         AND s.engine = 'pi'
@@ -257,9 +263,9 @@ export async function claimForegroundAgentTurn(params: {
   sessionId: string;
   ownerBootId: string;
   leaseSeconds?: number;
-}): Promise<ForegroundAgentTurnClaim> {
+}, readOne: typeof queryOne = queryOne): Promise<ForegroundAgentTurnClaim> {
   const leaseSeconds = Math.max(15, Math.min(params.leaseSeconds ?? 180, 600));
-  const row = await queryOne<{
+  const row = await readOne<{
     claimed: boolean;
     token: string | null;
     state: AgentTurnState | 'missing';
@@ -306,10 +312,10 @@ export async function claimAgentTurn(params: {
   leaseSeconds?: number;
   /** Hard stop for crash-looping automatic recovery. */
   maxAttempts?: number;
-}): Promise<AgentTurnClaim> {
+}, readOne: typeof queryOne = queryOne): Promise<AgentTurnClaim> {
   const leaseSeconds = Math.max(15, Math.min(params.leaseSeconds ?? 180, 600));
   const maxAttempts = Math.max(1, Math.min(params.maxAttempts ?? 4, 20));
-  const row = await queryOne<{
+  const row = await readOne<{
     claimed: boolean;
     token: string | null;
     attempt: number;
@@ -320,7 +326,7 @@ export async function claimAgentTurn(params: {
        VALUES ($1, $2, 'running')
        ON CONFLICT (root_turn_id) DO NOTHING
      ), locked AS (
-       SELECT * FROM agent_turns WHERE root_turn_id = $1 FOR UPDATE
+       SELECT * FROM agent_turns WHERE root_turn_id = $1 AND session_id = $2 FOR UPDATE
      ), exhausted AS (
        UPDATE agent_turns t
        SET state = 'needs_attention',
@@ -334,14 +340,15 @@ export async function claimAgentTurn(params: {
            updated_at = NOW()
        FROM locked
        WHERE t.root_turn_id = locked.root_turn_id
-         AND locked.state NOT IN ('completed', 'failed', 'needs_attention')
+         AND locked.state IN ('running', 'waiting_retry')
          AND locked.attempt_count >= $7::int
        RETURNING 1
      ), candidate AS (
        SELECT root_turn_id, attempt_count + 1 AS next_attempt, gen_random_uuid()::text AS next_token
        FROM locked
        WHERE NOT EXISTS (SELECT 1 FROM exhausted)
-         AND state NOT IN ('completed', 'failed', 'needs_attention')
+         AND state IN ('running', 'waiting_retry')
+         AND waiting_user_started_at IS NULL
          AND attempt_count < $7::int
          AND NOT (
            state = 'running'
@@ -528,9 +535,9 @@ export async function settleAgentTurn(params: {
   failureClass?: string;
   assistantMessageId?: string;
   retryDelaySeconds?: number;
-}): Promise<boolean> {
+}, readOne: typeof queryOne = queryOne): Promise<boolean> {
   const retryDelaySeconds = Math.max(1, Math.min(params.retryDelaySeconds ?? 20, 300));
-  const row = await queryOne<{ settled: boolean }>(
+  const row = await readOne<{ settled: boolean }>(
     `WITH updated AS (
        UPDATE agent_turns
        SET state = $3,

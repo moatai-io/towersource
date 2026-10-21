@@ -596,8 +596,13 @@ export async function getSkillsForSession(userId?: number, projectId?: string | 
 export async function getCommandsForUser(userId?: number, projectId?: string | null, username?: string | null, cwd?: string): Promise<CommandEntry[]> {
   const userPrefs = userId ? await getUserSkillPrefs(userId) : new Map<string, boolean>();
 
-  const seen = new Set<string>();
   const result: CommandEntry[] = [...nativeCommandEntries()];
+  const seen = new Set<string>();
+  for (const command of result) {
+    seen.add(command.id);
+    seen.add(command.canonical);
+    for (const alias of command.aliases) seen.add(alias);
+  }
 
   const projectRoot = await resolveProjectSkillRoot(cwd, projectId);
   const projectManagedSkillsReady = hasProjectManagedSkillManifest(projectRoot ?? undefined);
@@ -605,11 +610,17 @@ export async function getCommandsForUser(userId?: number, projectId?: string | n
     if (seen.has(command.id) || seen.has(command.canonical)) continue;
     seen.add(command.id);
     seen.add(command.canonical);
+    for (const alias of command.aliases) seen.add(alias);
     result.push(command);
   }
   for (const s of loadProjectFilesystemSkills(projectRoot ?? undefined)) {
-    if (seen.has(s.name)) continue;
+    const canonical = `/${s.name}`;
+    if (seen.has(s.name) || seen.has(canonical)) {
+      console.warn(`[commands] skipping conflicting project skill ${s.skillPath || s.name}: ${canonical} is already registered by a command`);
+      continue;
+    }
     seen.add(s.name);
+    seen.add(canonical);
     if (!isSkillActiveForUser(true, s.name, userPrefs)) continue;
     result.push(skillCommandEntry({
       name: s.name,

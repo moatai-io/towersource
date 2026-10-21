@@ -40,6 +40,9 @@ export function SessionFilesMenuSection({ activeSessionId, onFileClick, isMobile
       return;
     }
 
+    // Do not retain another session's or a previous authority snapshot's paths.
+    setFiles([]);
+    setProjectMissing(false);
     let cancelled = false;
     const fetchFiles = async () => {
       setLoading(true);
@@ -66,6 +69,11 @@ export function SessionFilesMenuSection({ activeSessionId, onFileClick, isMobile
           { headers },
         );
         if (cancelled) return;
+        if (!fallbackResponse.ok) {
+          setFiles([]);
+          setProjectMissing(false);
+          return;
+        }
         if (fallbackResponse.ok) {
           const data = await fallbackResponse.json();
           if (cancelled) return;
@@ -77,7 +85,11 @@ export function SessionFilesMenuSection({ activeSessionId, onFileClick, isMobile
           );
         }
       } catch {
-        // Session files are a convenience surface; the rest of the menu stays usable.
+        // Failed refresh must not keep stale file paths after authority changes.
+        if (!cancelled) {
+          setFiles([]);
+          setProjectMissing(false);
+        }
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -94,7 +106,7 @@ export function SessionFilesMenuSection({ activeSessionId, onFileClick, isMobile
       window.clearInterval(interval);
       document.removeEventListener('visibilitychange', pollIfVisible);
     };
-  }, [activeSessionId]);
+  }, [activeSessionId, panelOpen]);
 
   const positionPanel = React.useCallback(() => {
     const trigger = triggerRef.current;

@@ -21,5 +21,9 @@ describe('side effect tool guard scope', () => {
   it('does not ledger conversational checkpoints that are intentionally repeatable', () => {
     expect(shouldGuardSideEffectTool('AskUserQuestion', write)).toBe(false);
     expect(shouldGuardSideEffectTool('TodoWrite', write)).toBe(false);
+    expect(shouldGuardSideEffectTool('wait', write)).toBe(false);
+    expect(shouldGuardSideEffectTool('mcp__wait__wait', write)).toBe(false);
+    expect(shouldGuardSideEffectTool('sleep', write)).toBe(false);
+    expect(shouldGuardSideEffectTool('mcp__sleep__sleep', write)).toBe(false);
   });
 });

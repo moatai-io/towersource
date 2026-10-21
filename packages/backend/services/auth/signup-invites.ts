@@ -13,12 +13,12 @@ import {
   InvalidUsernameError,
   UsernameTakenError,
   autoJoinDefaultProjects,
-  encryptPassword,
+  hashPassword,
   invalidateAuthCache,
 } from './auth.js';
 
 export const APPROVAL_STATUSES = new Set(['active', 'pending', 'rejected', 'suspended']);
-export const INVITE_ASSIGNABLE_ROLES = new Set(['viewer', 'guest', 'member', 'operator', 'customer_manager']);
+export const INVITE_ASSIGNABLE_ROLES = new Set(['viewer', 'guest', 'member', 'operator']);
 
 export interface SignupInviteCodeRow {
   id: number;
@@ -216,7 +216,7 @@ export async function requestSignup(input: SignupRequestInput) {
   if (!displayName) throw new Error('Display name is required');
   if (!input.password || input.password.length < 8) throw new Error('Password must be at least 8 characters');
 
-  const encrypted = encryptPassword(input.password);
+  const encrypted = await hashPassword(input.password);
   const approvalMode = input.approvalMode === 'manual' ? 'manual' : 'auto';
   const approvalStatus = approvalMode === 'manual' ? 'pending' : 'active';
 

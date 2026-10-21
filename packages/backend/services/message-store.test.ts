@@ -94,3 +94,26 @@ describe('message-store content compaction', () => {
     expect(JSON.stringify(persisted)).not.toContain('Need internal planning');
   });
 });
+
+ describe('composer message context', () => {
+  it.each([true, false])('bounds body loading with sequence capability %s', async (sequence) => {
+    const { getComposerMessageContext, resetMessageOrderingCapabilityForTests } = await import('./message-store.js');
+    resetMessageOrderingCapabilityForTests();
+    queryOne.mockReset();
+    if (sequence) queryOne.mockResolvedValueOnce({});
+    else queryOne.mockRejectedValueOnce(Object.assign(new Error('missing column'), { code: '42703' }));
+    queryOne.mockResolvedValueOnce({ content: '[]', context_revision: '123' });
+    expect(await getComposerMessageContext('s1')).toEqual({ content: '[]', contextRevision: 123 });
+    const [sql, params] = queryOne.mock.calls[1];
+    expect(sql).toContain(sequence ? 'message_seq DESC' : 'created_at DESC, id DESC');
+    expect(sql).toContain("role = 'assistant'");
+    expect(sql).toContain('LIMIT 1');
+    expect(sql.match(/contextState/g)).toHaveLength(2);
+    expect(params).toEqual(['s1']);
+  });
+  it('returns null when no assistant exists', async () => {
+    const { getComposerMessageContext } = await import('./message-store.js');
+    queryOne.mockReset().mockResolvedValue({ content: null, context_revision: '2' });
+    expect(await getComposerMessageContext('s')).toEqual({ content: null, contextRevision: 2 });
+  });
+});

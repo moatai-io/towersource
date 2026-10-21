@@ -49,6 +49,11 @@ function persistSnapshots(): void {
 /** Save the latest stable viewport anchor for an open chat session. */
 export function captureSessionViewportSnapshot(sessionId: string, snapshot: ChatViewportSnapshot): void {
   hydrateSnapshots();
+  const current = snapshotsBySession.get(sessionId);
+  // A deferred DOM/rAF measurement from an earlier render may arrive after the
+  // synchronous leave-time capture. Never let an explicitly older sample roll
+  // the session back to a stale reading position.
+  if (current && snapshot.capturedAt < current.capturedAt) return;
   snapshotsBySession.set(sessionId, snapshot);
   persistSnapshots();
 }

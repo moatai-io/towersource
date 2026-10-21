@@ -57,13 +57,14 @@ export async function buildPiSessionResources(params: {
   // Tower only injects what Pi can't know: user identity, team rules, path restrictions.
   const harnessFragments = requireSystemPromptFragmentKeys(harness.prompt.fragments);
   const systemPromptFragments = mergeSystemPromptFragments(harnessFragments, opts.systemPromptFragments);
+  const isolatedSecretary = opts.secretaryConversation === true;
   const includeAgentIdentity = harness.prompt.includeAgentIdentity;
   const rawTowerPrompt = await buildSystemPrompt({
     userId: opts.userId,
     username: opts.username || 'anonymous',
     role: opts.userRole || 'member',
     allowedPath: opts.allowedPath,
-    sessionProjectRoot: resolveSessionProjectRoot(opts.cwd) ?? undefined,
+    sessionProjectRoot: opts.sessionProjectRoot ?? resolveSessionProjectRoot(opts.cwd) ?? undefined,
     projectId: includeAgentIdentity && !opts.serviceIdentityPrompt ? opts.projectId : undefined,
     serviceIdentityPrompt: includeAgentIdentity ? opts.serviceIdentityPrompt : undefined,
     sessionId: includeAgentIdentity && !opts.serviceIdentityPrompt ? sessionId : undefined,
@@ -77,7 +78,7 @@ export async function buildPiSessionResources(params: {
   const towerPrompt = baseTowerPrompt;
 
   // Pi-first personal continuity memory: same user + same project only.
-  const memoryContext = harness.prompt.includeMemory
+  const memoryContext = !isolatedSecretary && harness.prompt.includeMemory
     ? await (async () => {
         const { buildMemoryContext } = await import('../../services/ai/memory-context.js');
         return buildMemoryContext({
@@ -95,7 +96,7 @@ export async function buildPiSessionResources(params: {
   let activeSkillNames: Set<string> | null = null;
   let projectManagedSkillsReady = false;
   try {
-    if (!harness.prompt.includeSkills) throw new Error('Harness disables skills');
+    if (isolatedSecretary || !harness.prompt.includeSkills) throw new Error('Harness disables skills');
     const { getMaterializedSkillPaths, getSkillsForSession, hasProjectManagedSkillManifest } = await import('../../services/skill/skill-registry.js');
     projectManagedSkillsReady = hasProjectManagedSkillManifest(opts.cwd);
     additionalSkillPaths = await getMaterializedSkillPaths({
@@ -119,19 +120,19 @@ export async function buildPiSessionResources(params: {
   const resourceLoader = new DefaultResourceLoader({
     cwd: opts.cwd,
     agentDir: getAgentDir(),
-    noExtensions: !harness.prompt.includeSkills,
-    agentsFilesOverride: harness.prompt.includeProjectInstructions ? undefined : () => ({ agentsFiles: [] }),
+    noExtensions: isolatedSecretary || !harness.prompt.includeSkills,
+    agentsFilesOverride: !isolatedSecretary && harness.prompt.includeProjectInstructions ? undefined : () => ({ agentsFiles: [] }),
     appendSystemPrompt: memoryContext
       ? [PI_RESPONSE_STYLE_PROMPT, towerPrompt, memoryContext]
       : [PI_RESPONSE_STYLE_PROMPT, towerPrompt],
     additionalSkillPaths,
-    noSkills: !harness.prompt.includeSkills || projectManagedSkillsReady,
+    noSkills: isolatedSecretary || !harness.prompt.includeSkills || projectManagedSkillsReady,
     // When a project has a managed `.tower/skills/manifest.json`, Tower's
     // additionalSkillPaths are the complete skill source set for that project.
     // Pi's package manager may still discover global user skills from
     // `agentDir`; disable default discovery so same-name skills (e.g.
     // naver-search) cannot keep a host/global <location> in the prompt.
-    skillsOverride: harness.prompt.includeSkills && activeSkillNames ? (base) => {
+    skillsOverride: !isolatedSecretary && harness.prompt.includeSkills && activeSkillNames ? (base) => {
       const allowedSkillRoots = additionalSkillPaths.map((p) => p.replace(/\/$/, ''));
       const isAllowedPath = (filePath: string) => allowedSkillRoots.some((root) => filePath === root || filePath.startsWith(`${root}/`));
       const blockedByPath = projectManagedSkillsReady

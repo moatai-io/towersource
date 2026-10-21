@@ -2,12 +2,16 @@ import { Type } from '@sinclair/typebox';
 import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
 import { getCommandsForUser } from '../services/skill/skill-registry.js';
 import type { CommandEntry } from '../services/command-registry.js';
+import { resolveOperatorSkillAssets } from '../services/skill/operator-skill-assets.js';
 
 export interface PiSkillToolContext {
   userId?: number;
   username?: string;
   projectId?: string;
   cwd?: string;
+  projectRoot?: string;
+  /** Re-evaluated at read time: Operator access can change during a session. */
+  resolveAssetExecution?: () => Promise<'operator-host' | 'project-executor' | 'unavailable'>;
 }
 
 function textResult(text: string, isError = false) {
@@ -88,6 +92,7 @@ export function createSkillsReadTool(ctx: PiSkillToolContext): ToolDefinition {
       'When using a skill, if its instructions explicitly reference bundled files such as templates, examples, scripts, schemas, fixtures, checklists, or reference docs that materially affect the output, inspect the relevant files before producing the final artifact when practical.',
       'After reading a skill, explicitly tell the user when that skill is being used if it affects the answer.',
       'Do not read host-global skill paths directly; this tool resolves the current project-visible registry safely.',
+      'Follow the returned assetAccess guidance for bundled files. A control-only project copy is not the complete bundle. Missing files there do not prove source files are missing; do not invent replacements or edit generated .tower/skills copies.',
     ],
     parameters: Type.Object({
       name: Type.String({ description: 'Skill name, alias, or canonical slash command, e.g. meeting-prep or /meeting-prep.' }),
@@ -98,7 +103,27 @@ export function createSkillsReadTool(ctx: PiSkillToolContext): ToolDefinition {
           .filter((command) => command.dispatch.type === 'skill');
         const command = commands.find((candidate) => commandAliasMatches(candidate, input.name));
         if (!command) return textResult(`Skill not found or not visible in this session: ${input.name}`, true);
-        return textResult(JSON.stringify({ ...summarizeSkill(command), content: command.fullContent || '' }, null, 2));
+        const execution = await ctx.resolveAssetExecution?.() ?? 'unavailable';
+        const name = command.dispatch.target;
+        const managedPath = /^[A-Za-z0-9_-]+$/.test(name)
+          ? `/workspace/.tower/skills/${name}/` : null;
+        const assetAccess = {
+          execution,
+          status: 'unverified',
+          bodyOnly: true,
+          managedRuntimePath: execution === 'project-executor' ? managedPath : null,
+          guidance: execution === 'project-executor'
+            ? 'For manifest-listed managed skills, inspect the managedRuntimePath using the assigned bash. This is a runtime convention, not proof that this skill is managed or mounted. Project-authored skills use their project source. Do not treat host control-copy ENOENT as source loss.'
+            : execution === 'operator-host'
+              ? 'The assigned bash runs on the host, not inside the Worker skill mount. /workspace/.tower/skills is not a verified host asset path. A project .tower/skills directory may contain only control files. Resolve the authorized canonical bundle before reading references; if unresolved, report asset access blocked rather than creating replacement files. Do not switch execution planes.'
+              : 'The asset execution path has not been established. Do not guess host-global source paths or claim the bundle is missing. Report asset access blocked if required references cannot be resolved.',
+          safety: 'Missing references in a control-only copy do not prove missing source files. Never fabricate replacement references or hand-edit generated .tower/skills files. This metadata grants no additional file access.',
+        };
+        const operatorSource = execution === 'operator-host'
+          ? resolveOperatorSkillAssets(ctx.projectRoot, name, command.fullContent || '') : undefined;
+        return textResult(JSON.stringify({ ...summarizeSkill(command), content: command.fullContent || '',
+          assetAccess: operatorSource ? { ...assetAccess, ...operatorSource } : assetAccess,
+        }, null, 2));
       } catch (err: any) {
         return textResult(`skills.read failed: ${err?.message || String(err)}`, true);
       }

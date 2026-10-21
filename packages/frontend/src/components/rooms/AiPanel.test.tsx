@@ -3,13 +3,17 @@ import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import { AiPanel } from './AiPanel';
+import i18n, { i18nReady } from '../../i18n';
 import { useAiPanelStore } from '../../stores/ai-panel-store';
 import { useRoomStore } from '../../stores/room-store';
 import { useSessionStore } from '../../stores/session-store';
 
 const fetchMock = vi.fn(async () => ({ ok: true, json: async () => [] }));
 
-beforeEach(() => {
+beforeEach(async () => {
+  // This suite checks English UI interactions explicitly, not the install default.
+  await i18nReady;
+  await i18n.changeLanguage('en');
   vi.stubGlobal('fetch', fetchMock);
   fetchMock.mockClear();
   localStorage.clear();
@@ -433,8 +437,8 @@ describe('AiPanel width resize', () => {
 
     const handle = container.querySelector('[aria-label="Resize panel"]') as HTMLElement;
     fireEvent.pointerDown(handle, { pointerId: 1, clientX: 800 });
-    fireEvent.pointerMove(document, { clientX: window.innerWidth - 640 });
-    fireEvent.pointerUp(document);
+    fireEvent.pointerMove(window, { clientX: window.innerWidth - 640 });
+    fireEvent.pointerUp(window, { clientX: window.innerWidth - 640 });
 
     await waitFor(() => {
       expect(localStorage.getItem('tower:ai-panel:width')).toBe('640');

@@ -21,7 +21,9 @@ const GOOGLE_AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
 const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
 const GOOGLE_USERINFO_URL = 'https://www.googleapis.com/oauth2/v2/userinfo';
 
-// Scopes for Gmail + Calendar + Drive. Gmail compose/send are included so
+// Scopes for Gmail + Calendar + Drive + Sheets. Sheets editing is separate
+// from read-only Drive access; existing connections must consent again.
+// Gmail compose/send are included so
 // user-owned GWS connections can support draft/send workflows with explicit
 // user confirmation at send time.
 export const GOOGLE_DEFAULT_SCOPES = [
@@ -30,6 +32,7 @@ export const GOOGLE_DEFAULT_SCOPES = [
   'https://www.googleapis.com/auth/gmail.send',
   'https://www.googleapis.com/auth/calendar.readonly',
   'https://www.googleapis.com/auth/drive.readonly',
+  'https://www.googleapis.com/auth/spreadsheets',
   'https://www.googleapis.com/auth/userinfo.email',
   'https://www.googleapis.com/auth/userinfo.profile',
 ];
@@ -50,7 +53,9 @@ function isLoopbackHostname(hostname: string): boolean {
 }
 
 export function getGoogleOAuthReadiness(): GoogleOAuthReadiness {
-  const publicUrl = config.publicUrl.replace(/\/$/, '');
+  // `config.publicUrl` is typed string but resolves undefined in preflight
+  // environments where PUBLIC_URL is not injected; guard before use.
+  const publicUrl = (config.publicUrl ?? '').replace(/\/$/, '');
   const redirectUri = config.googleRedirectUri;
   const expectedRedirectUri = publicUrl ? `${publicUrl}/api/auth/google/callback` : redirectUri;
   let secureRedirect = false;

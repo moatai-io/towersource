@@ -23,6 +23,11 @@ describe('session-aware Viewer delivery', () => {
     expect(consumeSessionViewerDelivery('session-a')).toEqual(delivery('d1'));
   });
 
+  it('keeps a background result quiet when its session is selected later', () => {
+    queueSessionViewerDelivery({ ...delivery('d-background'), focus: false });
+    expect(consumeSessionViewerDelivery('session-a')).toEqual({ ...delivery('d-background'), focus: false });
+  });
+
   it('delivers only the newest pending artifact per session', () => {
     queueSessionViewerDelivery(delivery('d1'));
     queueSessionViewerDelivery(delivery('d2'));

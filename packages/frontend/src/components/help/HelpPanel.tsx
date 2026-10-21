@@ -25,6 +25,9 @@ export function HelpPanel() {
   const [activeSlug, setActiveSlug] = useState<string | null>(null);
   const [content, setContent] = useState('');
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(false);
+  const [retry, setRetry] = useState(0);
+  const [topicsLang, setTopicsLang] = useState('');
   const [mobileTopicOpen, setMobileTopicOpen] = useState(false);
   const [lang, setLang] = useState<'en' | 'ko'>(() => {
     const saved = localStorage.getItem('tower:helpLang');
@@ -36,45 +39,45 @@ export function HelpPanel() {
     localStorage.setItem('tower:helpLang', newLang);
   }, []);
 
-  // Fetch topics list
+  // Topic IDs remain stable even where localized filenames differ.
   useEffect(() => {
     if (!isOpen) return;
-    const token = localStorage.getItem('token');
-    const headers: Record<string, string> = {};
-    if (token) headers['Authorization'] = `Bearer ${token}`;
-    fetch(`/api/help?lang=${lang}`, { headers })
-      .then((r) => r.json())
-      .then((data) => {
-        if (!Array.isArray(data)) return;
-        setTopics(data as HelpTopic[]);
-        if (data.length > 0 && !activeSlug) {
-          setActiveSlug(data[0].slug);
-        }
-      })
-      .catch(() => {});
-  }, [isOpen, lang]);
-
-  // Fetch content when active topic changes
-  useEffect(() => {
-    if (!activeSlug || !isOpen) return;
+    let cancelled = false;
     setLoading(true);
+    setError(false);
+    setTopicsLang('');
     const token = localStorage.getItem('token');
     const headers: Record<string, string> = {};
-    if (token) headers['Authorization'] = `Bearer ${token}`;
+    if (token) headers.Authorization = `Bearer ${token}`;
+    fetch(`/api/help?lang=${lang}`, { headers })
+      .then((r) => { if (!r.ok) throw new Error('topics'); return r.json(); })
+      .then((data) => {
+        if (cancelled) return;
+        if (!Array.isArray(data) || !data.length) throw new Error('topics');
+        setTopics(data);
+        setActiveSlug((previous) => data.find((topic: HelpTopic) => topic.slug === previous)?.slug
+          ?? data.find((topic: HelpTopic) => previous?.match(/^\d+/)?.[0] && topic.slug.match(/^\d+/)?.[0] === previous.match(/^\d+/)?.[0])?.slug
+          ?? data[0].slug);
+        setTopicsLang(lang);
+      })
+      .catch(() => { if (!cancelled) { setError(true); setLoading(false); } });
+    return () => { cancelled = true; };
+  }, [isOpen, lang, retry]);
+
+  useEffect(() => {
+    if (!activeSlug || !isOpen || topicsLang !== lang) return;
+    let cancelled = false;
+    setLoading(true);
+    setError(false);
+    const token = localStorage.getItem('token');
+    const headers: Record<string, string> = {};
+    if (token) headers.Authorization = `Bearer ${token}`;
     fetch(`/api/help/${activeSlug}?lang=${lang}`, { headers })
-      .then((r) => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        return r.text();
-      })
-      .then((text) => {
-        setContent(text);
-        setLoading(false);
-      })
-      .catch(() => {
-        setContent(t('failedToLoad'));
-        setLoading(false);
-      });
-  }, [activeSlug, isOpen, lang]);
+      .then((r) => { if (!r.ok) throw new Error('content'); return r.text(); })
+      .then((text) => { if (!cancelled) { setContent(text); setLoading(false); } })
+      .catch(() => { if (!cancelled) { setError(true); setLoading(false); } });
+    return () => { cancelled = true; };
+  }, [activeSlug, isOpen, lang, topicsLang, retry]);
 
   // Escape key handler
   const handleKeyDown = useCallback(
@@ -191,7 +194,9 @@ export function HelpPanel() {
 
           {/* Right content */}
           <div className="flex-1 overflow-y-auto px-6 py-5 md:px-8 md:py-6">
-            {loading ? (
+            {error ? (
+              <div role="alert"><p>{t('failedToLoad')}</p><button type="button" onClick={() => setRetry((value) => value + 1)}>{t('retry')}</button></div>
+            ) : loading ? (
               <div className="flex items-center justify-center h-32 text-surface-600 text-base">
                 {t('common:loading')}
               </div>
@@ -214,6 +219,13 @@ export function HelpPanel() {
                 prose-hr:border-surface-700
               ">
                 <ReactMarkdown
+                  components={{ a: ({ href, children }) => {
+                    const slug = href?.match(/^\.\/([a-zA-Z0-9_-]+)\.md(?:#.*)?$/)?.[1];
+                    if (slug && topics.some((topic) => topic.slug === slug)) {
+                      return <a href={href} onClick={(event) => { event.preventDefault(); setActiveSlug(slug); setMobileTopicOpen(false); }}>{children}</a>;
+                    }
+                    return <a href={href}>{children}</a>;
+                  } }}
                   remarkPlugins={[remarkGfmPlugin, [remarkMath, remarkMathOptions]]}
                   rehypePlugins={[rehypeHighlight, rehypeKatex]}
                 >

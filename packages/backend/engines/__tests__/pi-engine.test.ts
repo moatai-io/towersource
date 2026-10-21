@@ -21,6 +21,8 @@ const PI_RUNTIME_BOX_TOOLS_PATH = path.resolve(import.meta.dirname, '../pi-runti
 const PI_PDF_AWARE_READ_TOOL_PATH = path.resolve(import.meta.dirname, '../pi-pdf-aware-read-tool.ts');
 const PI_PDF_VIEW_TOOL_PATH = path.resolve(import.meta.dirname, '../pi-pdf-view-tool.ts');
 const PI_PDF_EXPORT_TOOL_PATH = path.resolve(import.meta.dirname, '../pi-pdf-export-tool.ts');
+const PI_DOCUMENT_PARSE_TOOL_PATH = path.resolve(import.meta.dirname, '../pi-document-parse-tool.ts');
+const PI_NAVER_SEARCH_TOOL_PATH = path.resolve(import.meta.dirname, '../pi-naver-search-tool.ts');
 const PI_CAD_VIEW_TOOL_PATH = path.resolve(import.meta.dirname, '../pi-cad-view-tool.ts');
 const PI_PUBLISH_TOOL_PATH = path.resolve(import.meta.dirname, '../pi-publish-tool.ts');
 const PI_TOOL_CATEGORIES_PATH = path.resolve(import.meta.dirname, '../pi-tool-categories.ts');
@@ -40,7 +42,7 @@ function readSource(file: string): string {
   // engines/pi/ after strangler-style refactors.
   const piModuleDir = path.resolve(import.meta.dirname, '../pi');
   const moduleSources = fs.readdirSync(piModuleDir)
-    .filter((name) => name.endsWith('.ts'))
+    .filter((name) => name.endsWith('.ts') && !name.endsWith('.test.ts'))
     .sort()
     .map((name) => fs.readFileSync(path.join(piModuleDir, name), 'utf-8'));
   return [source, ...moduleSources].join('\n\n');
@@ -122,7 +124,7 @@ describe('Pi engine — source contracts', () => {
     // decisions so CTX does not overstate actual model usage.
     expect(src).toMatch(/const actualContextInputTokens = runCtx\.actualContextInputTokens\(\)/);
     expect(src).toMatch(/const riskContextEstimateTokens = runCtx\.riskContextEstimateTokens\(estimatedLiveContextInput\)/);
-    expect(src).toMatch(/usage:\s*runCtx\.usageSummary\(\{/);
+    expect(src).toMatch(/usage:\s*\{?\s*\.{0,3}runCtx\.usageSummary\(\{/);
     expect(src).toMatch(/const userFacingStopReason = effectiveErrorStopReason \|\| \(state\.stopReason === 'toolUse' \? 'stop' : state\.stopReason\)/);
     expect(src).toMatch(/contextInputTokens/);
   });
@@ -179,20 +181,34 @@ describe('Pi engine — model safety', () => {
     expect(kimiEmergency.enabled).toBe(true);
     expect(kimiEmergency.roles).toEqual(['full']);
     expect(kimiEmergency.badge).toBe('EMERG');
+    const astraCanary = models.pi.find((m: any) => m.provider === 'litellm-responses' && m.modelId === 'astra-canary');
     const smartest = models.pi.find((m: any) => m.provider === 'litellm-responses' && m.modelId === 'smartest');
     const smartestLong = models.pi.find((m: any) => m.provider === 'litellm-responses' && m.modelId === 'smartest-long');
     const smart = models.pi.find((m: any) => m.provider === 'litellm-responses' && m.modelId === 'smart');
     const gpt55 = models.pi.find((m: any) => m.provider === 'litellm-responses' && m.modelId === 'gpt55');
-    const mini = models.pi.find((m: any) => m.provider === 'litellm-responses' && m.modelId === 'mini');
+    const sol = models.pi.find((m: any) => m.provider === 'litellm-responses' && m.modelId === 'gpt-5.6-sol');
+    const terra = models.pi.find((m: any) => m.provider === 'litellm-responses' && m.modelId === 'gpt-5.6-terra');
+    expect(astraCanary.enabled).toBe(true);
+    expect(astraCanary.hidden).toBe(true);
+    expect(smartestLong.enabled).toBe(true);
+    expect(smartestLong.hidden).toBe(true);
+    expect(smartest).toMatchObject({ enabled: false, hidden: true, selectable: false });
+    expect(models.pi.find((model: any) => `${model.provider}/${model.modelId}` === models.defaults.session)).toMatchObject({ provider: 'litellm-responses', api: 'openai-responses', enabled: true });
+    expect(astraCanary.name).toBe('Astra (시험)');
+    expect(astraCanary.badge).toBe('TEST');
+    expect(astraCanary.contextWindow).toBe(353400);
+    expect(astraCanary.maxTokens).toBe(128000);
+    expect(astraCanary.cost).toEqual({ input: 10, output: 50, cacheRead: 1, cacheWrite: 12.5 });
     expect(smartest.contextWindow).toBe(353400);
-    expect(smartest.cost).toEqual({ input: 5, output: 30, cacheRead: 0.5, cacheWrite: 6.25 });
+    expect(smartest.cost).toEqual({ input: 4, output: 20, cacheRead: 0.4, cacheWrite: 5 });
     expect(smartestLong.contextWindow).toBe(760000);
     expect(smartestLong.badge).toBe('LONG');
-    expect(smartestLong.cost).toEqual(smartest.cost);
+    expect(smartestLong.cost).toEqual({ input: 8, output: 30, cacheRead: 0.8, cacheWrite: 10 });
     expect(smart.contextWindow).toBe(353400);
-    expect(smart.cost).toEqual({ input: 2.5, output: 15, cacheRead: 0.25, cacheWrite: 3.125 });
-    expect(gpt55.contextWindow).toBe(258400);
-    expect(mini.contextWindow).toBe(258400);
+    expect(smart.cost).toEqual({ input: 2, output: 12, cacheRead: 0.2, cacheWrite: 2.5 });
+    expect(gpt55).toBeUndefined();
+    expect(sol).toMatchObject({ badge: 'SOL', selectable: false, hidden: true, contextWindow: 353400 });
+    expect(terra).toMatchObject({ badge: 'TERRA', selectable: false, hidden: true, contextWindow: 353400 });
   });
 
   it('dynamically clamps Chat Completions output tokens instead of hardcoding Kimi low', () => {
@@ -203,20 +219,14 @@ describe('Pi engine — model safety', () => {
     expect(src).toMatch(/contextWindow - estimatedPrompt - reserve/);
   });
 
-  it('preserves OpenAI Responses output budgets and rejects near-context requests for compaction recovery', () => {
+  it('preserves OpenAI Responses output budgets without synthetic estimate-only context errors', () => {
     const src = readSource(PI_ENGINE_PATH);
     expect(src).not.toMatch(/function clampOpenAIResponsesOutputTokens/);
     expect(src).not.toMatch(/responses output clamp/);
-    expect(src).toMatch(/PI_RESPONSES_PREFLIGHT_CONTEXT_RATIO \?\? 0\.90/);
-    expect(src).toMatch(/context_length_exceeded/);
+    expect(src).not.toMatch(/PI_RESPONSES_PREFLIGHT_CONTEXT_RATIO/);
+    expect(src).not.toMatch(/shouldRejectNearContextOpenAIResponsesRequest/);
     expect(src).toMatch(/isGenericOpenAIResponses/);
-    expect(src).toMatch(/gpt-5\.6-sol/);
-    expect(src).toMatch(/gpt-5\.6-terra/);
-    expect(src).toMatch(/smartest-long/);
-    expect(src).toMatch(/gpt55/);
-    expect(src).toMatch(/760_000/);
-    expect(src).toMatch(/353_400/);
-    expect(src).toMatch(/258_400/);
+    expect(src).toMatch(/const res = await _origFetch\(effectiveInput as any, effectiveInit\)/);
   });
 
   it('keeps retired direct/debug providers out of the Pi model catalog', () => {
@@ -242,19 +252,36 @@ describe('Pi engine — model safety', () => {
     expect(src).toMatch(/toTowerBlocks\(\)[\s\S]*?sanitizePiVisibleBlocks\(normalizeInlineThinkingTags/);
   });
 
-  it('wires Smartest/Mini routes plus full-VM direct OpenRouter and Azure emergency models', () => {
+  it('wires physical Sol/Terra defaults plus hidden legacy aliases and emergency models', () => {
     const models = JSON.parse(readSource(MODELS_JSON_PATH));
+    const astraCanary = models.pi.find((m: any) => m.provider === 'litellm-responses' && m.modelId === 'astra-canary');
     const smartestResponses = models.pi.find((m: any) => m.provider === 'litellm-responses' && m.modelId === 'smartest');
     const smartestLong = models.pi.find((m: any) => m.provider === 'litellm-responses' && m.modelId === 'smartest-long');
     const smart = models.pi.find((m: any) => m.provider === 'litellm-responses' && m.modelId === 'smart');
     const gpt55 = models.pi.find((m: any) => m.provider === 'litellm-responses' && m.modelId === 'gpt55');
-    const mini = models.pi.find((m: any) => m.provider === 'litellm-responses' && m.modelId === 'mini');
+    const sol = models.pi.find((m: any) => m.provider === 'litellm-responses' && m.modelId === 'gpt-5.6-sol');
+    const terra = models.pi.find((m: any) => m.provider === 'litellm-responses' && m.modelId === 'gpt-5.6-terra');
     const kimiEmergency = models.pi.find((m: any) => m.provider === 'openrouter' && m.modelId === 'moonshotai/kimi-k2.6');
     const azureEmergency = models.pi.find((m: any) => m.provider === 'azure-openai-responses-eastus2' && m.modelId === 'gpt-5.5');
     expect(models.claude).toEqual([]);
     expect(models.pi.filter((m: any) => m.provider === 'litellm')).toEqual([]);
+    expect(astraCanary.enabled).toBe(true);
+    expect(astraCanary.hidden).toBe(true);
+    expect(smartestLong.enabled).toBe(true);
+    expect(smartestLong.hidden).toBe(true);
+    expect(smartestResponses).toMatchObject({ enabled: false, hidden: true, selectable: false });
+    expect(models.pi.find((model: any) => `${model.provider}/${model.modelId}` === models.defaults.session)).toMatchObject({ provider: 'litellm-responses', api: 'openai-responses', enabled: true });
+    expect(astraCanary).toBeTruthy();
+    expect(astraCanary.enabled).toBe(true);
+    expect(astraCanary.hidden).toBe(true);
+    expect(astraCanary.name).toBe('Astra (시험)');
+    expect(astraCanary.badge).toBe('TEST');
+    expect(astraCanary.roles).toEqual(['full', 'managed', 'standalone']);
+    expect(astraCanary.api).toBe('openai-responses');
+    expect(astraCanary.contextWindow).toBe(353400);
+    expect(astraCanary.maxTokens).toBe(128000);
     expect(smartestResponses).toBeTruthy();
-    expect(smartestResponses.enabled).toBe(true);
+    expect(smartestResponses.enabled).toBe(false);
     expect(smartestResponses.name).toBe('Smartest');
     expect(smartestResponses.badge).toBe('');
     expect(smartestResponses.roles).toEqual(['full', 'managed', 'standalone']);
@@ -269,35 +296,28 @@ describe('Pi engine — model safety', () => {
     expect(smart).toBeTruthy();
     expect(smart.name).toBe('Smart');
     expect(smart.contextWindow).toBe(353400);
-    expect(gpt55).toBeTruthy();
-    expect(gpt55.name).toBe('GPT-5.5 Legacy');
-    expect(gpt55.badge).toBe('5.5');
-    expect(gpt55.contextWindow).toBe(258400);
+    expect(gpt55).toBeUndefined();
     expect(models.pi.find((m: any) => m.provider === 'litellm-responses' && m.modelId === 'smartest56')).toBeFalsy();
     expect(models.pi.find((m: any) => m.provider === 'litellm-responses' && m.modelId === 'smartest-fast')).toBeFalsy();
-    expect(models.defaults.session).toBe('litellm-responses/smartest');
+    expect(models.pi.find((model: any) => `${model.provider}/${model.modelId}` === models.defaults.session)).toMatchObject({ provider: 'litellm-responses', api: 'openai-responses', enabled: true });
     expect(models.defaults.ai_reply).toBe('litellm-responses/mini');
     expect(models.defaults.ai_task).toBe('litellm-responses/mini');
-    expect(mini).toBeTruthy();
-    expect(mini.enabled).toBe(true);
-    expect(mini.name).toBe('Mini');
-    expect(mini.roles).toEqual(['full', 'managed', 'standalone']);
-    expect(mini.api).toBe('openai-responses');
+    expect(sol).toMatchObject({ enabled: true, selectable: false, hidden: true, badge: 'SOL', api: 'openai-responses' });
+    expect(terra).toMatchObject({ enabled: true, selectable: false, hidden: true, badge: 'TERRA', api: 'openai-responses' });
     expect(kimiEmergency).toBeTruthy();
     expect(kimiEmergency.roles).toEqual(['full']);
     expect(kimiEmergency.badge).toBe('EMERG');
     expect(kimiEmergency.api).toBe('openai-completions');
     expect(kimiEmergency.contextWindow).toBe(262142);
     expect(kimiEmergency.maxTokens).toBe(245760);
-    expect(azureEmergency).toBeTruthy();
-    expect(azureEmergency.roles).toEqual(['full']);
-    expect(azureEmergency.badge).toBe('EMERG');
+    expect(azureEmergency).toBeFalsy();
 
     const src = readSource(PI_ENGINE_PATH);
     expect(src).toMatch(/getModelDefaults\(\)\.session/);
-    expect(src).toMatch(/Using configured default model/);
-    expect(src).toMatch(/'openai-responses-compatible': 'openai-responses'/);
-    expect(src).toMatch(/const apiKind = m\.api && providerToDefaultApi\[m\.api\]/);
+    const registry = fs.readFileSync(path.resolve(import.meta.dirname, '../pi/model-registry.ts'), 'utf8');
+    expect(registry).toMatch(/isPiPresetMappingReady\('preset\/core'\)/);
+    expect(src).toMatch(/'litellm-responses': 'openai-responses'/);
+    expect(src).toMatch(/const resolvedApi = providerToDefaultApi\[m\.provider\]/);
     expect(src).toMatch(/quickReplyLiteLLMResponses/);
     expect(src).toMatch(/Do not inject service_tier=priority for Smartest by default/);
     expect(src).not.toMatch(/serviceTier: 'priority'/);
@@ -322,13 +342,32 @@ describe('Pi engine — model safety', () => {
     expect(src).not.toMatch(/ModelRegistry\.inMemory/);
   });
 
-  it('does not inject OPENAI_API_KEY into Pi direct provider unless explicitly opted in', () => {
-    const src = readSource(PI_ENGINE_PATH);
-    expect(src).toMatch(/function allowPiOpenAiDirect/);
-    expect(src).toMatch(/PI_ALLOW_OPENAI_DIRECT/);
-    expect(src).toMatch(/OPENAI_API_KEY && allowPiOpenAiDirect\(\)/);
-    expect(src).toMatch(/setRuntimeApiKey\('openai', process\.env\.OPENAI_API_KEY,/);
-    expect(src).toMatch(/Skipping OpenAI direct model/);
+  it('does not inject or register direct Codex/Azure/OpenAI providers in Tower Pi', () => {
+    const registry = fs.readFileSync(path.resolve(import.meta.dirname, '../pi/model-registry.ts'), 'utf8');
+    expect(registry).not.toMatch(/setRuntimeApiKey\('azure-openai-responses'/);
+    expect(registry).not.toMatch(/setRuntimeApiKey\('openai'/);
+    expect(registry).not.toMatch(/setRuntimeApiKey\('openai-codex'/);
+    expect(registry).toMatch(/isPiModelEntryEnabledForThisVm/);
+    expect(registry).toMatch(/ModelRuntime\.create\(\{ modelsPath: null, allowModelNetwork: false \}\)/);
+    expect(registry).toMatch(/MODEL_PRESET_UNAVAILABLE/);
+  });
+
+  it('resolves explicit Core/Lite before both cold starts and warm model switches', () => {
+    const engine = fs.readFileSync(PI_ENGINE_PATH, 'utf8');
+    expect(engine).toContain('if (sessionAlias(modelStr))');
+    expect(engine).toContain('Pinned Harness requires a physical model ID');
+    expect(engine).toContain('if (!isPiPresetMappingReady(modelStr))');
+    expect(engine).toContain('const physical = resolvePiSessionChoice(modelStr)');
+    expect(engine).toContain('this.resolveRuntimeModelChoice(effectiveModelId, Boolean(harness.allowedModels))');
+    expect(engine).toContain('this.resolveRuntimeModelChoice(modelStr, Boolean(entry.harness?.allowedModels))');
+    expect(engine).toContain('return restricted ? modelStr : resolveLegacyPiModelId(modelStr)');
+  });
+
+  it('uses the separate compaction override only on Tower compaction paths', () => {
+    const engine = fs.readFileSync(PI_ENGINE_PATH, 'utf8');
+    expect(engine.match(/getCompactionFallbackModelSpecs\(\)/g)).toHaveLength(2);
+    expect(engine.match(/getCodexFallbackModelSpecs\(\)/g)).toHaveLength(1);
+    expect(engine).not.toMatch(/PI_CODEX_FALLBACK_MODELS/);
   });
 
   it('supports steering messages while a Pi prompt is already running', () => {
@@ -370,6 +409,12 @@ describe('Pi engine — model safety', () => {
     expect(src).toMatch(/agent_end-carried-error-stuck/);
     expect(src).toMatch(/agent_end-context-overflow-settle-stuck/);
     expect(src).toMatch(/PI_OVERFLOW_COMPACTION_SETTLE_MS/);
+    // An SDK overflow compact can finish after agent_end, then resume tool work.
+    // The old error timeout must not kill that resumed run.
+    expect(src).toMatch(/if \(agentEndNeedsOverflowSettle\) pendingOverflowSettle = true/);
+    expect(src).toMatch(/if \(releasePiOverflowSettleAfterAssistant\([\s\S]*?clearClosingTimer: clearClosingTerminalizer,[\s\S]*?clearAgentEndTimer: clearAgentEndTerminalizer/);
+    expect(src).toMatch(/pendingOverflowSettle = false;[\s\S]*?terminalProviderErrorMessage = ''/);
+    expect(src).toMatch(/resetPiOverflowSettleAfterCompaction\([\s\S]*?armPostCompactTimer: \(\) => markClosing\('post-overflow-compaction-settle'/);
     expect(src).toMatch(/skipping promptPromise await after forced terminalization/);
     expect(src).toMatch(/classifyPiSteer/);
   });
@@ -485,6 +530,26 @@ describe('Pi engine — tool registration', () => {
     expect(pdfAwareRead).not.toMatch(/getOrCreateBox/);
   });
 
+  it('registers naver_search and limits Gateway key mutation assembly to privileged roles', () => {
+    const assembly = readSource(PI_TOOL_ASSEMBLY_PATH);
+    const naverSearch = readSource(PI_NAVER_SEARCH_TOOL_PATH);
+    expect(assembly).toMatch(/createNaverSearchTool/);
+    expect(assembly).toMatch(/createGatewayKeyIssueAndStoreTool\(\{ userId: opts\.userId, userRole: opts\.userRole, projectId: opts\.projectId, channelSafeToolsOnly: opts\.channelSafeToolsOnly \}\)/);
+    expect(naverSearch).toMatch(/name:\s*'naver_search'/);
+    expect(naverSearch).toMatch(/resolveGatewayApiClient/);
+    expect(naverSearch).not.toMatch(/NAVER_CLIENT_ID|NAVER_CLIENT_SECRET|openapi\.naver\.com/);
+  });
+
+  it('registers document_parse as the harness-level Corepin document conversion tool', () => {
+    const assembly = readSource(PI_TOOL_ASSEMBLY_PATH);
+    const documentParse = readSource(PI_DOCUMENT_PARSE_TOOL_PATH);
+    expect(assembly).toMatch(/createDocumentParseTool/);
+    expect(documentParse).toMatch(/name:\s*'document_parse'/);
+    expect(documentParse).toContain('shared Corepin API gateway');
+    expect(documentParse).toContain('resolveGatewayCredential(ctx)');
+    expect(documentParse).toMatch(/writeProjectWorkspaceText\(\{[^}]*exclusive:\s*true\s*\}/);
+  });
+
   it('registers pdf_export as the harness-level PDF output contract', () => {
     const assembly = readSource(PI_TOOL_ASSEMBLY_PATH);
     const pdfExport = readSource(PI_PDF_EXPORT_TOOL_PATH);
@@ -504,7 +569,7 @@ describe('Pi engine — tool registration', () => {
     expect(publishTool).toMatch(/TOWER_API_TOKEN/);
     expect(publishTool).toMatch(/isPathWritableByRole/);
     expect(publishTool).toMatch(/verifyUrl/);
-    expect(publishTool).toMatch(/return `\$\{protocol\}\/\/\$\{slug\}\.\$\{host\}\/`/);
+    expect(publishTool).toContain('publishedSiteUrl(slug, config.publicUrl, config.publishingBaseUrl)');
     expect(publishTool).not.toMatch(/return `\$\{protocol\}\/\/\$\{host\}\/sites\/\$\{slug\}\//);
   });
 
@@ -527,6 +592,9 @@ describe('Pi engine — tool registration', () => {
     expect(categories).toMatch(/pdf_view:\s*'view'/);
     expect(categories).toMatch(/cad_view:\s*'view'/);
     expect(categories).toMatch(/excel_read:\s*'analyze'/);
+    expect(categories).toMatch(/document_parse:\s*'analyze'/);
+    expect(categories).toMatch(/naver_search:\s*'integrate'/);
+    expect(categories).toMatch(/gateway_key_issue_and_store:\s*'integrate'/);
     expect(categories).toMatch(/project_shell:\s*'runtime'/);
     expect(categories).toMatch(/pdf_export:\s*'export'/);
     expect(categories).toMatch(/excel_write:\s*'export'/);
@@ -750,9 +818,12 @@ describe('Pi session persistence — source contracts', () => {
     const wsHandlerSrc = fs.readFileSync(
       path.resolve(import.meta.dirname, '../../routes/ws-handler.ts'), 'utf-8'
     );
+    const pendingSrc = fs.readFileSync(
+      path.resolve(import.meta.dirname, '../../services/session/pending-questions.ts'), 'utf-8'
+    );
     expect(wsHandlerSrc).toMatch(/cancelPendingQuestionsForSession\(sessionId, 'Session aborted'\)/);
-    expect(wsHandlerSrc).toMatch(/sanitizeAskUserQuestions/);
-    expect(wsHandlerSrc).toMatch(/ask_user dropped empty payload/);
+    expect(pendingSrc).toMatch(/sanitizeAskUserQuestions/);
+    expect(pendingSrc).toMatch(/ask_user dropped empty payload/);
   });
 });
 
@@ -785,7 +856,7 @@ describe('Pi stream watchdog — source contracts', () => {
 
   it('subscribe handler routes every event into watchdog.observe()', () => {
     const src = readSource(PI_ENGINE_PATH);
-    expect(src).toMatch(/entry\.session\.subscribe\(\(event:\s*any\)\s*=>\s*\{\s*watchdog\.observe\(event\)/);
+    expect(src).toMatch(/entry\.session\.subscribe\(\(event:\s*any\)\s*=>\s*\{(?:[^}]*)watchdog\.observe\(event\)/);
   });
 
   it('watchdog onStuck calls entry.session.abort()', () => {
@@ -871,7 +942,7 @@ describe('Pi stream watchdog — source contracts', () => {
     const wsSrc = readSource(path.resolve(import.meta.dirname, '../../routes/ws-handler.ts'));
     const engineSrc = readSource(PI_ENGINE_PATH);
     expect(wsSrc).toMatch(/autoResume:\s*true/);
-    expect(wsSrc).toMatch(/autoResumeReason:\s*'server-restart'/);
+    expect(wsSrc).toMatch(/autoResumeReason:[^\n]*'server-restart'/);
     expect(engineSrc).toMatch(/autoResumeRun\s*=\s*Boolean\(opts\.autoResume\)/);
     expect(engineSrc).toMatch(/SERVER_RESTART_RECOVERY_PROMPT/);
     expect(engineSrc).not.toMatch(/AUTO_RESUME_TRANSIENT_NOTICE_TEXT/);
@@ -882,7 +953,7 @@ describe('Pi stream watchdog — source contracts', () => {
     const engineSrc = readSource(PI_ENGINE_PATH);
     expect(wsSrc).toMatch(/engine\.run\(sessionId, AUTO_RESUME_NATIVE_PROMPT/);
     expect(wsSrc).toMatch(/autoResume:\s*true/);
-    expect(wsSrc).toMatch(/autoResumeReason:\s*'server-restart'/);
+    expect(wsSrc).toMatch(/autoResumeReason:[^\n]*'server-restart'/);
     expect(engineSrc).toMatch(/const restartDecision = decidePiRestartRecovery\(recoveryState\)/);
     expect(engineSrc).toMatch(/restartDecision\.action === 'native_continue'[\s\S]{0,240}continueWithPiNativeLifecycle/);
     expect(engineSrc).toMatch(/restartDecision\.action === 'recovery_prompt'[\s\S]{0,240}promptWithFetchCorrelation\(SERVER_RESTART_RECOVERY_PROMPT\)/);
@@ -898,6 +969,12 @@ describe('Pi stream watchdog — source contracts', () => {
     expect(wsSrc).not.toContain('status 등으로 상태만 확인');
   });
 
+  it('never synthesizes an assistant message id when settling auto-resume', () => {
+    const wsSrc = readSource(path.resolve(import.meta.dirname, '../../routes/ws-handler.ts'));
+    expect(wsSrc).toContain('const durableAssistantMessageId = towerMsg.assistantMessageId;');
+    expect(wsSrc).not.toContain('`recovered:${userMessageId || sessionId}`');
+  });
+
   it('makes server-side restart recovery observable and duplicate-safe without writing session notices', () => {
     const wsSrc = readSource(path.resolve(import.meta.dirname, '../../routes/ws-handler.ts'));
     expect(wsSrc).toMatch(/AUTO_RESUME_MAX_ATTEMPTS\s*=\s*4/);
@@ -910,11 +987,16 @@ describe('Pi stream watchdog — source contracts', () => {
     expect(wsSrc).toContain('session_refresh_needed');
   });
 
-  it.skipIf(!fs.existsSync(path.resolve(import.meta.dirname, '../../../../scripts/prod-restart-committed.sh')))('guards committed prod restart detached phase with a process lock', () => {
-    const scriptSrc = fs.readFileSync(path.resolve(import.meta.dirname, '../../../../scripts/prod-restart-committed.sh'), 'utf-8');
-    expect(scriptSrc).toContain('RUN_LOCK_DIR="/tmp/tower-prod-restart.running"');
-    expect(scriptSrc).toContain('tower-prod restart is already running');
-    expect(scriptSrc).toContain('trap cleanup_lock EXIT');
+  it('checks the public installer deployment lock before changing services', () => {
+    // The operator-only committed restart runner is outside the public distribution.
+    // Protect the lifecycle entry point actually shipped to self-hosting users.
+    const scriptSrc = fs.readFileSync(path.resolve(import.meta.dirname, '../../../../scripts/oss/install.sh'), 'utf-8');
+    const lock = scriptSrc.indexOf('flock -s -n 197');
+    const config = scriptSrc.indexOf('systemctl daemon-reload');
+    expect(scriptSrc).toContain('exec 197</var/lib/tower-worker-maintenance/deployment.lock');
+    expect(scriptSrc).toContain('Worker maintenance owns deployment lock');
+    expect(lock).toBeGreaterThan(-1);
+    expect(config).toBeGreaterThan(lock);
   });
 
   it('recovers DB-checkpointed orphan turns that did not reach a visible assistant row', () => {
@@ -964,7 +1046,8 @@ describe('Pi stream watchdog — source contracts', () => {
     expect(src).toMatch(/compactionEntriesAtRunStart/);
     expect(src).toMatch(/sdkCompactionSucceededEventsThisTurn/);
     expect(src).toMatch(/local fallback compaction created after SDK no-result compaction/);
-    expect(src).toMatch(/local fallback compaction created after compact\(\) no-persist/);
+    expect(src).toMatch(/recoverPiOverflowCompaction/);
+    expect(src).toMatch(/local fallback compaction created after provider compact failure\/no-persist/);
   });
 
   it('appends Tower file-ledger checkpoints after successful Pi compaction paths', () => {
@@ -975,7 +1058,7 @@ describe('Pi stream watchdog — source contracts', () => {
     expect(src).toMatch(/await Promise\.allSettled\(towerFileLedgerCheckpointPromises\)/);
     expect(src).toMatch(/void appendTowerFileLedgerAfterCompaction\(`sdk-event:/);
     expect(src).toMatch(/await appendTowerFileLedgerAfterCompaction\(`proactive:\$\{source\}`\)/);
-    expect(src).toMatch(/await appendTowerFileLedgerAfterCompaction\('oversized-preflight-recovery'\)/);
+    expect(src).toMatch(/await appendTowerFileLedgerAfterCompaction\(recoveryReason\)/);
     expect(src).toMatch(/reason: 'manual-compact'/);
   });
 
@@ -1019,16 +1102,25 @@ describe('Pi stream watchdog — source contracts', () => {
     expect(src).toMatch(/runPostCompactContinuationOnce\('transient-retry-exhausted'\)/);
   });
 
-  it('executes Tower pre-prompt compaction when proactive pressure crosses threshold', () => {
+  it('compacts before the next prompt at Tower pressure and emits visible compact lifecycle', () => {
     const src = readSource(PI_ENGINE_PATH);
     const policySrc = readSource(path.resolve(import.meta.dirname, '../pi/proactive-compaction.ts'));
-    expect(src).toMatch(/shouldProactivelyCompactPiSession/);
-    expect(src).toMatch(/const compactSessionBeforePromptIfNeeded = async/);
-    expect(src).toMatch(/compaction advisory before prompt/);
-    expect(src).toMatch(/execution=disabled-env/);
-    expect(src).toMatch(/Tower proactive compaction before prompt/);
-    expect(policySrc).toMatch(/PI_TOWER_PROACTIVE_COMPACTION_EXECUTION === '0'/);
     expect(src).toMatch(/await compactSessionBeforePromptIfNeeded\('initial'\)/);
+    expect(src).toMatch(/emitRecoveryCompactStart\(`proactive-\$\{source\}`\)/);
+    expect(src).toMatch(/emitRecoveryCompactDoneIfNeeded\(`proactive-\$\{source\}`\)/);
+    expect(src).toMatch(/emitRecoveryCompactSkippedIfNeeded\('proactive-noop'\)/);
+    expect(src).toMatch(/emitRecoveryCompactFailedIfNeeded\('proactive-error'\)/);
+    expect(policySrc).toMatch(/shouldProactivelyCompactPiSession/);
+    expect(readSource(path.resolve(import.meta.dirname, '../pi/compaction-budget.ts'))).toMatch(/PI_PROACTIVE_COMPACTION_PRESSURE \?\? 0\.72/);
+    expect(readSource(path.resolve(import.meta.dirname, '../pi/compaction-budget.ts'))).toMatch(/PI_PROACTIVE_COMPACTION_MIN_RESERVE_TOKENS/);
+    const settingsSrc = readSource(path.resolve(import.meta.dirname, '../pi/session-settings.ts'));
+    expect(settingsSrc).toMatch(/compaction:\s*\{\s*enabled: true/);
+    expect(settingsSrc).toMatch(/reserveTokens: Number\(process\.env\.PI_COMPACTION_RESERVE_TOKENS \|\| 48_000\)/);
+    // Explicit user compaction and bounded recovery for actual provider overflow/413 remain.
+    expect(src).toMatch(/await entry\.session\.compact\(prompt\)/);
+    expect(src).toMatch(/oversized-preflight-recovery/);
+    const safeguardsSrc = readSource(path.resolve(import.meta.dirname, '../pi/provider-safeguards.ts'));
+    expect(safeguardsSrc).not.toMatch(/PI_RESPONSES_PREFLIGHT_CONTEXT_RATIO/);
   });
 });
 
@@ -1071,11 +1163,17 @@ describe('Pi transient abort auto-retry', () => {
     const src = readSource(PI_ENGINE_PATH);
     expect(src).toMatch(/TRANSIENT_ABORT_RETRY_MAX/);
     expect(src).toMatch(/TRANSIENT_ABORT_RETRY_BACKOFF_MS/);
+    expect(src).toMatch(/TRANSIENT_CONTINUATION_RETRY_MAX/);
+    expect(src).toMatch(/continuationRetryMax = Math\.max\(1, Math\.min\(TRANSIENT_CONTINUATION_RETRY_MAX, 4\)\)/);
+    expect(src).toMatch(/const getEffectiveTransientRetryMax/);
+    expect(src).toMatch(/workStarted && classifyPiFailure\(message\)\.kind === 'transient_transport'/);
     expect(src).toMatch(/auto-retry transient\/provider retryable error/);
-    expect(src).toMatch(/transientAbortRetryAttempts\s*<\s*getTransientAbortRetryMax\(transientAbortRetryMessage\)/);
+    expect(src).toMatch(/transientAbortRetryAttempts\s*<\s*getEffectiveTransientRetryMax\(transientAbortRetryMessage\)/);
     expect(src).toMatch(/!entry\.abortRequested/);
     expect(src).toMatch(/toolCallsForTelemetry === 0/);
     expect(src).toMatch(/retryUsesOriginalPrompt[\s\S]*?promptWithFetchCorrelation\(prompt\)[\s\S]*?continueWithPiNativeLifecycle\('transient retry after started work'\)/);
+    expect(src).toMatch(/transientContinuationRetriesExhausted = true/);
+    expect(src).toMatch(/recoveryExhausted \|\| transientContinuationRetriesExhausted/);
   });
 
   it('waits once for router restart style connection drops before retrying', () => {
@@ -1090,6 +1188,17 @@ describe('Pi transient abort auto-retry', () => {
     expect(src).toMatch(/function getTransientAbortRetryDelayMs/);
     expect(src).toMatch(/ROUTER_RESTART_RETRY_BACKOFF_MS/);
     expect(src).toMatch(/clearClosingTerminalizer\(\);\n\s*clearAgentEndTerminalizer\(\);\n\s*entry\.runPhase = 'running';\n\s*entry\.promptActive = true;/);
+  });
+
+  it('terminates exhausted recovery without scheduling another durable attempt', () => {
+    const src = readSource(PI_ENGINE_PATH);
+    const helper = src.slice(src.indexOf('const surfaceTransientAbortFailure'), src.indexOf('const runTransientRetriesIfNeeded'));
+    expect(helper).toContain('recoveryExhausted = true');
+    expect(helper).toContain("durableOutcome = 'failed'");
+    expect(helper).toContain("await completeRecoveryClaim('failed', message)");
+    expect(helper).not.toContain('releaseRecoveryClaim');
+    expect(src).not.toContain('durableCapacityRetryScheduled');
+    expect(src).toMatch(/if \(recoveryExhausted \|\| transientContinuationRetriesExhausted\) \{\s*await emitTurnDone\('error'\);\s*return;/);
   });
 
   it('does not let stale agent_end terminalizers kill transient retries', () => {
@@ -1108,23 +1217,35 @@ describe('Pi transient abort auto-retry', () => {
     expect(src).toMatch(/stream_incomplete\/upstream truncation[\s\S]*?successful empty completion/);
   });
 
+  it('keeps recoverable compaction attempt errors internal and rejects late forced-terminal work', () => {
+    const src = readSource(PI_ENGINE_PATH);
+    expect(src).toMatch(/result\.outcome === 'failed' && !compactionRecoveryNoticeSaved && !oversizedPreflightRecoveryRequested/);
+    expect(src).toMatch(/oversizedPreflightRecoveryRequested\s*\? result\.messages\.filter\(\(message\) => message\.type !== 'engine_error'\)/);
+    expect(src).toMatch(/entry\.session\.subscribe\(\(event: any\) => \{[\s\S]*?if \(terminalizer\.isTerminalForced\) return;[\s\S]*?observeVoiceSdkTiming/);
+    expect(src).toMatch(/await sleep\(delayMs\);\s*if \(terminalizer\.isTerminalForced\) return false;/);
+    expect(src).toMatch(/catch \(err: any\) \{\s*if \(terminalizer\.isTerminalForced\) return;\s*markClosing\('prompt-rejected'\)/);
+  });
+
   it('gives context-overflow compaction a five-minute settle window and preserves provider errors', () => {
     const src = readSource(PI_ENGINE_PATH);
     expect(src).toMatch(/OVERFLOW_COMPACTION_SETTLE_MS/);
     expect(src).toMatch(/5 \* 60_000/);
     expect(src).toMatch(/overflowCompactionInProgress = true/);
-    expect(src).toMatch(/compactionNoticeEmittedThisTurn/);
+    expect(src).not.toMatch(/compactionNoticeEmittedThisTurn/);
+    expect(src).toMatch(/if \(!visibleCompactionInProgress\)/);
+    expect(src).toMatch(/visibleCompactionInProgress = false/);
     expect(src).toMatch(/duplicate compaction_start suppressed from UI/);
     expect(src).toMatch(/alreadyCompactedThisTurn = runCtx\.compactionSucceededThisTurn && !overflowCompactionInProgress/);
     expect(src).toMatch(/reusing SDK compaction already completed this turn/);
     expect(src).toMatch(/emitRecoveryCompactStart\('oversized-preflight-recovery'\)/);
-    expect(src).toMatch(/emitRecoveryCompactDoneIfNeeded\('oversized-preflight-recovery'\)/);
+    expect(src).toMatch(/emitRecoveryCompactDoneIfNeeded\(recoveryReason\)/);
     expect(src).toMatch(/continueWithPiNativeLifecycle/);
     expect(src).not.toMatch(/makePostCompactContinuationPrompt/);
     expect(src).toMatch(/attempting safe post-compact recovery without replaying original prompt/);
     expect(src).not.toMatch(/컨텍스트가 커져서 자동으로 정리했습니다\. 이어서 진행해 주세요/);
     expect(src).toMatch(/요약용 모델 슬롯이 일시적으로 가득 찼습니다/);
-    expect(src).toMatch(/agentEndNeedsOverflowSettle = isPreflightOversized \|\| isContextOverflow \|\| isUpstreamRejectedInput \|\| overflowCompactionInProgress \|\| overflowCompactionObservedThisTurn/);
+    expect(src).toMatch(/agentEndNeedsOverflowSettle = isPreflightOversized \|\| isContextOverflow \|\| isUpstreamRejectedInput \|\| overflowCompactionInProgress;/);
+    expect(src).not.toMatch(/overflowCompactionObservedThisTurn/);
     expect(src).toMatch(/createPiCompactRecoverySessionFile/);
     expect(src).toMatch(/compactRecoverySessionFile \|\| entry\.session\.sessionFile/);
     expect(src).toMatch(/kept history가 여전히 너무 큽니다/);
@@ -1154,8 +1275,9 @@ describe('Pi transient abort auto-retry', () => {
     expect(src).toMatch(/requestBodyEstimate/);
     expect(src).toMatch(/hintedEstimate/);
     expect(src).toMatch(/previousResponseId/);
-    expect(src).toMatch(/Pi Responses preflight rejected near-context request/);
-    expect(src).toMatch(/PI_RESPONSES_PREFLIGHT_CONTEXT_RATIO/);
+    const safeguardsSrc = readSource(path.resolve(import.meta.dirname, '../pi/provider-safeguards.ts'));
+    expect(safeguardsSrc).not.toMatch(/Pi Responses preflight rejected near-context request/);
+    expect(safeguardsSrc).not.toMatch(/PI_RESPONSES_PREFLIGHT_CONTEXT_RATIO/);
     expect(src).toMatch(/PI_RESPONSES_REQUEST_DEBUG/);
   });
 
@@ -1171,11 +1293,22 @@ describe('Pi transient abort auto-retry', () => {
     expect(src).toMatch(/x-codex-session-id/);
   });
 
-  it('enables Responses preflight rejection by default so Tower can compact before upstream', () => {
+  it('leaves actual overflow recovery to Pi and does not mint synthetic context errors', () => {
     const src = readSource(PI_ENGINE_PATH);
-    expect(src).toMatch(/PI_RESPONSES_PREFLIGHT_CONTEXT_RATIO \?\? 0\.90/);
-    expect(src).toMatch(/synthetic non-retryable provider-style 400/);
-    expect(src).toMatch(/context_length_exceeded/);
+    expect(src).not.toMatch(/PI_RESPONSES_PREFLIGHT_CONTEXT_RATIO/);
+    expect(src).not.toMatch(/synthetic non-retryable provider-style 400/);
+    expect(src).not.toMatch(/code: 'context_length_exceeded'/);
+    expect(src).toMatch(/recoverPiOverflowCompaction/);
+    expect(src).toMatch(/isPiContextOverflowFailure/);
+  });
+
+  it('falls back locally when the provider compaction request is itself rejected for size', () => {
+    const src = readSource(PI_ENGINE_PATH);
+    expect(src).toMatch(/recoverPiOverflowCompaction/);
+    expect(src).toMatch(/shouldReplayPiOverflowPrompt/);
+    expect(src).toMatch(/provider compaction was itself oversized; switched to local fallback/);
+    expect(src).toMatch(/recovery\.mode === 'local-fallback'/);
+    expect(src).toMatch(/assistantSaved, toolCallsExecuted: toolCallsForTelemetry/);
   });
 
   it('uses the closing settle window for post-side-effect transient agent_end errors', () => {
@@ -1255,6 +1388,13 @@ describe('Pi transient abort auto-retry', () => {
     expect(src).toMatch(/trigger=post_compact[\s\S]{0,260}action=\$\{recoveryDecision\.action\}/);
     expect(src).toMatch(/if \(recoveryDecision\.action !== 'native_continue'\) return false/);
     expect(src).toMatch(/execute: params\.execute \|\| continueWithPiNativeLifecycle/);
+  });
+
+  it('replays at most once after reusing SDK compaction during oversized recovery', () => {
+    const src = readSource(PI_ENGINE_PATH);
+    const reused = src.slice(src.indexOf('if (alreadyCompactedThisTurn) {'), src.indexOf('emitRecoveryCompactStart(\'oversized-preflight-recovery\')'));
+    expect(reused).not.toMatch(/promptWithFetchCorrelation\(prompt\)/);
+    expect(src).toMatch(/if \(overflowRecoveryReplayed\) \{[\s\S]*?await promptWithFetchCorrelation\(prompt\)/);
   });
 
   it('keeps oversized-preflight recovery off direct Pi native continuation', () => {
@@ -1429,10 +1569,10 @@ describe('Pi usage instrumentation', () => {
   });
 
   it('includes cumulative cache and cost totals in turn_done usage', () => {
-    const src = readSource(PI_ENGINE_PATH);
+    const src = readSource(path.resolve(path.dirname(PI_ENGINE_PATH), 'pi/run-terminalizer.ts'));
     // emitTurnDone's usage object must carry cumulative totals so the
     // frontend / cost reports match claude-engine's contract.
-    const block = src.match(/emitTurnDone\s*=\s*[\s\S]*?usage:\s*runCtx\.usageSummary\(\{[\s\S]*?\}\)/);
+    const block = src.match(/async emitTurnDone\([\s\S]*?usage:\s*\{\s*\.\.\.runCtx\.usageSummary\(\{[\s\S]*?\}\)/);
     expect(block).toBeTruthy();
     expect(block![0]).toMatch(/durationMs/);
     expect(block![0]).toMatch(/stopReason:\s*userFacingStopReason/);

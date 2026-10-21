@@ -54,3 +54,8 @@ describe('deriveConnectionReadiness', () => {
     expect(deriveConnectionReadiness({ ...connected, enabled: false }).effectiveStatus).toBe('disabled');
   });
 });
+
+it('never lets old provider success override failed or unverified materialization', () => {
+  expect(deriveConnectionReadiness({ ...connected, materializationFailed: true, providerHealth: { status: 'ready' } }).effectiveStatus).toBe('needs_attention');
+  expect(deriveConnectionReadiness({ ...connected, providerHealth: { status: 'ready' } }).effectiveStatus).toBe('connected_unverified');
+});

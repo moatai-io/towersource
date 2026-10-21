@@ -13,16 +13,17 @@ describe('header and model selector locale contract', () => {
     expect(selector).toContain('confirmEngineSwitch(');
   });
 
-  it('localizes file and conversation reference payloads and copy results', () => {
-    expect(header).toContain("activeFileTab?.path ? 'file' : 'session'");
-    expect(header).toContain("t('reference.workspace', { name: activeProjectName })");
-    expect(header).toContain("t(`reference.${activeDisplayKind}`, { title: activeDisplayTitle })");
-    expect(header).toContain("t(`reference.${activeDisplayKind}Copied`)");
-    expect(header).toContain("t('reference.copyFailed')");
+  it('localizes the active work title and agent labels', () => {
+    expect(header).toContain("t('reference.titleLabel')");
+    expect(header).toContain("t('reference.agentLabel')");
+    expect(header).toContain('activeDisplayTitle');
+    expect(header).toContain('activeAgentName');
   });
 
-  it('preserves clipboard payload structure and stable IDs', () => {
-    expect(header).toContain("navigator.clipboard.writeText(parts.join(' / '))");
-    expect(header).toContain('activeDisplayId ? `id: ${activeDisplayId}` : null');
+  it('derives the active work title from a file or session without restoring the removed copy action', () => {
+    expect(header).toContain('const activeDisplayTitle = activeFileTab?.path');
+    expect(header).toContain('? basename(activeFileTab.path)');
+    expect(header).toContain(': activeSessionName');
+    expect(header).not.toContain("navigator.clipboard.writeText(parts.join(' / '))");
   });
 });

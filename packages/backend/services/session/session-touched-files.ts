@@ -6,7 +6,7 @@
  * the same table.
  *
  * Owns: GET /api/sessions/:id/touched-files data layer.
- * Public API: getTouchedFiles(sessionId, limit?).
+ * Public API: getTouchedFiles(sessionId, viewer, limit?).
  *
  * Data source:
  *   - session_file_edits (PostgreSQL) — UNIQUE (session_id, file_path).
@@ -35,6 +35,7 @@
 import { query } from '../../db/pg-repo.js';
 import type { TouchedFile, TouchedFilesResponse } from '@tower/shared';
 import { isUserFacingSessionFile } from './session-file-filter.js';
+import { filterAccessibleSessionFiles, type SessionFileViewer } from './session-file-access.js';
 
 const DEFAULT_LIMIT = 10;
 const MAX_LIMIT = 50; // Allow higher limits for debugging; UI caps at 10.
@@ -47,6 +48,7 @@ const MAX_LIMIT = 50; // Allow higher limits for debugging; UI caps at 10.
  */
 export async function getTouchedFiles(
   sessionId: string,
+  viewer: SessionFileViewer,
   limit = DEFAULT_LIMIT,
 ): Promise<TouchedFilesResponse> {
   const started = Date.now();
@@ -71,8 +73,9 @@ export async function getTouchedFiles(
     [sessionId, fetchN],
   );
 
-  const files: TouchedFile[] = rows
-    .filter((r) => isUserFacingSessionFile(r.file_path))
+  const files: TouchedFile[] = (await filterAccessibleSessionFiles(
+    rows.filter((r) => isUserFacingSessionFile(r.file_path)), viewer,
+  ))
     .slice(0, n)
     .map((r) => ({
       path: r.file_path,

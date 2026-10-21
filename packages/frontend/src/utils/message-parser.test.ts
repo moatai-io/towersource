@@ -142,3 +142,27 @@ describe('normalizeContentBlocks', () => {
     expect(normalized[1].toolUse?.result).toBeUndefined();
   });
 });
+
+ describe('nested artifact regression', () => {
+  it('preserves the entire body including diagrams and following text', () => {
+    const body = '# Report\n\n```mermaid\nflowchart LR\n A["A"] --> B["B"]\n```\n\n## After diagram\nBody';
+    const blocks = normalizeContentBlocks([{ type: 'text', text: '```tower-artifact path="work/report.md"\n' + body + '\n```' }]);
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0]).toMatchObject({ type: 'artifact_markdown', text: body });
+  });
+});
+
+ describe('streaming artifact boundaries', () => {
+  it('keeps partial inner opening fences as text and parses the final response', async () => {
+    const { parseSDKMessage } = await import('./message-parser');
+    const raw = '```tower-artifact path="work/report.md"\n# Report\n```mermaid\nflowchart LR\n A["A"] --> B["B"]\n```\nEnd\n```';
+    for (let n = 0; n < raw.length; n++) {
+      const content = [{ type: 'text', text: raw.slice(0, n) }];
+      expect(normalizeContentBlocks(content, [], true).some(b => b.type === 'artifact_markdown')).toBe(false);
+      expect(parseSDKMessage({ message: { content } }, true).some(b => b.type === 'artifact_markdown')).toBe(false);
+    }
+    const content = [{ type: 'text', text: raw }];
+    expect(normalizeContentBlocks(content, [], true)[0].type).toBe('text');
+    expect(normalizeContentBlocks(content)[0].type).toBe('artifact_markdown');
+  });
+});

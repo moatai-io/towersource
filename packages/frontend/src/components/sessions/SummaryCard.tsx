@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useSessionStore, type SessionMeta } from '../../stores/session-store';
 
 interface SummaryCardProps {
@@ -6,6 +7,7 @@ interface SummaryCardProps {
 }
 
 export function SummaryCard({ session }: SummaryCardProps) {
+  const { t } = useTranslation('chat');
   const [expanded, setExpanded] = useState(false);
   const [loading, setLoading] = useState(false);
   const updateSessionMeta = useSessionStore((s) => s.updateSessionMeta);
@@ -50,20 +52,20 @@ export function SummaryCard({ session }: SummaryCardProps) {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
             </svg>
             <span className="text-[13px] sm:text-[14px] font-medium text-surface-600 sm:text-gray-400">
-              {session.summary ? 'Summary' : 'No summary'}
+              {session.summary ? t('sessionSummary.title', { defaultValue: '대화 요약' }) : t('sessionSummary.empty', { defaultValue: '아직 요약이 없습니다.' })}
             </span>
           </button>
 
           {/* Meta chips */}
           <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
             {turnCount > 0 && (
-              <span className="text-[12px] text-surface-700 sm:text-surface-600 sm:bg-surface-800/50 sm:px-1.5 sm:py-0.5 sm:rounded" title="Turns">
-                {turnCount}t
+              <span className="text-[12px] text-surface-700 sm:text-surface-600 sm:bg-surface-800/50 sm:px-1.5 sm:py-0.5 sm:rounded" title={t('sessionSummary.turns', { defaultValue: '대화 횟수' })}>
+                {t('sessionSummary.turnCount', { defaultValue: '{{count}}회', count: turnCount })}
               </span>
             )}
             {filesCount > 0 && (
-              <span className="text-[12px] text-surface-700 sm:text-surface-600 sm:bg-surface-800/50 sm:px-1.5 sm:py-0.5 sm:rounded" title="Files edited">
-                {filesCount}f
+              <span className="text-[12px] text-surface-700 sm:text-surface-600 sm:bg-surface-800/50 sm:px-1.5 sm:py-0.5 sm:rounded" title={t('sessionSummary.files', { defaultValue: '수정한 파일' })}>
+                {t('sessionSummary.fileCount', { defaultValue: '{{count}}개 파일', count: filesCount })}
               </span>
             )}
             {session.totalCost > 0 && (
@@ -83,7 +85,7 @@ export function SummaryCard({ session }: SummaryCardProps) {
             onClick={handleSummarize}
             disabled={loading}
             className="p-1 text-surface-700 sm:text-surface-600 hover:text-primary-400 transition-colors disabled:opacity-50 shrink-0"
-            title={session.summary ? 'Refresh summary' : 'Generate summary'}
+            title={session.summary ? t('sessionSummary.refresh', { defaultValue: '요약 갱신' }) : t('sessionSummary.generate', { defaultValue: '요약 생성' })}
           >
             <svg className={`w-3 h-3 sm:w-3.5 sm:h-3.5 ${loading ? 'animate-spin' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
@@ -99,7 +101,7 @@ export function SummaryCard({ session }: SummaryCardProps) {
                 <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
                 </svg>
-                <span>Summary is outdated (+{turnCount - summaryAtTurn} turns)</span>
+                <span>{t('sessionSummary.stale', { defaultValue: '요약 이후 {{count}}회 더 대화했습니다.', count: turnCount - summaryAtTurn })}</span>
               </div>
             )}
             <div className="text-[14px] text-gray-400 leading-relaxed mt-2 space-y-1">

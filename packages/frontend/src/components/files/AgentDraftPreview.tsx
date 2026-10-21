@@ -7,7 +7,7 @@ import { useChatStore } from '../../stores/chat-store';
 import { useFileStore } from '../../stores/file-store';
 import { useSettingsStore } from '../../stores/settings-store';
 import { AGENT_CHARACTERS, AgentCharacterAvatar, agentFaceImageUrl, characterFace } from '../../features/agent-profile/characters';
-import { AgentGoogleConnectionSetup, allowOrganizationGoogleConnection, loadGoogleOAuthReadiness, loadOrganizationGoogleConnections, startDedicatedGoogleOAuth, type AgentGoogleSetup, type GoogleOAuthReadiness, type OrganizationGoogleConnection } from './AgentGoogleConnectionSetup';
+import { AgentGoogleConnectionSetup, loadGoogleOAuthReadiness, loadOrganizationGoogleConnections, startDedicatedGoogleOAuth, type AgentGoogleSetup, type GoogleOAuthReadiness, type OrganizationGoogleConnection } from './AgentGoogleConnectionSetup';
 
 function authHeaders() {
   const token = localStorage.getItem('token');
@@ -39,7 +39,7 @@ function FieldLabel({ children }: { children: React.ReactNode }) {
   return <span className="text-[11px] font-black uppercase tracking-[0.16em] text-surface-500">{children}</span>;
 }
 
-export function AgentDraftPreview({ content }: { content: string }) {
+export function AgentDraftPreview({ content, onCancel }: { content: string; onCancel?: () => void }) {
   const { t } = useTranslation('files');
   const addProject = useProjectStore((state) => state.addProject);
   const addSession = useSessionStore((state) => state.addSession);
@@ -77,8 +77,8 @@ export function AgentDraftPreview({ content }: { content: string }) {
       .then(([readiness, connections]) => {
         if (!active) return;
         setGoogleOAuthReadiness(readiness);
-        setOrganizationGoogleConnections(readiness.ready ? connections : []);
-        if (!readiness.ready) setGoogleSetup({ mode: 'none' });
+        setOrganizationGoogleConnections(connections);
+        if (!readiness.ready) setGoogleSetup(current => current.mode === 'dedicated' ? { mode: 'none' } : current);
       })
       .catch(() => {
         if (!active) return;
@@ -112,7 +112,8 @@ export function AgentDraftPreview({ content }: { content: string }) {
   const expertiseInput = draft ? expectedExpertiseInput(draft) : '';
   const expertise = expertiseInput.trim();
   const faceImageUrl = agentFaceImageUrl(draft?.face);
-  const canCreate = Boolean(draft?.name.trim() && expertise);
+  const dedicatedGoogleBlocked = googleSetup.mode === 'dedicated' && googleOAuthReadiness?.ready !== true;
+  const canCreate = Boolean(draft?.name.trim() && expertise && !dedicatedGoogleBlocked);
 
   const generateCharacter = async () => {
     if (!characterPrompt.trim()) return;
@@ -160,16 +161,23 @@ export function AgentDraftPreview({ content }: { content: string }) {
         body: JSON.stringify(bootstrapPayload),
       });
       const result = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(result?.error || `Request failed: ${response.status}`);
+      if (!response.ok) {
+        const hint = result?.code === 'SOURCE_PROJECT_ACCESS_DENIED'
+          ? '현재 프로젝트에 접근할 수 없습니다. 접근 가능한 프로젝트의 대화에서 다시 시도하세요.'
+          : result?.code === 'DEFAULT_HARNESS_UNAVAILABLE'
+            ? '기본 AI 실행 환경을 사용할 수 없습니다. 관리자에게 설정 점검을 요청하세요.'
+            : result?.code === 'SKILL_SOURCE_INCOMPLETE'
+              ? '기본 스킬 설치가 완료되지 않았습니다. 관리자에게 스킬 원본 점검을 요청하세요.'
+              : null;
+        throw new Error(hint || result?.error || `Request failed: ${response.status}`);
+      }
       const project = result.project;
       const session = result.session;
       addProject(project);
       if (session?.id) addSession(session);
       if (!session?.id) throw new Error(t('agentCreation.sessionMissing'));
       setRecovery({ projectName: project.name, sessionId: session.id });
-      if (googleSetup.mode === 'organization') {
-        await allowOrganizationGoogleConnection(project.id, googleSetup.credentialId);
-      } else if (googleSetup.mode === 'dedicated') {
+      if (googleSetup.mode === 'dedicated') {
         await startDedicatedGoogleOAuth(project.id);
         return;
       }
@@ -215,7 +223,10 @@ export function AgentDraftPreview({ content }: { content: string }) {
     <div className="agent-draft-preview absolute inset-0 overflow-auto bg-surface-950 p-5 text-surface-100 font-sans">
       <div className="mx-auto max-w-2xl space-y-5">
         <header className="border-b border-surface-800 pb-5">
-          <FieldLabel>{t('agentCreation.newAiTeammate')}</FieldLabel>
+          <div className="flex items-center justify-between gap-4">
+            <FieldLabel>{t('agentCreation.newAiTeammate')}</FieldLabel>
+            {onCancel && <button type="button" onClick={onCancel} className="rounded-xl border border-surface-700 px-3 py-2 text-xs font-bold text-surface-400 transition-colors hover:border-surface-500 hover:text-surface-100">{t('cancel')}</button>}
+          </div>
           <h1 className="mt-2 text-2xl font-black tracking-tight text-surface-100">{t('agentCreation.heading')}</h1>
           <p className="mt-2 max-w-xl text-sm leading-6 text-surface-400">{t('agentCreation.description')}</p>
         </header>
@@ -278,7 +289,7 @@ export function AgentDraftPreview({ content }: { content: string }) {
             <FieldLabel>{t('agentCreation.chooseFace')}</FieldLabel>
             <div className="mt-3 grid grid-cols-3 gap-2 sm:grid-cols-4 lg:grid-cols-7">
               {AGENT_CHARACTERS.map((character) => {
-                const characterLabel = t(`agentCreation.characterLabels.${character.id}`);
+                const characterLabel = t(`agentCreation.characterLabels.${character.id}`, { defaultValue: character.label });
                 return (
                 <button key={character.id} type="button" title={characterLabel} onClick={() => setFace(`character:${character.id}`)} aria-label={t('agentCreation.characterLabel', { name: characterLabel })} aria-pressed={characterFace(draft.face) === character.id} className={`group overflow-hidden rounded-2xl border p-1 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400/70 ${characterFace(draft.face) === character.id ? 'border-primary-400 bg-primary-500/20' : 'border-surface-700 bg-surface-950 hover:border-surface-500'}`}>
                   <AgentCharacterAvatar id={character.id} className="h-auto w-full rounded-xl" />
@@ -324,7 +335,7 @@ export function AgentDraftPreview({ content }: { content: string }) {
           <h2 className="text-lg font-black text-surface-100">{t('agentCreation.readyHeading')}</h2>
           <p className="mt-1 text-sm leading-6 text-surface-400">{t('agentCreation.readyDescription')}</p>
           <button type="button" onClick={createAgent} disabled={creating || !canCreate} className="mt-4 w-full rounded-2xl bg-emerald-500 px-4 py-3 text-sm font-black text-white transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-50">
-            {creating ? t('agentCreation.creating') : !canCreate ? t('agentCreation.requiredPrompt') : t('agentCreation.create')}
+            {creating ? t('agentCreation.creating') : dedicatedGoogleBlocked ? t('agentCreation.google.setupRequired') : !canCreate ? t('agentCreation.requiredPrompt') : t('agentCreation.create')}
           </button>
 
           {recovery && (

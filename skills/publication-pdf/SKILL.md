@@ -85,7 +85,7 @@ final/<document-name>.pdf
 
 ### 3. `publish` 빌드
 
-Project Runtime Box 안에서 아래 도구가 보여야 한다.
+현재 Project의 `bash`에서 아래 도구가 보여야 한다.
 
 ```bash
 typst --version    # 0.15.0
@@ -93,7 +93,7 @@ pandoc --version   # 3.10
 mmdc --version     # 11.16.0
 ```
 
-스킬은 host-global 경로를 사용하지 않는다. Runtime Box에서는 materialized skill directory를 찾고 그 안의 `scripts/build.sh`를 실행한다. 현재 프로젝트 로컬 authoring 환경에서는 이 스킬 폴더의 같은 스크립트를 사용할 수 있다.
+스킬은 host-global 경로를 사용하지 않는다. Project `bash`에서는 materialized skill directory를 찾고 그 안의 `scripts/build.sh`를 실행한다. 현재 프로젝트 로컬 authoring 환경에서는 이 스킬 폴더의 같은 스크립트를 사용할 수 있다.
 
 ```bash
 bash <skill-dir>/scripts/build.sh \
@@ -159,6 +159,6 @@ $ E = m c^2 $          // math
 ## 완료 조건
 
 - `publication.md`, `publication.typ`, 최종 PDF가 프로젝트 안에 존재한다.
-- Runtime Box toolchain 버전 확인과 자동 postflight가 통과한다.
+- Project `bash` toolchain 버전 확인과 자동 postflight가 통과한다.
 - PDF 시각 검수를 완료한다.
 - 사용자에게 최종 파일의 절대 경로를 각각 한 줄로 안내한다.

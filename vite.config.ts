@@ -3,9 +3,26 @@ import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 import { VitePWA } from 'vite-plugin-pwa';
 import path from 'path';
+import { resolveFrontendSourceRev } from './scripts/frontend-source-rev.mjs';
+import { malformedPathGuard } from './scripts/vite-request-guard';
+
+const frontendSourceRev = resolveFrontendSourceRev();
 
 export default defineConfig({
+  define: { __TOWER_FRONTEND_SOURCE_REV__: JSON.stringify(frontendSourceRev) },
   plugins: [
+    malformedPathGuard(),
+    {
+      name: 'tower-frontend-release',
+      generateBundle() {
+        // Use the exact same value as the compiled JS, never runtime metadata.
+        this.emitFile({
+          type: 'asset',
+          fileName: 'frontend-release.json',
+          source: JSON.stringify({ sourceRev: frontendSourceRev }),
+        });
+      },
+    },
     react(),
     tailwindcss(),
     VitePWA({
@@ -87,8 +104,12 @@ export default defineConfig({
         // visibility-redesign.md.
         skipWaiting: true,
         clientsClaim: true,
-        navigateFallback: '/index.html',
-        navigateFallbackDenylist: [/^\/api\//, /^\/valuelens/, /^\/edge\//, /^\/pulse\//, /^\/miroball\//, /^\/text2sql\//, /^\/collectors\//, /^\/sites\//, /^\/fleet\.html/],
+        // index.html is deliberately NOT precached (the server must serve the
+        // latest document on every navigation). Workbox's NavigationRoute
+        // requires its fallback to be precached; pointing it at index.html
+        // while globPatterns excludes HTML makes the worker fail to install.
+        // Let the server's SPA fallback handle navigations instead.
+        navigateFallback: null,
         importScripts: ['/push-handlers.js'],
         runtimeCaching: [
           {
@@ -120,7 +141,11 @@ export default defineConfig({
     }),
   ],
   root: 'packages/frontend',
+  // Concurrent dev/visual servers must not overwrite each other's optimized
+  // React graph (production and development React cannot share a dispatcher).
+  cacheDir: path.resolve(__dirname, `node_modules/.vite-tower/${process.pid}`),
   resolve: {
+    dedupe: ['react', 'react-dom'],
     alias: {
       '@': path.resolve(__dirname, 'packages/frontend/src'),
       '@tower/shared': path.resolve(__dirname, 'packages/shared/index.ts'),

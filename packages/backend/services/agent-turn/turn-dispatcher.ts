@@ -1,6 +1,7 @@
 // Owns: the lightweight wake loop for durable agent-turn retries.
 // Public API: createAgentTurnDispatcher. See README.md.
 
+import { reconcileAbandonedAgentTurns } from './reconcile-abandoned-turns.js';
 import { findDueAgentTurnRetries, type DueAgentTurnRetry } from './turn-supervisor.js';
 
 export type AgentTurnDispatchCandidate = DueAgentTurnRetry;
@@ -17,6 +18,8 @@ let activeDispatcher: AgentTurnDispatcher | null = null;
 type AgentTurnDispatcherDependencies = {
   dispatch(candidates: AgentTurnDispatchCandidate[]): Promise<void>;
   findDue?: typeof findDueAgentTurnRetries;
+  reconcile?: () => Promise<number>;
+  initialInterviews?: () => Promise<void>;
   intervalMs?: number;
   batchSize?: number;
   logger?: Pick<Console, 'log' | 'warn'>;
@@ -50,6 +53,8 @@ export function createAgentTurnDispatcher(deps: AgentTurnDispatcherDependencies)
 
     scanning = true;
     try {
+      if (deps.reconcile) await deps.reconcile();
+      if (deps.initialInterviews) await deps.initialInterviews();
       const candidates = await findDue({ limit: batchSize });
       if (candidates.length > 0) {
         logger.log(`[agent-turn-dispatcher] due=${candidates.length}`);
@@ -100,7 +105,7 @@ export function createAgentTurnDispatcher(deps: AgentTurnDispatcherDependencies)
 /** Start the one backend dispatcher after active-mode startup gates pass. */
 export function startAgentTurnDispatcher(deps: AgentTurnDispatcherDependencies): AgentTurnDispatcher {
   if (activeDispatcher) return activeDispatcher;
-  activeDispatcher = createAgentTurnDispatcher(deps);
+  activeDispatcher = createAgentTurnDispatcher({ initialInterviews: async () => { const {dispatchDurableInterviews}=await import('../agents/automatic-interview.js'); await dispatchDurableInterviews(); }, reconcile: reconcileAbandonedAgentTurns, ...deps });
   activeDispatcher.start();
   return activeDispatcher;
 }

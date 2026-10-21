@@ -13,7 +13,7 @@ description: >
   4 모드:
   - default (인자 없음) — 짧은 맞춤 소개 또는 받은 질문에 직접 답변 (2-3 단락) + 다음 옵션
   - tour — 5-7 단계 워킹 튜토리얼
-  - <topic> — 토픽 즉답 (runtime box / sandbox / publishing / 권한 / 스킬 / agent / credential / schedule / 발표 자료 / 시각화 / FAQ / 보안 / 인프라 / 결정 / 격리 등 자유)
+  - <topic> — 토픽 즉답 (project environment / sandbox / runtime box compatibility / publishing / 권한 / 스킬 / agent / credential / schedule / 발표 자료 / 시각화 / FAQ / 보안 / 인프라 / 결정 / 격리 등 자유)
   - cheatsheet — 한 페이지 요약 (자주 쓰는 트리거 · 산출물 위치)
 
   Trigger:
@@ -33,7 +33,7 @@ description: >
   - 새 스킬 만들기 (→ /skill-architect)
   - 발표 자료 *생성* 자체 (→ /image-slide-gen, /html-slide 또는 /pptx-template; 단 본 스킬이 §8 묶음 골라서 위임은 OK)
   - 사용자 도메인 업무 (재무 분석 / 보고서 작성 등) 진행 중 끼어들기 — 그건 본 스킬 영역 아님
-version: 1.2.0
+version: 1.3.0
 tags:
   - core
 audience: 모든 Tower 사용자 (admin / operator / member / viewer)
@@ -50,9 +50,10 @@ owner: moat
 
 ## 데이터 소스
 
-- **1차**: Project Runtime Box/materialized 경로 `/workspace/.tower/skills/tower-intro/handbook.md`.
+- **1차**: 현재 Project에 materialize된 `.tower/skills/tower-intro/handbook.md`.
 - **2차**: organization source `workspace/projects/teamskills/skills/tower-intro/handbook.md`.
 - **3차**: Tower seed/reference `skills/managed/tower-intro/handbook.md`.
+- 실제 legacy Runtime Box compatibility가 확인된 경우에만 그 안의 `/workspace/.tower/skills/tower-intro/handbook.md`를 runtime copy로 취급한다.
 - 본 스킬은 host-global provider config 경로를 읽지 않는다. 본 스킬은 핸드북 절대경로를 사용자에게 *직접 안내하지 않는다*.
 - **4차** (선택): 조직이 별도로 제공한 Tower 안내 문서 (있는 경우에만)
 - **5차**: `~/workspace/principles.md` (다섯 원칙 — tour 모드 끝부분)
@@ -100,7 +101,7 @@ owner: moat
    - 익숙도 — 이번 세션에서 핸드북 / tower-intro 호출 이력 있으면 익숙, 없으면 신규
 2. **첫 문장 = 위 카테고리 framing 한 단락** (고정).
 3. 그 다음 핸드북 §0 (30초 요약) + §1-1 (비유 4개 중 1개) + §1-2 (개인 AI 비교 핵심 3행)을 골라 **추가 1-2 단락**. 사용자 역할에 맞춰:
-   - admin/operator → 운영 가능성 강조 (스킬·자체 호스팅 서버·decisions·Credential/Runtime Box)
+   - admin/operator → 운영 가능성 강조 (스킬·자체 호스팅 서버·decisions·Project Environment·Credential Vault)
    - member → 자기 프로젝트 안 가능성 강조 (AI 작업·산출물·발표 자료·스케줄)
    - viewer → 보고 / 검토 강조 (감사·결정·산출물 읽기)
 4. 끝에 옵션 안내 (plain prose, AskUserQuestion 사용 X):
@@ -123,9 +124,9 @@ owner: moat
   "steps": [
     { "title": "Tower 가 뭔지", "status": "pending", "description": "비유 + ChatGPT 와 다른 점. 핸드북 §0 + §1-1 + §1-2" },
     { "title": "프로젝트 = 모든 것의 중심", "status": "pending", "description": "왜 프로젝트 단위인지, 폴더 구조. 핸드북 §3-2" },
-    { "title": "AI 와 일하는 네 가지 경로", "status": "pending", "description": "Session / @ai / Task·Schedule / Agent Worker 차이. 핸드북 §3-1 + §4" },
-    { "title": "스킬과 Runtime Box", "status": "pending", "description": "teamskills SSOT, project-local skills, materialized runtime copy. 핸드북 §3-4 + §3-5" },
-    { "title": "산출물 어디 가나", "status": "pending", "description": "Publishing + 절대경로 + Runtime Box/Sandbox. 핸드북 §3-5 + §3-6 + §5-1" },
+    { "title": "AI 와 일하는 네 가지 경로", "status": "pending", "description": "Session / Automations / 지원 AI / AI 서비스 차이. 핸드북 §3-1 + §4" },
+    { "title": "스킬과 Project Environment", "status": "pending", "description": "teamskills SSOT, project-local skills, materialized runtime copy, executor 경계. 핸드북 §3-4 + §3-5" },
+    { "title": "산출물 어디 가나", "status": "pending", "description": "Publishing + 절대경로 + Project workspace/Sandbox. 핸드북 §3-5 + §3-6 + §5-1" },
     { "title": "발표 자료 / 보고서", "status": "pending", "description": "§8 톤별 묶음 + 시각화 15+ 종. 핸드북 §8 + §3-9" },
     { "title": "다음 단계", "status": "pending", "description": "다섯 원칙 + 깊이 들어가는 길잡이. principles.md + 핸드북 §10" }
   ]
@@ -150,11 +151,11 @@ owner: moat
 |---|---|---|
 | `Tower 란` / `intro` / `소개` | §0 + §1 | 비유 3개 + ChatGPT 비교 표 |
 | `권한` / `역할` / `RBAC` / `permission` | §2 | datatable: admin/operator/member/viewer + permission mode |
-| `세션` / `session` / `@ai` / `@task` / `schedule` | §3-1 + §4-1~3 | mermaid sequence: 네 경로 |
-| `프로젝트` / `project` / `AGENTS.md` / `Runtime Box` | §3-2 + §3-5 | 폴더 구조 도식 |
+| `세션` / `session` / `@ai` / `@task` / `schedule` | §3-1 + §4-1~3 | 현재 경로 비교 및 종료 채널 구분 |
+| `프로젝트` / `project` / `AGENTS.md` / `Project Environment` | §3-2 + §3-5 | 폴더 구조 도식 |
 | `결정문서` / `decisions` / `progress` / `memory` | §3-3 | 다섯 원칙 |
 | `스킬` / `skill` / `카탈로그` / `teamskills` | §3-4 | project-local vs teamskills vs runtime copy 표 |
-| `sandbox` / `샌드박스` / `runtime box` / `실행` / `격리` | §3-5 | Runtime Box + sandbox 비교 |
+| `sandbox` / `샌드박스` / `runtime box` / `실행` / `격리` | §3-5 | Project Environment + sandbox + legacy Runtime Box 비교 |
 | `publishing` / `배포` / `사이트` / `웹` | §3-6 | unlisted vs public + URL 패턴 |
 | `agent` / `worker` / `spawn` / `세션 분기` / `자식 세션` | §3-7 | Agent Session 모델 + 가드 매트릭스 |
 | `hook` / `자동 동작` | §3-8 | 대표 사례 3개 |
@@ -192,8 +193,8 @@ owner: moat
 | 무엇을 | 어떻게 |
 |---|---|
 | AI 에게 무엇을 시키기 | 세션 열고 자연어. 명령어 아님 |
-| 채널에서 빠른 AI | `@ai <질문>` |
-| 백그라운드/예약 작업 | `@task <지시>` 또는 `/task-schedule` / UI 스케줄 생성 |
+| AI에게 빠르게 질문 | 담당 AI 팀원의 세션에서 자연어 요청 |
+| 예약·반복 업무 | `/task-schedule` 또는 자동화 UI. 요약 확인 후 생성 |
 | 스킬 호출 | `/<스킬명>` 또는 자연어 (description 매칭) |
 | 새 프로젝트 만들기 | 사이드바 "+" 버튼 (직접 mkdir 금지) |
 | 사이트 만들기 | "이거 웹 페이지로 만들어줘" → AI 가 자동 publish |
@@ -210,7 +211,7 @@ owner: moat
 | 결정 (왜 A 대신 B) | `<프로젝트>/.project/decisions/YYYY-MM-DD-제목.md` |
 | 작업 로그 | `<프로젝트>/.project/progress.md` |
 | 사이트 (웹) | `workspace/published/sites/<slug>/` (또는 프로젝트 안 + 심링크) |
-| Runtime Box / Sandbox 실행 코드 | `workspace/projects/<p>/...` 또는 프로젝트 scaffold의 `work/`, `sandbox-tools/` |
+| Project Environment / Sandbox 실행 코드 | `workspace/projects/<p>/...` 또는 프로젝트 scaffold의 `work/`, `sandbox-tools/` |
 | 업로드 / 첨부 | `<프로젝트>/uploads/` |
 
 ### Steps — 처음 30분에 하면 좋은 것
@@ -232,7 +233,7 @@ owner: moat
 
 | 역할 | 톤 가이드 |
 |---|---|
-| **admin / operator** | 운영 가능성 강조. 스킬·자체 호스팅 서버·decisions·hooks·Runtime Box·Credential Vault·fleet. "당신이 할 수 있는 건…" |
+| **admin / operator** | 운영 가능성 강조. 스킬·자체 호스팅 서버·decisions·hooks·Project Environment·Credential Vault·fleet. Runtime Box는 legacy compatibility 질문에서만 다룸. "당신이 할 수 있는 건…" |
 | **member** | 자기 프로젝트 안 활용 강조. AI 작업·산출물·발표 자료·decisions 기록. "이 프로젝트에서 당신이…" |
 | **viewer** | 보기·검토 강조. 감사 로그·읽기 권한·결정문서 조회. "이 워크스페이스에서 당신은…" |
 

@@ -108,3 +108,14 @@ If you want an external action, name the target and expected effect. Tower may s
 ## Example request
 
 > Compare the current English installation guide with the actual package scripts and `.env.example`. Update only public documentation. Do not change runtime code or deployment scripts. Preserve existing local edits from other Sessions. Validate every relative link and report changed files and remaining uncertainty.
+
+## Additional navigation shortcuts
+
+These are defaults and can be customized in Settings. Availability depends on focus, the active question card, and browser or OS handling.
+
+| Action | Default shortcut |
+|---|---|
+| Start or stop voice input | `Alt+V` |
+| Previous or next Session | `Alt+Shift+↑` / `Alt+Shift+↓` |
+| Previous or next user message | `Alt+↑` / `Alt+↓` |
+| Choose a question option | `1`–`9` (when the card is active) |

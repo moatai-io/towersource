@@ -50,6 +50,10 @@ export function canMergeAssistantMessages(last: ChatMessage | undefined, msg: Ch
     && msg.role === 'assistant'
     && !isAgentReportMessage(last)
     && !isAgentReportMessage(msg)
+    // A recovery notice has its own UI treatment. Merging the next answer
+    // into that row makes MessageBubble render only the notice and hide the answer.
+    && !(last.metadata as any)?.modelRecovery
+    && !(msg.metadata as any)?.modelRecovery
     && (last.parentToolUseId ?? null) === (msg.parentToolUseId ?? null);
 }
 

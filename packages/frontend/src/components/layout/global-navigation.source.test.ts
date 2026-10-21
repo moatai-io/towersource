@@ -11,7 +11,6 @@ const destinationSources = [
   ['favorites-panel', '../favorites/FavoritesPanel.tsx'],
   ['settings-panel', '../settings/SettingsPanel.tsx'],
   ['skills-browser', '../skills/SkillsBrowserV2.tsx'],
-  ['personal-credentials-panel', '../admin/AdminPanel.tsx'],
 ] as const;
 const app = fs.readFileSync(path.join(__dirname, '../../App.tsx'), 'utf8');
 
@@ -19,9 +18,11 @@ describe('global navigation source contracts', () => {
   it('exposes a stable Publishing Hub menu target and destination landmark', () => {
     expect(header).toContain('data-testid={testId}');
     expect(header).toContain('testId="global-nav-publishing"');
-    for (const destination of ['automation', 'work', 'inbox', 'favorites', 'settings', 'skills', 'personal-credentials']) {
+    for (const destination of ['automation', 'work', 'inbox', 'settings', 'skills']) {
       expect(header).toContain(`testId="global-nav-${destination}"`);
     }
+    expect(header).not.toContain('testId="global-nav-favorites"');
+    expect(header).not.toContain('testId="global-nav-personal-credentials"');
     expect(header).toContain('aria-expanded={open}');
     expect(publishPanel).toContain('data-testid="publishing-hub"');
     expect(publishPanel).toContain("aria-label={i18n.t('publish.hubTitle')}");

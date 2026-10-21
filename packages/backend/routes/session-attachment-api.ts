@@ -6,17 +6,16 @@ import crypto from 'node:crypto';
 import multer from 'multer';
 import { config } from '../config.js';
 import {
+  createSessionAttachmentFromPath,
   deleteSessionAttachment,
   listSessionAttachments,
-  promoteSessionAttachmentToPersonal,
   promoteSessionAttachmentToProject,
   resolveReadableSessionAttachment,
   resolveSessionAttachment,
   SessionAttachmentError,
 } from '../services/session-attachments/session-attachment-store.js';
 import { queryOne } from '../db/pg-repo.js';
-import { canAccessSession, isPathWritableByRole } from '../services/pm/project-access.js';
-import { getProject } from '../services/pm/project-manager.js';
+import { canAccessSession, canWriteSessionContent } from '../services/pm/project-access.js';
 
 const router = Router();
 const stagingDir = path.join(config.dataDir, 'upload-staging', 'session-attachments');
@@ -64,7 +63,7 @@ async function assertSessionWritable(userId: number, role: string, sessionId: st
   if (role === 'viewer' || role === 'guest') {
     throw new SessionAttachmentError('FORBIDDEN', 'Session attachment write access denied');
   }
-  const access = await canAccessSession(sessionId, userId, role);
+  const access = await canWriteSessionContent(sessionId, userId, role);
   if (!access.allowed) throw new SessionAttachmentError(access.status === 404 ? 'NOT_FOUND' : 'FORBIDDEN', access.message);
   const row = await queryOne<{ project_id: string | null }>('SELECT project_id FROM sessions WHERE id = $1', [sessionId]);
   if (!row) throw new SessionAttachmentError('NOT_FOUND', 'Session not found');
@@ -87,58 +86,6 @@ function fail(res: any, error: unknown) {
 
 const MAX_UPLOAD_REQUEST_BYTES = 220 * 1024 * 1024;
 
-function safeProjectUploadName(input: string): string {
-  const base = path.basename(String(input || '').trim()).replace(/[\\/:*?"<>|\0]/g, '-').slice(0, 240);
-  if (!base || base === '.' || base === '..') throw new SessionAttachmentError('INVALID', 'Attachment filename required');
-  return base;
-}
-
-function uniqueProjectUploadName(name: string): string {
-  const ext = path.extname(name);
-  const stem = path.basename(name, ext);
-  return `${stem}-${Date.now()}-${crypto.randomUUID().slice(0, 8)}${ext}`;
-}
-
-async function commitStagedProjectUpload(input: {
-  sourcePath: string;
-  originalName: string;
-  mimeType?: string | null;
-  sizeBytes: number;
-  projectId: string;
-  userId: number;
-  userRole: string;
-}) {
-  const project = await getProject(input.projectId);
-  if (!project?.rootPath) throw new SessionAttachmentError('NOT_FOUND', 'Project not found');
-  const targetDir = path.join(project.rootPath, 'uploads');
-  if (!await isPathWritableByRole(targetDir, input.userId, input.userRole)) {
-    throw new SessionAttachmentError('FORBIDDEN', 'Project upload access denied');
-  }
-  await fs.mkdir(targetDir, { recursive: true });
-  const name = safeProjectUploadName(input.originalName);
-  let target = path.join(targetDir, name);
-  try { await fs.access(target); target = path.join(targetDir, uniqueProjectUploadName(name)); } catch {}
-  const temporaryTarget = `${target}.tower-upload-${crypto.randomUUID()}.tmp`;
-  try {
-    await fs.copyFile(input.sourcePath, temporaryTarget, fs.constants.COPYFILE_EXCL);
-    await fs.rename(temporaryTarget, target);
-  } catch (error) {
-    await fs.rm(temporaryTarget, { force: true }).catch(() => undefined);
-    throw error;
-  }
-  return {
-    id: crypto.randomUUID(),
-    uri: target,
-    name: path.basename(target),
-    mimeType: input.mimeType || null,
-    sizeBytes: input.sizeBytes,
-    status: 'project_file' as const,
-    promotedUri: target,
-    expiresAt: null,
-    createdAt: new Date().toISOString(),
-  };
-}
-
 function rejectOversizedUploadRequest(req: any, res: any, next: any) {
   const contentLength = Number(req.headers?.['content-length'] || 0);
   if (Number.isFinite(contentLength) && contentLength > MAX_UPLOAD_REQUEST_BYTES) {
@@ -147,13 +94,22 @@ function rejectOversizedUploadRequest(req: any, res: any, next: any) {
   next();
 }
 
-router.post('/:sessionId', rejectOversizedUploadRequest, upload.array('files', 20), withStagingCleanup, async (req: any, res) => {
+export function handleSessionAttachmentUpload(req: any, res: any, next: any) {
+  upload.array('files', 20)(req, res, async (error: any) => {
+    if (!error) return next();
+    await cleanupStagedFiles(req);
+    const oversized = error.code === 'LIMIT_FILE_SIZE' || error.code === 'LIMIT_FILE_COUNT';
+    res.status(oversized ? 413 : 400).json({
+      code: oversized ? error.code : 'UPLOAD_INTAKE_FAILED',
+      error: oversized ? 'Upload limit exceeded (200MB per file, 20 files per request)' : 'Upload intake failed; please try again',
+    });
+  });
+}
+
+router.post('/:sessionId', rejectOversizedUploadRequest, handleSessionAttachmentUpload, withStagingCleanup, async (req: any, res) => {
   try {
     const actor = user(req);
     const session = await assertSessionWritable(actor.id, actor.role, req.params.sessionId);
-    if (!session.projectId) {
-      throw new SessionAttachmentError('CONFLICT', 'Chat uploads require a project-connected session');
-    }
     const files = (req.files || []) as Express.Multer.File[];
     if (files.length === 0) return res.status(400).json({ error: 'No files provided' });
     const attachments = [];
@@ -161,20 +117,28 @@ router.post('/:sessionId', rejectOversizedUploadRequest, upload.array('files', 2
     for (const file of files) {
       file.originalname = Buffer.from(file.originalname, 'latin1').toString('utf8');
       try {
-        const attachment = await commitStagedProjectUpload({
+        const attachment = await createSessionAttachmentFromPath({
           sourcePath: file.path,
-          originalName: file.originalname,
+          name: file.originalname,
           mimeType: file.mimetype,
-          sizeBytes: file.size,
+          sessionId: req.params.sessionId,
           projectId: session.projectId,
           userId: actor.id,
-          userRole: actor.role,
         });
         attachments.push(attachment);
       } catch (error) {
         failures.push({
           name: file.originalname,
-          error: error instanceof Error ? error.message : 'Upload failed',
+          error: (error as NodeJS.ErrnoException).code === 'ENAMETOOLONG'
+            ? 'Filename is too long; rename the file and retry'
+            : (error as NodeJS.ErrnoException).code === 'ENOSPC'
+              ? 'Storage is full; ask an administrator to free space'
+            : ['EACCES', 'EPERM'].includes((error as NodeJS.ErrnoException).code || '')
+              ? 'Storage access denied; ask an administrator to check permissions'
+            : error instanceof SessionAttachmentError ? error.message
+            : error instanceof Error && error.message.startsWith('WORKER_')
+              ? 'Project Worker could not save the file; please retry when the Worker is available'
+              : 'Could not save the file; ask an administrator to check storage permissions and free space',
         });
       } finally {
         if (file.path) await fs.rm(file.path, { force: true }).catch(() => undefined);
@@ -228,19 +192,17 @@ router.post('/:sessionId/:attachmentId/promote', async (req: any, res) => {
     const session = await assertSessionWritable(actor.id, actor.role, req.params.sessionId);
     const destination = req.body?.destination;
     const name = typeof req.body?.name === 'string' ? req.body.name : undefined;
-    const attachment = destination === 'personal'
-      ? await promoteSessionAttachmentToPersonal({ userId: actor.id, sessionId: req.params.sessionId, attachmentId: req.params.attachmentId, requestedName: name })
-      : destination === 'project'
-        ? await promoteSessionAttachmentToProject({
-            userId: actor.id,
-            userRole: actor.role,
-            sessionId: req.params.sessionId,
-            attachmentId: req.params.attachmentId,
-            projectId: String(req.body?.projectId || session.projectId || ''),
-            requestedName: name,
-          })
-        : null;
-    if (!attachment) return res.status(400).json({ error: 'destination must be personal or project' });
+    const attachment = destination === 'project'
+      ? await promoteSessionAttachmentToProject({
+          userId: actor.id,
+          userRole: actor.role,
+          sessionId: req.params.sessionId,
+          attachmentId: req.params.attachmentId,
+          projectId: String(req.body?.projectId || session.projectId || ''),
+          requestedName: name,
+        })
+      : null;
+    if (!attachment) return res.status(400).json({ error: 'destination must be project' });
     res.json({ ok: true, attachment, destination, uri: attachment.promotedUri });
   } catch (error) { fail(res, error); }
 });

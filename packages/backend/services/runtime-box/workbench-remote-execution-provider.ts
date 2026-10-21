@@ -1,3 +1,4 @@
+import { isManagedDownloadCommand } from '../execution/downloads/download-contract.js';
 /**
  * Owns: Remote Worker adapter for the provider-neutral Workbench broker.
  * Public API: createRemoteWorkbenchExecutionProvider.
@@ -7,13 +8,13 @@
  */
 
 import { randomInt } from 'node:crypto';
-import type { WorkbenchExecutionProvider } from './workbench-execution-broker.js';
+import type { WorkbenchExecutionProvider } from '../execution/execution-broker.js';
 import { registerAndStartRemoteWorkerService } from './workbench-remote-service-registry.js';
 import {
   enqueueRemoteWorkbenchJob,
   type RemoteWorkbenchWorkerTransport,
   type RemoteWorkbenchWorkspaceBridge,
-} from './workbench-remote-job-runner.js';
+} from '../execution/remote-job-runner.js';
 
 /** Bind one allowlisted Worker transport to the common Workbench execution contract. */
 export function createRemoteWorkbenchExecutionProvider(
@@ -24,12 +25,18 @@ export function createRemoteWorkbenchExecutionProvider(
   return {
     kind: 'remote-worker',
     async executeForeground(input) {
-      const environmentKeys = Object.keys(input.env ?? {}).sort();
+      // Worker-first authority travels in spec.sessionId. Mirror it into the run-scoped
+      // envelope as a compatibility contract so older Workers that predate native
+      // spec.sessionId materialization still expose the audit context to the process.
+      const runEnv = { ...input.env, TOWER_SESSION_ID: input.sessionId };
+      const environmentKeys = Object.keys(runEnv).sort();
       try {
+        input.signal?.throwIfAborted();
         const result = await transport.execute({
         spec: {
           jobId: 800_000_000 + randomInt(100_000_000),
           projectId: input.projectId,
+          actorUserId: input.userId,
           sessionId: input.sessionId,
           command: input.command,
           cwd: input.cwd,
@@ -37,8 +44,8 @@ export function createRemoteWorkbenchExecutionProvider(
           workbenchRevision: null,
           environmentKeys,
         },
-        credentials: input.env,
-        signal: new AbortController().signal,
+        credentials: runEnv,
+        signal: input.signal ?? new AbortController().signal,
         onStdout: () => {},
         onStderr: () => {},
         });
@@ -55,7 +62,7 @@ export function createRemoteWorkbenchExecutionProvider(
         command: input.command,
         cwd: input.cwd,
         timeoutSec: input.timeoutSec,
-        env: input.env,
+        env: isManagedDownloadCommand(input.command) ? undefined : input.env,
         transport,
         workspaceBridge,
         onTerminal: slot?.reserved ? slot.release : undefined,

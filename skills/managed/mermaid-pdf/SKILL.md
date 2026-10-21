@@ -21,7 +21,7 @@ Puppeteer(Chrome headless) 기반, Noto Sans KR 한글 폰트, Obsidian 스타�
 직접 `render_pdf.mjs <input.md> <output.pdf>`로 PDF까지 굽는 방식은 다음 경우의 fallback이다.
 - 사용자가 의도적으로 스킬 내장 렌더러를 테스트/디버그한다.
 - 현재 harness `pdf_export`를 사용할 수 없다.
-- 프로젝트 Runtime Box 안에서 중간 확인용 PDF가 필요하고 최종 전달본이 아니다.
+- 현재 Project 실행면에서 중간 확인용 PDF가 필요하고 최종 전달본이 아니다.
 
 ## Execution Flow
 
@@ -31,12 +31,12 @@ Puppeteer(Chrome headless) 기반, Noto Sans KR 한글 폰트, Obsidian 스타�
    └── 현재 작업 중인 md 파일이 있는 경우 → 해당 파일 사용
 
 2. 실행 경로 확인
-   ├── Project Runtime Box에서는 `/workspace/.tower/skills/mermaid-pdf/scripts/` 사용
+   ├── Project `bash`에서는 `.tower/skills/mermaid-pdf/scripts/` 사용
    ├── host-side `~/.claude/skills/...` 경로를 직접 열거나 실행하지 않음
    └── 의존성이 없으면 자동 설치를 반복하지 말고 사용자에게 필요한 설치/공유 런타임 상태를 보고
 
 3. print-ready HTML 생성
-   └── node /workspace/.tower/skills/mermaid-pdf/scripts/render_pdf.mjs <input.md> <fallback.pdf> --html-out <output.html> --skip-pdf [options]
+   └── node .tower/skills/mermaid-pdf/scripts/render_pdf.mjs <input.md> <fallback.pdf> --html-out <output.html> --skip-pdf [options]
 
 4. 최종 PDF export
    └── pdf_export(input_path=<output.html>, output_path=<output.pdf>) 사용
@@ -55,7 +55,7 @@ Puppeteer(Chrome headless) 기반, Noto Sans KR 한글 폰트, Obsidian 스타�
 ## CLI 사용법
 
 ```bash
-node /workspace/.tower/skills/mermaid-pdf/scripts/render_pdf.mjs <input.md> <output.pdf> [options]
+node .tower/skills/mermaid-pdf/scripts/render_pdf.mjs <input.md> <output.pdf> [options]
 
 Options:
   --page-size    A4 | Letter | Legal  (기본: A4)
@@ -66,7 +66,7 @@ Options:
   --skip-pdf     HTML만 생성하고 내장 Puppeteer PDF 렌더링은 건너뜀
 ```
 
-일반 프로젝트에서는 `project_shell`로 실행한다. 입력/출력 파일은 `/workspace` 아래, 즉 현재 프로젝트 안에 둔다.
+일반 프로젝트에서는 `bash`로 실행한다. 입력/출력 파일은 현재 Project 안에 둔다. Worker-first에서는 Project Workstation을 사용하고 compatibility Project의 Runtime Box 선택은 Tower가 내부적으로 처리한다.
 
 > **마진 기본값 노트 (2026-04-11):** 초기엔 `20,20,20,20` 이었으나 위아래가 너무 좁아 책 느낌이 안 나서 `35,22,35,22`로 조정.
 
@@ -74,17 +74,17 @@ Options:
 
 ```bash
 # 권장: Markdown → HTML 생성 후 pdf_export로 최종 PDF
-node /workspace/.tower/skills/mermaid-pdf/scripts/render_pdf.mjs report.md report.fallback.pdf --html-out report.html --skip-pdf
+node .tower/skills/mermaid-pdf/scripts/render_pdf.mjs report.md report.fallback.pdf --html-out report.html --skip-pdf
 # 이후 Tower pdf_export tool: input_path=report.html, output_path=report.pdf
 
 # fallback: 내장 렌더러로 직접 A4 세로 PDF 생성
-node /workspace/.tower/skills/mermaid-pdf/scripts/render_pdf.mjs report.md report.pdf
+node .tower/skills/mermaid-pdf/scripts/render_pdf.mjs report.md report.pdf
 
 # Letter 가로, 스케일 0.8
-node /workspace/.tower/skills/mermaid-pdf/scripts/render_pdf.mjs report.md report.pdf --page-size Letter --orientation landscape --scale 0.8
+node .tower/skills/mermaid-pdf/scripts/render_pdf.mjs report.md report.pdf --page-size Letter --orientation landscape --scale 0.8
 
 # 커스텀 마진 (상10, 좌우15, 하10)
-node /workspace/.tower/skills/mermaid-pdf/scripts/render_pdf.mjs report.md report.pdf --margin 10,15,10,15
+node .tower/skills/mermaid-pdf/scripts/render_pdf.mjs report.md report.pdf --margin 10,15,10,15
 ```
 
 ---

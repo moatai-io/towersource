@@ -65,9 +65,9 @@ export const DEFAULT_NOTIFICATION_EVENTS: DefaultNotificationEventPreference[] =
     eventType: 'session.completed',
     label: 'AI 세션 완료',
     description: 'AI가 세션 응답 생성을 마쳤을 때',
-    inApp: false,
-    toast: false,
-    webPush: false,
+    inApp: true,
+    toast: true,
+    webPush: true,
     minPriority: 'normal',
   },
   {

@@ -38,7 +38,7 @@ const RUNTIME_GUIDES: RuntimeGuideResource[] = [
   {
     name: 'visualization',
     title: 'Tower Visualization Guide',
-    description: 'Exact Tower visual block schemas, Mermaid rules, and JSON formatting constraints. Read before producing chart, mermaid, datatable, svg, html-sandbox, timeline, map, or other rich visual blocks.',
+    description: 'Exact Tower visual block schemas, Mermaid rules, and JSON formatting constraints. Read when exact block schemas or advanced Mermaid syntax are needed. Basic Mermaid flowcharts using the shared core rules do not require a guide read.',
     relativePath: 'docs/tower-guide/resources/visualization.md',
     minRole: 'viewer',
   },
@@ -192,7 +192,7 @@ export function createRuntimeGuideReadTool(ctx: RuntimeGuideToolContext = {}): T
     promptSnippet: 'Use runtime_guide_read when you need exact Tower runtime guide details.',
     promptGuidelines: [
       'Use runtime_guide_read before producing detailed visual blocks, publishing-specific artifacts, or other guide-backed outputs once those guides exist.',
-      'For visualization, call runtime_guide_read with name="visualization" before relying on exact schemas or Mermaid edge/label rules.',
+      'For visualization, call runtime_guide_read with name="visualization" when exact block schemas or advanced Mermaid syntax are needed. Basic Mermaid flowcharts using the shared core rules do not require a guide read.',
       'For publishing, call runtime_guide_read with name="publishing" before relying on exact slug, visibility, URL, or verification rules.',
       'For git/PR work, call runtime_guide_read with name="git" before relying on exact commit message, Tower-Session trailer, or PR procedure details.',
       'For subagent or session orchestration work, call runtime_guide_read with name="agent-orchestration" before relying on exact quota, report, spawn, send, fan-in, or cleanup details.',

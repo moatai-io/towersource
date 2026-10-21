@@ -22,10 +22,13 @@ vi.mock('./automation-manager.js', () => ({
 }));
 
 import { applyAutomationChangeIntent, automationChangeProposalHash, createAutomationChangeIntent, getAutomationChangeIntentDiagnostics, reconcileAutomationChangeIntent } from './automation-change-intent.js';
+import { materializeAutomationChangeV1 } from '../../../shared/automation-yaml.js';
 import { getAutomation, getAutomationInTransaction, getAutomationForUpdateInTransaction, updateAutomationInTransaction } from './automation-manager.js';
+import { authorizeAutomationMutation } from './automation-mutation-policy.js';
 import type { Automation } from './automation-manager.js';
 
-const validYaml = `version: 1\nname: Updated\n\ntrigger:\n  type: manual\n\nrun:\n  type: ai_prompt\n  prompt: summarize\n\ncondition:\n  ai_when:\n    - output.ai_needed == true\n\nai:\n  prompt: summarize\n\nreport:\n  policy: auto\n`;
+const validYaml = `version: 1\nname: Updated\n\ntrigger:\n  type: manual\n\nrun:\n  type: ai_prompt\n  prompt: summarize\n`;
+const unsupportedYaml = `${validYaml}\ncondition:\n  ai_when:\n    - output.ai_needed == true\nai:\n  prompt: summarize\nreport:\n  policy: auto\n`;
 const automation = {
   id: 'a1', userId: 7, projectId: 'p1', scopeType: 'project', jobType: 'ai_prompt', definitionJson: {},
   configUpdatedAt: '2026-07-20T00:00:00.000Z', configUpdatedByUserId: 7,
@@ -35,7 +38,7 @@ function intentRow(overrides: Record<string, unknown> = {}) {
   return {
     id: 'i1', automation_id: 'a1', project_id: 'p1', proposed_by_user_id: 7, source_session_id: 's1',
     base_config_updated_at: automation.configUpdatedAt, proposal_hash: 'h'.repeat(64), yaml_text: validYaml,
-    materialized_updates: { name: 'Updated', jobType: 'ai_prompt', riskLevel: 'low' }, risk_level: 'low', warnings: [], summary: 'rename',
+    materialized_updates: { ...materializeAutomationChangeV1(validYaml, automation).updates, riskLevel: 'low' }, risk_level: 'low', warnings: [], summary: 'rename',
     status: 'proposed', expires_at: '2099-01-01T00:00:00.000Z', applying_by_user_id: null, applying_at: null, applied_by_user_id: null, applied_at: null,
     error: null, created_at: '2026-07-20T00:00:00.000Z', updated_at: '2026-07-20T00:00:00.000Z', ...overrides,
   };
@@ -57,6 +60,35 @@ describe('automation change intents', () => {
     expect(queryOne).toHaveBeenCalledWith(expect.stringContaining('automation_change_intents'), expect.arrayContaining(['a1', 'p1', 7]));
     expect(automationChangeProposalHash({ automationId: 'a1', baseConfigUpdatedAt: 'x', updates: { b: 2, a: 1 } }))
       .toBe(automationChangeProposalHash({ automationId: 'a1', baseConfigUpdatedAt: 'x', updates: { a: 1, b: 2 } }));
+  });
+
+  it('retains runner policy when proposing a same-kind command change', async () => {
+    const commandAutomation = { ...automation, jobType: 'shell', definitionJson: { command: 'echo old', runner: { preference: 'runtime_box', fallback: 'fail' } } } as Automation;
+    const commandYaml = validYaml.replace('type: ai_prompt\n  prompt: summarize', 'type: command\n  command: echo new');
+    queryOne.mockResolvedValueOnce(intentRow());
+    await createAutomationChangeIntent({ automation: commandAutomation, actorUserId: 7, yaml: commandYaml });
+    expect(authorizeAutomationMutation).toHaveBeenCalledWith(expect.objectContaining({
+      mutation: expect.objectContaining({ definitionJson: { command: 'echo new', runner: { preference: 'runtime_box', fallback: 'fail' } } }),
+    }));
+    const insert = queryOne.mock.calls[0][1];
+    expect(JSON.parse(insert[7]).definitionJson.runner).toEqual({ preference: 'runtime_box', fallback: 'fail' });
+  });
+
+  it('rejects a proposal containing unimplemented condition/AI/report fields', async () => {
+    await expect(createAutomationChangeIntent({ automation, actorUserId: 7, yaml: unsupportedYaml })).rejects.toThrow('invalid automation yaml');
+    expect(queryOne).not.toHaveBeenCalled();
+  });
+
+  it('rejects an old hashed intent containing unsupported fields without applying it', async () => {
+    txQueryOne.mockResolvedValueOnce(intentRow({ yaml_text: unsupportedYaml }));
+    await expect(applyAutomationChangeIntent({ intentId: 'i1', automationId: 'a1', actorUserId: 7, proposalHash: 'h'.repeat(64) })).rejects.toThrow('unsupported fields');
+    expect(updateAutomationInTransaction).not.toHaveBeenCalled();
+  });
+
+  it('rejects an old intent whose stored updates do not match effective YAML', async () => {
+    txQueryOne.mockResolvedValueOnce(intentRow({ materialized_updates: { name: 'Updated', jobType: 'ai_prompt', riskLevel: 'low' } }));
+    await expect(applyAutomationChangeIntent({ intentId: 'i1', automationId: 'a1', actorUserId: 7, proposalHash: 'h'.repeat(64) })).rejects.toThrow('no longer matches');
+    expect(updateAutomationInTransaction).not.toHaveBeenCalled();
   });
 
   it('rejects a stale preview before claiming or applying it', async () => {

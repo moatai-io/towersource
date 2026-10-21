@@ -29,10 +29,13 @@ describe('project upload disk staging source contract', () => {
     expect(source).toContain('void cleanupProjectUploadStaging(req)');
   });
 
-  it('keeps legacy chat upload on its existing buffer contract instead of silently mixing lifecycles', () => {
-    expect(source).toContain("router.post('/files/chat-upload', upload.array('files', UPLOAD_MAX_FILES)");
+  it('retires sessionless chat upload before accepting multipart data', () => {
     const start = source.indexOf("router.post('/files/chat-upload'");
-    const end = source.indexOf("router.post('/files/finalize'", start);
-    expect(source.slice(start, end)).toContain('file.buffer');
+    const end = source.indexOf("router.delete('/files/temp-upload'", start);
+    const legacy = source.slice(start, end);
+    expect(legacy).toContain('res.status(410)');
+    expect(legacy).toContain("router.post('/files/finalize-uploads'");
+    expect(legacy).not.toContain('upload.array');
+    expect(legacy).not.toContain('file.buffer');
   });
 });

@@ -1,5 +1,8 @@
 @import "tailwindcss";
 
+/* Tower theme selection, not OS preference, owns every dark: utility. */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
 @font-face {
   font-family: "Pretendard Variable";
   src: url("/fonts/PretendardVariable.woff2") format("woff2");
@@ -96,7 +99,7 @@
   --th-chat-user-bg-queued: rgba(7, 16, 18, 0.78);
   --th-chat-user-bg-failed: rgba(239, 68, 68, 0.18);
   --th-chat-user-text: #f3fbfa;
-  --th-chat-user-shadow: 0 10px 28px rgba(0, 0, 0, 0.20);
+  --th-chat-user-shadow: none;
   --th-chat-queued-ring: rgba(94, 234, 212, 0.18);
   --th-chat-queued-status-text: rgba(178, 201, 200, 0.82);
   --th-chat-queued-spinner-track: rgba(94, 234, 212, 0.16);
@@ -115,15 +118,19 @@
   --th-accent-700: #115e59;
   --th-accent-800: #134e4a;
   --th-accent-900: #042f2e;
+  /* Clean light hierarchy: white canvas/cards, one quiet neutral region, and
+     borders rather than stacked gray-green fills for depth. */
   --th-bg-primary: #ffffff;
-  --th-bg-secondary: #f8fbfa;
-  --th-bg-tertiary: #eef6f4;
-  --th-bg-surface: #dfeae7;
-  --th-border: #829c98;
-  --th-border-subtle: #b9ccc8;
-  --th-text-primary: #111827;
-  --th-text-secondary: #4b5563;
-  --th-text-muted: #6b7280;
+  --th-bg-secondary: #f8faf9;
+  --th-bg-tertiary: #f3f5f4;
+  --th-bg-surface: #ffffff;
+  --th-sidebar-primary: #f3f6f5;
+  --th-sidebar-secondary: #ffffff;
+  --th-border: #d2d9d6;
+  --th-border-subtle: #dfe5e2;
+  --th-text-primary: #17201e;
+  --th-text-secondary: #4f5b58;
+  --th-text-muted: #66736f;
   --th-prose-body: #1f2937;
   --th-prose-heading: #0f172a;
   --th-prose-muted: #4b5563;
@@ -175,11 +182,11 @@
   --th-gray-400: #4b5563;
   --th-gray-500: #6b7280;
   --th-gray-600: #9ca3af;
-  --th-chat-user-bg: #d2e6e2;
-  --th-chat-user-bg-queued: #dff4f1;
-  --th-chat-user-bg-failed: #fecaca;
-  --th-chat-user-text: #0f172a;
-  --th-chat-user-shadow: 0 10px 26px rgba(15, 23, 42, 0.10);
+  --th-chat-user-bg: #e6f0ed;
+  --th-chat-user-bg-queued: #edf7f4;
+  --th-chat-user-bg-failed: #fee2e2;
+  --th-chat-user-text: #17201e;
+  --th-chat-user-shadow: none;
   --th-chat-queued-ring: rgba(15, 118, 110, 0.18);
   --th-chat-queued-status-text: rgba(15, 118, 110, 0.76);
   --th-chat-queued-spinner-track: rgba(15, 118, 110, 0.18);
@@ -548,9 +555,7 @@
     linear-gradient(180deg, #081416 0%, #071012 40%, #050d0f 100%);
 }
 :root[data-theme="light"] .app-bg {
-  background:
-    radial-gradient(ellipse 80% 50% at 50% 0%, rgba(13, 148, 136, 0.035) 0%, transparent 50%),
-    linear-gradient(180deg, #ffffff 0%, #f8fbfa 50%, #eef6f4 100%);
+  background: var(--th-bg-primary);
 }
 
 
@@ -1197,6 +1202,10 @@ code, pre, .font-mono {
   min-width: 0;
 }
 
+.tower-login-mobile-brand {
+  display: none;
+}
+
 .tower-login-mark-card {
   width: min(320px, 100%);
   margin: 0 0 28px;
@@ -1406,16 +1415,45 @@ code, pre, .font-mono {
 
 @media (max-width: 560px) {
   .tower-login-layout {
-    min-height: var(--vvh, 100dvh);
-    padding: 24px 18px calc(30px + env(safe-area-inset-bottom));
+    min-height: 100%;
+    align-content: center;
+    gap: 20px;
+    padding: max(20px, env(safe-area-inset-top)) 18px max(20px, env(safe-area-inset-bottom));
   }
 
-  .tower-login-title {
-    font-size: clamp(34px, 12vw, 48px);
+  .tower-login-mobile-brand {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    font-size: 24px;
+    font-weight: 700;
+  }
+
+  .tower-login-mobile-brand img {
+    width: 32px;
+    height: 32px;
+  }
+
+  .tower-login-hero .tower-login-mark-card,
+  .tower-login-hero .tower-login-title,
+  .tower-login-hero .tower-login-subtitle,
+  .tower-login-hero .tower-login-chips,
+  .tower-login-card-wrap .tower-login-logo {
+    display: none;
+  }
+
+  .tower-login-eyebrow {
+    margin: 8px 0 0;
+    letter-spacing: 0.08em;
   }
 
   .tower-login-form {
-    padding: 24px;
+    padding: 20px;
+  }
+
+  .tower-login-footer {
+    margin-top: 16px;
   }
 
   .tower-login-input {
@@ -1936,11 +1974,9 @@ code, pre, .font-mono {
 
 .tower-active-turn-pill {
   color: #0f766e;
-  background: rgba(240,253,250,0.90);
-  border-color: rgba(15,118,110,0.12);
-  box-shadow:
-    0 10px 24px rgba(15,23,42,0.08),
-    inset 0 0 0 1px rgba(255,255,255,0.38);
+  background: var(--th-bg-surface, #f8fafc);
+  border-color: rgba(15,118,110,0.38);
+  box-shadow: none;
 }
 
 .tower-active-turn-pill__dot {
@@ -1954,11 +1990,9 @@ code, pre, .font-mono {
 :root[data-theme="dark"] .tower-active-turn-pill,
 .dark .tower-active-turn-pill {
   color: rgba(178,201,200,0.86);
-  background: rgba(7,16,18,0.86);
-  border-color: rgba(94,234,212,0.07);
-  box-shadow:
-    0 10px 26px rgba(0,0,0,0.20),
-    inset 0 0 0 1px rgba(94,234,212,0.025);
+  background: var(--th-bg-surface, #1b222b);
+  border-color: rgba(94,234,212,0.28);
+  box-shadow: none;
 }
 
 :root[data-theme="dark"] .tower-active-turn-pill__dot,
@@ -1994,27 +2028,14 @@ code, pre, .font-mono {
   input[type="text"], input[type="search"], textarea, select {
     font-size: max(var(--input-font-size-mobile, var(--input-font-size, 1rem)), 16px) !important;
   }
-  /* Shrink the root container to the *visual* viewport (set by main.tsx
-     via visualViewport API). This makes the bottom-anchored InputBox ride
-     above the iOS virtual keyboard automatically, instead of being hidden
-     behind it. Fallback to 100vh when --vvh isn't set (non-mobile / older
-     browsers without visualViewport). */
+  /* The React mobile app shell owns keyboard viewport height. Keep the document
+     roots stable so iOS Chrome cannot combine native viewport panning with
+     repeated html/body/#root relayouts. */
   html, body, #root {
-    height: var(--vvh, 100dvh);
-    min-height: var(--vvh, 100dvh);
-    max-height: var(--vvh, 100dvh);
+    height: 100dvh;
+    min-height: 100dvh;
+    max-height: 100dvh;
     overflow: hidden;
-  }
-
-  /* 입력 중에는 하단 모바일 메뉴를 잠시 접는다. composer 위치는 건드리지
-     않고 footer만 접어서 기존 키보드 보정 흐름과 충돌하지 않게 한다. */
-  .tower-input-focused .tower-mobile-tab-bar {
-    max-height: 0;
-    padding-bottom: 0 !important;
-    border-top-width: 0;
-    overflow: hidden;
-    opacity: 0;
-    pointer-events: none;
   }
 }
 
@@ -2281,9 +2302,34 @@ code, pre, .font-mono {
   stroke-linejoin: round;
 }
 
-/* ─── Touch device: always show hover-based buttons ─── */
+/* ─── Message actions ──────────────────────────────────────────────────────
+   One input-capability contract:
+   - touch / hybrid / uncertain input: actions stay visible and clickable
+   - precise hover-capable desktop: actions hide until row hover or keyboard focus
+
+   Do not express this with responsive `md:group-hover` utilities. Screen width
+   does not tell us whether a user can hover, and mixing both conditions caused
+   desktop-width touch devices to receive opacity:0 with no way to reveal it. */
+.message-actions {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+@media (min-width: 48rem) and (hover: hover) and (pointer: fine) {
+  .group\/message .message-actions {
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .group\/message:hover .message-actions,
+  .group\/message:focus-within .message-actions {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+
+/* Other legacy hover-only controls still need a visible touch fallback. */
 @media (hover: none) {
-  .group-hover\/message\:opacity-100,
   .group-hover\/code\:opacity-100,
   .group-hover\/mermaid\:opacity-100 {
     opacity: 0.6 !important;
@@ -2317,13 +2363,25 @@ code, pre, .font-mono {
   box-shadow: 6px 22px 60px rgba(0, 0, 0, 0.34) !important;
 }
 
+/* Match the light theme: the branded chat canvas must not obscure the
+   already low-opacity background image. Other surfaces keep their default. */
+:root[data-theme="dark"] .tower-main-content-surface.tower-branded-chat-surface,
+:root:not([data-theme]) .tower-main-content-surface.tower-branded-chat-surface {
+  background: rgba(36, 40, 50, 0.12);
+  backdrop-filter: none;
+}
+
 :root[data-theme="dark"] .tower-main-content-surface::before,
 :root:not([data-theme]) .tower-main-content-surface::before {
   content: none;
 }
 
 :root[data-theme="dark"] .tower-main-tabbar-shell,
-:root:not([data-theme]) .tower-main-tabbar-shell,
+:root:not([data-theme]) .tower-main-tabbar-shell {
+  background: transparent !important;
+  border-bottom: 1px solid var(--th-border-subtle);
+}
+
 :root[data-theme="dark"] .tower-main-tabbar,
 :root:not([data-theme]) .tower-main-tabbar {
   background: transparent !important;
@@ -2339,7 +2397,7 @@ code, pre, .font-mono {
   background: rgba(36, 40, 50, 0.74) !important;
   border-color: rgba(255, 255, 255, 0.10) rgba(255, 255, 255, 0.09) transparent !important;
   box-shadow: none !important;
-  backdrop-filter: blur(10px) saturate(1.05);
+  backdrop-filter: none;
   transform: none;
 }
 
@@ -2442,10 +2500,151 @@ code, pre, .font-mono {
   .ai-team-stat:nth-child(n + 3) { border-top: 1px solid var(--ai-team-line); }
 }
 
+/* Shared application dividers use the same quiet line in both themes. */
+.tower-app-header {
+  border-color: var(--th-border-subtle);
+}
+
+.tower-viewer-reopen-handle {
+  border-color: var(--th-border-subtle);
+  background: var(--th-bg-tertiary);
+}
+
+.tower-viewer-reopen-handle:hover {
+  border-color: var(--th-border);
+  background: var(--th-bg-secondary);
+}
+
 /* The resizable left sidebar follows its own width, not the viewport width. */
 .tower-sidebar {
   container-type: inline-size;
   container-name: tower-sidebar;
+}
+
+/* Light mode uses a deliberate two-stage sidebar hierarchy instead of stacking
+   semi-transparent gray-green surface utilities. Dark mode keeps its existing
+   depth and translucency. */
+.tower-sidebar {
+  border-right: 1px solid var(--th-border-subtle);
+}
+
+.sidebar-resize-guide {
+  background: transparent;
+}
+
+.group:hover > .sidebar-resize-guide {
+  background: var(--th-border);
+}
+
+.group.is-dragging > .sidebar-resize-guide {
+  background: color-mix(in srgb, var(--th-accent-500) 38%, var(--th-border));
+}
+
+:root[data-theme="light"] .tower-sidebar {
+  background: var(--th-sidebar-secondary);
+}
+:root[data-theme="light"] .tower-sidebar-primary {
+  background: var(--th-sidebar-primary);
+  border-color: var(--th-border-subtle);
+}
+:root[data-theme="light"] .tower-sidebar-secondary {
+  background: var(--th-sidebar-secondary);
+}
+/* Tailwind's dark: variant follows the OS media preference; Tower's selected
+   theme can be light even when the OS is dark. Keep selected rail labels legible
+   against the light sidebar in that combination. */
+:root[data-theme="light"] .agent-nav-rail button[aria-pressed="true"],
+:root[data-theme="light"] .agent-nav-rail button[aria-current="page"] .fade-overflow-text {
+  color: var(--th-text-primary);
+}
+
+/* Recent sessions is a flat list. Date/project labels provide hierarchy through
+   type and spacing only; rows avoid glossy white pills, inset rings, and fades. */
+.sidebar-timeline-date {
+  background: transparent;
+  backdrop-filter: none;
+}
+.sidebar-timeline-project {
+  border-color: var(--th-border);
+}
+:root[data-theme="light"] .sidebar-timeline-date {
+  color: var(--th-text-secondary);
+}
+:root[data-theme="light"] .sidebar-timeline-project {
+  color: var(--th-text-secondary);
+  border-color: var(--th-accent-600);
+}
+:root[data-theme="light"] .sidebar-session-row {
+  color: var(--th-text-secondary);
+  background: transparent;
+  box-shadow: none;
+}
+:root[data-theme="light"] .sidebar-session-row:hover {
+  color: var(--th-text-primary);
+  background: transparent;
+}
+:root[data-theme="light"] .sidebar-session-row:hover .sidebar-session-highlight {
+  background: var(--th-bg-tertiary);
+}
+:root[data-theme="light"] .sidebar-session-row.is-active {
+  color: var(--th-text-primary);
+  background: transparent;
+  box-shadow: none;
+  outline: none;
+}
+:root[data-theme="light"] .sidebar-session-row.is-active .sidebar-session-highlight {
+  background: color-mix(in srgb, var(--th-accent-500) 14%, var(--th-sidebar-secondary));
+}
+:root[data-theme="light"] .sidebar-session-meta {
+  color: var(--th-text-secondary);
+}
+.fade-overflow-text {
+  text-overflow: clip;
+}
+.fade-overflow-text[data-overflowing='true'] {
+  -webkit-mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 0.75rem), transparent 100%);
+  mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 0.75rem), transparent 100%);
+}
+
+@container tower-sidebar (max-width: 390px) {
+  .sidebar-session-meta--compact-responsive:not(.sidebar-session-meta--mobile-visible) {
+    display: none;
+  }
+}
+
+/* Keep search in the same visual plane as the list instead of a floating pill. */
+.sidebar-sessions-toolbar {
+  border-color: var(--th-border-subtle);
+  background: transparent;
+  box-shadow: none;
+}
+.sidebar-session-search {
+  border-color: transparent;
+  border-radius: 0;
+  box-shadow: none;
+}
+.sidebar-session-search:focus {
+  border-color: var(--th-accent-600);
+  background: transparent;
+  box-shadow: none;
+}
+:root[data-theme="light"] .sidebar-session-search {
+  color: var(--th-text-primary);
+}
+:root[data-theme="light"] .sidebar-session-search::placeholder,
+:root[data-theme="light"] .sidebar-session-search-icon {
+  color: var(--th-text-muted);
+}
+
+/* The sessions pane must end as a flat surface at the right edge. */
+:root[data-theme="light"] .tower-sidebar-secondary,
+:root[data-theme="light"] .tower-sidebar-scroll,
+:root[data-theme="light"] .tower-sidebar-scroll > div {
+  background-color: var(--th-sidebar-secondary);
+  background-image: none;
+  mask-image: none;
+  -webkit-mask-image: none;
+  box-shadow: none;
 }
 
 .sidebar-team-ticket-title,
@@ -2524,8 +2723,10 @@ code, pre, .font-mono {
 }
 
 :root[data-theme="light"] .tower-main-shell {
-  border-left: 1px solid rgba(148, 163, 184, 0.20);
-  box-shadow: 8px 24px 60px rgba(15, 23, 42, 0.14) !important;
+  border-left: 1px solid var(--th-border-subtle);
+  box-shadow: none !important;
+  backdrop-filter: none;
+  background: var(--th-bg-primary) !important;
 }
 
 .tower-viewer-shell {
@@ -2626,17 +2827,27 @@ code, pre, .font-mono {
 :root[data-theme="light"] .tower-main-content-surface {
   position: relative;
   z-index: 1;
-  background: rgba(255, 255, 255, 0.46);
+  background: var(--th-bg-primary);
   border-top: 0;
-  backdrop-filter: blur(6px) saturate(1.04);
-  box-shadow: 6px 20px 52px rgba(15, 23, 42, 0.11) !important;
+  backdrop-filter: none;
+  box-shadow: none !important;
+}
+
+/* Only the customer-branded chat surface lets the image behind it show through.
+   File tabs and unbranded servers keep their default light canvas. */
+:root[data-theme="light"] .tower-main-content-surface.tower-branded-chat-surface {
+  background: rgba(255, 255, 255, 0.12);
 }
 
 :root[data-theme="light"] .tower-main-content-surface::before {
   content: none;
 }
 
-:root[data-theme="light"] .tower-main-tabbar-shell,
+:root[data-theme="light"] .tower-main-tabbar-shell {
+  background: transparent !important;
+  border-bottom: 1px solid var(--th-border-subtle);
+}
+
 :root[data-theme="light"] .tower-main-tabbar {
   background: transparent !important;
 }
@@ -2647,21 +2858,18 @@ code, pre, .font-mono {
 }
 
 :root[data-theme="light"] .tower-main-tab[aria-selected="true"] {
-  background: rgba(255, 255, 255, 0.58) !important;
-  border-color: transparent !important;
-  color: #111827 !important;
-  box-shadow:
-    0 -5px 12px rgba(15, 23, 42, 0.08),
-    8px 0 14px -12px rgba(15, 23, 42, 0.12),
-    -8px 0 14px -12px rgba(15, 23, 42, 0.12) !important;
-  backdrop-filter: blur(6px) saturate(1.04);
-  transform: none;
+  background: var(--th-bg-primary) !important;
+  border-color: var(--th-border-subtle) var(--th-border-subtle) var(--th-bg-primary) !important;
+  color: var(--th-text-primary) !important;
+  box-shadow: none !important;
+  backdrop-filter: none;
+  transform: translateY(1px);
 }
 
 :root[data-theme="light"] .tower-main-tab[aria-selected="false"] {
   background: transparent !important;
   border-color: transparent !important;
-  color: #64748b !important;
+  color: var(--th-text-secondary) !important;
   box-shadow: none !important;
 }
 
@@ -2669,7 +2877,7 @@ code, pre, .font-mono {
 :root[data-theme="light"] .tower-main-tab[aria-selected="false"][data-run-state="done"] {
   background: transparent !important;
   border-color: transparent !important;
-  color: #64748b !important;
+  color: var(--th-text-secondary) !important;
   box-shadow: none !important;
 }
 
@@ -2697,22 +2905,33 @@ code, pre, .font-mono {
   background-color: color-mix(in srgb, var(--color-primary-500, #3b82f6) 7%, transparent) !important;
 }
 
-/* ─── Chat input: light mode stays flat with only a faint lift ─── */
+/* ─── Chat input: a quiet work surface, not a floating card ─── */
 :root[data-theme="light"] .tower-input-shell {
-  background: rgba(255, 255, 255, 0.72) !important;
-  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.07) !important;
+  background: #ffffff !important;
+  border-color: var(--th-border) !important;
+  box-shadow: none !important;
+}
+
+:root[data-theme="light"] .tower-input-shell:hover {
+  border-color: #bac5c1 !important;
 }
 
 :root[data-theme="light"] .tower-input-shell:focus-within {
-  background: rgba(255, 255, 255, 0.88) !important;
-  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.09) !important;
+  background: #ffffff !important;
+  border-color: #5c8f83 !important;
+  box-shadow: none !important;
 }
 
-/* ─── Chat input steering back-sheet ─── */
+:root[data-theme="light"] .tower-composer-status {
+  color: var(--th-text-secondary);
+  border-color: var(--th-border-subtle);
+}
+
+/* Compact steering surface; the surrounding floating layer stays transparent. */
 .tower-steering-sheet {
-  background: rgba(236, 253, 245, 0.94);
+  background: #f8fafc;
   color: #0f172a;
-  box-shadow: 0 8px 22px rgba(15, 23, 42, 0.08);
+  box-shadow: none;
 }
 .tower-steering-text { color: rgba(15, 23, 42, 0.78); }
 .tower-steering-spinner {
@@ -2726,12 +2945,9 @@ code, pre, .font-mono {
 }
 :root[data-theme="dark"] .tower-steering-sheet,
 :root:not([data-theme]) .tower-steering-sheet {
-  background: #20393b;
+  background: #1b222b;
   color: #d7e4e5;
-  box-shadow:
-    0 -1px 0 rgba(125, 211, 203, 0.28),
-    0 10px 30px rgba(0, 0, 0, 0.32),
-    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  box-shadow: none;
 }
 :root[data-theme="dark"] .tower-steering-text,
 :root:not([data-theme]) .tower-steering-text {
@@ -3145,4 +3361,89 @@ code, pre, .font-mono {
 
 .tower-tour-button--primary:hover {
   background: linear-gradient(135deg, var(--th-accent-500), var(--th-accent-400));
+}
+
+/* Main tabs progressively surrender chrome before title space. The sortable
+   shell is the container because every tab can have a different rendered width. */
+.tower-main-tab-shell {
+  container-name: tower-main-tab;
+  container-type: inline-size;
+}
+
+.tower-main-tab[data-mobile='false'] .tower-main-tab-title {
+  /* Fade the glyphs themselves instead of spending width on an ellipsis. */
+  -webkit-mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 1.25rem), transparent 100%);
+  mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 1.25rem), transparent 100%);
+}
+
+.tower-main-tab[data-mobile='false'] .tower-main-tab-actions {
+  position: absolute;
+  inset-block: 0;
+  right: 0.25rem;
+  display: flex;
+  align-items: center;
+  padding-left: 1.5rem;
+  background: linear-gradient(to right, transparent, var(--th-bg-surface) 1.25rem);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease;
+}
+
+.tower-main-tab[data-mobile='false']:hover .tower-main-tab-actions,
+.tower-main-tab[data-mobile='false']:focus-within .tower-main-tab-actions {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+@container tower-main-tab (max-width: 9rem) {
+  .tower-main-tab[data-mobile='false'] .tower-main-tab-title {
+    -webkit-mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 1rem), transparent 100%);
+    mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 1rem), transparent 100%);
+  }
+}
+
+@container tower-main-tab (max-width: 7rem) {
+  .tower-main-tab[data-mobile='false'] {
+    gap: 0.25rem;
+    padding-inline: 0.375rem;
+  }
+
+  .tower-main-tab[data-mobile='false'] .tower-main-tab-avatar,
+  .tower-main-tab[data-mobile='false'] .tower-main-tab-leading,
+  .tower-main-tab[data-mobile='false'] .tower-main-tab-kind {
+    display: none;
+  }
+
+  .tower-main-tab[data-mobile='false'] .tower-main-tab-actions {
+    right: 0.125rem;
+  }
+}
+
+@container tower-main-tab (max-width: 5.5rem) {
+  .tower-main-tab[data-mobile='false'] .tower-main-tab-pin {
+    display: none;
+  }
+
+  .tower-main-tab[data-mobile='false'][data-active='true'] {
+    padding-inline: 0.5rem;
+  }
+}
+
+/* The Viewer uses the same tab language as the main pane. At compact widths,
+   keep the document title and surrender Viewer chrome before tab content. */
+.tower-viewer-shell {
+  container-name: tower-viewer;
+  container-type: inline-size;
+}
+
+@container tower-viewer (max-width: 30rem) {
+  .tower-viewer-label {
+    display: none;
+  }
+}
+
+@container tower-viewer (max-width: 22rem) {
+  .tower-viewer-new-note {
+    display: none;
+  }
 }

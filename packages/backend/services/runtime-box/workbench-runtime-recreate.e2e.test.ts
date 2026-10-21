@@ -114,7 +114,7 @@ run('Workbench Runtime recreate disposable Docker + PostgreSQL E2E', () => {
   afterAll(async () => {
     await modules?.pg?.closePgPool?.().catch(() => undefined);
     if (boxId) await docker('rm', '-f', `tower-box-${boxId}`).catch(() => undefined);
-    await docker('rm', '-f', pgName).catch(() => undefined);
+    await docker('rm', '-f', '-v', pgName).catch(() => undefined);
     await docker('run', '--rm', '-v', `${workspaceRoot}:/cleanup`, 'alpine:3.20', 'sh', '-c', 'chmod -R 777 /cleanup').catch(() => undefined);
     await docker('run', '--rm', '-v', `${storeRoot}:/cleanup`, 'alpine:3.20', 'sh', '-c', 'chmod -R 777 /cleanup').catch(() => undefined);
     await fs.rm(workspaceRoot, { recursive: true, force: true });

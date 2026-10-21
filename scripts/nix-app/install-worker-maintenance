@@ -1,0 +1,137 @@
+#!/usr/bin/env python3
+"""Install/update deployment-triggered root-owned system Worker maintenance.
+Called by the normal Worker installer. Existing enrollment persists across upgrades.
+No timer, Worker restart, token rotation, Project permission repair, or DB mutation.
+"""
+import importlib.machinery
+import importlib.util
+import json
+import os
+from pathlib import Path
+import pwd
+import re
+import sys
+
+HERE = Path(__file__).resolve().parent
+loader = importlib.machinery.SourceFileLoader('maintenance', str(HERE / ('.tower-worker-maintenance-wrapped' if (HERE / '.tower-worker-maintenance-wrapped').exists() else 'tower-worker-maintenance')))
+spec = importlib.util.spec_from_loader(loader.name, loader)
+m = importlib.util.module_from_spec(spec); loader.exec_module(m)
+
+
+def grant_worker_state_read(account, root, directory, state):
+    """Keep root ownership/write authority while admitting only the Worker to read the gate."""
+    for target in (root, directory):
+        m.command(['setfacl', '-m', f'u:{account.pw_name}:--x', str(target)])
+    m.command(['setfacl', '-m', f'u:{account.pw_name}:r--', str(state)])
+    checks = [('x', root), ('x', directory), ('r', state)]
+    for permission, target in checks:
+        result = m.command(['runuser', '-u', account.pw_name, '--', 'test', f'-{permission}', str(target)])
+        if result: raise RuntimeError('WORKER_MAINTENANCE_STATE_ACCESS_UNEXPECTED_OUTPUT')
+
+
+def install():
+    if os.geteuid() != 0: raise RuntimeError('ROOT_REQUIRED')
+    e = os.environ
+    worker = e.get('TOWER_LOCAL_WORKER_ID', 'tower-prod-local-01')
+    if not re.fullmatch(r'[A-Za-z0-9_-]{1,100}', worker): raise RuntimeError('INVALID_WORKER_ID')
+    directory = m.ROOT / worker
+    config_path = directory / 'config.json'
+    prior = json.loads(m.trusted(config_path).read_text()) if config_path.exists() else {}
+    # Known deployment input is reusable only after the same strict checks below.
+    # Never infer paths from a user's HOME, copy secrets, or chmod an existing input.
+    db_env = e.get('TOWER_WORKER_MAINTENANCE_DATABASE_ENV_FILE') or prior.get('databaseEnvFile')
+    candidate = e.get('TOWER_ASSIGNMENT_ENVIRONMENT_FILE')
+    if not db_env and candidate:
+        try:
+            checked = m.trusted(candidate)
+            if not checked.stat().st_mode & 0o077: db_env = str(checked)
+        except (OSError, RuntimeError): pass
+    deployment = e.get('TOWER_LOCAL_WORKER_DEPLOYMENT_ID', 'production')
+    if deployment == 'development' or not db_env:
+        print(json.dumps({'status': 'excluded' if deployment == 'development' else 'not-enrolled',
+            'reason': 'development' if deployment == 'development' else 'trusted-database-environment-required', 'workerId': worker,
+            'nextAction': 'none' if deployment == 'development' else 'Pass TOWER_WORKER_MAINTENANCE_DATABASE_ENV_FILE pointing to an existing root-owned 0600 systemd DB environment, then rerun the approved Worker installer; do not copy secrets or relax permissions.'}))
+        return
+    # Explicit narrow rollout: system service, dedicated non-root uid, local HTTP,
+    # immutable closure, and an administrator-provided root-only DB env file.
+    app = str(Path(e['TOWER_APP_ROOT']).resolve())
+    if not m.STORE.fullmatch(app): raise RuntimeError('IMMUTABLE_STORE_REQUIRED')
+    manifest = json.loads((Path(app) / 'share/tower/release-manifest.json').read_text())
+    if not re.fullmatch('[a-f0-9]{40}', manifest['sourceRev']): raise RuntimeError('IMMUTABLE_REV_REQUIRED')
+    database_env = m.trusted(db_env)
+    if database_env.stat().st_mode & 0o077: raise RuntimeError('ROOT_ONLY_DB_ENV_REQUIRED')
+    user = e.get('TOWER_EXECUTION_USER', 'tower-worker')
+    account = pwd.getpwnam(user)
+    if account.pw_uid == 0: raise RuntimeError('DEDICATED_USER_REQUIRED')
+    base = e.get('TOWER_LOCAL_WORKER_BASE_URL', 'http://127.0.0.1:43125')
+    control = e.get('TOWER_LOCAL_WORKER_CONTROL_PLANE_URL', 'http://127.0.0.1:32364')
+    for url in [base, control]:
+        if not re.fullmatch(r'http://127\.0\.0\.1:[0-9]{1,5}', url): raise RuntimeError('LOCAL_HTTP_REQUIRED')
+    envfile = e.get('TOWER_LOCAL_WORKER_ENV_FILE', f'/etc/tower-workers/{worker}.env')
+    # Group-read of the transport input is intentional; group-write is not.
+    m.trusted(envfile)
+    m.ROOT.mkdir(mode=0o755, exist_ok=True); m.trusted(m.ROOT)
+    lock = m.ROOT / 'deployment.lock'
+    if not lock.exists(): lock.touch(mode=0o644, exist_ok=False)
+    m.trusted(lock)
+    import fcntl
+    with lock.open('r') as held:
+        fcntl.flock(held, fcntl.LOCK_SH | fcntl.LOCK_NB)
+        directory.mkdir(mode=0o755, exist_ok=True); m.trusted(directory)
+        state = directory / 'state.json'
+        if not state.exists(): m.atomic(state, {'version': 1, 'owner': None, 'phase': 'idle', 'result': 'installed'})
+        if json.loads(m.trusted(state).read_text()).get('owner'): raise RuntimeError('MAINTENANCE_RECOVERY_REQUIRED')
+        # Existing enrollments may retain root-only 0700 parents. Do not chmod them
+        # public: grant this exact Worker traverse/read only, then verify as that uid.
+        grant_worker_state_read(account, m.ROOT, directory, state)
+        smoke = directory / 'smoke'
+        smoke.mkdir(mode=0o700, exist_ok=True)
+        os.chown(smoke, account.pw_uid, account.pw_gid)
+        unit = f'tower-workbench-worker-{worker}.service'
+        heartbeat = f'tower-workbench-worker-{worker}-heartbeat.service'
+        config = {'version': 1, 'workerId': worker, 'deploymentId': deployment, 'unit': unit, 'heartbeatUnit': heartbeat,
+            'approvedStore': app, 'approvedRev': manifest['sourceRev'], 'baseUrl': base, 'controlPlaneUrl': control,
+            'databaseEnvFile': str(database_env), 'smokeRoot': str(smoke), 'executionUser': user, 'transportEnvFile': envfile,
+            'observer': app + '/lib/tower/dist/backend/packages/backend/scripts/worker-maintenance-observe.js'}
+        for v in [str(database_env), envfile, str(state), str(smoke)]:
+            if not re.fullmatch(r'/[A-Za-z0-9_./-]+', v): raise RuntimeError('UNSAFE_SYSTEMD_PATH')
+        # Refuse missing compiled helpers before publishing the approved pointer.
+        for helper in [config['observer'], app + '/bin/tower-worker-maintenance']:
+            if not Path(helper).is_file(): raise RuntimeError('MAINTENANCE_HELPER_MISSING')
+        unit_root = Path('/etc/systemd/system')
+        drop = unit_root / (unit + '.d'); drop.mkdir(mode=0o755, exist_ok=True)
+        # A maintenance restart must never signal the entire workload cgroup or
+        # escalate a slow graceful stop into SIGKILL.
+        (drop / '40-maintenance-safety.conf').write_text('[Service]\nKillMode=process\nSendSIGKILL=no\nTimeoutStopSec=infinity\nEnvironment=TOWER_WORKER_MAINTENANCE_STATE=' + str(state) + '\nEnvironment=TOWER_WORKER_MAINTENANCE_SMOKE_ROOT=' + str(smoke) + '\n')
+        service = f'tower-worker-maintenance-{worker}.service'
+        timer = f'tower-worker-maintenance-{worker}.timer'
+        (unit_root / service).write_text(f'''[Unit]
+Description=Tower deployment-triggered Worker maintenance ({worker})
+After=network-online.target
+[Service]
+Type=oneshot
+User=root
+UMask=0077
+EnvironmentFile={database_env}
+EnvironmentFile={envfile}
+ExecStart={app}/bin/tower-worker-maintenance run {config_path}
+TimeoutStartSec=660
+''')
+        # Scheduled mutation is intentionally retired. Keep no installed timer;
+        # an older enrollment is disabled and removed during an approved reinstall.
+        try: m.command(['systemctl', 'disable', '--now', timer])
+        except RuntimeError: pass
+        (unit_root / timer).unlink(missing_ok=True)
+        m.atomic(config_path, config)
+        m.command(['nix-store', '--realise', app, '--add-root', str(directory / 'approved-root'), '--indirect'])
+        m.command(['nix-store', '--realise', app, '--add-root', str(directory / 'tool-root'), '--indirect'])
+        m.command(['systemctl', 'daemon-reload'])
+        print(json.dumps({'status': 'installed', 'workerId': worker, 'trigger': 'approved-deployment', 'workerRestarted': False,
+            'nextAction': 'Run worker-maintenance-readiness.py; an old running Worker requires one approved idle activation. Future approved deploys invoke deploy-installed explicitly.'}))
+
+
+if __name__ == '__main__':
+    try: install()
+    except Exception:
+        print('install-worker-maintenance: installation blocked; inspect protected inputs and ownership', file=sys.stderr)
+        sys.exit(1)

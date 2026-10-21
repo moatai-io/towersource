@@ -25,7 +25,7 @@ vi.mock('../../config.js', () => ({ config: { workspaceRoot: '/workspace', dataD
 const fixturePath = new URL(import.meta.url).pathname;
 const fixtureSha256 = crypto.createHash('sha256').update(readFileSync(fixturePath)).digest('hex');
 
-const { confirmFileTransferPlan, executeFileTransfer, recoverStaleFileTransfer } = await import('./file-exchange-service.js');
+const { confirmFileTransferPlan, executeFileTransfer, inspectFileTransfer, recoverStaleFileTransfer } = await import('./file-exchange-service.js');
 
 const actor = { userId: 7, role: 'member' };
 const plan = {
@@ -53,6 +53,33 @@ describe('File Exchange execute revalidation', () => {
   beforeEach(() => {
     for (const mock of [queryOne, resolveFileSource, assertFileDestination, createSessionAttachmentFromPath, deleteSessionAttachment, createPersonalBinaryFileFromPath, archivePersonalFile]) mock.mockReset();
     assertFileDestination.mockResolvedValue(undefined);
+  });
+
+  it('cleans a materialized source after inspect persists its plan', async () => {
+    const cleanup = vi.fn();
+    resolveFileSource.mockResolvedValue({
+      ref: plan.source_ref, name: 'a.pdf', mimeType: 'application/pdf', sizeBytes: 3,
+      version: '4', sha256: fixtureSha256, storagePath: fixturePath, cleanup,
+    });
+    queryOne.mockResolvedValueOnce(plan);
+
+    await inspectFileTransfer(actor, { source: plan.source_ref, destination: plan.destination_ref });
+
+    expect(cleanup).toHaveBeenCalledOnce();
+  });
+
+  it('cleans a materialized source when inspect destination validation fails', async () => {
+    const cleanup = vi.fn();
+    resolveFileSource.mockResolvedValue({
+      ref: plan.source_ref, name: 'a.pdf', mimeType: 'application/pdf', sizeBytes: 3,
+      version: '4', sha256: fixtureSha256, storagePath: fixturePath, cleanup,
+    });
+    assertFileDestination.mockRejectedValueOnce(new Error('destination denied'));
+
+    await expect(inspectFileTransfer(actor, { source: plan.source_ref, destination: plan.destination_ref })).rejects.toThrow('destination denied');
+
+    expect(cleanup).toHaveBeenCalledOnce();
+    expect(queryOne).not.toHaveBeenCalled();
   });
 
   it('records authenticated confirmation only for the actor-owned active plan', async () => {

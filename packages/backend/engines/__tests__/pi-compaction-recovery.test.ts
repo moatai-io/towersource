@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { SessionManager } from '@earendil-works/pi-coding-agent';
-import { countPiCompactionEntries, countPiLocalFallbackMarkersInFile, createPiCompactRecoverySessionFile, createPiLocalFallbackCompaction, createPiOversizedRecoveryEpochFromFile, isPiContextLengthExceededMessage, parsePiPreflightContextMetrics, piRecoveryKeepBudgets, sanitizePiMessagesForRecovery, shouldCreatePiOversizedRecoveryEpoch } from '../pi/compaction-recovery.js';
+import { countPiCompactionEntries, countPiLocalFallbackMarkersInFile, createPiCompactRecoverySessionFile, createPiLocalFallbackCompaction, createPiOversizedRecoveryEpochFromFile, isPiContextLengthExceededMessage, parsePiPreflightContextMetrics, piRecoveryKeepBudgets, recoverPiOverflowCompaction, sanitizePiMessagesForRecovery, shouldCreatePiOversizedRecoveryEpoch, shouldReplayPiOverflowPrompt, shouldUsePiLocalFallbackAfterCompactionError } from '../pi/compaction-recovery.js';
 import { isPiCompactionNoOpMessage } from '../pi/compaction-outcome.js';
 
 describe('Pi compact recovery session file', () => {
@@ -18,7 +18,16 @@ describe('Pi compact recovery session file', () => {
   it('recognizes Responses preflight/context overflow messages', () => {
     expect(isPiContextLengthExceededMessage('400 context_length_exceeded')).toBe(true);
     expect(isPiContextLengthExceededMessage('preflightFloor=232560')).toBe(true);
+    expect(isPiContextLengthExceededMessage('litellm-responses API error (413): 413 Request Entity Too Large')).toBe(false);
     expect(isPiContextLengthExceededMessage('ordinary error')).toBe(false);
+  });
+
+  it('switches to local fallback when the compaction request itself cannot fit', () => {
+    const observed = 'OpenAI API error (400): {"message":"context_length_exceeded: Pi Responses preflight rejected near-context request before upstream send (bodyEstimatedPromptTokens=342840 >= preflightFloor=318060 (ratio=0.9, context=353400))"}';
+    expect(shouldUsePiLocalFallbackAfterCompactionError(observed)).toBe(true);
+    expect(shouldUsePiLocalFallbackAfterCompactionError('request_too_large: inline file image budget exceeded')).toBe(false);
+    expect(shouldUsePiLocalFallbackAfterCompactionError('OpenAI Responses stream ended before a terminal event')).toBe(false);
+    expect(shouldUsePiLocalFallbackAfterCompactionError('401 invalid_api_key')).toBe(false);
   });
 
   it('parses authoritative Responses preflight context measurements', () => {
@@ -60,6 +69,114 @@ describe('Pi compact recovery session file', () => {
     expect(countPiCompactionEntries(null)).toBe(0);
   });
 
+  it('recovers the representative overflow sequence and makes the retry smaller', async () => {
+    const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'tower-pi-overflow-flow-'));
+    tempDirs.push(cwd);
+    const sessionDir = path.join(cwd, '.pi', 'sessions');
+    fs.mkdirSync(sessionDir, { recursive: true });
+    const source = path.join(sessionDir, 'representative-overflow.jsonl');
+    const entries: any[] = [
+      { type: 'session', version: 3, id: 'sess-flow', timestamp: '2026-01-01T00:00:00.000Z', cwd },
+      { type: 'model_change', id: 'm1', parentId: null, timestamp: '2026-01-01T00:00:01.000Z', provider: 'litellm-responses', modelId: 'smartest' },
+    ];
+    let parentId = 'm1';
+    // Mirrors the incident shape without customer data: many tool/image results,
+    // multiple prior turns, and a small recent suffix that must remain actionable.
+    for (let i = 0; i < 24; i++) {
+      const userId = `u${i}`;
+      entries.push({ type: 'message', id: userId, parentId, timestamp: `2026-01-01T00:00:${String(i + 2).padStart(2, '0')}.000Z`, message: { role: 'user', content: [{ type: 'text', text: `synthetic slide request ${i} ${'u'.repeat(5000)}` }], timestamp: i * 3 + 1 } });
+      const assistantId = `a${i}`;
+      entries.push({ type: 'message', id: assistantId, parentId: userId, timestamp: `2026-01-01T00:01:${String(i).padStart(2, '0')}.000Z`, message: { role: 'assistant', content: [{ type: 'toolCall', id: `call${i}`, name: 'read', arguments: { path: `/workspace/example/slide-${i}.png` } }], stopReason: 'toolUse', timestamp: i * 3 + 2 } });
+      const toolId = `r${i}`;
+      entries.push({ type: 'message', id: toolId, parentId: assistantId, timestamp: `2026-01-01T00:02:${String(i).padStart(2, '0')}.000Z`, message: { role: 'toolResult', toolCallId: `call${i}`, toolName: 'read', content: [{ type: 'image', data: 'A'.repeat(32_000), mimeType: 'image/png' }, { type: 'text', text: `inspection ${i} ${'r'.repeat(5000)}` }], timestamp: i * 3 + 3 } });
+      parentId = toolId;
+    }
+    entries.push({ type: 'message', id: 'latest-user', parentId, timestamp: '2026-01-01T00:03:00.000Z', message: { role: 'user', content: [{ type: 'text', text: 'Finish the PDF once; do not repeat completed exports.' }], timestamp: 1000 } });
+    fs.writeFileSync(source, `${entries.map((entry) => JSON.stringify(entry)).join('\n')}\n`);
+
+    const manager = SessionManager.open(source, sessionDir);
+    const agent = { state: { messages: manager.buildSessionContext().messages } };
+    const beforeChars = JSON.stringify(agent.state.messages).length;
+    let providerCompactionCalls = 0;
+    let retryCalls = 0;
+    const observed = 'OpenAI API error (400): {"message":"context_length_exceeded: Pi Responses preflight rejected near-context request before upstream send (bodyEstimatedPromptTokens=342840 >= preflightFloor=318060 (ratio=0.9, context=353400))"}';
+
+    const recovery = await recoverPiOverflowCompaction({
+      session: manager as any,
+      refreshContext: () => { agent.state.messages = manager.buildSessionContext().messages; },
+      agent,
+      keepRecentTokens: 8_000,
+      compact: async () => {
+        providerCompactionCalls++;
+        throw new Error(observed);
+      },
+    });
+    if (shouldReplayPiOverflowPrompt({ assistantSaved: false, toolCallsExecuted: 0, abortRequested: false })) retryCalls++;
+    const afterSerialized = JSON.stringify(agent.state.messages);
+
+    expect(recovery.mode).toBe('local-fallback');
+    expect(providerCompactionCalls).toBe(1);
+    expect(retryCalls).toBe(1);
+    expect(recovery.compactionCountAfter).toBe(recovery.compactionCountBefore + 1);
+    expect(afterSerialized.length).toBeLessThan(beforeChars / 2);
+    expect(afterSerialized).toContain('Finish the PDF once; do not repeat completed exports.');
+    expect(afterSerialized).not.toContain('"type":"image"');
+    expect(fs.readFileSync(source, 'utf8').match(/"localFallback":true/g)).toHaveLength(1);
+  });
+
+  it('never replays the original prompt after a tool side effect', async () => {
+    let entries: any[] = [
+      { type: 'session', id: 's1' },
+      { type: 'message', id: 'u0', message: { role: 'user', content: [{ type: 'text', text: 'old context ' + 'x'.repeat(40_000) }] } },
+      { type: 'message', id: 'a0', message: { role: 'assistant', content: [{ type: 'text', text: 'old result ' + 'y'.repeat(40_000) }] } },
+      { type: 'message', id: 'u1', message: { role: 'user', content: [{ type: 'text', text: 'export once' }] } },
+      { type: 'message', id: 'a1', message: { role: 'assistant', content: [{ type: 'text', text: 'done' }] } },
+    ];
+    let retries = 0;
+    const session = {
+      getEntries: () => entries,
+      getHeader: () => ({}), getSessionFile: () => undefined, getSessionDir: () => '', getBranch: () => entries,
+      appendCompaction: (_summary: string, firstKeptEntryId: string) => {
+        entries = [...entries, { type: 'compaction', id: 'c1', firstKeptEntryId }];
+        return 'c1';
+      },
+      buildSessionContext: () => ({ messages: [] }),
+    } as any;
+    const result = await recoverPiOverflowCompaction({
+      session,
+      keepRecentTokens: 8_000,
+      compact: async () => { throw new Error('400 context_length_exceeded'); },
+    });
+    if (shouldReplayPiOverflowPrompt({ assistantSaved: true, toolCallsExecuted: 1, abortRequested: false })) retries++;
+    expect(shouldReplayPiOverflowPrompt({ assistantSaved: true, toolCallsExecuted: 1, abortRequested: false })).toBe(false);
+    expect(shouldReplayPiOverflowPrompt({ assistantSaved: false, toolCallsExecuted: 0, abortRequested: true })).toBe(false);
+    expect(retries).toBe(0);
+    expect(result.mode).toBe('local-fallback');
+  });
+
+  it('does not hide a non-context provider compaction failure behind local fallback', async () => {
+    await expect(recoverPiOverflowCompaction({
+      session: null,
+      keepRecentTokens: 8_000,
+      compact: async () => { throw new Error('401 invalid_api_key'); },
+    })).rejects.toThrow('401 invalid_api_key');
+  });
+
+  it('accepts a persisted provider compaction without creating a second boundary', async () => {
+    let entries: any[] = [{ type: 'message', id: 'u1' }];
+    const session = {
+      getEntries: () => entries,
+      getHeader: () => ({}), getSessionFile: () => undefined, getSessionDir: () => '', getBranch: () => entries,
+      appendCompaction: () => { throw new Error('local fallback must not run'); },
+    } as any;
+    const recovery = await recoverPiOverflowCompaction({
+      session,
+      keepRecentTokens: 8_000,
+      compact: async () => { entries = [...entries, { type: 'compaction', id: 'c1' }]; },
+    });
+    expect(recovery).toEqual({ mode: 'provider', compactionCountBefore: 0, compactionCountAfter: 1 });
+  });
+
   it('creates a local fallback compaction entry when SDK compaction reports no persisted result', () => {
     const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'tower-pi-local-compact-'));
     tempDirs.push(cwd);
@@ -79,7 +196,7 @@ describe('Pi compact recovery session file', () => {
 
     const manager = SessionManager.open(source, sessionDir);
     const agent = { state: { messages: manager.buildSessionContext().messages } };
-    const result = createPiLocalFallbackCompaction({ session: manager as any, agent, reason: 'test no-result', keepRecentTokens: 50 });
+    const result = createPiLocalFallbackCompaction({ session: manager as any, agent, refreshContext: () => { agent.state.messages = manager.buildSessionContext().messages; }, reason: 'test no-result', keepRecentTokens: 50 });
 
     expect(result.succeeded).toBe(true);
     expect(result.after).toBe(1);

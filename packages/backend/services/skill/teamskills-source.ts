@@ -5,6 +5,7 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import { readStableOverlayDefaults } from './managed-teamskills-source.js';
 
 export interface TeamskillsSkillsetFile {
   version?: number;
@@ -105,7 +106,9 @@ export function validateTeamskillsSkillset(fallback: readonly string[]): Teamski
 
 /** Read VM-level default materialized skill names from teamskills/skillset.json, using compiled names only as a temporary bootstrap fallback. */
 export function readTeamskillsSkillset(fallback: readonly string[]): string[] {
-  return validateTeamskillsSkillset(fallback).skills;
+  const local = validateTeamskillsSkillset(fallback).skills;
+  const overlay = readStableOverlayDefaults();
+  return overlay ? [...new Set([...local, ...overlay])] : local;
 }
 
 function parseSkillsetItemName(item: unknown): string | null {

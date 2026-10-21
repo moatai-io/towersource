@@ -67,3 +67,41 @@ describe('Pi skill tools', () => {
     expect(parsed.content).toContain('# Meeting Prep');
   });
 });
+
+
+describe('skill asset access guidance', () => {
+  it.each(['operator-host', 'project-executor', 'unavailable'] as const)('distinguishes %s without claiming mount verification', async (execution) => {
+    mockGetCommandsForUser.mockResolvedValueOnce([{
+      name: '/issue', canonical: '/issue', fullContent: '# issue',
+      dispatch: { type: 'skill', target: 'issue' },
+    }]);
+    const { createSkillsReadTool } = await import('./pi-skill-tools.js');
+    const resolver = vi.fn().mockResolvedValue(execution);
+    const tool = createSkillsReadTool({ resolveAssetExecution: resolver });
+    const result = JSON.parse(readText(await (tool as any).execute('tc', { name: 'issue' })));
+    expect(resolver).toHaveBeenCalledOnce();
+    expect(result.assetAccess).toMatchObject({ execution, status: execution === 'operator-host' ? 'blocked' : 'unverified', bodyOnly: true });
+    expect(result.assetAccess.managedRuntimePath).toBe(execution === 'project-executor' ? '/workspace/.tower/skills/issue/' : null);
+    expect(result.assetAccess.safety).toContain('Never fabricate replacement references');
+  });
+
+  it('does not resolve assets for an invisible skill', async () => {
+    mockGetCommandsForUser.mockResolvedValueOnce([]);
+    const resolver = vi.fn();
+    const { createSkillsReadTool } = await import('./pi-skill-tools.js');
+    const result = await (createSkillsReadTool({ resolveAssetExecution: resolver }) as any).execute('tc', { name: 'hidden' });
+    expect(result.isError).toBe(true);
+    expect(resolver).not.toHaveBeenCalled();
+  });
+
+  it('does not construct a runtime path from traversal in a registry target', async () => {
+    mockGetCommandsForUser.mockResolvedValueOnce([{
+      name: '/issue', canonical: '/issue', fullContent: '# issue',
+      dispatch: { type: 'skill', target: '../outside' },
+    }]);
+    const { createSkillsReadTool } = await import('./pi-skill-tools.js');
+    const tool = createSkillsReadTool({ resolveAssetExecution: async () => 'project-executor' });
+    const result = JSON.parse(readText(await (tool as any).execute('tc', { name: 'issue' })));
+    expect(result.assetAccess.managedRuntimePath).toBeNull();
+  });
+});

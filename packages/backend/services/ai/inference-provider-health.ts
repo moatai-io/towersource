@@ -16,10 +16,11 @@ async function resolveCredential(provider: string): Promise<ProviderCredential |
   if (provider === 'openrouter' && process.env.OPENROUTER_API_KEY) {
     return {
       apiKey: process.env.OPENROUTER_API_KEY,
-      baseUrl: process.env.OPENROUTER_BASE_URL || 'https://openrouter.ai/api/v1',
+      baseUrl: 'https://openrouter.ai/api/v1',
     };
   }
-  return resolveConfiguredInferenceProviderSecret(provider, 0);
+  const saved = await resolveConfiguredInferenceProviderSecret(provider, 0);
+  return saved ? { ...saved, baseUrl: 'https://openrouter.ai/api/v1' } : null;
 }
 
 export async function probeConfiguredInferenceProviders(

@@ -3,6 +3,10 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const source = fs.readFileSync(path.resolve(import.meta.dirname, './ws-handler.ts'), 'utf8');
+// `setAgentTurnWaitingUser` moved to the shared pending-questions module in
+// 675719b6 (background-approval routing). Assert against the real module,
+// not the old import path.
+const pendingQuestions = fs.readFileSync(path.resolve(import.meta.dirname, '../services/session/pending-questions.ts'), 'utf8');
 
 describe('authoritative turn timing websocket contract', () => {
   it('keeps acceptedAt in the active run registry and reconnect snapshots', () => {
@@ -20,8 +24,8 @@ describe('authoritative turn timing websocket contract', () => {
     expect(source).toContain('|| durableTiming');
     expect(source).toContain("status: actualStatus,\n          turnTiming,");
     expect(source).toContain('activeTurnTimings.delete(sessionId)');
-    expect(source).toContain('setAgentTurnWaitingUser(userMsgId, true)');
-    expect(source).toContain('setAgentTurnWaitingUser(activeRootTurnId, false)');
+    expect(pendingQuestions).toContain('setAgentTurnWaitingUser(userMessageId, true)');
+    expect(pendingQuestions).toContain('setAgentTurnWaitingUser(userMessageId, false)');
     expect(source).toContain('acceptedAt: turnTiming.acceptedAt');
   });
 });

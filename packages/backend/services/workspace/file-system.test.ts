@@ -89,3 +89,20 @@ describe('workspace file tree visibility', () => {
     expect((await getFileTreeAsync(targetDir, 2, { skipSafetyCheck: true })).map((e) => e.name)).toEqual(['note.md']);
   });
 });
+
+
+describe('directory symlink listings', () => {
+  it('classifies linked folders by their target in both listing implementations', async () => {
+    const root = makeTempDir();
+    fs.mkdirSync(path.join(root, 'target'));
+    fs.symlinkSync('target', path.join(root, '0905-강연'));
+    fs.writeFileSync(path.join(root, 'README'), 'extensionless file');
+    for (const entries of [getFileTree(root, 1, { skipSafetyCheck: true }), await getFileTreeAsync(root, 1, { skipSafetyCheck: true })]) {
+      const link = entries.find(entry => entry.name === '0905-강연');
+      expect(link?.isDirectory).toBe(true);
+      expect(link?.size).toBeUndefined();
+      expect(link?.extension).toBeUndefined();
+      expect(entries.find(entry => entry.name === 'README')?.isDirectory).toBe(false);
+    }
+  });
+});

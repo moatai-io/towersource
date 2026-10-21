@@ -17,7 +17,9 @@ async function fetchSafe(url: string, timeoutMs = 3000): Promise<Response | null
   }
 }
 
-describe('dev server smoke', () => {
+const describeDevServer = process.env.TOWER_DEV_SERVER_SMOKE === '1' ? describe : describe.skip;
+
+describeDevServer('dev server smoke', () => {
   it('frontend (Vite :32354) serves HTML', async () => {
     const res = await fetchSafe('http://localhost:32354/');
     if (!res) return; // skip if server not running

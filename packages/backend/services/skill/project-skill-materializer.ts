@@ -38,6 +38,7 @@ export interface MaterializedProjectSkillManifestEntry {
   managed: true;
   materializedAt: string;
   requiredSecrets: string[];
+  gatewayApis: Array<{ apiId: string; apiKeyEnv: string; baseUrlEnv: string }>;
   canonicalId: string;
   bundleDigest: string;
   sourceCommit?: string;
@@ -98,8 +99,23 @@ export function materializeProjectRegistrySkills(
   const targetRootPath = path.join(projectRootPath, '.tower', 'skills');
   const manifestPath = path.join(targetRootPath, MANIFEST_FILE);
   const generatedAt = (opts.now ?? new Date()).toISOString();
+  let retained: MaterializedProjectSkillManifestEntry[] = [];
+  if (opts.prune === false && fs.existsSync(manifestPath)) {
+    const previous = JSON.parse(fs.readFileSync(manifestPath, 'utf-8'));
+    if (!Array.isArray(previous.skills)) throw new Error('Invalid existing skill manifest');
+    retained = previous.skills;
+  }
   const requestedSkillNames = uniqueSkillNames(opts.skillNames);
   const storageMode = opts.storageMode ?? 'copy';
+  // A subset update must not silently carry incompatible entries into the new
+  // manifest. Check before touching any folders so a failed transition is safe.
+  const incompatible = retained.filter(entry =>
+    !requestedSkillNames.includes(entry.name)
+    && (entry.storageMode ?? 'copy') !== storageMode,
+  );
+  if (incompatible.length > 0) {
+    throw new Error(`Cannot retain incompatible skill storage modes (${incompatible.map(entry => entry.name).join(', ')}); include these skills in the materialization request or keep the existing storage mode`);
+  }
   const materialized: MaterializedProjectSkillManifestEntry[] = [];
   const skipped: ProjectSkillMaterializationResult['skipped'] = [];
   const findings: ProjectSkillMaterializationResult['findings'] = [];
@@ -143,6 +159,7 @@ export function materializeProjectRegistrySkills(
       managed: true,
       materializedAt: generatedAt,
       requiredSecrets: bundle.requiredSecrets,
+      gatewayApis: bundle.gatewayApis,
       canonicalId: bundle.canonicalId,
       bundleDigest: storageMode === 'bind-ro' ? computeBundleDigest(runtimeFiles) : bundle.bundleDigest,
       ...(bundle.sourceCommit ? { sourceCommit: bundle.sourceCommit } : {}),
@@ -155,6 +172,11 @@ export function materializeProjectRegistrySkills(
     });
   }
 
+  const retainedUnchanged = retained.filter(entry => !materialized.some(skill => skill.name === entry.name));
+  const failedTransitions = retainedUnchanged.filter(entry => (entry.storageMode ?? 'copy') !== storageMode);
+  if (failedTransitions.length > 0) {
+    throw new Error(`Cannot retain incompatible skill storage modes after skipped materialization (${failedTransitions.map(entry => entry.name).join(', ')}); restore the source bundles and retry`);
+  }
   const pruned = opts.prune === false ? [] : pruneUnrequestedManagedSkills(targetRootPath, new Set(materialized.map((s) => s.name)));
   const manifest: ProjectSkillMaterializationManifest = {
     schemaVersion: storageMode === 'bind-ro' ? 3 : 2,
@@ -162,7 +184,7 @@ export function materializeProjectRegistrySkills(
     managedBy: storageMode === 'bind-ro'
       ? 'tower-project-skill-runtime-layer'
       : 'tower-project-skill-materializer',
-    skills: materialized.sort((a, b) => a.name.localeCompare(b.name)),
+    skills: [...retainedUnchanged, ...materialized].sort((a, b) => a.name.localeCompare(b.name)),
   };
   fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf-8');
 
@@ -171,7 +193,7 @@ export function materializeProjectRegistrySkills(
     projectRootPath,
     targetRootPath,
     manifestPath,
-    materialized: manifest.skills,
+    materialized,
     skipped,
     findings,
     pruned,

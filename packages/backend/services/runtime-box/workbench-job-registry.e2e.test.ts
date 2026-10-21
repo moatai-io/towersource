@@ -25,7 +25,7 @@ run('Workbench durable Job PostgreSQL E2E', () => {
       catch { if (attempt === 39) throw new Error('Disposable PostgreSQL did not become ready'); await new Promise(resolve => setTimeout(resolve, 250)); }
     }
     process.env.DATABASE_URL = databaseUrl;
-    modules = { jobs: await import('./workbench-job-registry.js'), db: await import('../../db/pg-repo.js'), pg: await import('../../db/pg.js') };
+    modules = { jobs: await import('../execution/jobs/job-registry.js'), db: await import('../../db/pg-repo.js'), pg: await import('../../db/pg.js') };
     const migrations = path.resolve(process.cwd(), 'packages/backend/db/migrations');
     for (const file of ['007_users.sql', '008_sessions.sql', '009_projects.sql', '075_project_runtime_boxes.sql', '077_project_runtime_box_node22_profile.sql', '150_runtime_box_workbench_tool_revisions.sql', '162_runtime_box_workbench_jobs.sql', '163_runtime_box_workbench_job_claims.sql', '164_runtime_box_workbench_job_claim_indexes.sql']) {
       await runFile('psql', [databaseUrl, '-v', 'ON_ERROR_STOP=1', '-f', path.join(migrations, file)]);
@@ -38,7 +38,7 @@ run('Workbench durable Job PostgreSQL E2E', () => {
 
   afterAll(async () => {
     await modules?.pg?.closePgPool?.().catch(() => undefined);
-    await docker('rm', '-f', pgName).catch(() => undefined);
+    await docker('rm', '-f', '-v', pgName).catch(() => undefined);
     delete process.env.DATABASE_URL;
   }, 120_000);
 

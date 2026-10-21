@@ -8,8 +8,7 @@ const CODE_EXTS = new Set(['ts', 'tsx', 'js', 'jsx', 'py', 'sh', 'bash', 'sql', 
 const MARKDOWN_EXTS = new Set(['md', 'markdown']);
 const PREVIEWABLE_EXTS = new Set([...MARKDOWN_EXTS, ...CODE_EXTS, 'html', 'htm', 'pdf', 'png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'mp4', 'webm']);
 // 브라우저가 직접 렌더링하는 파일 — iframe으로 표시.
-// PDF is intentionally excluded: open it as a top-level browser PDF viewer instead.
-const IFRAME_EXTS = new Set(['html', 'htm', 'png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'mp4', 'webm']);
+const IFRAME_EXTS = new Set(['html', 'htm', 'pdf', 'png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'mp4', 'webm']);
 
 const LANGUAGE_BY_EXT: Record<string, string> = {
   ts: 'typescript',

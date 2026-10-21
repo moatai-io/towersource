@@ -7,6 +7,8 @@ import { ModelSelector } from './ModelSelector';
 import { getModelIdForBackend, useModelStore, useSessionAwareModel } from '../../stores/model-store';
 import { confirmEngineSwitch } from '../../stores/engine-pick';
 import { EngineSwitchConfirmModal } from './EngineSwitchConfirmModal';
+import { getDefaultModelRank, getModelCompany, getModelDisplayName } from './model-display';
+import { ModelTokenPrice } from './ModelTokenPrice';
 import { GitPanel } from '../git/GitPanel';
 import { NotificationBell } from './NotificationBell';
 import { useProjectStore } from '../../stores/project-store';
@@ -22,24 +24,22 @@ interface HeaderProps {
   onAdminClick?: () => void;
   onPersonalCredentialsClick?: () => void;
   onPublishClick?: () => void;
-  onPersonalMaterialsClick?: () => void;
-  onPersonalTodosClick?: () => void;
   onViewDiff?: (diff: string) => void;
   onLogout?: () => void;
   onSettingsClick?: () => void;
-  onPinsClick?: () => void;
   onInboxClick?: () => void;
-  onHistoryClick?: () => void;
+  onSecretariatClick?: () => void;
   onSessionFileClick?: (path: string) => void;
   onRequestFileTree?: () => void;
   onSelectSession?: (session: import('../../stores/session-store').SessionMeta) => void;
+  onNavigateSessions?: () => void;
   username?: string;
   userRole?: string;
   sidebarOpen?: boolean;
 }
 
 /* ─── Nav Switch (segmented toggle) ─── */
-function NavTabs({ onRequestFileTree }: { onRequestFileTree?: () => void }) {
+function NavTabs({ onRequestFileTree, onNavigateSessions }: { onRequestFileTree?: () => void; onNavigateSessions?: () => void }) {
   const { t } = useTranslation('layout');
   const sidebarTab = useSessionStore((s) => s.sidebarTab);
   const setSidebarTab = useSessionStore((s) => s.setSidebarTab);
@@ -48,7 +48,6 @@ function NavTabs({ onRequestFileTree }: { onRequestFileTree?: () => void }) {
   const sidebarOpen = useSessionStore((s) => s.sidebarOpen);
   const sessions = useSessionStore((s) => s.sessions);
   const activeSessionId = useSessionStore((s) => s.activeSessionId);
-  const workAttentionCount = useSessionStore((s) => s.unreadSessions.size);
   const agentFirstEnabled = useSettingsStore((s) => s.serverConfig?.agentFirstEnabled === true);
   const containerRef = React.useRef<HTMLDivElement>(null);
   const [indicator, setIndicator] = React.useState({ left: 0, width: 0 });
@@ -58,7 +57,6 @@ function NavTabs({ onRequestFileTree }: { onRequestFileTree?: () => void }) {
     if (agentFirstEnabled) {
       return [
         { key: 'ai', label: t('conversationsNav'), badge: 0 },
-        { key: 'work', label: t('workHubNav'), badge: workAttentionCount },
         { key: 'files', label: t('files'), badge: 0 },
       ];
     }
@@ -67,14 +65,12 @@ function NavTabs({ onRequestFileTree }: { onRequestFileTree?: () => void }) {
       { key: 'files', label: t('files'), badge: 0 },
     ];
 
-  }, [agentFirstEnabled, t, workAttentionCount]);
+  }, [agentFirstEnabled, t]);
 
   // Determine active key
   const activeKey = activeView === 'aiServices' ? ''
     : activeView === 'aiTeam' ? 'ai'
-    : activeView === 'work' || activeView === 'inbox' ? 'work'
     : activeView === 'schedules' ? 'schedule'
-    : activeView === 'automations' ? 'schedule'
     : activeView === 'projectFiles' ? 'files'
     : activeView === 'chat' && sidebarOpen && sidebarTab === 'files' ? 'files'
     : 'ai';
@@ -98,16 +94,12 @@ function NavTabs({ onRequestFileTree }: { onRequestFileTree?: () => void }) {
     const store = useSessionStore.getState();
     switch (key) {
       case 'ai':
-        // AI 팀 is the primary work mode: restore the conversation workspace and
-        // its left teammate/session navigation. The explicit "AI 팀 홈" button
-        // inside that sidebar is the route to the all-teammates home.
+        // Sessions is an explicit destination, not only a sidebar toggle. Leave any
+        // file/system surface and stale directory before restoring the conversation.
+        useFileStore.getState().activateChatSlot();
+        onNavigateSessions?.();
         store.setAiNavigationSurface();
         store.setSidebarOpen(true);
-        break;
-      case 'work':
-        useFileStore.getState().activateChatSlot();
-        setActiveView('work');
-        store.setSidebarOpen(false);
         break;
       case 'files': {
         const currentProjectId = sessions.find((session) => session.id === activeSessionId)?.projectId || null;
@@ -213,6 +205,10 @@ function ModelSelectorInline({ onClose }: { onClose: () => void }) {
   >(null);
   const [switchBusy, setSwitchBusy] = React.useState(false);
   const [switchError, setSwitchError] = React.useState<string | null>(null);
+  const defaultPiModels = visiblePiModels
+    .filter((model) => getDefaultModelRank(model) !== null)
+    .sort((a, b) => getDefaultModelRank(a)! - getDefaultModelRank(b)!);
+  const registryPiModels = visiblePiModels.filter((model) => getDefaultModelRank(model) === null);
   const allVisible = [...visibleClaudeModels, ...visiblePiModels, ...visibleLocalModels];
   const current = allVisible.find((m) => m.id === effectiveSelected)
     || allVisible[0]
@@ -272,7 +268,7 @@ function ModelSelectorInline({ onClose }: { onClose: () => void }) {
         className="w-full flex items-center gap-2 text-[14px] font-medium text-gray-300 bg-surface-800/80 border border-surface-700/50 px-2.5 py-1.5 rounded-lg hover:bg-surface-800 transition-all"
       >
         <div className="w-1.5 h-1.5 rounded-full bg-primary-400 shrink-0" />
-        <span className="flex-1 text-left truncate">{current.name}</span>
+        <span className="flex-1 text-left truncate">{getModelDisplayName(current, t)}</span>
         {current.badge && (
           <span className={`text-[11px] font-bold px-1 py-px rounded ${
             current.badge === 'OR'
@@ -303,7 +299,7 @@ function ModelSelectorInline({ onClose }: { onClose: () => void }) {
               }`}
             >
               <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${model.id === effectiveSelected ? 'bg-primary-400' : 'bg-surface-700'}`} />
-              <span className="flex-1 text-left truncate">{model.name}</span>
+              <span className="flex-1 text-left truncate">{getModelDisplayName(model, t)}</span>
               {model.badge && (
                 <span className={`text-[11px] font-bold px-1 py-px rounded shrink-0 ${
                   model.badge === 'OR'
@@ -322,32 +318,23 @@ function ModelSelectorInline({ onClose }: { onClose: () => void }) {
           {visiblePiModels.length > 0 && (
             <>
               {visibleClaudeModels.length > 0 && <div className="border-t border-surface-700/50 mx-2 my-0.5" />}
-              <div className="px-2.5 pt-1 pb-0.5 text-[11px] font-semibold text-violet-400/70 uppercase tracking-wider">{t('modelSelection')}</div>
-              {visiblePiModels.map((model) => (
-                <button
-                  key={model.id}
-                  onClick={() => handlePick(model.id)}
-                  className={`w-full flex items-center gap-2 px-2.5 py-1.5 text-[13px] transition-colors ${
-                    model.id === effectiveSelected
-                      ? 'bg-primary-600/15 text-primary-300'
-                      : 'text-gray-400 hover:bg-surface-800 hover:text-gray-200'
-                  }`}
-                >
+              {defaultPiModels.length > 0 && (
+                <div className="mx-1.5 my-1 rounded-lg border border-primary-500/20 bg-primary-500/[0.04] py-0.5">
+                  <div className="px-2 pb-0.5 pt-1 text-[10px] font-semibold uppercase tracking-wider text-primary-400/80">{t('defaultModels')}</div>
+                  {defaultPiModels.map((model) => (
+                    <button key={model.id} onClick={() => handlePick(model.id)} className={`w-full flex items-center gap-2 px-2 py-1.5 text-[13px] transition-colors ${model.id === effectiveSelected ? 'bg-primary-600/15 text-primary-300' : 'text-gray-400 hover:bg-surface-800 hover:text-gray-200'}`}>
+                      <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${model.id === effectiveSelected ? 'bg-primary-400' : 'bg-surface-700'}`} />
+                      <span className="min-w-0 flex-1 text-left"><span className="block truncate font-medium">{getModelDisplayName(model, t)}</span><ModelTokenPrice model={model} /></span>
+                    </button>
+                  ))}
+                </div>
+              )}
+              {registryPiModels.length > 0 && defaultPiModels.length > 0 && <div className="border-t border-surface-700/50 mx-2 my-0.5" />}
+              {registryPiModels.map((model) => (
+                <button key={model.id} onClick={() => handlePick(model.id)} className={`w-full flex items-center gap-2 px-2.5 py-1.5 text-[13px] transition-colors ${model.id === effectiveSelected ? 'bg-primary-600/15 text-primary-300' : 'text-gray-400 hover:bg-surface-800 hover:text-gray-200'}`}>
                   <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${model.id === effectiveSelected ? 'bg-primary-400' : 'bg-surface-700'}`} />
-                  <span className="flex-1 text-left truncate">{model.name}</span>
-                  {model.badge && (
-                    <span className={`text-[11px] font-bold px-1 py-px rounded shrink-0 ${
-                      model.badge === 'OR'
-                        ? 'text-violet-300 bg-violet-500/20 border border-violet-500/30'
-                        : model.badge === 'AZ'
-                        ? 'text-sky-300 bg-sky-500/20 border border-sky-500/30'
-                        : model.badge === 'LOCAL'
-                        ? 'tone-pill tone-success'
-                        : 'text-purple-300 bg-purple-500/20 border border-purple-500/30'
-                    }`}>
-                      {model.badge}
-                    </span>
-                  )}
+                  <span className="min-w-0 flex-1 text-left"><span className="block truncate">{getModelDisplayName(model, t)}</span><ModelTokenPrice model={model} /></span>
+                  {getModelCompany(model) && <span className="max-w-[88px] shrink-0 truncate text-[11px] text-surface-500">{getModelCompany(model)}</span>}
                 </button>
               ))}
             </>
@@ -367,7 +354,7 @@ function ModelSelectorInline({ onClose }: { onClose: () => void }) {
                   }`}
                 >
                   <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${model.id === effectiveSelected ? 'bg-primary-400' : 'bg-surface-700'}`} />
-                  <span className="flex-1 text-left truncate">{model.name}</span>
+                  <span className="flex-1 text-left truncate">{getModelDisplayName(model, t)}</span>
                   {model.badge && (
                     <span className={`text-[11px] font-bold px-1 py-px rounded shrink-0 ${
                       model.badge === 'OR'
@@ -404,24 +391,22 @@ function isPathInsideRoot(path: string, rootPath: string): boolean {
   return normalizedPath === normalizedRoot || normalizedPath.startsWith(`${normalizedRoot}/`);
 }
 
-function AppMenu({
-  username, userRole, onAdminClick, onPersonalCredentialsClick, onPublishClick, onPersonalMaterialsClick, onPersonalTodosClick, onViewDiff,
-  onLogout, onSettingsClick, onPinsClick, onInboxClick, onHistoryClick, onSessionFileClick, isMobile,
+export function AppMenu({
+  username, userRole, onAdminClick, onPublishClick, onViewDiff,
+  onLogout, onSettingsClick, onInboxClick, onSecretariatClick, onSessionFileClick, onSelectSession, isMobile,
 }: {
   username?: string;
   userRole?: string;
   onAdminClick?: () => void;
   onPersonalCredentialsClick?: () => void;
   onPublishClick?: () => void;
-  onPersonalMaterialsClick?: () => void;
-  onPersonalTodosClick?: () => void;
   onViewDiff?: (diff: string) => void;
   onLogout?: () => void;
   onSettingsClick?: () => void;
-  onPinsClick?: () => void;
   onInboxClick?: () => void;
-  onHistoryClick?: () => void;
+  onSecretariatClick?: () => void;
   onSessionFileClick?: (path: string) => void;
+  onSelectSession?: (session: import('../../stores/session-store').SessionMeta) => void;
   isMobile?: boolean;
 }) {
   const { t } = useTranslation('layout');
@@ -442,24 +427,6 @@ function AppMenu({
   const agentFirstEnabled = useSettingsStore((s) => s.serverConfig?.agentFirstEnabled === true);
   const aiServicesEnabled = useSettingsStore((s) => s.serverConfig?.aiServicesEnabled === true);
   const activeSessionId = useSessionStore((s) => s.activeSessionId);
-  const [openTodoCount, setOpenTodoCount] = React.useState(0);
-
-  React.useEffect(() => {
-    if (userRole === 'guest' || userRole === 'viewer') {
-      setOpenTodoCount(0);
-      return;
-    }
-    const refreshTodos = () => {
-      const token = localStorage.getItem('token');
-      void fetch('/api/personal-space/todos', { headers: token ? { Authorization: `Bearer ${token}` } : {} })
-        .then(async response => response.ok ? response.json() : { todos: [] })
-        .then(data => setOpenTodoCount(Array.isArray(data.todos) ? data.todos.filter((todo: { completed?: boolean }) => !todo.completed).length : 0))
-        .catch(() => {});
-    };
-    refreshTodos();
-    window.addEventListener('focus', refreshTodos);
-    return () => window.removeEventListener('focus', refreshTodos);
-  }, [userRole, open]);
 
   // Reset sub-panels when menu closes
   React.useEffect(() => {
@@ -471,6 +438,7 @@ function AppMenu({
       setNpSlugTouched(false);
     }
   }, [open]);
+
 
   // Auto-focus project name input
   React.useEffect(() => {
@@ -557,24 +525,27 @@ function AppMenu({
     }
   };
 
-  const MenuItem = ({ icon, label, onClick, danger, shortcut, keepOpen, badge, testId }: {
-    icon: React.ReactNode; label: string; onClick?: () => void; danger?: boolean; shortcut?: string; keepOpen?: boolean; badge?: number; testId?: string;
+  const MenuItem = ({ icon, label, description, onClick, danger, shortcut, keepOpen, badge, testId }: {
+    icon: React.ReactNode; label: string; description?: string; onClick?: () => void; danger?: boolean; shortcut?: string; keepOpen?: boolean; badge?: number; testId?: string;
   }) => (
     <button
       type="button"
       data-testid={testId}
       onMouseDown={(e) => e.stopPropagation()}
       onClick={(e) => { e.stopPropagation(); onClick?.(); if (!keepOpen) setOpen(false); }}
-      className={`w-full flex items-center gap-2.5 px-3 py-2 text-[14px] transition-colors ${
+      className={`flex min-h-10 w-full items-start gap-2.5 px-3 py-2 text-[14px] transition-colors ${
         danger
           ? 'text-red-400 hover:bg-red-950/30 hover:text-red-300'
           : 'text-gray-400 hover:bg-surface-800 hover:text-gray-200'
       }`}
     >
-      <span className="w-4 h-4 shrink-0 flex items-center justify-center">{icon}</span>
-      <span className="flex-1 text-left">{label}</span>
-      {badge != null && badge > 0 && <span className="min-w-5 rounded-full bg-red-500 px-1.5 py-0.5 text-center text-[11px] font-bold leading-none text-white">{badge > 99 ? '99+' : badge}</span>}
-      {shortcut && <span className="text-[12px] text-surface-600 font-mono">{shortcut}</span>}
+      <span className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center">{icon}</span>
+      <span className="min-w-0 flex-1 text-left">
+        <span className="block leading-5">{label}</span>
+        {description && <span className="mt-0.5 block text-[12px] leading-4 text-surface-500">{description}</span>}
+      </span>
+      {badge != null && badge > 0 && <span className="mt-0.5 min-w-5 rounded-full bg-red-500 px-1.5 py-0.5 text-center text-[11px] font-bold leading-none text-white">{badge > 99 ? '99+' : badge}</span>}
+      {shortcut && <span className="mt-0.5 font-mono text-[12px] text-surface-600">{shortcut}</span>}
     </button>
   );
 
@@ -605,7 +576,7 @@ function AppMenu({
       </button>
 
       {open && !gitOpen && !newProjectOpen && (
-        <div className="absolute left-0 top-full mt-2 w-64 max-h-[calc(100dvh-4.5rem)] overflow-y-auto overscroll-contain bg-surface-900 border border-surface-700 rounded-xl shadow-2xl shadow-black/40 z-[100]">
+        <div className="absolute left-0 top-full mt-2 w-72 max-h-[calc(100dvh-4.5rem)] overflow-y-auto overscroll-contain bg-surface-900 border border-surface-700 rounded-xl shadow-2xl shadow-black/40 z-[100]">
           {/* User info header */}
           <div className="px-3 py-2.5 border-b border-surface-800 flex items-center gap-2.5">
             <div className="w-7 h-7 rounded-full bg-primary-600/30 border border-primary-500/40 flex items-center justify-center shrink-0">
@@ -626,25 +597,17 @@ function AppMenu({
           <div className="py-1">
             {/* ── Personal workspace ── */}
             <MenuSection label={t('mySpace')} />
-            {userRole !== 'guest' && userRole !== 'viewer' && onPersonalTodosClick && (
-              <MenuItem
-                icon={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M5 4h14v16H5zM8 8l1.5 1.5L12 7M8 14h8" /></svg>}
-                label={t('myTodo')}
-                badge={openTodoCount}
-                onClick={onPersonalTodosClick}
-              />
-            )}
-            {userRole !== 'guest' && userRole !== 'viewer' && onPersonalMaterialsClick && (
-              <MenuItem
-                icon={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M6 3h9l3 3v15H6zM9 11h6M9 15h6" /></svg>}
-                label={isMobile ? t('myDocuments') : t('myMaterials')}
-                onClick={onPersonalMaterialsClick}
-              />
-            )}
+            <MenuItem
+              icon={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 3h18v5H3zM5 8v13h14V8M9 12h6" /></svg>}
+              label={t('sessionTrash')}
+              testId="global-nav-archive"
+              onClick={() => window.dispatchEvent(new CustomEvent('tower-open-session-directory', { detail: { mode: 'archived' } }))}
+            />
             {userRole !== 'guest' && userRole !== 'viewer' && (
               <MenuItem
                 icon={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 19V7m0 12h16M8 15v-4m4 4V5m4 10V9" /></svg>}
                 label={t('workHistory')}
+                description={t('workHistoryDescription')}
                 testId="global-nav-work"
                 onClick={() => {
                   const store = useSessionStore.getState();
@@ -656,20 +619,19 @@ function AppMenu({
             <MenuItem
               icon={<svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.6}><path strokeLinecap="round" strokeLinejoin="round" d="M17 8h2a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2h-2v4l-4-4H9M7 14H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2h-4l-4 4v-4Z" /></svg>}
               label={t('pendingReplies')}
+              description={t('pendingRepliesDescription')}
               testId="global-nav-inbox"
               onClick={onInboxClick}
             />
-            <MenuItem
-              icon={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 3.8l2.5 5.05 5.58.81-4.04 3.94.95 5.56L12 16.54l-4.99 2.62.95-5.56-4.04-3.94 5.58-.81L12 3.8z" /></svg>}
-              label={t('favorites')}
-              testId="global-nav-favorites"
-              onClick={onPinsClick}
-            />
-            <MenuItem
-              icon={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>}
-              label={t('sessionHistory')}
-              onClick={onHistoryClick}
-            />
+            {onSecretariatClick && userRole !== 'guest' && userRole !== 'viewer' && (
+              <MenuItem
+                icon={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2h-2 M9 3h6v4H9z M8 12h8 M8 16h5" /></svg>}
+                label={t('secretariat')}
+                description={t('secretariatDescription')}
+                testId="global-nav-secretariat"
+                onClick={onSecretariatClick}
+              />
+            )}
             {onSessionFileClick && (
               <SessionFilesMenuSection
                 activeSessionId={activeSessionId}
@@ -688,6 +650,7 @@ function AppMenu({
             <MenuItem
               icon={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 7V3m8 4V3M5 11h14M6 5h12a2 2 0 012 2v12H4V7a2 2 0 012-2z" /></svg>}
               label={t('automation')}
+              description={t('automationDescription')}
               testId="global-nav-automation"
               onClick={() => {
                 const store = useSessionStore.getState();
@@ -699,25 +662,11 @@ function AppMenu({
               <MenuItem
                 icon={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>}
                 label={t('publishingHub')}
+                description={t('publishingHubDescription')}
                 onClick={onPublishClick}
                 testId="global-nav-publishing"
               />
             )}
-
-            <Divider />
-
-            {/* ── Beta ── */}
-            <MenuSection label={t('beta')} />
-            <MenuItem
-              icon={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 3h6m-5 0v5l-5 9a2 2 0 001.7 3h10.6a2 2 0 001.7-3l-5-9V3M8 14h8" /></svg>}
-              label={t('skillWorkbench')}
-              onClick={() => {
-                const store = useSessionStore.getState();
-                store.setActiveView('beta');
-                store.setSidebarOpen(false);
-                window.setTimeout(() => window.dispatchEvent(new CustomEvent('tower-beta-mode', { detail: { mode: 'skill-workbench' } })), 0);
-              }}
-            />
 
             <Divider />
 
@@ -732,21 +681,14 @@ function AppMenu({
             <MenuItem
               icon={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>}
               label={t('skillsMarket')}
+              description={t('skillsMarketDescription')}
               testId="global-nav-skills"
               onClick={() => { setSkillsBrowserOpen(true); }}
             />
-            {(isOperatorOrAdmin || onPersonalCredentialsClick) && (
+            {isOperatorOrAdmin && (
               <>
                 {/* ── Role-gated settings and management tools ── */}
-                {onPersonalCredentialsClick && (
-                  <MenuItem
-                    icon={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" /></svg>}
-                    label={t('personalCredentials')}
-                    testId="global-nav-personal-credentials"
-                    onClick={onPersonalCredentialsClick}
-                  />
-                )}
-                {onAdminClick && isOperatorOrAdmin && (
+                {onAdminClick && (
                   <MenuItem
                     icon={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0 1 12 2.944a11.955 11.955 0 0 1-8.618 3.04A12.02 12.02 0 0 0 3 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" /></svg>}
                     label={userRole === 'operator' ? t('operatorPanel') : t('adminPanel')}
@@ -793,6 +735,8 @@ function AppMenu({
 
             <Divider />
 
+            {/* Switching intentionally uses the same authenticated sign-out boundary. */}
+            {onLogout && <MenuItem label={t('accountSwitchTitle')} onClick={onLogout} icon={<span aria-hidden="true">↔</span>} />}
             {/* ── Logout ── */}
             {onLogout && (
               <MenuItem
@@ -921,10 +865,76 @@ function formatIdentityName(username?: string) {
   return username.charAt(0).toUpperCase() + username.slice(1);
 }
 
+function ActiveSessionDeckControl({ sessionId, projectId, label }: { sessionId: string; projectId: string; label: string | null }) {
+  const { t } = useTranslation('layout');
+  const sessions = useSessionStore((s) => s.sessions);
+  const updateSessionMeta = useSessionStore((s) => s.updateSessionMeta);
+  const [open, setOpen] = useState(false);
+  const [newLabel, setNewLabel] = useState('');
+  const [saving, setSaving] = useState(false);
+  const ref = React.useRef<HTMLDivElement>(null);
+  const labels = React.useMemo(() => [...new Set(sessions.filter((session) => session.projectId === projectId && session.label).map((session) => session.label!))].sort(), [projectId, sessions]);
+
+  React.useEffect(() => {
+    if (!open) return;
+    const close = (event: MouseEvent) => {
+      if (ref.current && !ref.current.contains(event.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', close);
+    return () => document.removeEventListener('mousedown', close);
+  }, [open]);
+
+  const applyLabel = async (nextLabel: string | null) => {
+    if (saving || nextLabel === label) { setOpen(false); return; }
+    const previousLabel = label;
+    setSaving(true);
+    updateSessionMeta(sessionId, { label: nextLabel });
+    try {
+      const token = localStorage.getItem('token');
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (token) headers.Authorization = `Bearer ${token}`;
+      const response = await fetch(`/api/sessions/${sessionId}`, { method: 'PATCH', headers, body: JSON.stringify({ label: nextLabel }) });
+      if (!response.ok) throw new Error('deck assignment failed');
+      toastSuccess(nextLabel ? t('sessionAssignedToDeck', { name: nextLabel }) : t('sessionMovedToDefaultDeck'));
+      setOpen(false);
+      setNewLabel('');
+    } catch {
+      updateSessionMeta(sessionId, { label: previousLabel });
+      toastError(t('deckAssignmentFailed'));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div ref={ref} className="relative shrink-0">
+      <button type="button" onClick={() => setOpen((value) => !value)} aria-label={t('assignCurrentSessionToDeck')} className="inline-flex max-w-44 items-center gap-1 rounded-md border border-surface-700/70 bg-surface-850 px-2 py-1 text-[12px] font-semibold text-surface-300 hover:border-primary-500/40 hover:text-primary-300">
+        <span className="text-surface-500">{t('deck')}</span>
+        <span className="truncate">{label || t('defaultDeck')}</span>
+        <svg className="h-3 w-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="m6 9 6 6 6-6" /></svg>
+      </button>
+      {open && (
+        <div className="absolute left-0 top-full z-50 mt-1 w-56 rounded-lg border border-surface-700 bg-surface-850 py-1 shadow-xl">
+          <div className="max-h-44 overflow-y-auto">
+            <button type="button" disabled={saving} onClick={() => void applyLabel(null)} className="flex w-full items-center justify-between px-3 py-1.5 text-left text-[13px] text-surface-300 hover:bg-surface-700/60"><span>{t('defaultDeck')}</span>{!label && <span className="text-primary-400">✓</span>}</button>
+            {labels.map((deckLabel) => <button key={deckLabel} type="button" disabled={saving} onClick={() => void applyLabel(deckLabel)} className="flex w-full items-center justify-between px-3 py-1.5 text-left text-[13px] text-surface-300 hover:bg-surface-700/60"><span className="truncate">{deckLabel}</span>{label === deckLabel && <span className="text-primary-400">✓</span>}</button>)}
+          </div>
+          <div className="border-t border-surface-700 p-2">
+            <div className="flex gap-1.5">
+              <input value={newLabel} onChange={(event) => setNewLabel(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && newLabel.trim()) void applyLabel(newLabel.trim()); }} placeholder={t('newDeckPlaceholder')} className="min-w-0 flex-1 rounded border border-surface-700 bg-surface-900 px-2 py-1 text-[12px] text-surface-200 outline-none focus:border-primary-500/50" />
+              <button type="button" disabled={!newLabel.trim() || saving} onClick={() => void applyLabel(newLabel.trim())} className="rounded bg-primary-500/15 px-2 text-[12px] font-semibold text-primary-300 disabled:opacity-40">{t('addDeck')}</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function HeaderImpl({
-  connected, onNewSession, onAdminClick, onPersonalCredentialsClick, onPublishClick, onPersonalMaterialsClick, onPersonalTodosClick,
-  onViewDiff, onLogout, onSettingsClick, onPinsClick, onInboxClick, onHistoryClick, onSessionFileClick,
-  onRequestFileTree, onSelectSession, username, userRole,
+  connected, onNewSession, onAdminClick, onPersonalCredentialsClick, onPublishClick,
+  onViewDiff, onLogout, onSettingsClick, onInboxClick, onSecretariatClick, onSessionFileClick,
+  onRequestFileTree, onSelectSession, onNavigateSessions, username, userRole,
 }: HeaderProps) {
   const { t, i18n } = useTranslation('layout');
   // Keep App Shell light: subscribe to scalar fields instead of
@@ -940,24 +950,27 @@ function HeaderImpl({
     const id = s.activeSessionId;
     return id ? s.sessions.find((ss) => ss.id === id)?.projectId ?? null : null;
   });
+  const activeSessionLabel = useSessionStore((s) => {
+    const id = s.activeSessionId;
+    return id ? s.sessions.find((ss) => ss.id === id)?.label ?? null : null;
+  });
   const activeFileTab = useFileStore((s) => {
     const id = s.activeTabId;
     return id ? s.tabs.find((tab) => tab.id === id) ?? null : null;
   });
   const projects = useProjectStore((s) => s.projects);
-  const activeProjectName = React.useMemo(() => {
+  const activeProject = React.useMemo(() => {
     if (activeFileTab?.path) {
       return projects
         .filter((project) => project.rootPath && isPathInsideRoot(activeFileTab.path, project.rootPath))
-        .sort((a, b) => (b.rootPath || '').length - (a.rootPath || '').length)[0]?.name ?? null;
+        .sort((a, b) => (b.rootPath || '').length - (a.rootPath || '').length)[0] ?? null;
     }
-    return activeSessionProjectId ? projects.find((p) => p.id === activeSessionProjectId)?.name ?? null : null;
+    return activeSessionProjectId ? projects.find((p) => p.id === activeSessionProjectId) ?? null : null;
   }, [activeFileTab?.path, activeSessionProjectId, projects]);
+  const activeAgentName = activeProject?.agent?.displayName || activeProject?.name || null;
   const activeDisplayTitle = activeFileTab?.path
     ? basename(activeFileTab.path)
     : activeSessionName;
-  const activeDisplayKind = activeFileTab?.path ? 'file' : 'session';
-  const activeDisplayId = activeFileTab?.path ?? activeSessionId;
   const isMobile = useSessionStore((s) => s.isMobile);
   const identityLines = React.useMemo(
     () => t('towerIdentityLines', { returnObjects: true }) as TowerIdentityLine[],
@@ -974,27 +987,9 @@ function HeaderImpl({
     return () => window.clearInterval(rotate);
   }, [identityLines]);
   const identityName = React.useMemo(() => formatIdentityName(username) || t('user'), [t, username]);
-  const [titleCopied, setTitleCopied] = useState(false);
-
-  const handleCopyTitle = async () => {
-    if (!activeDisplayTitle) return;
-    const parts = [
-      activeProjectName ? t('reference.workspace', { name: activeProjectName }) : null,
-      t(`reference.${activeDisplayKind}`, { title: activeDisplayTitle }),
-      activeDisplayId ? `id: ${activeDisplayId}` : null,
-    ].filter(Boolean);
-    try {
-      await navigator.clipboard.writeText(parts.join(' / '));
-      setTitleCopied(true);
-      toastSuccess(t(`reference.${activeDisplayKind}Copied`));
-      setTimeout(() => setTitleCopied(false), 1500);
-    } catch {
-      toastError(t('reference.copyFailed'));
-    }
-  };
 
   return (
-    <header className="relative z-50 h-12 bg-surface-900/80 backdrop-blur-md border-b border-surface-800 flex items-center px-3 md:px-4 gap-2 md:gap-3 shrink-0">
+    <header className="tower-app-header relative z-50 h-12 bg-surface-900/80 backdrop-blur-md border-b flex items-center px-3 md:px-4 gap-2 md:gap-3 shrink-0">
       {/* ☰ App Menu */}
       <AppMenu
         username={username}
@@ -1002,66 +997,39 @@ function HeaderImpl({
         onAdminClick={onAdminClick}
         onPersonalCredentialsClick={onPersonalCredentialsClick}
         onPublishClick={onPublishClick}
-        onPersonalMaterialsClick={onPersonalMaterialsClick}
-        onPersonalTodosClick={onPersonalTodosClick}
         onViewDiff={onViewDiff}
         onLogout={onLogout}
         onSettingsClick={onSettingsClick}
-        onPinsClick={onPinsClick}
         onInboxClick={onInboxClick}
-        onHistoryClick={onHistoryClick}
+        onSecretariatClick={onSecretariatClick}
         onSessionFileClick={onSessionFileClick}
+        onSelectSession={onSelectSession}
         isMobile={isMobile}
       />
 
       {/* Nav tabs — app-level navigation */}
-      {!isMobile && <NavTabs onRequestFileTree={onRequestFileTree} />}
+      {!isMobile && <NavTabs onRequestFileTree={onRequestFileTree} onNavigateSessions={onNavigateSessions} />}
 
       {/* Active work target — session / file */}
       {activeDisplayTitle && (
         <>
           {!isMobile && <span className="text-surface-700 shrink-0">/</span>}
-          <div
-            className={`group flex items-center gap-2 px-1.5 py-0.5 rounded bg-surface-800/30 transition-colors min-w-0 flex-[1_1_auto] max-w-[min(82vw,1120px)] ${
-              titleCopied ? 'tone-success tone-text' : 'text-surface-100'
-            }`}
-          >
-            <span className="truncate min-w-0 flex-1 text-left text-[15px] md:text-[16px] leading-5">
-              <span className="font-bold text-surface-100">{activeDisplayTitle}</span>
-              {activeProjectName && (
-                <>
-                  <span className="mx-3 text-[14px] md:text-[15px] font-normal text-surface-600">|</span>
-                  <span className="text-[14px] md:text-[15px] font-medium text-surface-400">{activeProjectName}</span>
-                </>
-              )}
+          <div className="flex min-w-0 flex-[1_1_auto] max-w-[min(82vw,1120px)] items-center gap-3 text-left">
+            <span className="flex min-w-0 items-baseline gap-1.5">
+              <span className="shrink-0 text-[12px] font-medium text-surface-500">{t('reference.titleLabel')}:</span>
+              <span className="truncate text-[15px] font-bold leading-5 text-surface-100 md:text-[16px]">
+                {activeDisplayTitle}
+              </span>
             </span>
-            <button
-              type="button"
-              onClick={handleCopyTitle}
-              title={titleCopied ? t('copied') : t('copyReference', { kind: activeDisplayKind })}
-              aria-label={t('copyReference', { kind: activeDisplayKind })}
-              className={`shrink-0 rounded p-0.5 transition-colors ${
-                titleCopied
-                  ? 'tone-success tone-text'
-                  : 'text-surface-500 hover:bg-surface-700/70 hover:text-surface-100'
-              }`}
-            >
-              <svg
-                className={`w-3 h-3 transition-opacity ${
-                  titleCopied ? 'opacity-100' : 'opacity-60'
-                }`}
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-                aria-hidden="true"
-              >
-                {titleCopied ? (
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
-                ) : (
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" />
-                )}
-              </svg>
-            </button>
+            {activeAgentName && (
+              <span className="hidden min-w-0 items-baseline gap-1.5 sm:flex">
+                <span className="shrink-0 text-[12px] font-medium text-surface-500">{t('reference.agentLabel')}:</span>
+                <span className="max-w-44 truncate text-[13px] font-semibold text-surface-300">{activeAgentName}</span>
+              </span>
+            )}
+            {!isMobile && !activeFileTab?.path && activeSessionId && activeSessionProjectId && (
+              <ActiveSessionDeckControl sessionId={activeSessionId} projectId={activeSessionProjectId} label={activeSessionLabel} />
+            )}
           </div>
         </>
       )}

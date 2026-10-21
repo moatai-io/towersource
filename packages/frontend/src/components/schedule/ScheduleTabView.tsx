@@ -29,7 +29,7 @@ async function fetchJson<T>(url: string, opts?: FetchOpts): Promise<T> {
 function statusText(job: Automation, t: (key: string) => string): string {
   if (!job.enabled) return t('disabled');
   if (job.status === 'running') return t('running');
-  if (job.lastStatus === 'failed' || job.status === 'failed') return t('failed');
+  if ((job.lastStatus === 'failed' || job.lastStatus === 'timeout') || job.status === 'failed') return t('failed');
   return t('healthy');
 }
 
@@ -83,7 +83,12 @@ export function ScheduleTabView({ automationId, tabId }: { automationId: string;
     }
   }, [automationId, loadProcessMap]);
 
-  useEffect(() => { void load(); }, [load]);
+  // Keep unattended executions visible without polling hidden tabs.
+  useEffect(() => {
+    void load();
+    const timer = window.setInterval(() => { if (!document.hidden) void load(); }, 30_000);
+    return () => window.clearInterval(timer);
+  }, [load]);
 
   const handleRunNow = async () => {
     if (!job || running) return;

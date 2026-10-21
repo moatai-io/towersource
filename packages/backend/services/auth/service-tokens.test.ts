@@ -31,7 +31,7 @@ const NOW_S = Math.floor(Date.now() / 1000);
 
 beforeEach(() => {
   executeMock.mockReset();
-  queryOneMock.mockReset();
+  queryOneMock.mockReset().mockResolvedValue({ auth_epoch: 0, disabled: 0, approval_status: 'active' });
   queryMock.mockReset();
   sut._resetLastUsedCache();
   // Default execute returns { changes: 1 } so revokeServiceToken's
@@ -55,6 +55,7 @@ describe('issueServiceToken', () => {
 
     const decoded = jwt.verify(result.token, 'test-secret-deterministic-32-bytes-min') as any;
     expect(decoded.aud).toBe('fleet');
+    expect(decoded.authEpoch).toBe(0);
     expect(decoded.username).toBe('admin');
     expect(decoded.role).toBe('admin');
     expect(decoded.issued_for).toBe('julius@openclaw-vm');

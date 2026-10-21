@@ -1,0 +1,4 @@
+import {it,expect} from 'vitest';import {publishedSiteUrl} from './published-url.js';
+it('keeps existing default subdomain URL',()=>{expect(publishedSiteUrl('report','https://tower.example')).toBe('https://report.tower.example/');expect(publishedSiteUrl('report',undefined)).toBeUndefined();});
+it('explicit separate publishing origin uses path slug',()=>{expect(publishedSiteUrl('report','https://test1.tower.example.com','https://test1.publish.tower.example.com')).toBe('https://test1.publish.tower.example.com/report/');});
+it('rejects same app origin, invalid base and traversal',()=>{for(const base of ['https://tower.example','http://publish.example','https://publish.example/path','https://publish.example/?key=x'])expect(()=>publishedSiteUrl('report','https://tower.example',base)).toThrow();expect(()=>publishedSiteUrl('../report','https://tower.example')).toThrow();});

@@ -4,6 +4,8 @@ Tower is a self-hosted AI workspace for teams. It combines a web application, du
 
 This document describes the public product architecture. Environment-specific deployment, customer fleet operations, signing, backup, and private release procedures are intentionally outside this repository.
 
+> Updated 2026-09-13. Start development at the [documentation index](../index.md) and [code map](../architecture/code-map.md). Current contracts and historical experiments are separate.
+
 ## System overview
 
 ```mermaid
@@ -13,7 +15,7 @@ flowchart LR
     API --> DB["PostgreSQL"]
     API --> FS["Project workspaces"]
     API --> AI["AI provider adapters"]
-    AI --> WB["Project Workstation / Runtime Box"]
+    AI --> WB["Assigned execution<br/>Worker or explicit host access"]
     API --> CV["Credential Vault"]
     API --> AUTO["Automations and workers"]
     API --> PUB["Publishing Hub"]
@@ -49,15 +51,13 @@ A Primary AI teammate is the user-facing owner of a Project workspace. Its profi
 
 Helper Agents are delegated specialists. They do not acquire broader Project or Credential authority merely because they were created by another agent.
 
-### Workstation and Runtime Box
+### Workstation, Worker, and compatibility names
 
-Tower can execute AI work against a real project filesystem.
+A **Workstation** is the product contract for a persistent work environment. A **Worker** is an execution service selected through server-owned Project/deployment bindings. A **Project workspace** is the file/context/access boundary; these concepts do not imply one VM or OS user per Project.
 
-- The **Project Workstation** is the assigned environment for commands, builds, tests, and file operations.
-- A **Runtime Box** is an isolated execution boundary used when a task or provider path requires controlled runtime materialization.
-- Runtime execution receives only the Project, path, tool, and credential authority granted for that run.
+`runtime-box/` and `workbench-*` remain active implementation and compatibility identifiers. Runtime Box is being retired as the general product model, not declared already removed. Workbench can also name a specific authoring UI. Explicit Operator access is a separate host execution branch, not a fallback when a Worker fails.
 
-The browser never becomes the authority source for filesystem or runtime access. The backend validates the current user, Project, role, path, and operation.
+See [execution terminology](../architecture/execution-terminology.md) for actual routing, remaining compatibility, and code aliases. See [authority and storage](../architecture/authority-and-storage.md) for requester/Agent identity, Session audience, Worker storage, and known parity gaps. File tools, command execution, and transfer paths must be checked separately; full convergence is not claimed.
 
 ## Request and execution flow
 

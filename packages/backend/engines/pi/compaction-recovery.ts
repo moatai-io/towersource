@@ -3,6 +3,7 @@
 // Public API: createPiCompactRecoverySessionFile, isPiContextLengthExceededMessage.
 
 import crypto from 'node:crypto';
+import { getModelDefaults } from '../../config.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { estimateTokens } from '@earendil-works/pi-coding-agent';
@@ -32,6 +33,16 @@ const LOCAL_FALLBACK_MARKER = '"localFallback":true';
 
 export function isPiContextLengthExceededMessage(message: unknown): boolean {
   return /Pi Responses preflight rejected near-context request before upstream send|preflightFloor=|context_length_exceeded/i.test(String(message || ''));
+}
+
+/**
+ * Compaction uses the same provider transport as an ordinary turn. If the
+ * compaction request itself is rejected for context size, retrying provider
+ * compaction cannot make progress; Tower must switch to its bounded local
+ * compaction instead of bubbling the same overflow back into the recovery loop.
+ */
+export function shouldUsePiLocalFallbackAfterCompactionError(message: unknown): boolean {
+  return isPiContextLengthExceededMessage(message);
 }
 
 export function countPiLocalFallbackMarkersInFile(filePath: string, stopAfter = Number.POSITIVE_INFINITY): number {
@@ -114,6 +125,34 @@ export function sanitizePiMessagesForRecovery(messages: any[]): any[] {
     }
     return { ...message, content };
   });
+}
+
+/** Persist recovery edits on canonical SDKs; retain the 0.82 compatibility path. */
+export function refreshPiRecoveryContext(manager: any, agent: any, refreshContext?: () => void): void {
+  if (typeof manager?.buildSessionProjection === 'function' && typeof manager?.appendContextEdit === 'function') {
+    if (!refreshContext) throw new Error('Canonical Pi recovery requires AgentSession.refreshContext');
+    for (const entry of manager.buildSessionProjection().entries) {
+      // Only edit single persisted messages, not generated compaction summaries.
+      if (entry.sourceEntry?.type !== 'message' || entry.messages.length !== 1) continue;
+      const message = entry.messages[0];
+      if (!['user', 'assistant', 'toolResult'].includes(message.role)) continue;
+      const safe = sanitizePiMessagesForRecovery([message])[0];
+      // Historical tool arguments are execution evidence, not disposable text.
+      // Preserve them exactly; repeatedly wrapping them would also grow edits.
+      if (Array.isArray(message.content)) {
+        safe.content = safe.content.map((part: any, index: number) =>
+          message.content[index]?.type === 'toolCall' ? message.content[index] : part);
+      }
+      if (JSON.stringify(safe.content) !== JSON.stringify(message.content)) {
+        manager.appendContextEdit(entry.sourceEntry.id, { content: safe.content });
+      }
+    }
+    refreshContext();
+    return;
+  }
+  if (agent?.state && typeof manager?.buildSessionContext === 'function') {
+    agent.state.messages = sanitizePiMessagesForRecovery(manager.buildSessionContext().messages);
+  }
 }
 
 function shortId(prefix: string): string {
@@ -204,10 +243,76 @@ function buildLocalFallbackSummary(params: {
   ].join('\n'), 24_000);
 }
 
+export type PiOverflowCompactionRecoveryResult = {
+  mode: 'provider' | 'local-fallback';
+  compactionCountBefore: number;
+  compactionCountAfter: number;
+  providerError?: string;
+  localFallback?: ReturnType<typeof createPiLocalFallbackCompaction>;
+};
+
+/**
+ * Execute the complete compaction decision used after a provider preflight
+ * overflow. This boundary is intentionally independent from PiEngine so the
+ * representative failure sequence can be exercised with a real session-like
+ * branch instead of source-regex tests.
+ */
+export function shouldReplayPiOverflowPrompt(params: {
+  assistantSaved: boolean;
+  toolCallsExecuted: number;
+  abortRequested: boolean;
+}): boolean {
+  return !params.assistantSaved && params.toolCallsExecuted === 0 && !params.abortRequested;
+}
+
+export async function recoverPiOverflowCompaction(params: {
+  session: MutableSessionLike | null | undefined;
+  agent?: { state?: { messages?: any[] } } | null;
+  refreshContext?: () => void;
+  compact: () => Promise<unknown>;
+  keepRecentTokens: number;
+  compactionCountBefore?: number;
+}): Promise<PiOverflowCompactionRecoveryResult> {
+  const before = params.compactionCountBefore ?? countPiCompactionEntries(params.session);
+  let providerError = '';
+  try {
+    await params.compact();
+  } catch (err: any) {
+    providerError = err?.message || String(err || 'unknown compaction error');
+    if (!shouldUsePiLocalFallbackAfterCompactionError(providerError)) throw err;
+  }
+
+  const afterProvider = countPiCompactionEntries(params.session);
+  if (!providerError && afterProvider > before) {
+    return { mode: 'provider', compactionCountBefore: before, compactionCountAfter: afterProvider };
+  }
+
+  const localFallback = createPiLocalFallbackCompaction({
+    session: params.session,
+    agent: params.agent,
+    refreshContext: params.refreshContext,
+    reason: providerError
+      ? `provider compaction failed before persistence: ${providerError}`
+      : 'manual oversized-preflight recovery compact() returned without persisting a compaction entry',
+    keepRecentTokens: params.keepRecentTokens,
+  });
+  if (!localFallback.succeeded) {
+    throw new Error(`Pi compact() did not produce a usable compaction; local fallback failed: ${localFallback.reason || 'unknown'}`);
+  }
+  return {
+    mode: 'local-fallback',
+    compactionCountBefore: before,
+    compactionCountAfter: localFallback.after,
+    ...(providerError ? { providerError } : {}),
+    localFallback,
+  };
+}
+
 export function createPiLocalFallbackCompaction(params: {
   session: MutableSessionLike | null | undefined;
   agent?: { state?: { messages?: any[] } } | null;
   reason: string;
+  refreshContext?: () => void;
   keepRecentTokens?: number;
 }): { succeeded: boolean; compactionId?: string; before: number; after: number; firstKeptEntryId?: string; reason?: string } {
   const { session, agent, reason } = params;
@@ -245,9 +350,7 @@ export function createPiLocalFallbackCompaction(params: {
       { localFallback: true, reason: reason.slice(0, 500), keepRecentTokens, suffixTokens },
       false,
     );
-    if (agent?.state && typeof session!.buildSessionContext === 'function') {
-      agent.state.messages = sanitizePiMessagesForRecovery(session!.buildSessionContext().messages);
-    }
+    refreshPiRecoveryContext(session, agent, params.refreshContext);
     const after = countPiCompactionEntries(session);
     return { succeeded: after > before, compactionId, before, after, firstKeptEntryId: firstKeptEntry.id };
   } catch (err: any) {
@@ -343,7 +446,7 @@ export async function createPiOversizedRecoveryEpochFromFile(sourceFile: string,
   const compactId = shortId('c_');
   const recoveredEntries = [
     { ...header, id: recoveryId, version: 3, timestamp, parentSession: sourceFile, cwd: header.cwd },
-    { type: 'model_change', id: modelId, parentId: null, timestamp, provider: state.latestModelChange?.provider || 'litellm-responses', modelId: state.latestModelChange?.modelId || 'smartest' },
+    { type: 'model_change', id: modelId, parentId: null, timestamp, provider: state.latestModelChange?.provider || 'litellm-responses', modelId: state.latestModelChange?.modelId || getModelDefaults().session.split('/').slice(1).join('/') },
     { type: 'thinking_level_change', id: thinkingId, parentId: modelId, timestamp, thinkingLevel: state.latestThinkingChange?.thinkingLevel || 'medium' },
     { type: 'compaction', id: compactId, parentId: thinkingId, timestamp, summary, firstKeptEntryId: compactId, tokensBefore: state.latestCompaction?.tokensBefore || 0, details: { oversizedRecovery: true, recoveredFrom: sourceFile, skippedOversizedLines: state.skippedOversizedLines, scannedLines: state.scannedLines }, fromHook: false },
   ];
@@ -430,7 +533,7 @@ export function createPiCompactRecoverySessionFile(session: SessionLike, reason:
       parentId: null,
       timestamp,
       provider: modelChange?.provider || 'litellm-responses',
-      modelId: modelChange?.modelId || 'smartest',
+      modelId: modelChange?.modelId || getModelDefaults().session.split('/').slice(1).join('/'),
     },
     {
       type: 'thinking_level_change',

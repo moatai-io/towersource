@@ -113,16 +113,16 @@ export function createSpawnMcpServer(ctx: SpawnMcpContext) {
             .describe(
               "Engine for the spawned session. Omit to use Tower's configured DEFAULT_ENGINE for this VM. " +
                 '"claude" uses Anthropic Claude Agent SDK. ' +
-                '"pi" uses @earendil-works/pi-coding-agent SDK and supports Tower AI Router / OpenRouter / Azure OpenAI models.',
+                '"pi" uses @earendil-works/pi-coding-agent SDK and supports Tower AI Router / OpenRouter models.',
             ),
           model: z
             .string()
             .optional()
             .describe(
               "Model id. Omit to use this VM's admin-configured session default for the selected engine. " +
-                'For Pi-first Tower VMs this is usually "litellm-responses/smartest". ' +
+                'For Pi-first Tower VMs this stores "preset/core" and resolves the current admin Core mapping at run time. ' +
                 'For engine="claude", use a Claude SDK alias like "claude-sonnet-4-6". ' +
-                'For engine="pi", use a provider-prefixed id like "litellm-responses/smartest" or ' +
+                'For engine="pi", use "preset/core", "preset/lite", or an explicitly registered provider-prefixed id such as ' +
                 '"openrouter/moonshotai/kimi-k2.6" (see packages/backend/models.json pi array for the registered list).',
             ),
           context_summary: z

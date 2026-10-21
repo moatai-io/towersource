@@ -18,25 +18,33 @@
  * Test guard: packages/backend/engines/__tests__/pi-eventstream-patch.test.ts
  */
 import fs from 'node:fs';
+import { verifyPiBehavior } from './pi-sdk-behavior.mjs';
 import path from 'node:path';
 
 const root = process.cwd();
-function findFirst(paths) {
-  return paths.find((p) => fs.existsSync(p));
+// Traverse the Pi dependency graph, not just the first hoisted pi-ai copy.
+// Npm may install a private pi-ai below pi-coding-agent/pi-agent-core.
+const seen = new Set();
+const aiRoots = new Set();
+function discover(modules) {
+  for (const name of ['pi-ai', 'pi-coding-agent', 'pi-agent-core']) {
+    const candidate = path.join(modules, '@earendil-works', name);
+    if (!fs.existsSync(candidate)) continue;
+    const directory = fs.realpathSync(candidate);
+    if (seen.has(directory)) continue;
+    seen.add(directory);
+    if (name === 'pi-ai') aiRoots.add(directory);
+    discover(path.join(directory, 'node_modules'));
+  }
+}
+discover(path.join(root, 'node_modules'));
+discover(path.join(root, 'packages/backend/node_modules'));
+if (!aiRoots.size) {
+  console.error('[pi-eventstream-patch] no pi-ai installation found');
+  process.exit(1);
 }
 
-const eventStreamFile = findFirst([
-  path.join(root, 'packages/backend/node_modules/@earendil-works/pi-ai/dist/utils/event-stream.js'),
-  path.join(root, 'node_modules/@earendil-works/pi-ai/dist/utils/event-stream.js'),
-]);
-
-function patchEventStream() {
-  const file = eventStreamFile;
-  if (!file) {
-    console.warn('[pi-eventstream-patch] pi-ai event-stream.js not found; skipping');
-    return;
-  }
-
+function patchEventStream(file) {
   let src = fs.readFileSync(file, 'utf8');
   if (src.includes('_resultResolved = false') && src.includes('result ?? null')) {
     console.log(`[pi-eventstream-patch] EventStream already applied: ${file}`);
@@ -68,27 +76,14 @@ src = src.replace(
 
   if (src === original || !src.includes('_resultResolved = false') || !src.includes('result ?? null')) {
     console.error(`[pi-eventstream-patch] failed to patch expected EventStream patterns in ${file}`);
-    process.exit(1);
+    throw new Error('Unrecognized SDK source; refusing patch');
   }
 
   fs.writeFileSync(file, src, 'utf8');
   console.log(`[pi-eventstream-patch] EventStream applied: ${file}`);
 }
 
-const responsesSharedFile = findFirst([
-  path.join(root, 'packages/backend/node_modules/@earendil-works/pi-ai/dist/providers/openai-responses-shared.js'),
-  path.join(root, 'node_modules/@earendil-works/pi-ai/dist/providers/openai-responses-shared.js'),
-  path.join(root, 'packages/backend/node_modules/@earendil-works/pi-ai/dist/api/openai-responses-shared.js'),
-  path.join(root, 'node_modules/@earendil-works/pi-ai/dist/api/openai-responses-shared.js'),
-]);
-
-function patchResponsesEarlyPhase() {
-  const file = responsesSharedFile;
-  if (!file) {
-    console.warn('[pi-eventstream-patch] pi-ai openai-responses-shared.js not found; skipping early phase patch');
-    return;
-  }
-
+function patchResponsesEarlyPhase(file) {
   let src = fs.readFileSync(file, 'utf8');
   if (src.includes('textSignature: encodeTextSignatureV1(item.id, item.phase ?? undefined)')) {
     console.log(`[pi-eventstream-patch] Responses early phase already applied: ${file}`);
@@ -107,12 +102,37 @@ function patchResponsesEarlyPhase() {
 
   if (src === original || !src.includes('textSignature: encodeTextSignatureV1(item.id, item.phase ?? undefined)')) {
     console.error(`[pi-eventstream-patch] failed to patch expected Responses early phase pattern in ${file}`);
-    process.exit(1);
+    throw new Error('Unrecognized SDK source; refusing patch');
   }
 
   fs.writeFileSync(file, src, 'utf8');
   console.log(`[pi-eventstream-patch] Responses early phase applied: ${file}`);
 }
 
-patchEventStream();
-patchResponsesEarlyPhase();
+async function ensureBehavior(file, kind, patch, version) {
+  try {
+    await verifyPiBehavior(file, kind);
+    console.log(`[pi-eventstream-patch] behavior already satisfied (${kind}): ${file}`);
+    return;
+  } catch (error) {
+    if (!['0.82.1', '0.87.1'].includes(version)) {
+      throw new Error(`Unreviewed Pi ${version} ${kind} behavior: ${error.message}`);
+    }
+  }
+  const original = fs.readFileSync(file, 'utf8');
+  try {
+    patch(file);
+    await verifyPiBehavior(file, kind);
+  } catch (error) {
+    fs.writeFileSync(file, original);
+    throw error;
+  }
+}
+for (const directory of aiRoots) {
+  const version = JSON.parse(fs.readFileSync(path.join(directory, 'package.json'), 'utf8')).version;
+  await ensureBehavior(path.join(directory, 'dist/utils/event-stream.js'), 'stream', patchEventStream, version);
+  const responses = ['dist/api/openai-responses-shared.js', 'dist/providers/openai-responses-shared.js']
+    .map((relative) => path.join(directory, relative)).filter((file) => fs.existsSync(file));
+  if (!responses.length) throw new Error(`Responses adapter missing in ${directory}`);
+  for (const file of responses) await ensureBehavior(file, 'responses', patchResponsesEarlyPhase, version);
+}

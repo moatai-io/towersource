@@ -10,7 +10,7 @@ import { execute } from '../../db/pg-repo.js';
 import { queryServiceOne, queryServices } from './runtime-box-row-repository.js';
 import { RuntimeBoxError } from './runtime-box-manager.js';
 import type { ServiceRegisterRequest, ServiceRow } from './types.js';
-import type { RemoteWorkbenchWorkerTransport } from './workbench-remote-job-runner.js';
+import type { RemoteWorkbenchWorkerTransport } from '../execution/remote-job-runner.js';
 
 function makePreviewToken(): string {
   return randomBytes(16).toString('hex');
@@ -44,14 +44,17 @@ function servicePaths(serviceId: number, serviceName: string) {
 async function runWorkerControl(input: {
   transport: RemoteWorkbenchWorkerTransport;
   projectId: string;
+  actorUserId: number;
   command: string;
   cwd?: string;
   timeoutSec?: number;
 }): Promise<{ stdout: string; stderr: string; exitCode: number }> {
   const result = await input.transport.execute({
     spec: {
+      lifecycle: 'service-control',
       jobId: 900_000_000 + Math.floor(Math.random() * 99_999_999),
       projectId: input.projectId,
+      actorUserId: input.actorUserId,
       command: input.command,
       cwd: input.cwd,
       timeoutSec: input.timeoutSec ?? 30,
@@ -167,6 +170,7 @@ export async function registerAndStartRemoteWorkerService(input: {
   const result = await runWorkerControl({
     transport: input.transport,
     projectId: input.request.projectId,
+    actorUserId: input.request.userId,
     cwd,
     command: startScript,
     timeoutSec: 30,
@@ -202,6 +206,7 @@ export async function registerAndStartRemoteWorkerService(input: {
 /** Tail logs for a remote Worker service. */
 export async function readRemoteWorkerServiceLogs(input: {
   service: ServiceRow;
+  actorUserId: number;
   transport: RemoteWorkbenchWorkerTransport;
   tail?: number;
 }): Promise<string> {
@@ -210,6 +215,7 @@ export async function readRemoteWorkerServiceLogs(input: {
   const result = await runWorkerControl({
     transport: input.transport,
     projectId: input.service.project_id,
+    actorUserId: input.actorUserId,
     cwd: input.service.cwd,
     command: `test -f ${shellSingleQuoted(input.service.log_path)} || { echo "(log file not found: ${input.service.log_path})"; exit 0; }; tail -n ${safeTail} ${shellSingleQuoted(input.service.log_path)}`,
     timeoutSec: 15,
@@ -221,12 +227,14 @@ export async function readRemoteWorkerServiceLogs(input: {
 /** Stop a remote Worker service by tracked PID and mark the row stopped. */
 export async function stopRemoteWorkerService(input: {
   service: ServiceRow;
+  actorUserId: number;
   transport: RemoteWorkbenchWorkerTransport;
 }): Promise<void> {
   if (input.service.process_pid) {
     await runWorkerControl({
       transport: input.transport,
       projectId: input.service.project_id,
+      actorUserId: input.actorUserId,
       cwd: input.service.cwd,
       command: `PID=${Number(input.service.process_pid)}; if kill -0 "$PID" 2>/dev/null; then kill -TERM "$PID" 2>/dev/null || true; sleep 0.5; kill -0 "$PID" 2>/dev/null && kill -KILL "$PID" 2>/dev/null || true; fi`,
       timeoutSec: 15,

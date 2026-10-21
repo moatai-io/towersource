@@ -34,3 +34,7 @@ Pi 0.82.1은 `_runAgentPrompt()` 내부에서 retry, compaction, queued-message 
 - 자동 transient recovery 중간 상태는 로그와 live run 상태에만 남기며 assistant 본문에는 저장하지 않는다. 최종 exhaustion·사용자 중단만 별도 terminal 안내로 저장한다.
 
 관련 설계: `workspace/projects/tower/work/pi-continuation-reliability-redesign-2026-08-02.md`
+
+## 완료 저장 순서
+
+복구 완료 시 `pi-engine.ts`의 `completeRecoveryClaim`은 비동기 메시지 저장을 먼저 기다린 뒤 `agent_turns.assistant_message_id`를 기록한다. `emitTurnDone`의 flush만으로는 그보다 먼저 발생하는 복구 settlement를 보호하지 못한다. `pi-recovery-persistence.source.test.ts`는 이 연결 순서를 보호한다. 실제 DB 저장 실패 복구 및 운영 재시작 검증은 별도다.

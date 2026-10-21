@@ -1,11 +1,17 @@
+import { parseControlRegistry } from '../../../shared/publishing/control-room-registry.js';
+import { parsePricingDeclaration } from '../../../shared/pricing-app.js';
+import { addRegisteredDashboard } from '../../services/publishing/control-room-registration.js';
+import { searchFileTree } from '../../services/workspace/search-file-tree.js';
 /**
  * Owns: authenticated Project file browsing and core mutations.
  * Public API: projectFilesRouter. See README.md.
  */
-import { Router } from 'express';
+import { Router, type Response } from 'express';
 import fs from 'fs';
 import path from 'path';
+import lockfile from 'proper-lockfile';
 import { config } from '../../config.js';
+import { applyMultiFileEditProposal, runInlineEdit, appendInlineEditAudit, ScopedEditError, applyScopedReplacement, createScopedEditProposal, discoverStaticHtmlCssEditPlan, inspectMultiFileEditProposal, reserveMultiFileEditProposal, validateScopedSelection, verifyScopedEditProposal } from '../../services/inline-edit/index.js';
 import { getUserAllowedPath } from '../../services/auth/auth.js';
 import {
   copyEntry, createDirectory, deleteEntry, expandHome, getFileTreeAsync,
@@ -14,22 +20,92 @@ import {
 import { scanNotesIndex, type NotesIndexMode } from '../../services/workspace/notes-index.js';
 import { buildWorkspaceKnowledgeGraph } from '../../services/workspace/knowledge-graph.js';
 import { hasInternalShareForUser } from '../../services/workspace/share-manager.js';
-import { isDotfileDenied, isPathAccessible, isPathWritableByRole, isPrivilegedRole } from '../../services/pm/project-access.js';
-import { isPathAllowedByCoarseRootOrAcl } from './project-files-access.js';
+import { findProjectByPath, isDotfileDenied, isPathAccessible, isPathWritableByRole, isPrivilegedRole } from '../../services/pm/project-access.js';
+import { getProject } from '../../services/pm/project-manager.js';
 import {
-  copyWorkerProjectEntry,
-  createWorkerProjectDirectory,
-  deleteWorkerProjectEntry,
-  listWorkerProjectDirectory,
-  readWorkerProjectFile,
-  renameWorkerProjectEntry,
-  resolveWorkerFileAuthorityForHostPath,
-  workerProjectFileExists,
-  writeWorkerProjectFile,
-} from '../../services/runtime-box/workbench-project-file-authority.js';
-import { mirrorWorkerProjectMutation } from '../../services/runtime-box/workbench-project-derived-mirror.js';
+  copyProjectWorkspaceEntry,
+  createProjectWorkspaceDirectory,
+  deleteProjectWorkspaceEntry,
+  compareAndSwapProjectWorkspaceText,
+  listProjectWorkspaceDirectory,
+  projectWorkspaceEntryExists,
+  readProjectWorkspaceFileBytes,
+  readProjectWorkspaceFileForPresentation,
+  renameProjectWorkspaceEntry,
+  resolveProjectWorkspaceFile,
+  writeProjectWorkspaceText,
+} from '../../services/project-environment/project-workspace-files.js';
+import { isPathAllowedByCoarseRootOrAcl } from './project-files-access.js';
+import { assertProjectSharedMutationForHostPath } from '../../services/runtime-box/workbench-project-file-authority.js';
 
 const router = Router();
+function respondCanonicalWriteError(res: Response, error: unknown): boolean {
+  const code = error instanceof Error ? error.message : '';
+  if (!code.startsWith('CANONICAL_WRITE_')) return false;
+  if (code === 'CANONICAL_WRITE_NOT_CONFIRMED') {
+    res.status(409).json({ code, retryable: false, error: '쓰기 결과를 확인하지 못했습니다. 파일 내용을 확인한 후 다시 저장하세요.' });
+  } else if (['CANONICAL_WRITE_DENIED','CANONICAL_WRITE_ACCESS_REVOKED','CANONICAL_WRITE_PATH_DENIED'].includes(code)) {
+    res.status(403).json({ code, retryable: false, error: '현재 파일 쓰기 권한을 확인할 수 없습니다.' });
+  } else {
+    res.status(503).json({ code: 'CANONICAL_WRITE_UNAVAILABLE', retryable: false, error: '현재 파일 쓰기를 사용할 수 없습니다. 읽기는 계속 사용할 수 있습니다.' });
+  }
+  return true;
+}
+
+const consumedScopedEditProposalIds = new Map<string, number>();
+
+function reserveScopedEditProposal(proposalId: string): () => void {
+  const now = Date.now();
+  for (const [id, expiresAt] of consumedScopedEditProposalIds) {
+    if (expiresAt <= now) consumedScopedEditProposalIds.delete(id);
+  }
+  if (consumedScopedEditProposalIds.has(proposalId)) {
+    throw new ScopedEditError('scoped_edit_proposal_already_used', 409);
+  }
+  consumedScopedEditProposalIds.set(proposalId, now + 10 * 60 * 1000);
+  return () => consumedScopedEditProposalIds.delete(proposalId);
+}
+
+// Registration only: does not publish, execute HTML or grant access.
+router.post('/dashboards/register', async (req, res) => {
+  const user = (req as any).user;
+  if (!user?.userId) return res.status(401).json({ error: 'Authentication required' });
+  let entry;
+  try {
+    if (typeof req.body.projectId !== 'string' || req.body.confirmed !== true) throw Error();
+    entry = parseControlRegistry({ version: 1, dashboards: [req.body.entry] })[0];
+  } catch { return res.status(400).json({ error: 'Invalid registration' }); }
+  try {
+    const project = await getProject(req.body.projectId);
+    if (!project?.rootPath || project.archived) return res.status(404).json({ error: 'Project unavailable' });
+    const registryPath = path.join(project.rootPath, 'dashboards/control-room.json');
+    const targetRelative = `dashboards/${entry.slug}/${entry.format === 'html' ? entry.entry : 'dashboard.pricing-app.json'}`;
+    const targetPath = path.join(project.rootPath, targetRelative);
+    for (const candidate of [registryPath, targetPath]) {
+      if (!await isPathAccessible(candidate, user.userId, user.role)) return res.status(403).json({ error: 'Access denied' });
+    }
+    if (!await isPathWritableByRole(registryPath, user.userId, user.role || 'member')) return res.status(403).json({ error: 'Write denied' });
+    const target = await resolveProjectWorkspaceFile({ projectId: project.id, projectRoot: project.rootPath, relativePath: targetRelative });
+    const bytes = (await readProjectWorkspaceFileBytes({ reference: target, actorUserId: user.userId, maxBytes: 5 * 1024 * 1024 })).bytes;
+    if (!bytes.length) return res.status(400).json({ error: 'Empty dashboard' });
+    if (entry.format !== 'html') parsePricingDeclaration(JSON.parse(bytes.toString('utf8')));
+    const reference = await resolveProjectWorkspaceFile({ projectId: project.id, projectRoot: project.rootPath, relativePath: 'dashboards/control-room.json' });
+    if (!(await projectWorkspaceEntryExists({ reference, actorUserId: user.userId })).exists) {
+      try {
+        await writeProjectWorkspaceText({ reference, actorUserId: user.userId, content: JSON.stringify({ version: 1, dashboards: [entry] }, null, 2) + '\n', exclusive: true });
+        return res.json({ ok: true, changed: true });
+      } catch (error) {
+        if (!(await projectWorkspaceEntryExists({ reference, actorUserId: user.userId })).exists) throw error;
+      }
+    }
+    const result = await addRegisteredDashboard(reference, user.userId, entry);
+    return res.json({ ok: true, ...result });
+  } catch (error) {
+    if (respondCanonicalWriteError(res, error)) return;
+    return res.status(409).json({ error: 'Registration could not be confirmed. Check target file, permissions and concurrent changes.' });
+  }
+});
+
 // ───── Directories ─────
 router.get('/directories', async (req, res) => {
   try {
@@ -62,6 +138,20 @@ router.get('/directories', async (req, res) => {
   }
 });
 
+async function assertHostAuthoritativeProjectDirectory(rootPath: string): Promise<void> {
+  const projectId = await findProjectByPath(rootPath);
+  if (!projectId) return;
+  const project = await getProject(projectId);
+  if (!project?.rootPath) throw new Error('PROJECT_WORKSPACE_NOT_FOUND');
+  const relativePath = path.relative(path.resolve(project.rootPath), path.resolve(rootPath)).split(path.sep).join('/') || '.';
+  const reference = await resolveProjectWorkspaceFile({ projectId, projectRoot: project.rootPath, relativePath, allowProjectRoot: true });
+  if (reference.workerAuthority) {
+    const error = new Error('PROJECT_WORKSPACE_INDEX_REQUIRES_AUTHORITATIVE_SNAPSHOT');
+    (error as any).statusCode = 503;
+    throw error;
+  }
+}
+
 // ───── Files ─────
 router.get('/files/notes-index', async (req, res) => {
   try {
@@ -84,6 +174,7 @@ router.get('/files/notes-index', async (req, res) => {
     if (userId && !(await isPathAccessible(rootPath, userId, role || 'member'))) {
       return res.status(403).json({ error: 'Access denied: outside your project folders' });
     }
+    await assertHostAuthoritativeProjectDirectory(rootPath);
     if (!fs.existsSync(rootPath) || !fs.statSync(rootPath).isDirectory()) {
       return res.status(400).json({ error: 'path must be a directory' });
     }
@@ -92,7 +183,7 @@ router.get('/files/notes-index', async (req, res) => {
     res.json(result);
   } catch (error: any) {
     console.error('[api] files/notes-index failed:', error);
-    res.status(500).json({ error: error.message || 'Failed to build notes index' });
+    res.status(error?.statusCode || 500).json({ error: error.message || 'Failed to build notes index' });
   }
 });
 
@@ -114,6 +205,7 @@ router.get('/files/knowledge-graph', async (req, res) => {
     if (userId && !(await isPathAccessible(rootPath, userId, role || 'member'))) {
       return res.status(403).json({ error: 'Access denied: outside your project folders' });
     }
+    await assertHostAuthoritativeProjectDirectory(rootPath);
     if (!fs.existsSync(rootPath) || !fs.statSync(rootPath).isDirectory()) {
       return res.status(400).json({ error: 'path must be a directory' });
     }
@@ -122,7 +214,7 @@ router.get('/files/knowledge-graph', async (req, res) => {
     res.json(result);
   } catch (error: any) {
     console.error('[api] files/knowledge-graph failed:', error);
-    res.status(500).json({ error: error.message || 'Failed to build knowledge graph' });
+    res.status(error?.statusCode || 500).json({ error: error.message || 'Failed to build knowledge graph' });
   }
 });
 
@@ -228,13 +320,20 @@ router.get('/files/tree', async (req, res) => {
     // isDotfileDenied, so project members can inspect project-local dotfiles
     // without exposing credentials/runtime state.
     const showHidden = req.query.showHidden === 'true' || req.query.showHidden === '1';
-    const workerAuthority = userId ? await resolveWorkerFileAuthorityForHostPath(dirPath) : undefined;
-    let entries = workerAuthority
-      ? await listWorkerProjectDirectory({ authority: workerAuthority, actorUserId: userId, showHidden })
-      : await getFileTreeAsync(dirPath, 2, {
+    const projectId = await findProjectByPath(dirPath);
+    let entries;
+    if (userId && projectId) {
+      const project = await getProject(projectId);
+      if (!project?.rootPath) return res.status(404).json({ error: 'Project not found' });
+      const relativePath = path.relative(path.resolve(project.rootPath), path.resolve(dirPath)).split(path.sep).join('/') || '.';
+      const reference = await resolveProjectWorkspaceFile({ projectId, projectRoot: project.rootPath, relativePath, allowProjectRoot: true });
+      entries = (await listProjectWorkspaceDirectory({ reference, actorUserId: userId, showHidden })).entries;
+    } else {
+      entries = await getFileTreeAsync(dirPath, 2, {
         ...(inWorkspace ? {} : { skipSafetyCheck: true }),
         showHidden,
       });
+    }
 
     // Filter project folders: non-privileged users only see projects they're a member of
     const projectsDir = path.resolve(path.join(config.workspaceRoot, 'projects'));
@@ -277,11 +376,17 @@ router.get('/files/read', async (req, res) => {
     if (userId && !(await isPathAccessible(filePath, userId, role))) {
       return res.status(403).json({ error: 'Access denied: not a member of the project owning this file' });
     }
-    const workerAuthority = userId ? await resolveWorkerFileAuthorityForHostPath(filePath) : undefined;
-    const result = workerAuthority
-      ? await readWorkerProjectFile({ authority: workerAuthority, actorUserId: userId })
-      : readFile(filePath);
-    res.json({ path: filePath, storageAuthority: workerAuthority ? 'worker' : 'host', ...result });
+    const projectId = await findProjectByPath(filePath);
+    if (userId && projectId) {
+      const project = await getProject(projectId);
+      if (!project?.rootPath) return res.status(404).json({ error: 'Project not found' });
+      const relativePath = path.relative(path.resolve(project.rootPath), path.resolve(filePath)).split(path.sep).join('/');
+      const reference = await resolveProjectWorkspaceFile({ projectId, projectRoot: project.rootPath, relativePath });
+      const result = await readProjectWorkspaceFileForPresentation({ reference, actorUserId: userId });
+      return res.json({ path: filePath, ...result });
+    }
+    const result = readFile(filePath);
+    res.json({ path: filePath, storageAuthority: 'host', ...result });
   } catch (error: any) {
     res.status(403).json({ error: error.message });
   }
@@ -302,16 +407,267 @@ router.get('/files/exists', async (req, res) => {
     if (userId && !(await isPathAccessible(filePath, userId, role))) {
       return res.json({ exists: false });
     }
-    const workerAuthority = userId ? await resolveWorkerFileAuthorityForHostPath(filePath) : undefined;
-    if (workerAuthority) {
-      const exists = await workerProjectFileExists({ authority: workerAuthority, actorUserId: userId });
-      return res.json({ exists, path: filePath, storageAuthority: 'worker' });
+    const projectId = await findProjectByPath(filePath);
+    if (userId && projectId) {
+      const project = await getProject(projectId);
+      if (!project?.rootPath) return res.json({ exists: false });
+      const relativePath = path.relative(path.resolve(project.rootPath), path.resolve(filePath)).split(path.sep).join('/') || '.';
+      const reference = await resolveProjectWorkspaceFile({ projectId, projectRoot: project.rootPath, relativePath, allowProjectRoot: true });
+      const result = await projectWorkspaceEntryExists({ reference, actorUserId: userId });
+      return res.json({ ...result, path: filePath });
     }
     const fs = await import('fs');
     const exists = fs.existsSync(filePath);
     res.json({ exists, path: filePath, storageAuthority: 'host' });
-  } catch {
+  } catch (error: any) {
+    if (/WORKER_FILE_AUTHORITY|PROJECT_WORKSPACE_STORAGE_CHANGED/.test(error?.message || '')) {
+      return res.status(503).json({ exists: false, error: error.message });
+    }
     res.json({ exists: false });
+  }
+});
+
+async function assertScopedEditFileAccess(req: any, filePath: string) {
+  const userId = req.user?.userId as number | undefined;
+  const role = String(req.user?.role || 'member');
+  if (!userId) throw new ScopedEditError('scoped_edit_auth_required', 401);
+  const userRoot = await getUserAllowedPath(userId);
+  if (!(await isPathAllowedByCoarseRootOrAcl(filePath, userRoot, userId, role))) {
+    throw new ScopedEditError('scoped_edit_access_denied', 403);
+  }
+  if (isDotfileDenied(filePath)) throw new ScopedEditError('scoped_edit_system_path_denied', 403);
+  if (!(await isPathAccessible(filePath, userId, role))) throw new ScopedEditError('scoped_edit_access_denied', 403);
+  if (!(await isPathWritableByRole(filePath, userId, role || 'member'))) {
+    throw new ScopedEditError('scoped_edit_read_only', 403);
+  }
+  const projectId = await findProjectByPath(filePath);
+  if (projectId) {
+    const project = await getProject(projectId);
+    if (!project?.rootPath) throw new ScopedEditError('scoped_edit_project_not_found', 404);
+    const relativePath = path.relative(path.resolve(project.rootPath), path.resolve(filePath)).split(path.sep).join('/');
+    const reference = await resolveProjectWorkspaceFile({ projectId, projectRoot: project.rootPath, relativePath });
+    const result = await readProjectWorkspaceFileBytes({ reference, actorUserId: userId, maxBytes: 1024 * 1024 });
+    return { userId, role, reference, content: result.bytes.toString('utf8') };
+  }
+  return { userId, role, content: readFile(filePath).content };
+}
+
+router.post('/files/scoped-edit/plan', async (req, res) => {
+  try {
+    if (!config.inlineEditEnabled) return res.status(404).json({ error: 'Inline edit feature is not enabled' });
+    const rawPath = typeof req.body?.path === 'string' ? req.body.path : '';
+    const filePath = expandHome(rawPath);
+    const start = req.body?.start;
+    const end = req.body?.end;
+    const expectedSource = typeof req.body?.expectedSource === 'string' ? req.body.expectedSource : '';
+    if (!filePath || !expectedSource) return res.status(400).json({ error: 'path and expectedSource required' });
+    if (!/\.html?$/i.test(filePath)) return res.status(400).json({ error: 'scoped_edit_static_html_required' });
+    const access = await assertScopedEditFileAccess(req, filePath);
+    validateScopedSelection(access.content, { path: filePath, start, end, expectedSource });
+    const plan = await discoverStaticHtmlCssEditPlan({
+      htmlPath: filePath,
+      htmlContent: access.content,
+      elementStart: start,
+      elementEnd: end,
+      expectedSource,
+      readLocalFile: async (relatedPath) => {
+        try {
+          const related = await assertScopedEditFileAccess(req, relatedPath);
+          return related.content;
+        } catch {
+          return null;
+        }
+      },
+    });
+    res.json(plan);
+  } catch (error: any) {
+    const status = error instanceof ScopedEditError
+      ? error.status
+      : /stale|mapping_missing/i.test(error?.message || '') ? 409 : 500;
+    if (status >= 500) console.error('[scoped-edit] plan failed:', error);
+    res.status(status).json({ error: error?.code || error?.message || 'scoped_edit_plan_failed' });
+  }
+});
+
+router.post('/files/scoped-edit/propose', async (req, res) => {
+  try {
+    if (!config.inlineEditEnabled) return res.status(404).json({ error: 'Inline edit feature is not enabled' });
+    const rawPath = typeof req.body?.path === 'string' ? req.body.path : '';
+    const filePath = expandHome(rawPath);
+    const start = req.body?.start;
+    const end = req.body?.end;
+    const expectedSource = typeof req.body?.expectedSource === 'string' ? req.body.expectedSource : '';
+    const instruction = typeof req.body?.instruction === 'string' ? req.body.instruction.trim() : '';
+    if (!filePath || !expectedSource || !instruction) {
+      return res.status(400).json({ error: 'path, expectedSource, and instruction required' });
+    }
+    const access = await assertScopedEditFileAccess(req, filePath);
+    const selection = { path: filePath, start, end, expectedSource };
+    // Validate before invoking the model: stale or tampered ranges must not
+    // consume AI work and must never receive a proposal token.
+    validateScopedSelection(access.content, selection);
+    const beforeContext = access.content.slice(Math.max(0, start - 2_000), start);
+    const afterContext = access.content.slice(end, end + 2_000);
+    const result = await runInlineEdit({
+      selection: expectedSource,
+      beforeContext,
+      afterContext,
+      instruction,
+      selectionKind: 'html',
+      editMode: 'replace',
+    });
+    const proposal = createScopedEditProposal({
+      userId: access.userId,
+      selection,
+      currentContent: access.content,
+      replacement: result.replacement,
+      instruction,
+      model: result.model,
+    });
+    appendInlineEditAudit({
+      userId: access.userId,
+      role: access.role ?? null,
+      path: filePath,
+      instruction,
+      selectionLen: expectedSource.length,
+      replacementLen: result.replacement.length,
+      model: result.model,
+      applied: false,
+      durationMs: result.durationMs,
+    });
+    res.json({
+      proposalToken: proposal.proposalToken,
+      replacement: proposal.replacement,
+      original: expectedSource,
+      path: filePath,
+      start,
+      end,
+      model: result.model,
+      durationMs: result.durationMs,
+      unchanged: result.replacement === expectedSource,
+    });
+  } catch (error: any) {
+    const status = error instanceof ScopedEditError
+      ? error.status
+      : /too long|empty|required/i.test(error?.message || '') ? 400 : 500;
+    if (status >= 500) console.error('[scoped-edit] propose failed:', error);
+    res.status(status).json({ error: error?.code || error?.message || 'scoped_edit_proposal_failed' });
+  }
+});
+
+router.get('/files/scoped-edit/multi-file-proposal/:intentId', async (req, res) => {
+  try {
+    if (!config.inlineEditEnabled) return res.status(404).json({ error: 'Inline edit feature is not enabled' });
+    const userId = (req as any).user?.userId as number | undefined;
+    const proposalHash = typeof req.query?.proposalHash === 'string' ? req.query.proposalHash : '';
+    if (!userId) return res.status(401).json({ error: 'scoped_edit_auth_required' });
+    if (!proposalHash) return res.status(400).json({ error: 'proposalHash required' });
+    res.json(inspectMultiFileEditProposal({ intentId: req.params.intentId, proposalHash, userId }));
+  } catch (error: any) {
+    const status = error instanceof ScopedEditError ? error.status : 500;
+    res.status(status).json({ error: error?.code || error?.message || 'scoped_edit_multifile_proposal_failed' });
+  }
+});
+
+router.post('/files/scoped-edit/multi-file-apply', async (req, res) => {
+  let reservation: ReturnType<typeof reserveMultiFileEditProposal> | null = null;
+  try {
+    if (!config.inlineEditEnabled) return res.status(404).json({ error: 'Inline edit feature is not enabled' });
+    const userId = (req as any).user?.userId as number | undefined;
+    const role = (req as any).user?.role || 'member';
+    const intentId = typeof req.body?.intentId === 'string' ? req.body.intentId : '';
+    const proposalHash = typeof req.body?.proposalHash === 'string' ? req.body.proposalHash : '';
+    if (!userId) return res.status(401).json({ error: 'scoped_edit_auth_required' });
+    if (!intentId || !proposalHash || req.body?.confirmed !== true) return res.status(400).json({ error: 'intentId, proposalHash, and confirmed=true required' });
+    reservation = reserveMultiFileEditProposal({ intentId, proposalHash, userId });
+    for (const file of reservation.intent.files) {
+      const access = await assertScopedEditFileAccess(req, file.path);
+      if (access.reference?.workerAuthority) throw new ScopedEditError('scoped_edit_worker_cas_unavailable', 409);
+      if (!(await isPathWritableByRole(file.path, userId, role))) throw new ScopedEditError('scoped_edit_access_denied', 403);
+    }
+    const result = await applyMultiFileEditProposal(reservation.intent);
+    reservation.complete();
+    reservation = null;
+    res.json({ ok: true, applied: true, paths: result.paths, crashAtomic: false });
+  } catch (error: any) {
+    reservation?.release();
+    const status = error instanceof ScopedEditError ? error.status : 500;
+    if (status >= 500) console.error('[scoped-edit] multi-file apply failed:', error);
+    res.status(status).json({ error: error?.code || error?.message || 'scoped_edit_multifile_apply_failed' });
+  }
+});
+
+router.post('/files/scoped-edit/apply', async (req, res) => {
+  let releaseReservation: (() => void) | null = null;
+  try {
+    if (!config.inlineEditEnabled) return res.status(404).json({ error: 'Inline edit feature is not enabled' });
+    const proposalToken = typeof req.body?.proposalToken === 'string' ? req.body.proposalToken : '';
+    const userId = (req as any).user?.userId as number | undefined;
+    if (!proposalToken) return res.status(400).json({ error: 'proposalToken required' });
+    if (!userId) return res.status(401).json({ error: 'scoped_edit_auth_required' });
+    const proposal = verifyScopedEditProposal(proposalToken, userId);
+    releaseReservation = reserveScopedEditProposal(proposal.proposalId);
+    const access = await assertScopedEditFileAccess(req, proposal.path);
+    if (access.reference) {
+      const next = applyScopedReplacement(access.content, proposal);
+      const storageAuthority = await compareAndSwapProjectWorkspaceText({
+        reference: access.reference,
+        actorUserId: userId,
+        expectedContent: access.content,
+        content: next,
+      });
+      appendInlineEditAudit({
+        userId,
+        role: access.role ?? null,
+        path: proposal.path,
+        instruction: proposal.instruction,
+        selectionLen: proposal.end - proposal.start,
+        replacementLen: proposal.replacement.length,
+        model: proposal.model,
+        applied: true,
+        durationMs: 0,
+      });
+      releaseReservation = null;
+      return res.json({ ok: true, path: proposal.path, content: next, start: proposal.start, end: proposal.end, replacement: proposal.replacement, storageAuthority });
+    }
+    const release = await lockfile.lock(proposal.path, {
+      realpath: true,
+      retries: { retries: 3, minTimeout: 25, maxTimeout: 100 },
+    });
+    let next: string;
+    try {
+      const lockedContent = readFile(proposal.path).content;
+      next = applyScopedReplacement(lockedContent, proposal);
+      writeFile(proposal.path, next);
+    } finally {
+      await release();
+    }
+    appendInlineEditAudit({
+      userId,
+      role: access.role ?? null,
+      path: proposal.path,
+      instruction: proposal.instruction,
+      selectionLen: proposal.end - proposal.start,
+      replacementLen: proposal.replacement.length,
+      model: proposal.model,
+      applied: true,
+      durationMs: 0,
+    });
+    releaseReservation = null;
+    res.json({
+      ok: true,
+      path: proposal.path,
+      content: next,
+      start: proposal.start,
+      end: proposal.end,
+      replacement: proposal.replacement,
+      storageAuthority: 'host',
+    });
+  } catch (error: any) {
+    releaseReservation?.();
+    const status = error instanceof ScopedEditError ? error.status : 500;
+    if (status >= 500) console.error('[scoped-edit] apply failed:', error);
+    res.status(status).json({ error: error?.code || error?.message || 'scoped_edit_apply_failed' });
   }
 });
 
@@ -331,13 +687,19 @@ router.post('/files/write', async (req, res) => {
     if (userId && !(await isPathWritableByRole(filePath, userId, role || 'member'))) {
       return res.status(403).json({ error: 'Access denied: this folder is read-only for your role' });
     }
-    const workerAuthority = userId ? await resolveWorkerFileAuthorityForHostPath(filePath) : undefined;
-    if (workerAuthority) {
-      await writeWorkerProjectFile({ authority: workerAuthority, actorUserId: userId, content });
-      mirrorWorkerProjectMutation(workerAuthority, { kind: 'write-text', hostPath: filePath, content });
-    } else writeFile(filePath, content);
-    res.json({ ok: true, path: filePath, storageAuthority: workerAuthority ? 'worker' : 'host' });
+    const projectId = await findProjectByPath(filePath);
+    if (userId && projectId) {
+      const project = await getProject(projectId);
+      if (!project?.rootPath) return res.status(404).json({ error: 'Project not found' });
+      const relativePath = path.relative(path.resolve(project.rootPath), path.resolve(filePath)).split(path.sep).join('/');
+      const reference = await resolveProjectWorkspaceFile({ projectId, projectRoot: project.rootPath, relativePath });
+      const storageAuthority = await writeProjectWorkspaceText({ reference, actorUserId: userId, content });
+      return res.json({ ok: true, path: filePath, storageAuthority });
+    }
+    writeFile(filePath, content);
+    res.json({ ok: true, path: filePath, storageAuthority: 'host' });
   } catch (error: any) {
+    if (respondCanonicalWriteError(res, error)) return;
     res.status(403).json({ error: error.message });
   }
 });
@@ -375,17 +737,26 @@ router.post('/files/create', async (req, res) => {
     }
     const nameCheck = rejectDotName(path.basename(filePath), role);
     if (!nameCheck.allowed) return res.status(403).json({ error: nameCheck.message });
-    const workerAuthority = userId ? await resolveWorkerFileAuthorityForHostPath(filePath) : undefined;
-    const exists = workerAuthority
-      ? await workerProjectFileExists({ authority: workerAuthority, actorUserId: userId })
-      : fs.existsSync(filePath);
-    if (exists) return res.status(409).json({ error: 'File already exists' });
-    if (workerAuthority) {
-      await writeWorkerProjectFile({ authority: workerAuthority, actorUserId: userId, content: content || '', exclusive: true });
-      mirrorWorkerProjectMutation(workerAuthority, { kind: 'write-text', hostPath: filePath, content: content || '' });
-    } else writeFile(filePath, content || '');
+    const projectId = await findProjectByPath(filePath);
+    if (userId && projectId) {
+      const project = await getProject(projectId);
+      if (!project?.rootPath) return res.status(404).json({ error: 'Project not found' });
+      const relativePath = path.relative(path.resolve(project.rootPath), path.resolve(filePath)).split(path.sep).join('/');
+      const reference = await resolveProjectWorkspaceFile({ projectId, projectRoot: project.rootPath, relativePath });
+      try {
+        const storageAuthority = await writeProjectWorkspaceText({ reference, actorUserId: userId, content: content || '', exclusive: true });
+        invalidateTreeCache(filePath);
+        return res.json({ ok: true, path: filePath, storageAuthority });
+      } catch (error: any) {
+    if (respondCanonicalWriteError(res, error)) return;
+        if (error?.code === 'EEXIST' || /EEXIST|exit code 17/.test(error?.message || '')) return res.status(409).json({ error: 'File already exists' });
+        throw error;
+      }
+    }
+    if (fs.existsSync(filePath)) return res.status(409).json({ error: 'File already exists' });
+    writeFile(filePath, content || '');
     invalidateTreeCache(filePath);
-    res.json({ ok: true, path: filePath, storageAuthority: workerAuthority ? 'worker' : 'host' });
+    res.json({ ok: true, path: filePath, storageAuthority: 'host' });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }
@@ -414,17 +785,26 @@ router.post('/files/mkdir', async (req, res) => {
     }
     const nameCheck = rejectDotName(path.basename(dirPath), role);
     if (!nameCheck.allowed) return res.status(403).json({ error: nameCheck.message });
-    const workerAuthority = userId ? await resolveWorkerFileAuthorityForHostPath(dirPath) : undefined;
-    const exists = workerAuthority
-      ? await workerProjectFileExists({ authority: workerAuthority, actorUserId: userId })
-      : fs.existsSync(dirPath);
-    if (exists) return res.status(409).json({ error: 'Directory already exists' });
-    if (workerAuthority) {
-      await createWorkerProjectDirectory({ authority: workerAuthority, actorUserId: userId, exclusive: true });
-      mirrorWorkerProjectMutation(workerAuthority, { kind: 'mkdir', hostPath: dirPath });
-    } else createDirectory(dirPath);
+    await assertProjectSharedMutationForHostPath(dirPath);
+    const projectId = await findProjectByPath(dirPath);
+    if (userId && projectId) {
+      const project = await getProject(projectId);
+      if (!project?.rootPath) return res.status(404).json({ error: 'Project not found' });
+      const relativePath = path.relative(path.resolve(project.rootPath), path.resolve(dirPath)).split(path.sep).join('/');
+      const reference = await resolveProjectWorkspaceFile({ projectId, projectRoot: project.rootPath, relativePath });
+      try {
+        const storageAuthority = await createProjectWorkspaceDirectory({ reference, actorUserId: userId, exclusive: true });
+        invalidateTreeCache(dirPath);
+        return res.json({ ok: true, path: dirPath, storageAuthority });
+      } catch (error: any) {
+        if (error?.code === 'EEXIST' || /EEXIST|exit code 17/.test(error?.message || '')) return res.status(409).json({ error: 'Directory already exists' });
+        throw error;
+      }
+    }
+    if (fs.existsSync(dirPath)) return res.status(409).json({ error: 'Directory already exists' });
+    createDirectory(dirPath);
     invalidateTreeCache(dirPath);
-    res.json({ ok: true, path: dirPath, storageAuthority: workerAuthority ? 'worker' : 'host' });
+    res.json({ ok: true, path: dirPath, storageAuthority: 'host' });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }
@@ -436,19 +816,27 @@ router.post('/files/delete', async (req, res) => {
     if (!targetPath) return res.status(400).json({ error: 'path required' });
     const userId = (req as any).user?.userId;
     const role = (req as any).user?.role;
-    // viewer is read-only — block UI delete even when path-accessible.
-    // (Other roles fall through to project-membership / allowed-path checks.)
-    if (role === 'viewer') return res.status(403).json({ error: 'Viewer role cannot delete files' });
+    // A readable path is not a write grant (including guest and project viewers).
+    if (role === 'viewer' || role === 'guest') return res.status(403).json({ error: 'Read-only role cannot delete files' });
     const userRoot = userId ? await getUserAllowedPath(userId) : config.workspaceRoot;
     if (!(await isPathAllowedByCoarseRootOrAcl(targetPath, userRoot, userId, role))) return res.status(403).json({ error: 'Access denied' });
     if (userId && !(await isPathAccessible(targetPath, userId, role))) return res.status(403).json({ error: 'Access denied: outside your project folders' });
-    const workerAuthority = userId ? await resolveWorkerFileAuthorityForHostPath(targetPath) : undefined;
-    if (workerAuthority) {
-      await deleteWorkerProjectEntry({ authority: workerAuthority, actorUserId: userId });
-      mirrorWorkerProjectMutation(workerAuthority, { kind: 'delete', hostPath: targetPath });
-    } else deleteEntry(targetPath);
+    if (!userId || !(await isPathWritableByRole(targetPath, userId, role || 'guest'))) {
+      return res.status(403).json({ error: 'Access denied: this folder is read-only for your role' });
+    }
+    const projectId = await findProjectByPath(targetPath);
+    if (projectId) {
+      const project = await getProject(projectId);
+      if (!project?.rootPath) return res.status(404).json({ error: 'Project not found' });
+      const relativePath = path.relative(path.resolve(project.rootPath), path.resolve(targetPath)).split(path.sep).join('/');
+      const reference = await resolveProjectWorkspaceFile({ projectId, projectRoot: project.rootPath, relativePath });
+      const storageAuthority = await deleteProjectWorkspaceEntry({ reference, actorUserId: userId });
+      invalidateTreeCache(targetPath);
+      return res.json({ ok: true, storageAuthority });
+    }
+    deleteEntry(targetPath);
     invalidateTreeCache(targetPath);
-    res.json({ ok: true, storageAuthority: workerAuthority ? 'worker' : 'host' });
+    res.json({ ok: true, storageAuthority: 'host' });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }
@@ -479,18 +867,29 @@ router.post('/files/rename', async (req, res) => {
     }
     const nameCheck = rejectDotName(path.basename(newPath), role);
     if (!nameCheck.allowed) return res.status(403).json({ error: nameCheck.message });
-    const workerAuthority = userId ? await resolveWorkerFileAuthorityForHostPath(oldPath) : undefined;
-    const newWorkerAuthority = userId ? await resolveWorkerFileAuthorityForHostPath(newPath) : undefined;
-    if (Boolean(workerAuthority) !== Boolean(newWorkerAuthority) || (workerAuthority && newWorkerAuthority && workerAuthority.workerId !== newWorkerAuthority.workerId)) {
-      return res.status(409).json({ error: 'Cannot rename across storage authorities' });
+    const sourceProjectId = await findProjectByPath(oldPath);
+    const targetProjectId = await findProjectByPath(newPath);
+    if (userId && sourceProjectId && targetProjectId) {
+      const sourceProject = await getProject(sourceProjectId);
+      const targetProject = sourceProjectId === targetProjectId ? sourceProject : await getProject(targetProjectId);
+      if (!sourceProject?.rootPath || !targetProject?.rootPath) return res.status(404).json({ error: 'Project not found' });
+      const source = await resolveProjectWorkspaceFile({ projectId: sourceProjectId, projectRoot: sourceProject.rootPath, relativePath: path.relative(sourceProject.rootPath, oldPath).split(path.sep).join('/') });
+      const target = await resolveProjectWorkspaceFile({ projectId: targetProjectId, projectRoot: targetProject.rootPath, relativePath: path.relative(targetProject.rootPath, newPath).split(path.sep).join('/') });
+      try {
+        const storageAuthority = await renameProjectWorkspaceEntry({ source, target, actorUserId: userId });
+        invalidateTreeCache(oldPath);
+        invalidateTreeCache(newPath);
+        return res.json({ ok: true, path: newPath, storageAuthority });
+      } catch (error: any) {
+        if (/across storage authorities/.test(error?.message || '')) return res.status(409).json({ error: error.message });
+        throw error;
+      }
     }
-    if (workerAuthority) {
-      await renameWorkerProjectEntry({ authority: workerAuthority, actorUserId: userId, newHostPath: newPath });
-      mirrorWorkerProjectMutation(workerAuthority, { kind: 'rename', oldHostPath: oldPath, newHostPath: newPath });
-    } else renameEntry(oldPath, newPath);
+    if (sourceProjectId || targetProjectId) return res.status(409).json({ error: 'Cannot rename across storage authorities' });
+    renameEntry(oldPath, newPath);
     invalidateTreeCache(oldPath);
     invalidateTreeCache(newPath);
-    res.json({ ok: true, path: newPath, storageAuthority: workerAuthority ? 'worker' : 'host' });
+    res.json({ ok: true, path: newPath, storageAuthority: 'host' });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }
@@ -540,11 +939,14 @@ router.post('/files/copy', async (req, res) => {
     }
 
     const resolvedTargetDir = path.resolve(targetDir);
-    const targetWorkerAuthority = userId ? await resolveWorkerFileAuthorityForHostPath(resolvedTargetDir) : undefined;
-    const targetExists = targetWorkerAuthority
-      ? await workerProjectFileExists({ authority: targetWorkerAuthority, actorUserId: userId })
-      : fs.existsSync(resolvedTargetDir) && fs.statSync(resolvedTargetDir).isDirectory();
-    if (!targetExists) return res.status(404).json({ error: 'Target directory not found' });
+    const targetProjectId = await findProjectByPath(resolvedTargetDir);
+    let targetReference;
+    if (userId && targetProjectId) {
+      const project = await getProject(targetProjectId);
+      if (!project?.rootPath) return res.status(404).json({ error: 'Project not found' });
+      targetReference = await resolveProjectWorkspaceFile({ projectId: targetProjectId, projectRoot: project.rootPath, relativePath: path.relative(project.rootPath, resolvedTargetDir).split(path.sep).join('/') || '.', allowProjectRoot: true });
+      if (!(await projectWorkspaceEntryExists({ reference: targetReference, actorUserId: userId })).exists) return res.status(404).json({ error: 'Target directory not found' });
+    } else if (!fs.existsSync(resolvedTargetDir) || !fs.statSync(resolvedTargetDir).isDirectory()) return res.status(404).json({ error: 'Target directory not found' });
     if (resolvedTargetDir === path.resolve(config.workspaceRoot) && !isPrivilegedRole(role)) {
       return res.status(403).json({ error: 'Access denied: cannot copy into workspace root. admin/operator only.' });
     }
@@ -559,35 +961,26 @@ router.post('/files/copy', async (req, res) => {
         if (userId && !(await isPathAccessible(sourcePath, userId, role))) throw new Error('Access denied: outside your project folders');
 
         const resolvedSource = path.resolve(sourcePath);
-        const sourceWorkerAuthority = userId ? await resolveWorkerFileAuthorityForHostPath(resolvedSource) : undefined;
-        if (Boolean(sourceWorkerAuthority) !== Boolean(targetWorkerAuthority)
-          || (sourceWorkerAuthority && targetWorkerAuthority && sourceWorkerAuthority.workerId !== targetWorkerAuthority.workerId)) {
-          throw new Error('Cannot copy across storage authorities');
-        }
-        if (sourceWorkerAuthority) {
-          if (!(await workerProjectFileExists({ authority: sourceWorkerAuthority, actorUserId: userId }))) throw new Error('Source path does not exist');
-        } else if (!fs.existsSync(resolvedSource)) throw new Error('Source path does not exist');
-        if (!sourceWorkerAuthority) {
-          const stat = fs.statSync(resolvedSource);
-          if (stat.isDirectory() && (resolvedTargetDir === resolvedSource || resolvedTargetDir.startsWith(resolvedSource + path.sep))) {
-            throw new Error('Cannot copy a folder into itself or its subfolder');
-          }
-        }
-
-        const targetPath = sourceWorkerAuthority
-          ? path.join(resolvedTargetDir, path.basename(resolvedSource))
-          : nextAvailableCopyPath(resolvedTargetDir, path.basename(resolvedSource));
+        const sourceProjectId = await findProjectByPath(resolvedSource);
+        const targetPath = path.join(resolvedTargetDir, path.basename(resolvedSource));
         const nameCheck = rejectDotName(path.basename(targetPath), role);
         if (!nameCheck.allowed) throw new Error(nameCheck.message || 'Access denied');
         if (userId && !(await isPathWritableByRole(targetPath, userId, role || 'member'))) {
           throw new Error('Access denied: target path is read-only for your role');
         }
 
-        const copied = sourceWorkerAuthority
-          ? await copyWorkerProjectEntry({ authority: sourceWorkerAuthority, actorUserId: userId, targetDirHostPath: resolvedTargetDir })
-          : (copyEntry(resolvedSource, targetPath), { targetPath });
-        if (sourceWorkerAuthority) {
-          mirrorWorkerProjectMutation(sourceWorkerAuthority, { kind: 'copy', sourceHostPath: resolvedSource, targetHostPath: copied.targetPath });
+        let copied: { targetPath: string };
+        if (userId && sourceProjectId && targetProjectId && targetReference) {
+          const project = await getProject(sourceProjectId);
+          if (!project?.rootPath) throw new Error('Project not found');
+          const source = await resolveProjectWorkspaceFile({ projectId: sourceProjectId, projectRoot: project.rootPath, relativePath: path.relative(project.rootPath, resolvedSource).split(path.sep).join('/') });
+          copied = await copyProjectWorkspaceEntry({ source, targetDirectory: targetReference, actorUserId: userId });
+        } else {
+          if (sourceProjectId || targetProjectId) throw new Error('Cannot copy across storage authorities');
+          if (!fs.existsSync(resolvedSource)) throw new Error('Source path does not exist');
+          const availableTargetPath = nextAvailableCopyPath(resolvedTargetDir, path.basename(resolvedSource));
+          copyEntry(resolvedSource, availableTargetPath);
+          copied = { targetPath: availableTargetPath };
         }
         invalidateTreeCache(sourcePath);
         invalidateTreeCache(copied.targetPath);
@@ -615,24 +1008,22 @@ router.get('/files/search', async (req, res) => {
     const userRoot = userId ? await getUserAllowedPath(userId) : config.workspaceRoot;
     if (!(await isPathAllowedByCoarseRootOrAcl(root, userRoot, userId, role)) || (userId && !(await isPathAccessible(root, userId, role)))) return res.status(403).json({ error: 'Access denied' });
     const resolvedRoot = path.resolve(root);
-    if (!fs.existsSync(resolvedRoot) || !fs.statSync(resolvedRoot).isDirectory()) return res.status(404).json({ error: 'Root directory not found' });
-    const results: any[] = [];
-    const skip = new Set(['.git', 'node_modules', '.cache', 'dist']);
-    const walk = (dir: string, depth: number) => {
-      if (depth > 12 || results.length >= 500) return;
-      for (const item of fs.readdirSync(dir, { withFileTypes: true })) {
-        if (skip.has(item.name) || (!req.query.showHidden && item.name.startsWith('.'))) continue;
-        const fullPath = path.join(dir, item.name);
-        if (item.name.toLowerCase().includes(query) || path.relative(resolvedRoot, fullPath).toLowerCase().includes(query)) {
-          const stat = fs.statSync(fullPath);
-          results.push({ name: item.name, path: fullPath, isDirectory: item.isDirectory(), size: item.isDirectory() ? undefined : stat.size, modified: stat.mtime.toISOString(), extension: item.isDirectory() ? undefined : path.extname(item.name).slice(1) });
-          if (results.length >= 500) return;
-        }
-        if (item.isDirectory()) walk(fullPath, depth + 1);
-      }
-    };
-    walk(resolvedRoot, 0);
-    res.json({ results, truncated: results.length >= 500 });
+    const projectId = await findProjectByPath(resolvedRoot);
+    const project = projectId ? await getProject(projectId) : undefined;
+    const showHidden = req.query.showHidden === 'true';
+    const skip = new Set(['.git', 'node_modules', '.cache', 'dist', 'build']);
+    const result = await searchFileTree(resolvedRoot, query, async directory => {
+      const entries = userId && projectId && project?.rootPath
+        ? (await listProjectWorkspaceDirectory({
+            reference: await resolveProjectWorkspaceFile({ projectId, projectRoot: project.rootPath,
+              relativePath: path.relative(project.rootPath, directory).split(path.sep).join('/') || '.', allowProjectRoot: true }),
+            actorUserId: userId, showHidden, depth: 1,
+          })).entries
+        : await getFileTreeAsync(directory, 1, { showHidden });
+      return entries.filter(entry => !skip.has(entry.name) && !isDotfileDenied(entry.path)
+        && (showHidden || !entry.name.startsWith('.')));
+    });
+    res.json(result);
   } catch (error: any) { res.status(500).json({ error: error.message }); }
 });
 

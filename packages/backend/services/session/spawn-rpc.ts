@@ -22,11 +22,12 @@
 
 import { v4 as uuidv4 } from 'uuid';
 import { claimEngineSessionId, createSession, getEngineSessionId, getSession, updateSession, deleteSession } from './session-manager.js';
+import { choiceAfterPiTurn, isPiPresetMappingReady, resolvePiSessionChoice } from '../model-policy/session-alias.js';
 import { markAgentTurnCheckpoint, saveMessage, updateMessageContent as updateMessageContentDb, updateMessageMetrics as updateMessageMetricsDb } from '../message-store.js';
 import { getEngine, getAllRunningSessionIds } from '../../engines/index.js';
 import { query, queryOne, execute } from '../../db/pg-repo.js';
 import { getPgPool } from '../../db/pg.js';
-import { getUserAccessiblePaths, resolveSessionProjectRoot } from '../pm/project-access.js';
+import { canSendSessionMessage, getUserAccessiblePaths, resolveSessionProjectRoot } from '../pm/project-access.js';
 import { selectSystemPromptFragmentsForMessage } from '../system-prompt-fragments.js';
 import { buildSpawnRequestFingerprint, SPAWN_DEDUPE_WINDOW_SECONDS } from './spawn-idempotency.js';
 import { runSessionTurnStream } from '../agent-communication/session-turn-runner.js';
@@ -85,7 +86,8 @@ async function resolveChildId(
   }
   return matches[0].id;
 }
-import { DEFAULT_CLAUDE_MODEL_ID, DEFAULT_PI_MODEL_ID, config, getModelDefaults, normalizePiSessionModelId } from '../../config.js';
+import { DEFAULT_CLAUDE_MODEL_ID, DEFAULT_PI_MODEL_ID, config, getModelDefaults } from '../../config.js';
+import { backgroundTimeoutMessage, createSessionAskUser } from './pending-questions.js';
 import type { EffortLevel, EngineCallbacks, SavedMessage } from '../../engines/types.js';
 import type { SessionMeta } from '@tower/shared';
 
@@ -137,7 +139,7 @@ export interface SpawnRequest {
    * caller omits `engine`.
    * The wire format of `model` follows the engine's convention
    *   - 'claude' → SDK alias like 'claude-sonnet-4-6'
-   *   - 'pi'     → provider-prefixed id like 'litellm-responses/smartest'
+   *   - 'pi'     → preset/core by default, or an explicitly selected model
    */
   engine?: 'claude' | 'pi';
   model?: string;                     // engine-specific; see SpawnRequest.engine
@@ -161,14 +163,12 @@ export interface SpawnRequest {
  *
  * Caller-supplied `model` still wins. When omitted, use the admin-configured
  * session default when it matches the selected engine. On Pi-first VMs this keeps
- * child sessions on Tower's AI Router path (currently `litellm-responses/smartest`)
- * instead of silently falling back to an Anthropic/Opus/Sonnet debug route.
+ * child sessions on the Core selection slot instead of storing the current
+ * Router mapping as a sticky model or falling back to an Anthropic debug route.
  */
 function defaultModelForEngine(engine: 'claude' | 'pi'): string {
   const sessionDefault = getModelDefaults().session;
-  if (engine === 'pi') {
-    return sessionDefault.includes('/') ? normalizePiSessionModelId(sessionDefault) : DEFAULT_PI_MODEL_ID;
-  }
+  if (engine === 'pi') return DEFAULT_PI_MODEL_ID;
   return sessionDefault.startsWith('claude-') ? sessionDefault : DEFAULT_CLAUDE_MODEL_ID;
 }
 
@@ -400,6 +400,7 @@ async function createSpawnChildSession(req: SpawnRequest, requestFingerprint: st
     req.parentSessionId,           // parentSessionId — the link
     'spawned',                     // label distinguishes from 'temp' / 'proactive'
     req.model || null,             // pin explicit Helper model for follow-up runs
+    { visibility: parent.visibility === 'private' ? 'private' : 'project' },
   );
 
   // 5. Register callback
@@ -516,6 +517,7 @@ async function runChildSessionInBackground(
           context_input_tokens: metrics.contextInputTokens,
           context_window_size: metrics.contextWindowSize,
           context_estimated_tokens: metrics.contextEstimatedTokens,
+          context_compacted: metrics.contextCompacted,
           next_request_estimated_tokens: metrics.nextRequestEstimatedTokens,
           compact_threshold_tokens: metrics.compactThresholdTokens,
            context_snapshot: metrics.contextSnapshot,
@@ -529,14 +531,24 @@ async function runChildSessionInBackground(
         // non-critical: resume metadata
       }
     },
-    askUser: async () => 'skip', // child sessions don't ask users questions
+    askUser: createSessionAskUser({
+      sessionId: childSessionId,
+      recipientUserId: req.parentUserId,
+      userMessageId: userMsgId,
+      logTag: 'spawn-rpc',
+      timeoutMessage: backgroundTimeoutMessage,
+    }),
     attachToolResult: async () => {},
   };
 
   const accessiblePaths = await getUserAccessiblePaths(req.parentUserId, req.parentRole);
+  const childModelChoice = req.model || (await getSession(childSessionId))?.modelUsed;
+  if (engineName === 'pi' && !isPiPresetMappingReady(childModelChoice)) throw new Error('MODEL_PRESET_UNAVAILABLE');
   const runOpts = {
     cwd,
-    model: req.model || defaultModelForEngine(engineName),
+    model: engineName === 'pi'
+      ? resolvePiSessionChoice(childModelChoice)
+      : (req.model || defaultModelForEngine(engineName)),
     effort: req.effort,
     modelPolicyId: req.modelPolicyId,
     modelPolicyRevision: req.modelPolicyRevision,
@@ -729,6 +741,20 @@ async function onSpawnDone(childSessionId: string): Promise<void> {
     : undefined;
 
   try {
+    // Persistent worker callback and settlement recovery must share one durable
+    // idempotency key. The legacy completion shadow uses spawnId instead.
+    if (agentReport?.runId && (mode === 'inject-only' || mode === 'inject-and-wake')) {
+      await ensureAgentRunReportDelivered({
+        parentSessionId: cb.parentSessionId,
+        parentUserId: cb.parentUserId,
+        fromName: cb.spawnedName,
+        text,
+        agentReport,
+      });
+      pending.delete(childSessionId);
+      await markCallbackFired(cb.spawnId);
+      return;
+    }
     if (mode === 'inject-only' || mode === 'inject-and-wake') {
       const child = await getSession(cb.spawnedSessionId);
       const completionShadow = await recordCompletionReportShadow({
@@ -1152,20 +1178,12 @@ export interface SendToSessionRequest {
 }
 
 export async function sendToSession(req: SendToSessionRequest): Promise<{ ok: true }> {
-  const target = await queryOne<{ user_id: number | null }>(
-    'SELECT user_id FROM sessions WHERE id = $1',
-    [req.targetSessionId],
-  );
-  if (!target) {
-    throw Object.assign(new Error('TARGET_NOT_FOUND'), { code: 'TARGET_NOT_FOUND', status: 404 });
-  }
-  const isSelfOwned = target.user_id === req.callerUserId;
-  const isAdmin = req.callerRole === 'admin';
-  if (!isSelfOwned && !isAdmin) {
-    throw Object.assign(new Error('SEND_PERMISSION_DENIED'), {
-      code: 'SEND_PERMISSION_DENIED',
-      status: 403,
-    });
+  const access = await canSendSessionMessage(req.targetSessionId, req.callerUserId, req.callerRole);
+  if (!access.allowed) {
+    throw Object.assign(
+      new Error(`SEND_PERMISSION_DENIED (${access.reason}): ${access.message}`),
+      { code: 'SEND_PERMISSION_DENIED', status: access.status, reason: access.reason },
+    );
   }
   return sendMessageInternal(req);
 }
@@ -1400,6 +1418,7 @@ async function runSendInBackground(
           context_input_tokens: metrics.contextInputTokens,
           context_window_size: metrics.contextWindowSize,
           context_estimated_tokens: metrics.contextEstimatedTokens,
+          context_compacted: metrics.contextCompacted,
           next_request_estimated_tokens: metrics.nextRequestEstimatedTokens,
           compact_threshold_tokens: metrics.compactThresholdTokens,
            context_snapshot: metrics.contextSnapshot,
@@ -1413,16 +1432,23 @@ async function runSendInBackground(
         // non-critical
       }
     },
-    askUser: async () => 'skip',
+    askUser: createSessionAskUser({
+      sessionId: req.targetSessionId,
+      recipientUserId: req.callerUserId,
+      userMessageId: rootTurnId,
+      logTag: 'spawn-rpc-send',
+      timeoutMessage: backgroundTimeoutMessage,
+    }),
     attachToolResult: async () => {},
   };
 
+  if (engineName === 'pi' && !isPiPresetMappingReady(target.modelUsed)) throw new Error('MODEL_PRESET_UNAVAILABLE');
   const runOpts = {
     cwd: target.cwd,
     // Honor the target's own model (recorded when it was last run). Falling back
     // to the engine default keeps existing Claude sends working unchanged while
     // Pi targets resume on their own provider/model.
-    model: engineName === 'pi' ? normalizePiSessionModelId(target.modelUsed) : (target.modelUsed || defaultModelForEngine(engineName)),
+    model: engineName === 'pi' ? resolvePiSessionChoice(target.modelUsed) : (target.modelUsed || defaultModelForEngine(engineName)),
     effort: req.effort,
     modelPolicyId: req.modelPolicyId,
     modelPolicyRevision: req.modelPolicyRevision,
@@ -2115,6 +2141,7 @@ async function runWakeInBackground(
           context_input_tokens: metrics.contextInputTokens,
           context_window_size: metrics.contextWindowSize,
           context_estimated_tokens: metrics.contextEstimatedTokens,
+          context_compacted: metrics.contextCompacted,
           next_request_estimated_tokens: metrics.nextRequestEstimatedTokens,
           compact_threshold_tokens: metrics.compactThresholdTokens,
            context_snapshot: metrics.contextSnapshot,
@@ -2128,14 +2155,21 @@ async function runWakeInBackground(
         // non-critical
       }
     },
-    askUser: async () => 'skip',
+    askUser: createSessionAskUser({
+      sessionId: parentSessionId,
+      recipientUserId: parentUserId,
+      userMessageId: rootTurnId,
+      logTag: 'spawn-rpc-wake',
+      timeoutMessage: backgroundTimeoutMessage,
+    }),
     attachToolResult: async () => {},
   };
 
   const parentRole = (await queryOne<{ role: string }>('SELECT role FROM users WHERE id = $1', [parentUserId]))?.role || 'member';
+  if (engineName === 'pi' && !isPiPresetMappingReady(parent.modelUsed)) throw new Error('MODEL_PRESET_UNAVAILABLE');
   const runOpts = {
     cwd: parent.cwd,
-    model: engineName === 'pi' ? normalizePiSessionModelId(parent.modelUsed) : (parent.modelUsed || defaultModelForEngine(engineName)),
+    model: engineName === 'pi' ? resolvePiSessionChoice(parent.modelUsed) : (parent.modelUsed || defaultModelForEngine(engineName)),
     userId: parentUserId,
     userRole: parentRole,
     allowedPath: parentRole === 'admin' || parentRole === 'operator'
@@ -2163,16 +2197,9 @@ async function runWakeInBackground(
     });
   }
 
-  if (deliveryClaim && startAck) {
-    await startAck.started;
-    await markClaimedDeliveryStarted({
-      deliveryId: deliveryClaim.deliveryId,
-      ownerToken: deliveryClaim.ownerToken,
-      ownerBootId: deliveryClaim.ownerBootId,
-      mode: 'new-turn',
-      recipientRootTurnId: rootTurnId,
-    });
-  }
+  // Do not await startup before invoking the runner: the runner owns the
+  // acknowledgement. Waiting here deadlocks durable report delivery.
+  let deliveryStartedRecorded = false;
 
   // Phase 3 fix #6 (2026-05-10): emit session_status so frontend shows
   // streaming UI for wake-triggered turns. Without this the wake turn is a
@@ -2189,6 +2216,15 @@ async function runWakeInBackground(
       callbacks,
       startAcknowledgement: startAck,
       onMessage: async (towerMsg) => {
+        if (deliveryClaim && !deliveryStartedRecorded) {
+          deliveryStartedRecorded = true;
+          await markClaimedDeliveryStarted({
+            deliveryId: deliveryClaim.deliveryId,
+            ownerToken: deliveryClaim.ownerToken,
+            ownerBootId: deliveryClaim.ownerBootId,
+            mode: 'new-turn', recipientRootTurnId: rootTurnId,
+          });
+        }
         // Fix #7: was 'tower_message_session' (no frontend handler) → 'tower_message'.
         broadcastFn?.('tower_message', {
           sessionId: parentSessionId,
@@ -2229,7 +2265,9 @@ async function runWakeInBackground(
               await updateSession(parentSessionId, {
                 turnCount: newTurnCount,
                 filesEdited: mergedFiles,
-                modelUsed: towerMsg.model,
+                modelUsed: engineName === 'pi' && towerMsg.model
+                  ? choiceAfterPiTurn(undefined, parent.modelUsed, towerMsg.model)
+                  : towerMsg.model,
               } as any);
             }
           } catch {

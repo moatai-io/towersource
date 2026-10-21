@@ -1,0 +1,12 @@
+import React from 'react';
+import { createRoot } from 'react-dom/client';
+import { RichContent } from '../src/components/shared/RichContent';
+import { normalizeContentBlocks } from '../src/utils/message-parser';
+import '../src/index.css';
+const dark = new URLSearchParams(location.search).get('theme') === 'dark';
+document.documentElement.classList.toggle('dark', dark);
+document.documentElement.dataset.theme = dark ? "dark" : "light";
+const body = '# 문서 보존 검증\n\n```mermaid\nflowchart LR\n A["원작"] --> B["콘티"]\n B --> C["영상"]\n```\n\n|항목|결과|\n|---|---|\n|도표 이후 표|보존|\n\n## 마지막 절\n문서 끝까지 보존되었습니다.';
+const raw = '```tower-artifact path="work/report.md"\n' + body + '\n```';
+const blocks = normalizeContentBlocks([{type:'text',text:raw}]);
+createRoot(document.getElementById('root')!).render(<main style={{maxWidth:900,margin:'auto',padding:20}}>{blocks.map((b,i)=><RichContent key={i} text={b.text || ''}/>)}</main>);

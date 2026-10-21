@@ -22,13 +22,13 @@ run('Remote Workbench Worker PostgreSQL registry E2E', () => {
       catch { if (attempt === 39) throw new Error('Disposable PostgreSQL did not become ready'); await new Promise(resolve => setTimeout(resolve, 250)); }
     }
     process.env.DATABASE_URL = databaseUrl;
-    modules = { workers: await import('./workbench-worker-repository.js'), pg: await import('../../db/pg.js') };
+    modules = { workers: await import('../execution/worker/worker-repository.js'), pg: await import('../../db/pg.js') };
     await runFile('psql', [databaseUrl, '-v', 'ON_ERROR_STOP=1', '-f', path.resolve('packages/backend/db/migrations/170_runtime_box_workbench_workers.sql')]);
   }, 120_000);
 
   afterAll(async () => {
     await modules?.pg?.closePgPool?.().catch(() => undefined);
-    await docker('rm', '-f', pgName).catch(() => undefined);
+    await docker('rm', '-f', '-v', pgName).catch(() => undefined);
     delete process.env.DATABASE_URL;
   }, 120_000);
 

@@ -1,8 +1,10 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import { execFileSync } from 'node:child_process';
+import { decodeAgentGwsBundle } from './agent-gws-credential-selection.js';
 import { afterEach, describe, expect, it } from 'vitest';
-import { isSimpleFileInspectionCommand, shouldSuppressCredentialEnv } from './command-classifier.js';
+import { isSimpleFileInspectionCommand, shouldSuppressCredentialEnv } from '../execution/command-classifier.js';
 import type { RuntimeContext } from './types.js';
 import {
   clampRuntimeBoxExecTimeoutMs,
@@ -14,7 +16,7 @@ import {
   isDockerImageMissingError,
   parseRuntimeBoxUserSpec,
   recentWorkspaceOwnershipNormalizeScript,
-  runtimeBoxLegacyGwsCredentialCompatScript,
+  runtimeBoxAgentGwsCredentialPermissionsScript,
   runtimeBoxGwsShimScript,
   resolveProjectRuntimeProfile,
   runtimeBoxImageForProfile,
@@ -214,15 +216,36 @@ describe('GWS command classification', () => {
   });
 });
 
-describe('runtimeBoxLegacyGwsCredentialCompatScript', () => {
-  it('copies legacy root credentials to the user-scoped path without overwriting', () => {
-    const script = runtimeBoxLegacyGwsCredentialCompatScript('/tmp/gws-config', 7, '1000:1000');
-
-    expect(script).toContain("/tmp/gws-config/credentials.json");
-    expect(script).toContain("/tmp/gws-config/users/7/credentials.json");
-    expect(script).toContain('[ ! -f');
+describe('runtimeBoxAgentGwsCredentialPermissionsScript', () => {
+  it('applies Agent runtime ownership to root credentials without requester paths or copying', () => {
+    const script = runtimeBoxAgentGwsCredentialPermissionsScript('/tmp/gws-config', '1000:1000');
+    expect(script).toContain('/tmp/gws-config');
     expect(script).toContain('chmod 0600');
-    expect(script).toContain('chown');
+    expect(script).toContain("chown -R '1000:1000'");
+    expect(script).not.toContain('/users/');
+    expect(script).not.toContain('cp ');
+  });
+});
+
+describe('local GWS root account materialization primitives', () => {
+  it('validates a real archive with the shared selector and applies root-only file permissions', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tower-local-gws-synthetic-'));
+    try {
+      const source = path.join(root, 'source');
+      const dest = path.join(root, 'destination');
+      fs.mkdirSync(path.join(source, 'gws'), { recursive: true });
+      fs.mkdirSync(dest);
+      const credential = JSON.stringify({ type: 'authorized_user', refresh_token: 'synthetic-local-agent' });
+      fs.writeFileSync(path.join(source, 'gws', 'credentials.json'), credential);
+      fs.writeFileSync(path.join(source, 'gws', 'client_secret.json'), '{}');
+      const encoded = execFileSync('tar', ['-czf', '-', '-C', source, 'gws']).toString('base64');
+      for (const file of decodeAgentGwsBundle(encoded)) fs.writeFileSync(path.join(dest, file.name), file.content);
+      execFileSync('sh', ['-c', runtimeBoxAgentGwsCredentialPermissionsScript(dest)]);
+      expect(fs.readFileSync(path.join(dest, 'credentials.json'), 'utf8')).toBe(credential);
+      expect(fs.readdirSync(dest).sort()).toEqual(['credentials.json']);
+      for (const name of fs.readdirSync(dest)) expect(fs.statSync(path.join(dest, name)).mode & 0o777).toBe(0o600);
+      expect(fs.statSync(dest).mode & 0o777).toBe(0o700);
+    } finally { fs.rmSync(root, { recursive: true, force: true }); }
   });
 });
 
@@ -240,11 +263,11 @@ describe('runtimeBoxGwsShimScript', () => {
 });
 
 describe('withRuntimeBoxTowerIdentityEnv', () => {
-  it('injects the current Tower user id for user-scoped CLI credentials', () => {
+  it('injects current Tower requester identity for audit, not GWS account selection', () => {
     expect(withRuntimeBoxTowerIdentityEnv({}, 17)).toEqual({ TOWER_USER_ID: '17' });
   });
 
-  it('overwrites caller-provided TOWER_USER_ID to prevent token directory spoofing', () => {
+  it('overwrites caller-provided TOWER_USER_ID to prevent requester identity spoofing', () => {
     expect(withRuntimeBoxTowerIdentityEnv({ TOWER_USER_ID: '1', KEEP: 'ok' }, 17)).toEqual({
       TOWER_USER_ID: '17',
       KEEP: 'ok',

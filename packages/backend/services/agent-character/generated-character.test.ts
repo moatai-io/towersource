@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const resolveProjectApiKeySecretValue = vi.fn();
-vi.mock('../credential-vault/credential-vault-service.js', () => ({ resolveProjectApiKeySecretValue }));
+const resolveGatewayApiClient = vi.fn();
+vi.mock('../gateway-profile/gateway-profile-client.js', () => ({ resolveGatewayApiClient }));
 
 const { AgentCharacterGenerationError, generateAgentCharacter } = await import('./generated-character.js');
 
@@ -11,8 +11,8 @@ beforeEach(() => {
 });
 
 describe('generateAgentCharacter', () => {
-  it('uses the Project Vault OpenAI Image credential instead of the general OpenAI key', async () => {
-    resolveProjectApiKeySecretValue.mockResolvedValue({ credentialId: 'openai-image-default', envName: 'OPENAI_IMAGE_API_KEY', value: 'secret-value' });
+  it('uses the Project-aware OpenAI Image Gateway route', async () => {
+    resolveGatewayApiClient.mockResolvedValue({ apiId: 'openai-image', baseUrl: 'https://gateway.example.com/openai', apiKey: 'synthetic-virtual-key' });
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({ data: [{ b64_json: Buffer.from('png').toString('base64') }] }),
@@ -20,23 +20,23 @@ describe('generateAgentCharacter', () => {
 
     const result = await generateAgentCharacter({ projectId: 'p1', userId: 7, prompt: '전략 담당자' });
 
-    expect(resolveProjectApiKeySecretValue).toHaveBeenCalledWith({
-      projectId: 'p1', userId: 7, envName: 'OPENAI_IMAGE_API_KEY', targetType: 'agent-character-generation',
+    expect(resolveGatewayApiClient).toHaveBeenCalledWith({
+      actorUserId: 7, projectId: 'p1', apiId: 'openai-image',
     });
-    expect(fetch).toHaveBeenCalledWith('https://api.openai.com/v1/images/generations', expect.objectContaining({
-      headers: expect.objectContaining({ Authorization: 'Bearer secret-value' }),
+    expect(fetch).toHaveBeenCalledWith('https://gateway.example.com/openai/images/generations', expect.objectContaining({
+      headers: expect.objectContaining({ Authorization: 'Bearer synthetic-virtual-key' }),
     }));
     expect(result.face).toMatch(/^generated:/);
   });
 
-  it('returns a typed credential error without exposing provider text', async () => {
-    resolveProjectApiKeySecretValue.mockResolvedValue(null);
+  it('returns a typed credential error when the Gateway is unavailable', async () => {
+    resolveGatewayApiClient.mockRejectedValue(new Error('GATEWAY_CREDENTIAL_NOT_AVAILABLE'));
     await expect(generateAgentCharacter({ projectId: 'p1', userId: 7, prompt: '분석가' }))
       .rejects.toMatchObject({ name: 'AgentCharacterGenerationError', kind: 'credential_unavailable' });
   });
 
   it('does not propagate an OpenAI API error containing a key fragment', async () => {
-    resolveProjectApiKeySecretValue.mockResolvedValue({ credentialId: 'openai-image-default', envName: 'OPENAI_IMAGE_API_KEY', value: 'secret-value' });
+    resolveGatewayApiClient.mockResolvedValue({ apiId: 'openai-image', baseUrl: 'https://gateway.example.com/openai', apiKey: 'synthetic-virtual-key' });
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: false,
       status: 401,

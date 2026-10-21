@@ -13,6 +13,36 @@ function msg(partial: Partial<ChatMessage>): ChatMessage {
 }
 
 describe('agent message policy', () => {
+  it('keeps a model recovery notice separate from the reply to the same user turn', () => {
+    const notice = msg({
+      id: 'model-recovery',
+      metadata: { modelRecovery: { from: 'litellm-responses/smart', to: 'preset/core' } },
+      content: [{ type: 'text', text: 'Core로 전환했습니다.' }],
+    });
+    const answer = msg({
+      id: 'answer',
+      completedAt: 1000,
+      content: [{ type: 'text', text: '안녕하세요! 무엇을 도와드릴까요?' }],
+    });
+
+    const merged = mergeConsecutiveAssistant([notice, answer]);
+
+    expect(merged).toHaveLength(2);
+    expect(merged[0].id).toBe('model-recovery');
+    expect(merged[1].id).toBe('answer');
+    expect(merged[1].content).toEqual(answer.content);
+  });
+
+  it('does not swallow a recovery notice into the preceding assistant reply', () => {
+    const preceding = msg({ id: 'earlier-answer', content: [{ type: 'text', text: '이전 답변' }] });
+    const notice = msg({
+      id: 'model-recovery',
+      metadata: { modelRecovery: { from: 'litellm-responses/smart', to: 'preset/core' } },
+      content: [{ type: 'text', text: 'Core로 전환했습니다.' }],
+    });
+    expect(mergeConsecutiveAssistant([preceding, notice]).map((item) => item.id)).toEqual(['earlier-answer', 'model-recovery']);
+  });
+
   it('replaces a non-terminal text-only assistant row when a terminal continuation arrives', () => {
     const merged = mergeConsecutiveAssistant([
       msg({

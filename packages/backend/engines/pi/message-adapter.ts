@@ -6,6 +6,7 @@
  */
 
 import type { TowerContentBlock } from '../types.js';
+import { stripPdfObservationText } from './pdf-observation-visibility.js';
 
 // ═══════════════════════════════════════════════════════════════
 // Tool input normalization: Pi uses `path`, Tower standard is `file_path`
@@ -229,7 +230,9 @@ function textSimilarity(a: string, b: string): number {
 
 export function sanitizePiVisibleBlocks(blocks: TowerContentBlock[]): TowerContentBlock[] {
   const hasToolUse = blocks.some((b) => b.type === 'tool_use');
-  const withoutPrivate = blocks.filter((block) => {
+  const withoutPrivate = blocks.map(block => block.type === 'text' || block.type === 'commentary'
+    ? { ...block, text: stripPdfObservationText(block.text || '') } : block).filter((block) => {
+    if (block.type === 'text' && !block.text.trim()) return false;
     if (block.type === 'thinking') return false;
     if (block.type === 'commentary') {
       const text = block.text?.trim() || '';

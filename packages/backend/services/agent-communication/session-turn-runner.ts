@@ -7,6 +7,8 @@ import type {
   RunOpts,
   TowerMessage,
 } from '../../engines/types.js';
+import { recordPiUsageEvent } from '../ai-usage/usage-ledger.js';
+import { isModelPolicyId } from '../ai/litellm-model-catalog.js';
 
 /** Acknowledges that control reached the engine async iterator's first `next()` call. */
 export interface SessionTurnStartAcknowledgement {
@@ -75,6 +77,20 @@ export async function runSessionTurnStream(
       if (text) lastAssistantText = text;
       if (message.type === 'turn_terminal') terminalMessage = message;
       if (message.type === 'engine_done') engineDoneMessage = message;
+
+      if (message.type === 'turn_done' && input.runOpts.rootTurnId && input.runOpts.model?.startsWith('litellm-responses/')) {
+        await recordPiUsageEvent({
+          sessionId: input.sessionId,
+          rootTurnId: input.runOpts.rootTurnId,
+          messageId: message.msgId,
+          usage: message.usage,
+          requestedModel: input.runOpts.model,
+          modelPolicyId: input.runOpts.modelPolicyId ?? (isModelPolicyId(input.runOpts.model) ? input.runOpts.model!.split('/')[1] : undefined),
+          modelPolicyRevision: input.runOpts.modelPolicyRevision,
+        }).catch((error: any) => {
+          console.warn(`[session-turn-runner] AI usage ledger write failed: session=${input.sessionId.slice(0, 8)} error=${error?.message || error}`);
+        });
+      }
 
       await input.onMessage(message);
     }

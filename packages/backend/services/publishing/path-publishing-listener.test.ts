@@ -1,0 +1,3 @@
+import {it,expect} from 'vitest';import {startPathPublishingListener} from './path-publishing-listener.js';
+it('unset listener remains disabled',async()=>{expect(await startPathPublishingListener({},'/workspace')).toBeUndefined();});
+it('incomplete or unsafe listener config fails closed',async()=>{for(const env of [{TOWER_PUBLISHING_BASE_URL:'https://test1.publish.tower.example.com'},{TOWER_PATH_PUBLISHING_PORT:'32376'},{TOWER_PATH_PUBLISHING_PORT:'32376',TOWER_PUBLISHING_BASE_URL:'https://test1.tower.example.com'},{TOWER_PATH_PUBLISHING_PORT:'80',TOWER_PUBLISHING_BASE_URL:'https://test1.publish.tower.example.com'}])await expect(startPathPublishingListener(env,'/workspace')).rejects.toThrow();});

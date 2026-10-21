@@ -3,32 +3,36 @@ import path from 'path';
 import { describe, expect, it } from 'vitest';
 
 const source = fs.readFileSync(path.resolve(import.meta.dirname, './Sidebar.tsx'), 'utf8');
+const rail = fs.readFileSync(path.resolve(import.meta.dirname, './AgentNavigationRail.tsx'), 'utf8');
 const toolbar = fs.readFileSync(path.resolve(import.meta.dirname, '../../features/navigation-sidebar/sessions/SidebarSessionsToolbar.tsx'), 'utf8');
 
 describe('AI navigation density and Work-first contract', () => {
   it('uses a collapsible desktop rail and an independently scrolling conversation pane', () => {
-    expect(source).toContain("agentNavExpanded ? 'is-expanded w-44' : 'w-14'");
-    expect(source).toContain('min-[769px]:flex');
-    expect(source).toContain('scrollbar-none min-h-0 w-40 flex-1 overflow-y-auto overflow-x-hidden');
+    expect(source).toContain('width={agentNavWidth}');
+    expect(rail).toContain('min-[769px]:flex');
+    expect(rail).toContain('const visuallyExpanded = expanded || hoverExpanded;');
+    expect(rail).toContain('width: visuallyExpanded ? width : 56');
+    expect(rail).toContain('marginRight: !expanded && hoverExpanded ? -(width - 56) : 0');
+    expect(rail).toContain('scrollbar-none min-h-0 w-full flex-1 overflow-y-auto overflow-x-hidden');
     expect(source).toContain('scrollbar-none h-full min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden');
   });
 
   it('keeps Work above Team Home inside AI navigation, not as a top navigation tab', () => {
-    expect(source).toContain("title={t('aiTeammateManagementTitle')}");
-    expect(source).toContain("title={t('conversationsNavTitle')}");
+    expect(rail).toContain("title={t('aiTeammateManagementTitle')}");
+    expect(rail).toContain("title={t('conversationsNavTitle')}");
     expect(source).toContain("agentNavScope === 'team'");
     expect(source).toContain("agentNavScope === 'work'");
-    expect(source.indexOf("title={t('conversationsNavTitle')}")).toBeLessThan(source.indexOf("title={t('aiTeammateManagementTitle')}"));
+    expect(rail.indexOf("title={t('conversationsNavTitle')}")).toBeLessThan(rail.indexOf("title={t('aiTeammateManagementTitle')}"));
   });
 
   it('opens Team Home immediately and returns Work to the conversation surface', () => {
-    const workButton = source.slice(source.indexOf("title={t('conversationsNavTitle')}") - 700, source.indexOf("title={t('conversationsNavTitle')}") + 400);
-    const teamHomeButton = source.slice(source.indexOf("title={t('aiTeammateManagementTitle')}") - 700, source.indexOf("title={t('aiTeammateManagementTitle')}") + 400);
-    expect(workButton).toContain("setAgentNavScope('work')");
-    expect(workButton).toContain('activateChatSlot()');
-    expect(workButton).toContain("setActiveView('chat')");
-    expect(teamHomeButton).toContain("setAgentNavScope('team')");
-    expect(teamHomeButton).toContain("setActiveView('aiTeam')");
+    expect(rail).toContain('onOpenRecent');
+    expect(rail).toContain('onOpenTeam');
+    expect(source).toContain("setAgentNavScope('work')");
+    expect(source).toContain('activateChatSlot()');
+    expect(source).toContain("setActiveView('chat')");
+    expect(source).toContain("setAgentNavScope('team')");
+    expect(source).toContain("setActiveView('aiTeam')");
     expect(source).not.toContain("t('openTeamHome')");
   });
 

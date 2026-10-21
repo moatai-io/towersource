@@ -22,6 +22,6 @@
   "preview": "미리보기",
   "raw": "원본",
   "download": "다운로드",
-  "pdfViewerHint": "PDF는 이 페이지 안 iframe으로 렌더링하지 않고 브라우저의 PDF viewer에서 엽니다.",
+  "pdfViewerHint": "PDF는 이 페이지 안에 삽입하지 않고 브라우저의 PDF 뷰어에서 엽니다.",
   "openInNewTab": "새 탭에서 열기"
 }

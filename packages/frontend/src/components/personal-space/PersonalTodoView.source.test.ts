@@ -2,7 +2,10 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 const source = readFileSync(new URL('./PersonalTodoView.tsx', import.meta.url), 'utf8');
-const app = readFileSync(new URL('../../App.tsx', import.meta.url), 'utf8');
+const app = [
+  readFileSync(new URL('../../App.tsx', import.meta.url), 'utf8'),
+  readFileSync(new URL('../../hooks/useViewerDelivery.ts', import.meta.url), 'utf8'),
+].join('\n');
 
 describe('PersonalTodoView', () => {
   it('renders a localized clickable My Todo list with registration dates', () => {

@@ -1,5 +1,16 @@
-import { describe, it, expect } from 'vitest';
-import { decideEnginePick } from './engine-pick';
+import { describe, it, expect, vi, afterEach } from 'vitest';
+import { decideEnginePick, patchSessionModel } from './engine-pick';
+
+afterEach(() => vi.unstubAllGlobals());
+
+describe('patchSessionModel', () => {
+  it('reports rejected model persistence instead of silently accepting a failed PATCH', async () => {
+    vi.stubGlobal('localStorage', { getItem: () => null });
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 400 }));
+    await expect(patchSessionModel('session-1', { modelUsed: 'litellm-responses/gpt-5.6-sol' }))
+      .rejects.toThrow('Session model update failed (400)');
+  });
+});
 
 describe('decideEnginePick', () => {
   it('same engine → model_only (cheap PATCH, no swap)', () => {

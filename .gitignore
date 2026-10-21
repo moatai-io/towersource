@@ -1,4 +1,5 @@
 node_modules/
+.npm/
 dist/
 # Exception: packages/notify-hub/dist 는 backend 가 direct import 하는 monorepo-internal
 # runtime artifact 이므로 commit. (외부 publish 가 아닌 workspaces 의 builds 산출물).

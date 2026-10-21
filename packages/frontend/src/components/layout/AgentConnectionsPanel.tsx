@@ -1,52 +1,34 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useConfirm } from '../../hooks/useDialog';
 import { toastError, toastSuccess } from '../../utils/toast';
 
 type AgentConnection = {
   id: string;
-  source: 'profile' | 'credential' | 'group';
   displayName: string;
   provider: string;
   connectionType: string;
   capabilities: string[];
   status: 'available' | 'connected' | 'blocked';
-  mode: 'allow' | 'deny' | null;
+  origin?: 'agent' | 'organization';
   updatedAt: string | null;
   fieldCount?: number;
   connectedFieldCount?: number;
+  credentialId?: string;
+  canReveal?: boolean;
+};
+
+type ImportCandidate = {
+  credentialId: string;
+  displayName: string;
+  provider: string;
+  projectId: string;
+  projectName: string;
 };
 
 type AgentConnectionCatalog = {
-  project: { id: string; name: string };
+  project?: { id: string; name: string };
+  projectId?: string;
   connections: AgentConnection[];
-};
-
-type ProjectMcpSummary = {
-  manifestPath: string;
-  manifestPresent: boolean;
-  servers: Array<{
-    name: string;
-    catalogId: string | null;
-    type: 'stdio' | 'streamable-http';
-    description: string | null;
-    enabled: boolean;
-    managed: boolean;
-    requiredCredentials: string[];
-    valid: boolean;
-    problems: string[];
-  }>;
-};
-
-type ConnectionPreview = {
-  intentId: string;
-  proposalHash: string;
-  expiresAt: string;
-  action: 'connect' | 'disconnect';
-  connection: { id: string; displayName: string; provider: string; capabilities: string[] };
-  project: { id: string; name: string };
-  impact: string;
-  risk: 'low' | 'medium' | 'high';
 };
 
 function authHeaders(json = false): Record<string, string> {
@@ -57,16 +39,17 @@ function authHeaders(json = false): Record<string, string> {
   };
 }
 
-export function AgentConnectionsPanel({ projectId, spacious = false }: { projectId: string; spacious?: boolean }) {
+export function AgentConnectionsPanel({ projectId, spacious = false, hideAgentConnections = false, view = 'all' }: { projectId: string; spacious?: boolean; hideAgentConnections?: boolean; view?: 'all' | 'shared' | 'google' | 'import' }) {
   const { t } = useTranslation('layout');
-  const confirm = useConfirm();
   const [catalog, setCatalog] = useState<AgentConnectionCatalog | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [changingId, setChangingId] = useState<string | null>(null);
   const [connectingGoogle, setConnectingGoogle] = useState(false);
-  const [mcpSummary, setMcpSummary] = useState<ProjectMcpSummary | null>(null);
-  const [mcpError, setMcpError] = useState('');
+  const [revealed, setRevealed] = useState<Record<string, string>>({});
+  const [revealingId, setRevealingId] = useState('');
+  const [importCandidates, setImportCandidates] = useState<ImportCandidate[]>([]);
+  const [selectedImport, setSelectedImport] = useState('');
+  const [importing, setImporting] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -74,7 +57,21 @@ export function AgentConnectionsPanel({ projectId, spacious = false }: { project
       const response = await fetch(`/api/credential-vault/projects/${encodeURIComponent(projectId)}/connections/catalog`, { headers: authHeaders() });
       const body = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(body.error || t('connectionCatalogLoadFailed'));
-      setCatalog(body);
+      const connections = Array.isArray(body.connections) ? body.connections.map((connection: any): AgentConnection => ({
+        id: String(connection.id || ''),
+        displayName: String(connection.displayName || connection.credentialId || connection.id || ''),
+        provider: String(connection.provider || 'custom'),
+        connectionType: String(connection.kind || connection.connectionType || 'credential'),
+        capabilities: Array.isArray(connection.capabilities) ? connection.capabilities : [],
+        status: connection.status === 'blocked' ? 'blocked' : connection.status === 'available' ? 'available' : 'connected',
+        origin: connection.connectionScope === 'agent_dedicated' || connection.scope === 'project' ? 'agent' : 'organization',
+        updatedAt: connection.updatedAt ?? null,
+        fieldCount: connection.fieldCount,
+        connectedFieldCount: connection.connectedFieldCount,
+        credentialId: String(connection.credentialId || '').trim() || undefined,
+        canReveal: connection.canReveal === true,
+      })) : [];
+      setCatalog({ ...body, connections });
       setError('');
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : t('connectionCatalogLoadFailed'));
@@ -83,19 +80,16 @@ export function AgentConnectionsPanel({ projectId, spacious = false }: { project
     }
   }, [projectId, t]);
 
-  const loadMcp = useCallback(async () => {
-    try {
-      const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/mcp-connections`, { headers: authHeaders() });
-      const body = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(body.error || t('mcpConnections.loadFailed'));
-      setMcpSummary(body);
-      setMcpError('');
-    } catch (reason) {
-      setMcpError(reason instanceof Error ? reason.message : t('mcpConnections.loadFailed'));
-    }
+  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    void fetch(`/api/credential-vault/projects/${encodeURIComponent(projectId)}/credentials/import-candidates`, { headers: authHeaders() })
+      .then(async response => {
+        const body = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(body.error || t('connectionImportLoadFailed'));
+        setImportCandidates(Array.isArray(body.candidates) ? body.candidates : []);
+      })
+      .catch(reason => setError(reason instanceof Error ? reason.message : t('connectionImportLoadFailed')));
   }, [projectId, t]);
-
-  useEffect(() => { void load(); void loadMcp(); }, [load, loadMcp]);
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     if (params.get('oauth') !== 'google-agent' || params.get('projectId') !== projectId) return;
@@ -106,11 +100,7 @@ export function AgentConnectionsPanel({ projectId, spacious = false }: { project
     } else {
       toastError(t('agentGoogle.connectFailed'));
     }
-    params.delete('oauth');
-    params.delete('status');
-    params.delete('projectId');
-    params.delete('credentialId');
-    params.delete('message');
+    for (const key of ['oauth', 'status', 'projectId', 'credentialId', 'message']) params.delete(key);
     const query = params.toString();
     window.history.replaceState({}, '', `${window.location.pathname}${query ? `?${query}` : ''}${window.location.hash}`);
   }, [load, projectId, t]);
@@ -121,7 +111,46 @@ export function AgentConnectionsPanel({ projectId, spacious = false }: { project
     };
     window.addEventListener('tower-agent-credentials-changed', refresh);
     return () => window.removeEventListener('tower-agent-credentials-changed', refresh);
-  }, [load, projectId, t]);
+  }, [load, projectId]);
+
+  const revealConnection = async (connection: AgentConnection) => {
+    const credentialId = connection.credentialId;
+    if (!credentialId) return;
+    if (revealed[credentialId] !== undefined) {
+      setRevealed(current => { const next = { ...current }; delete next[credentialId]; return next; });
+      return;
+    }
+    setRevealingId(credentialId);
+    try {
+      const response = await fetch(`/api/credential-vault/projects/${encodeURIComponent(projectId)}/credentials/${encodeURIComponent(credentialId)}/reveal`, {
+        method: 'POST', headers: authHeaders(true), body: JSON.stringify({ purpose: 'Agent Connections value review' }),
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok || typeof body.value !== 'string') throw new Error(body.error || t('connectionRevealFailed'));
+      setRevealed(current => ({ ...current, [credentialId]: body.value }));
+    } catch (reason) {
+      toastError(reason instanceof Error ? reason.message : t('connectionRevealFailed'));
+    } finally { setRevealingId(''); }
+  };
+
+  const importConnection = async () => {
+    const candidate = importCandidates.find(item => `${item.projectId}:${item.credentialId}` === selectedImport);
+    if (!candidate) return;
+    setImporting(true);
+    try {
+      const response = await fetch(`/api/credential-vault/projects/${encodeURIComponent(projectId)}/credentials/import`, {
+        method: 'POST', headers: authHeaders(true), body: JSON.stringify({ sourceProjectId: candidate.projectId, sourceCredentialId: candidate.credentialId }),
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body.error || t('connectionImportFailed'));
+      toastSuccess(t('connectionImportSucceeded'));
+      setSelectedImport('');
+      window.dispatchEvent(new CustomEvent('tower-agent-credentials-changed', { detail: { projectId } }));
+      await load();
+    } catch (reason) {
+      toastError(reason instanceof Error ? reason.message : t('connectionImportFailed'));
+    } finally { setImporting(false); }
+  };
 
   const connectAgentGoogle = async () => {
     setConnectingGoogle(true);
@@ -138,121 +167,63 @@ export function AgentConnectionsPanel({ projectId, spacious = false }: { project
     }
   };
 
-  const changeConnection = async (connection: AgentConnection) => {
-    const action = connection.status === 'connected' ? 'disconnect' : 'connect';
-    setChangingId(connection.id);
-    try {
-      const previewResponse = await fetch(`/api/credential-vault/connections/${encodeURIComponent(connection.id)}/preview`, {
-        method: 'POST',
-        headers: authHeaders(true),
-        body: JSON.stringify({ projectId, action }),
-      });
-      const preview = await previewResponse.json().catch(() => ({})) as ConnectionPreview & { error?: string };
-      if (!previewResponse.ok) throw new Error(preview.error || t('connectionPreviewFailed'));
-
-      const approved = await confirm({
-        title: action === 'connect' ? t('connectOrganizationConnection') : t('blockAgentConnection'),
-        message: `${preview.impact}\n\n${t('connectionSecretSafetyNotice')}`,
-        confirmLabel: action === 'connect' ? t('connect') : t('blockUse'),
-        danger: action === 'disconnect',
-      });
-      if (!approved) return;
-
-      const applyResponse = await fetch(`/api/credential-vault/connections/${encodeURIComponent(connection.id)}/apply`, {
-        method: 'POST',
-        headers: authHeaders(true),
-        body: JSON.stringify({ intentId: preview.intentId, proposalHash: preview.proposalHash, confirmed: true }),
-      });
-      const result = await applyResponse.json().catch(() => ({}));
-      if (!applyResponse.ok) throw new Error(result.error || t('connectionApplyFailed'));
-      toastSuccess(action === 'connect' ? t('connectionConnected') : t('connectionBlocked'));
-      await load();
-    } catch (reason) {
-      const message = reason instanceof Error ? reason.message : t('connectionApplyFailed');
-      setError(message);
-      toastError(message);
-    } finally {
-      setChangingId(null);
-    }
-  };
-
   if (loading) return <div className="text-[13px] text-surface-500">{t('loadingConnections')}</div>;
 
+  const agentConnections = catalog?.connections.filter(connection => connection.origin === 'agent') ?? [];
+  const organizationConnections = catalog?.connections.filter(connection => connection.origin !== 'agent') ?? [];
+  const renderConnection = (connection: AgentConnection, shared: boolean) => {
+    const connected = connection.status === 'connected';
+    const blocked = connection.status === 'blocked';
+    const statusTone = connected ? 'tone-success' : blocked ? 'tone-warning' : 'tone-muted';
+    return (
+      <div key={connection.id} className={`rounded-lg border border-surface-700 bg-surface-850/70 ${spacious ? 'flex min-h-40 flex-col p-4' : 'p-2.5'}`}>
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0">
+            <div className="truncate text-[14px] font-semibold text-surface-200">{connection.displayName}</div>
+            <div className="mt-0.5 truncate text-[12px] text-surface-500">{connection.provider}{connection.fieldCount ? ` · ${t('connectionRequiredFields', { connected: connection.connectedFieldCount ?? 0, total: connection.fieldCount })}` : ''}</div>
+          </div>
+          <span className={`tone-pill shrink-0 px-2 py-0.5 text-[11px] ${statusTone}`}>{connected ? t('connected') : blocked ? t('blocked') : t('available')}</span>
+        </div>
+        {connection.capabilities.length > 0 && <div className="mt-2 flex flex-wrap gap-1">{connection.capabilities.slice(0, 3).map(capability => <span key={capability} className="tone-pill tone-muted px-1.5 py-0.5 text-[11px]">{capability}</span>)}</div>}
+        {connection.credentialId && revealed[connection.credentialId] !== undefined && <div className="mt-3 break-all rounded-md bg-surface-950 px-2.5 py-2 font-mono text-[12px] text-surface-200">{revealed[connection.credentialId]}</div>}
+        {connection.canReveal && <button type="button" onClick={() => void revealConnection(connection)} disabled={revealingId === connection.credentialId} className="tone-action tone-muted mt-3 rounded-md px-2.5 py-1.5 text-[12px] font-medium disabled:opacity-50">{connection.credentialId && revealed[connection.credentialId] !== undefined ? t('connectionHideValue') : revealingId === connection.credentialId ? t('connectionRevealing') : t('connectionRevealValue')}</button>}
+        {shared && <div className="mt-auto pt-3 text-[11px] leading-4 text-surface-500">{t('agentCredentials.managedByAdmin')}</div>}
+      </div>
+    );
+  };
+
   return (
-    <div className={spacious ? 'grid gap-3 sm:grid-cols-2' : 'space-y-2'}>
-      <div className={`rounded-lg border border-primary-500/35 bg-surface-850/70 ${spacious ? 'flex min-h-44 flex-col p-4' : 'p-2.5'}`}>
-        <div className="flex items-start justify-between gap-2">
-          <div className="min-w-0">
-            <div className="text-[14px] font-semibold text-surface-100">{t('agentGoogle.title')}</div>
-            <div className="mt-0.5 text-[12px] leading-5 text-surface-400">{t('agentGoogle.description')}</div>
+    <div className={spacious ? 'space-y-5' : 'space-y-3'}>
+      {view !== 'shared' && <p className="text-[12px] leading-5 text-surface-400" data-testid="agent-connection-authority-notice">{t('agentConnectionAuthorityNotice')}</p>}
+      {(view === 'all' || view === 'google') && <section>
+        <div className="mb-2"><h4 className="text-[14px] font-semibold text-surface-100">{t(hideAgentConnections ? 'agentGoogle.addAccountTitle' : 'agentGoogle.agentAccountsTitle')}</h4><p className="mt-0.5 text-[12px] leading-5 text-surface-500">{t('agentGoogle.agentAccountsDescription')}</p></div>
+        <div className={spacious ? 'grid gap-3 sm:grid-cols-2' : 'space-y-2'}>
+          <div className={`rounded-lg border border-primary-500/35 bg-surface-850/70 ${spacious ? 'flex min-h-40 flex-col p-4' : 'p-2.5'}`}>
+            <div className="flex items-start justify-between gap-2"><div className="min-w-0"><div className="text-[14px] font-semibold text-surface-100">{t('agentGoogle.title')}</div><div className="mt-0.5 text-[12px] leading-5 text-surface-400">{t('agentGoogle.description')}</div></div><span className="tone-pill tone-accent shrink-0 px-2 py-0.5 text-[11px]">{t('agentGoogle.dedicated')}</span></div>
+            <button type="button" onClick={() => void connectAgentGoogle()} disabled={connectingGoogle} className="tone-action tone-accent mt-auto min-h-10 w-full rounded-lg px-3 py-2 text-[12px] font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400 disabled:cursor-not-allowed disabled:bg-surface-800 disabled:text-surface-500">{connectingGoogle ? t('agentGoogle.redirecting') : t('agentGoogle.connectOrReauthorize')}</button>
           </div>
-          <span className="tone-pill tone-accent shrink-0 px-2 py-0.5 text-[11px]">{t('agentGoogle.dedicated')}</span>
+          {!hideAgentConnections && agentConnections.map(connection => renderConnection(connection, false))}
         </div>
-        <button
-          type="button"
-          onClick={() => void connectAgentGoogle()}
-          disabled={connectingGoogle}
-          className="tone-action tone-accent mt-auto min-h-10 w-full rounded-lg px-3 py-2 text-[12px] font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400 disabled:cursor-not-allowed disabled:bg-surface-800 disabled:text-surface-500"
-        >
-          {connectingGoogle ? t('agentGoogle.redirecting') : t('agentGoogle.connectOrReauthorize')}
-        </button>
-      </div>
-      {error && <div className="tone-card tone-warning rounded-md p-2 text-[12px] sm:col-span-2">{error}</div>}
-      {!catalog?.connections.length && <div className="text-[13px] text-surface-500">{t('noOrganizationConnections')}</div>}
-      {catalog?.connections.map((connection) => {
-        const connected = connection.status === 'connected';
-        const blocked = connection.status === 'blocked';
-        const statusTone = connected ? 'tone-success' : blocked ? 'tone-warning' : 'tone-muted';
-        return (
-          <div key={connection.id} className={`rounded-lg border border-surface-700 bg-surface-850/70 ${spacious ? 'flex min-h-44 flex-col p-4' : 'p-2.5'}`}>
-            <div className="flex items-start justify-between gap-2">
-              <div className="min-w-0">
-                <div className="truncate text-[14px] font-semibold text-surface-200">{connection.displayName}</div>
-                <div className="mt-0.5 truncate text-[12px] text-surface-500">{connection.provider}{connection.fieldCount ? ` · ${t('connectionRequiredFields', { connected: connection.connectedFieldCount ?? 0, total: connection.fieldCount })}` : ''}</div>
-              </div>
-              <span className={`tone-pill shrink-0 px-2 py-0.5 text-[11px] ${statusTone}`}>
-                {connected ? t('connected') : blocked ? t('blocked') : t('available')}
-              </span>
-            </div>
-            {connection.capabilities.length > 0 && (
-              <div className="mt-2 flex flex-wrap gap-1">
-                {connection.capabilities.slice(0, 3).map((capability) => <span key={capability} className="tone-pill tone-muted px-1.5 py-0.5 text-[11px]">{capability}</span>)}
-              </div>
-            )}
-            <button
-              type="button"
-              onClick={() => void changeConnection(connection)}
-              disabled={changingId !== null}
-              className={`tone-action mt-2 min-h-10 w-full rounded-lg px-3 py-2 text-[12px] font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400 ${connected ? 'tone-warning' : 'tone-accent'} disabled:cursor-not-allowed disabled:bg-surface-800 disabled:text-surface-500`}
-            >
-              {changingId === connection.id ? t('changingConnection') : connected ? t('blockUse') : blocked ? t('reconnect') : t('connect')}
-            </button>
-          </div>
-        );
-      })}
-      <div className={`rounded-lg border border-surface-700 bg-surface-850/70 ${spacious ? 'flex min-h-44 flex-col p-4' : 'p-2.5'}`}>
-        <div className="flex items-start justify-between gap-2">
-          <div className="min-w-0">
-            <div className="text-[14px] font-semibold text-surface-200">{t('mcpConnections.title')}</div>
-            <div className="mt-1 text-[12px] leading-5 text-surface-500">{t('mcpConnections.description')}</div>
-          </div>
-          <span className="tone-pill tone-accent shrink-0 px-2 py-0.5 text-[11px]">{t('mcpConnections.serverCount', { count: mcpSummary?.servers.length ?? 0 })}</span>
+      </section>}
+      {error && <div className="tone-card tone-warning rounded-md p-2 text-[12px]">{error}</div>}
+      {(view === 'all' || view === 'import') && <section>
+        <div className="mb-2"><h4 className="text-[14px] font-semibold text-surface-100">{t('connectionImportTitle')}</h4><p className="mt-0.5 text-[12px] leading-5 text-surface-500">{t('connectionImportDescription')}</p></div>
+        <div className="flex gap-2">
+          <select value={selectedImport} onChange={event => setSelectedImport(event.target.value)} className="min-w-0 flex-1 rounded-lg border border-surface-700 bg-surface-850 px-3 py-2 text-[12px] text-surface-200">
+            <option value="">{t('connectionImportPlaceholder')}</option>
+            {importCandidates.map(candidate => <option key={`${candidate.projectId}:${candidate.credentialId}`} value={`${candidate.projectId}:${candidate.credentialId}`}>{candidate.projectName} · {candidate.displayName} ({candidate.provider})</option>)}
+          </select>
+          <button type="button" onClick={() => void importConnection()} disabled={!selectedImport || importing} className="tone-action tone-accent rounded-lg px-3 py-2 text-[12px] font-semibold disabled:opacity-50">{importing ? t('connectionImporting') : t('connectionImportAction')}</button>
         </div>
-        {mcpError && <div className="tone-card tone-warning mt-3 rounded-md p-2 text-[11px]">{mcpError}</div>}
-        {!mcpError && mcpSummary?.servers.map((server) => (
-          <div key={server.name} className="mt-3 rounded-md border border-surface-700 bg-surface-900/50 p-2">
-            <div className="flex items-center justify-between gap-2">
-              <span className="truncate text-[12px] font-semibold text-surface-200">{server.name}</span>
-              <span className={`tone-pill px-1.5 py-0.5 text-[10px] ${!server.valid ? 'tone-warning' : server.enabled ? 'tone-success' : 'tone-muted'}`}>{!server.valid ? t('mcpConnections.invalid') : server.enabled ? t('mcpConnections.enabled') : t('mcpConnections.disabled')}</span>
-            </div>
-            {server.description && <div className="mt-1 text-[11px] leading-4 text-surface-500">{server.description}</div>}
-            {server.requiredCredentials.length > 0 && <div className="mt-1 text-[10px] text-surface-600">{t('mcpConnections.credentialsRequired', { names: server.requiredCredentials.join(', ') })}</div>}
-            {server.problems.length > 0 && <div className="mt-1 text-[10px] text-amber-300">{server.problems.join(' · ')}</div>}
-          </div>
-        ))}
-        <div className="mt-auto pt-3 text-[11px] leading-4 text-surface-600">{t('mcpConnections.scopeHint', { path: mcpSummary?.manifestPath || '.tower/mcp/manifest.json' })}</div>
-      </div>
-      <p className="text-[11px] leading-4 text-surface-500 sm:col-span-2">{t('connectionSecretSafetyNotice')}</p>
+      </section>}
+      {(view === 'all' || view === 'shared') && <section>
+        <div className="mb-2"><h4 className="text-[14px] font-semibold text-surface-100">{t('agentGoogle.organizationAccountsTitle')}</h4><p className="mt-0.5 text-[12px] leading-5 text-surface-500">{t('agentGoogle.organizationAccountsDescription')}</p></div>
+        <div className={spacious ? 'grid gap-3 sm:grid-cols-2' : 'space-y-2'}>
+          {!organizationConnections.length && <div className="text-[13px] text-surface-500">{t('noOrganizationConnections')}</div>}
+          {organizationConnections.map(connection => renderConnection(connection, true))}
+        </div>
+      </section>}
+      <p className="text-[11px] leading-4 text-surface-500">{t('connectionSecretSafetyNotice')}</p>
     </div>
   );
 }

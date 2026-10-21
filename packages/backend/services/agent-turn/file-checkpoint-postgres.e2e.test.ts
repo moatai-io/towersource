@@ -56,7 +56,7 @@ run('turn checkpoint disposable PostgreSQL vertical slice', () => {
 
   afterAll(async () => {
     await modules?.pg?.closePgPool().catch(() => undefined);
-    await docker('rm', '-f', pgName).catch(() => undefined);
+    await docker('rm', '-f', '-v', pgName).catch(() => undefined);
     if (projectRoot) await rm(projectRoot, { recursive: true, force: true });
     if (previousDatabaseUrl === undefined) delete process.env.DATABASE_URL;
     else process.env.DATABASE_URL = previousDatabaseUrl;

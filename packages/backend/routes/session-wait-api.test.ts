@@ -1,0 +1,22 @@
+import express from 'express';
+import { AddressInfo } from 'node:net';
+import { afterAll,beforeAll,beforeEach,describe,expect,it,vi } from 'vitest';
+const mocks=vi.hoisted(()=>({ get:vi.fn(),access:vi.fn(),principal:vi.fn(),read:vi.fn(),change:vi.fn(),owner:vi.fn() }));
+vi.mock('../db/pg-repo.js',()=>({queryOne:mocks.owner}));
+vi.mock('../services/session/session-manager.js',()=>({getSession:mocks.get}));
+vi.mock('../services/pm/project-access.js',()=>({canAccessSession:mocks.access}));
+vi.mock('../services/agent-sleep/alarms.js',()=>({assertWaitPrincipal:mocks.principal,readWaitAlarm:mocks.read,changeWaitAlarm:mocks.change,WaitAlarmError:class extends Error{constructor(public status:number,message:string){super(message);}}}));
+import router from './session-wait-api.js';
+import type { Server } from 'node:http';
+describe('session wait API authorization and validation',()=>{
+ let server:Server, base:string;
+ beforeAll(async()=>{const app=express();app.use(express.json());app.use((req,_res,next)=>{if(req.headers['x-user']) (req as any).user={userId:Number(req.headers['x-user']),role:'member'};next();});app.use('/api',router);await new Promise<void>(resolve=>{server=app.listen(0,'127.0.0.1',resolve);});base=`http://127.0.0.1:${(server.address() as AddressInfo).port}/api/sessions/s/wait-alarm`;});
+ afterAll(async()=>{await new Promise<void>((resolve,reject)=>server.close(e=>e?reject(e):resolve()));});
+ beforeEach(()=>{vi.clearAllMocks();mocks.get.mockResolvedValue({id:'s',userId:1,user_id:1});mocks.access.mockResolvedValue({allowed:true});mocks.principal.mockResolvedValue({role:'member'});mocks.owner.mockResolvedValue({user_id:1});mocks.read.mockResolvedValue({id:'a',status:'pending',version:1});mocks.change.mockResolvedValue({id:'a',status:'cancelled',version:2});});
+ it('requires login',async()=>{expect((await fetch(base)).status).toBe(401);expect(mocks.read).not.toHaveBeenCalled();});
+ it('does not reveal alarms to users without session access',async()=>{mocks.access.mockResolvedValue({allowed:false});expect((await fetch(base,{headers:{'x-user':'2'}})).status).toBe(403);expect(mocks.read).not.toHaveBeenCalled();});
+ it('allows a reader to see the card without granting control',async()=>{const r=await fetch(base,{headers:{'x-user':'2'}});expect(r.status).toBe(200);expect((await r.json()).canManage).toBe(false);});
+ it('does not permit a reader to cancel',async()=>{const r=await fetch(`${base}/cancel`,{method:'POST',headers:{'x-user':'2','content-type':'application/json'},body:JSON.stringify({id:'a',version:1})});expect(r.status).toBe(403);expect(mocks.change).not.toHaveBeenCalled();});
+ it('rejects malformed owner mutations before writing',async()=>{const r=await fetch(`${base}/cancel`,{method:'POST',headers:{'x-user':'1','content-type':'application/json'},body:JSON.stringify({id:'a',version:0})});expect(r.status).toBe(400);expect(mocks.change).not.toHaveBeenCalled();});
+ it('passes the exact owner version and target to cancellation',async()=>{const r=await fetch(`${base}/cancel`,{method:'POST',headers:{'x-user':'1','content-type':'application/json'},body:JSON.stringify({id:'a',version:1})});expect(r.status).toBe(200);expect(mocks.change).toHaveBeenCalledWith('s','cancel',{id:'a',version:1});});
+});

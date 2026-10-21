@@ -15,7 +15,8 @@ export type ScrollDebugEventName =
   | 'snapshot-before-switch'
   | 'restore-requested'
   | 'restore-fallback'
-  | 'restore-applied';
+  | 'restore-applied'
+  | 'layout-anchor-corrected';
 
 export type ScrollDebugPayload = Record<string, unknown>;
 

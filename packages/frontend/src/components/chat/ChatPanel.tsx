@@ -1,4 +1,9 @@
-import { useRef, useState, useEffect, useMemo, useCallback } from 'react';
+import { useMessageAnchorHistory } from '../../features/conversation-viewport/useMessageAnchorHistory';
+import { useShortcutStore, matchesShortcut } from '../../stores/shortcut-store';
+import { ChatFeedback } from '../../features/chat-feedback/ChatFeedback';
+import { StatusLine } from './StatusLine';
+import { SessionWaitAlarmCard } from './SessionWaitAlarmCard';
+import { useRef, useState, useEffect, useLayoutEffect, useMemo, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 import { useChatStore, type ChatMessage, type ContentBlock, type PendingQuestion, type TurnPhase } from '../../stores/chat-store';
@@ -7,6 +12,7 @@ import { useFileStore } from '../../stores/file-store';
 import { useAiPanelStore } from '../../stores/ai-panel-store';
 import { useSessionAwareModel } from '../../stores/model-store';
 import { normalizeContentBlocks } from '../../utils/message-parser';
+import { segmentMessagesAroundDeliveredSteers } from '../../utils/steer-segments';
 import { MessageBubble, TurnMetricsBar } from './MessageBubble';
 import { InputBox, type SendOptions } from './InputBox';
 import { FloatingQuestionCard } from './FloatingQuestionCard';
@@ -17,15 +23,15 @@ import {
   isAgentOriginMessage,
   mergeConsecutiveAssistant,
 } from '../../features/agent-card/agent-message-policy';
-import { hasSeenTowerGuide, markTowerGuideSeen, TOUR_STATE_CHANGED_EVENT } from '../../tours/tourState';
 import { traceChatScroll } from '../../features/conversation-viewport/scrollDebugTrace';
-import { logClientPerf, perfNow } from '../../utils/client-perf';
+import { finishClientPerfTrace, logClientPerf, markClientPerfTrace, perfNow } from '../../utils/client-perf';
 import { serverNowMs } from '../../utils/server-clock';
 import { useChatScrollController } from '../../features/conversation-viewport/useChatScrollController';
 import { useProjectStore } from '../../stores/project-store';
 import { useSettingsStore } from '../../stores/settings-store';
 import { isPureAgentSession } from '../../features/agent-sessions/classification';
-import { AgentIdentityAvatar } from '../../features/agent-profile/AgentIdentityAvatar';
+import { SessionWelcome } from '../../features/session-welcome/SessionWelcome';
+import { useSessionWelcome } from '../../features/session-welcome/useSessionWelcome';
 import {
   CHAT_VIEWPORT_PROJECTION_VERSION,
   captureSessionViewportSnapshot,
@@ -34,6 +40,8 @@ import {
   type ChatViewportSnapshot,
   type SessionViewportRestorePlan,
 } from '../../features/conversation-viewport/sessionViewportSnapshot';
+
+import { observeBottomLayout } from '../../features/conversation-viewport/observeBottomLayout';
 
 const USER_JUMP_SCROLL_DURATION_MS = 100;
 // Keep the plain DOM path only for genuinely small chats. Past this, full
@@ -161,18 +169,21 @@ function PlainMessageList({
     scrollToEnd();
     let frame = 0;
     const retry = () => {
+      if (userScrolledUpRef.current) return;
       scrollToEnd();
       frame++;
-      if (frame < 10) requestAnimationFrame(retry); // ~160ms of retries
+      if (frame < 10) raf = requestAnimationFrame(retry); // ~160ms of retries
     };
-    const raf = requestAnimationFrame(retry);
+    let raf = requestAnimationFrame(retry);
     return () => cancelAnimationFrame(raf);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // On new messages: scroll to bottom if user is at bottom
   useEffect(() => {
     if (messages.length > prevLen.current && !userScrolledUpRef.current) {
-      requestAnimationFrame(scrollToEnd);
+      const raf = requestAnimationFrame(() => { if (!userScrolledUpRef.current) scrollToEnd(); });
+      prevLen.current = messages.length;
+      return () => cancelAnimationFrame(raf);
     }
     prevLen.current = messages.length;
   }, [messages.length, scrollToEnd, userScrolledUpRef]);
@@ -203,12 +214,9 @@ function PlainMessageList({
     if (!el) return;
     const metrics = { scrollTop: el.scrollTop, scrollHeight: el.scrollHeight, clientHeight: el.clientHeight };
     const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
-    onViewportScroll?.(metrics);
-    isAtBottomRef.current = atBottom;
-    if (!atBottom && !userScrolledUpRef.current) {
-      userScrolledUpRef.current = true;   // user scrolled up — stop auto-scroll
-      onUserScrollStateChange?.(true);
-    }
+    // Geometry alone does not transfer ownership to history reading.
+    if (atBottom || userScrolledUpRef.current) onViewportScroll?.(metrics);
+    isAtBottomRef.current = !userScrolledUpRef.current || atBottom;
     if (atBottom && userScrolledUpRef.current && !isStreaming) {
       userScrolledUpRef.current = false;
       onUserScrollStateChange?.(false);
@@ -246,11 +254,11 @@ function PlainMessageList({
             onTopVisibleIndexChange?.(firstVisible);
           }
           const anchorNode = Array.from(items).find((item) => parseInt((item as HTMLElement).dataset.msgIndex || '-1', 10) === firstVisible) as HTMLElement | undefined;
-          onScrollSnapshotChange?.({ scrollTop: scroller.scrollTop, topVisibleIndex: firstVisible, atBottom });
+          onScrollSnapshotChange?.({ scrollTop: scroller.scrollTop, topVisibleIndex: firstVisible, atBottom: !userScrolledUpRef.current });
           onViewportSnapshot?.({
             anchorMessageId: messages[firstVisible]?.id ?? null,
             anchorOffsetPx: anchorNode ? anchorNode.getBoundingClientRect().top - wrapTop : 0,
-            atBottom,
+            atBottom: !userScrolledUpRef.current,
             renderer: 'plain',
             messageCountAtCapture: messages.length,
           });
@@ -259,6 +267,8 @@ function PlainMessageList({
       });
     }
   }, [isAtBottomRef, userScrolledUpRef, onStartReached, onTopVisibleIndexChange, onBottomVisibleIndexChange, onScrollSnapshotChange, onUserScrollStateChange, onViewportScroll, onViewportSnapshot, messages, isStreaming]);
+
+  useEffect(() => () => cancelAnimationFrame(rafTopRef.current), []);
 
   // After mount + scroll-to-end settles, push initial visible indices so the
   // nav bar renders immediately (without waiting for the first scroll).
@@ -292,29 +302,29 @@ function PlainMessageList({
   }, [onTopVisibleIndexChange, onBottomVisibleIndexChange]);
 
   return (
-    <div ref={scrollWrapRef} className="flex-1 min-h-0 relative">
+    <div ref={scrollWrapRef} className="relative min-h-0 min-w-0 max-w-full flex-1 overflow-x-hidden">
       <div
         ref={scrollRef}
         data-chat-scroll="plain"
-        className="h-full overflow-y-auto"
+        className="h-full min-w-0 max-w-full overflow-x-hidden overflow-y-auto"
         style={{ overscrollBehavior: 'contain' }}
         onScroll={handleScroll}
         onWheel={(event) => {
-          if (isStreaming && event.deltaY < 0) markPlainHistoryReadingIntent();
+          if (event.deltaY < 0) markPlainHistoryReadingIntent();
         }}
         onTouchStart={(event) => {
           plainTouchStartY.current = event.touches[0]?.clientY ?? 0;
         }}
         onTouchMove={(event) => {
           const y = event.touches[0]?.clientY ?? 0;
-          if (isStreaming && y - plainTouchStartY.current > 24) markPlainHistoryReadingIntent();
+          if (y - plainTouchStartY.current > 24) markPlainHistoryReadingIntent();
         }}
       >
         {/* Spacer pushes content to bottom when messages don't fill the view */}
         <div className="min-h-full flex flex-col justify-end">
           {headerComponent}
           {messages.map((_, i) => (
-            <div key={messages[i].id} data-msg-index={i} data-msg-id={messages[i].id}>{renderMessage(i)}</div>
+            <div key={messages[i].id} data-msg-index={i} data-msg-id={messages[i].id} className="min-w-0 max-w-full overflow-x-hidden">{renderMessage(i)}</div>
           ))}
           {footerComponent}
         </div>
@@ -322,10 +332,8 @@ function PlainMessageList({
       {showJumpToLatest && (
         <button
           onClick={() => {
-            // PlainMessageList path uses its own internal scrollRef — parent's
-            // scrollToBottom() only knows the Virtuoso ref, so we must scroll
-            // locally here. onJumpToLatest() still runs to reset parent state
-            // (userScrolledUp=false, showJumpToLatest=false).
+            // Move locally immediately, then reset shared bottom intent and
+            // cancel any pending anchor restoration through the parent.
             scrollToEnd();
             onJumpToLatest();
           }}
@@ -344,13 +352,13 @@ function PlainMessageList({
 interface ChatPanelProps {
   onSend: (message: string, options?: SendOptions) => void;
   onAbort: () => void;
-  onSafeStop?: () => void;
+  onStopImmediately?: () => void;
   onFileClick?: (path: string) => void;
   onAnswerQuestion?: (questionId: string, answer: string) => void;
   onLoadMore?: (sessionId: string) => Promise<void>;
 }
 
-export function ChatPanel({ onSend, onAbort, onSafeStop, onFileClick, onAnswerQuestion, onLoadMore }: ChatPanelProps) {
+export function ChatPanel({ onSend, onAbort, onStopImmediately, onFileClick, onAnswerQuestion, onLoadMore }: ChatPanelProps) {
   const { t, i18n } = useTranslation('chat');
   const messages = useChatStore((s) => s.messages);
   const chatSessionId = useChatStore((s) => s.sessionId);
@@ -363,14 +371,22 @@ export function ChatPanel({ onSend, onAbort, onSafeStop, onFileClick, onAnswerQu
   const hasMoreMessages = useChatStore((s) => s.hasMoreMessages);
   const loadingMoreMessages = useChatStore((s) => s.loadingMoreMessages);
   const activeSessionId = useSessionStore((s) => s.activeSessionId);
+  const visibleChatSessionId = useSessionStore((s) => s.visibleChatSessionId);
+  const isMobile = useSessionStore((s) => s.isMobile);
+  const isChatForeground = !!activeSessionId && visibleChatSessionId === activeSessionId;
   const activeTurnTerminal = useSessionStore((s) => activeSessionId ? s.turnTerminalBySession[activeSessionId] : undefined);
   const updateChatTabScroll = useFileStore((s) => s.updateChatTabScroll);
   const activeTurn = useActiveSessionTurnState();
-  const displayTurnPhase: TurnPhase = activeTurn.phase;
+  // Compact events can precede the run-state snapshot on the websocket.
+  // The compact lifecycle flag is the immediate UI source of truth while it is active.
+  const displayTurnPhase: TurnPhase = compactingSessionId === activeSessionId && activeSessionId !== null
+    ? 'compacting'
+    : activeTurn.phase;
   const activeAssistantMessageId = activeTurn.activeAssistantMessageId;
   const isCompacting = compactingSessionId !== null && compactingSessionId === activeSessionId;
   const _sessions = useSessionStore((s) => s.sessions); // keep subscription for sidebar reactivity
   const activeSession = _sessions.find((session) => session.id === activeSessionId) || null;
+  const markAiResponseRead = useSessionStore((s) => s.markAiResponseRead);
   const activeProject = useProjectStore((s) => activeSession?.projectId ? s.projects.find((project) => project.id === activeSession.projectId) || null : null);
   // Character identity is safe in both Vite dev and production. The Agent-first
   // flag controls navigation rollout, not whether an already-assigned Project
@@ -392,14 +408,46 @@ export function ChatPanel({ onSend, onAbort, onSafeStop, onFileClick, onAnswerQu
   const sessionMismatch = !!activeSessionId && !!chatSessionId && activeSessionId !== chatSessionId;
   const renderMessages = sessionMismatch ? [] : messages;
   const renderSessionLoading = sessionLoading || sessionMismatch;
+  const welcome = useSessionWelcome({
+    sessionId: activeSession?.id ?? null,
+    projectId: activeProject?.id ?? null,
+    locale: i18n.resolvedLanguage || i18n.language,
+    enabled: renderMessages.length === 0 && !isStreaming && !renderSessionLoading,
+  });
+
+  useEffect(() => {
+    if (!activeSessionId || visibleChatSessionId !== activeSessionId || sessionMismatch || !activeSession?.unreadAiResponse) return;
+    const sequence = activeSession.lastFinalAiSequence ?? 0;
+    if (sequence <= 0) return;
+    let inFlight = false;
+    const markVisibleResponseRead = () => {
+      if (inFlight || document.visibilityState !== 'visible') return;
+      // Mobile Safari/PWA can report hasFocus() === false while the foreground
+      // chat is visibly active. visibleChatSessionId + visibility + rendered
+      // assistant content are the reliable mobile read boundary.
+      if (!isMobile && typeof document.hasFocus === 'function' && !document.hasFocus()) return;
+      const hasRenderedAssistant = useChatStore.getState().messages.some((message) => message.role === 'assistant');
+      if (!hasRenderedAssistant) return;
+      inFlight = true;
+      void markAiResponseRead(activeSessionId, sequence).finally(() => { inFlight = false; });
+    };
+    markVisibleResponseRead();
+    document.addEventListener('visibilitychange', markVisibleResponseRead);
+    window.addEventListener('focus', markVisibleResponseRead);
+    return () => {
+      document.removeEventListener('visibilitychange', markVisibleResponseRead);
+      window.removeEventListener('focus', markVisibleResponseRead);
+    };
+  }, [activeSession?.lastFinalAiSequence, activeSession?.unreadAiResponse, activeSessionId, isMobile, markAiResponseRead, messages.length, sessionMismatch, visibleChatSessionId]);
 
   // Reconcile speaker attribution for already-mounted optimistic bubbles.
   // A user can jump into another user's project session; the local bubble may
   // initially carry stale browser-local identity, while the DB/API has the
   // verified message.username. Patch usernames by id without replacing content
   // or scroll state.
+  const hasMessagesForAttribution = messages.length > 0;
   useEffect(() => {
-    if (!activeSessionId || sessionMismatch || messages.length === 0) return;
+    if (!activeSessionId || sessionMismatch || !hasMessagesForAttribution) return;
     let cancelled = false;
     const token = localStorage.getItem('token');
     const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
@@ -431,7 +479,7 @@ export function ChatPanel({ onSend, onAbort, onSafeStop, onFileClick, onAnswerQu
       })
       .catch(() => {});
     return () => { cancelled = true; };
-  }, [activeSessionId, sessionMismatch, messages.length]);
+  }, [activeSessionId, sessionMismatch, hasMessagesForAttribution]);
 
   // Auto-resume banner data — set when ws-handler.ts:serverSideResumeInterrupted()
   // injected a hidden trigger after a backend restart. Banner dismisses once the
@@ -481,6 +529,7 @@ export function ChatPanel({ onSend, onAbort, onSafeStop, onFileClick, onAnswerQu
   // and the settle period stops re-snapping to bottom. Cleared when user returns
   // to bottom (via the jump button or by scrolling down themselves).
   const userScrolledUp = useRef(false);
+  const scrollInteractionGeneration = useRef(0);
   const bottomRearmSuppressedUntil = useRef(0);
   const streamingHistoryReadLock = useRef(false);
   const [showJumpToLatest, setShowJumpToLatest] = useState(false);
@@ -509,7 +558,11 @@ export function ChatPanel({ onSend, onAbort, onSafeStop, onFileClick, onAnswerQu
   // temporary fallback until the rAF measurement lands.
   const visibleRangeRafRef = useRef(0);
   const mergedMessages = useMemo(() => {
-    return mergeConsecutiveAssistant(getVisibleChatMessages(renderMessages));
+    const visible = getVisibleChatMessages(renderMessages);
+    // Segment before merging consecutive assistant iterations. A steer checkpoint
+    // points at the concrete assistant row active when Pi consumed it; merging
+    // first can erase that row id and strand the steer at the end of the turn.
+    return mergeConsecutiveAssistant(segmentMessagesAroundDeliveredSteers(visible));
   }, [renderMessages]);
   const sessionRenderPerfRef = useRef<{ sessionId: string | null; startedAt: number; logged: boolean }>({
     sessionId: activeSessionId,
@@ -524,14 +577,31 @@ export function ChatPanel({ onSend, onAbort, onSafeStop, onFileClick, onAnswerQu
     if (!activeSessionId || state.sessionId !== activeSessionId || state.logged) return;
     if (renderSessionLoading || renderMessages.length === 0) return;
     state.logged = true;
+    const renderElapsedMs = Math.round(perfNow() - state.startedAt);
     logClientPerf('chat-first-messages-render', {
       sessionId: activeSessionId,
       messageCount: renderMessages.length,
       mergedMessageCount: mergedMessages.length,
-      elapsedMs: Math.round(perfNow() - state.startedAt),
+      elapsedMs: renderElapsedMs,
     }, { thresholdMs: 800 });
+    markClientPerfTrace('session-select-to-paint', activeSessionId, 'reactCommitted', {
+      messageCount: renderMessages.length,
+      mergedMessageCount: mergedMessages.length,
+      renderElapsedMs,
+    });
+    const frame = requestAnimationFrame(() => {
+      finishClientPerfTrace('session-select-to-paint', activeSessionId, {}, { thresholdMs: 800 });
+    });
+    return () => cancelAnimationFrame(frame);
   }, [activeSessionId, renderSessionLoading, renderMessages.length, mergedMessages.length]);
-  const hasExplicitMessageAnchor = typeof window !== 'undefined' && /^#m-[a-z2-9]{8}$/.test(window.location.hash);
+  const [messageAnchorHash, setMessageAnchorHash] = useState(() => window.location.hash);
+  useEffect(() => {
+    const readHash = () => setMessageAnchorHash(window.location.hash);
+    window.addEventListener('hashchange', readHash);
+    readHash();
+    return () => window.removeEventListener('hashchange', readHash);
+  }, [activeSessionId]);
+  const hasExplicitMessageAnchor = /^#m-[a-z2-9]{8}$/.test(messageAnchorHash);
   const sessionRestorePlan = useMemo(() => {
     if (!activeSessionId) return { kind: 'bottom', reason: 'first-open' } as const;
     return chooseSessionViewportRestorePlan({
@@ -539,22 +609,42 @@ export function ChatPanel({ onSend, onAbort, onSafeStop, onFileClick, onAnswerQu
       messageIds: mergedMessages.map((message) => message.id),
       hasExplicitMessageAnchor,
     });
-  }, [activeSessionId, mergedMessages, hasExplicitMessageAnchor]);
+  }, [activeSessionId, mergedMessages, hasExplicitMessageAnchor, isChatForeground]);
   const restoreInProgressRef = useRef(false);
   const restoredSessionRef = useRef<string | null>(null);
   const restoreAttemptRef = useRef(0);
+  // Invalidate deferred writers at the commit boundary, including A→B→A.
+  const viewportVisitRef = useRef(0);
+  const viewportCaptureToken = useMemo(
+    () => Symbol(`${activeSessionId ?? 'no-session'}:${isChatForeground ? 'foreground' : 'background'}`),
+    [activeSessionId, isChatForeground],
+  );
+  const viewportCaptureTokenRef = useRef(viewportCaptureToken);
+  useLayoutEffect(() => {
+    viewportVisitRef.current++;
+    viewportCaptureTokenRef.current = viewportCaptureToken;
+    return () => {
+      viewportVisitRef.current++;
+      cancelAnimationFrame(visibleRangeRafRef.current);
+      visibleRangeRafRef.current = 0;
+    };
+  }, [activeSessionId, viewportCaptureToken]);
 
   const captureViewportSnapshot = useCallback((snapshot: Omit<ChatViewportSnapshot, 'capturedAt' | 'projectionVersion'>) => {
-    // Child range callbacks can fire before the parent's restore effect. Do not
-    // let that transient mount position overwrite the history snapshot that
-    // selected this restore plan.
-    if (!activeSessionId || restoreInProgressRef.current || (sessionRestorePlan.kind === 'anchor' && restoredSessionRef.current !== activeSessionId)) return;
+    // PlainMessageList and Virtuoso can both finish a deferred measurement after
+    // a rapid A→B→A switch. Session equality alone cannot distinguish the old A
+    // visit from the new one, so fence every writer with this visit token.
+    if (!activeSessionId || !isChatForeground || viewportCaptureTokenRef.current !== viewportCaptureToken
+      || useSessionStore.getState().activeSessionId !== activeSessionId
+      || useSessionStore.getState().visibleChatSessionId !== activeSessionId
+      || restoreInProgressRef.current || (sessionRestorePlan.kind === 'anchor' && restoredSessionRef.current !== activeSessionId)) return;
     captureSessionViewportSnapshot(activeSessionId, {
       ...snapshot,
+      atBottom: !userScrolledUp.current,
       capturedAt: Date.now(),
       projectionVersion: CHAT_VIEWPORT_PROJECTION_VERSION,
     });
-  }, [activeSessionId, sessionRestorePlan]);
+  }, [activeSessionId, isChatForeground, sessionRestorePlan, viewportCaptureToken]);
 
   const captureActiveViewportBeforeSwitch = useCallback(() => {
     if (!activeSessionId || mergedMessages.length === 0) return;
@@ -580,7 +670,7 @@ export function ChatPanel({ onSend, onAbort, onSafeStop, onFileClick, onAnswerQu
     const anchorIndex = Number(anchorNode.dataset.msgIndex);
     const anchorMessage = mergedMessages[anchorIndex];
     if (!anchorMessage) return;
-    const atBottom = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 80;
+    const atBottom = !userScrolledUp.current;
     captureSessionViewportSnapshot(activeSessionId, {
       anchorMessageId: anchorMessage.id,
       anchorOffsetPx: anchorNode.getBoundingClientRect().top - scrollerRect.top,
@@ -598,10 +688,20 @@ export function ChatPanel({ onSend, onAbort, onSafeStop, onFileClick, onAnswerQu
     return () => window.removeEventListener('tower-capture-chat-viewport', captureActiveViewportBeforeSwitch);
   }, [captureActiveViewportBeforeSwitch]);
 
+  // File/system tabs keep ChatPanel mounted but hidden. Capture in the layout
+  // cleanup while the foreground geometry is still readable, before the shell
+  // applies display:none to the chat surface.
+  useLayoutEffect(() => {
+    if (!isChatForeground) return;
+    return () => captureActiveViewportBeforeSwitch();
+  }, [isChatForeground, captureActiveViewportBeforeSwitch]);
+
   const updateVisibleRangeFromDom = useCallback((fallback?: { startIndex: number; endIndex: number }) => {
+    const visit = viewportVisitRef.current;
     if (visibleRangeRafRef.current) cancelAnimationFrame(visibleRangeRafRef.current);
     visibleRangeRafRef.current = requestAnimationFrame(() => {
       visibleRangeRafRef.current = 0;
+      if (viewportVisitRef.current !== visit) return;
       // Session selection changes synchronously after the leave-time capture,
       // while this measurement is deferred. Never let a callback owned by the
       // previous session write through after the active session has changed.
@@ -664,7 +764,7 @@ export function ChatPanel({ onSend, onAbort, onSafeStop, onFileClick, onAnswerQu
     onAnswerQuestion?.(questionId, answer);
   }, [onAnswerQuestion]);
 
-  const floatingQuestion = pendingQuestion || null;
+  const floatingQuestion = pendingQuestion?.sessionId === activeSessionId ? pendingQuestion : null;
   const floatingAnswered = null;
   const [minimizedQuestionId, setMinimizedQuestionId] = useState<string | null>(null);
   const isQuestionMinimized = !!floatingQuestion && minimizedQuestionId === floatingQuestion.questionId;
@@ -733,7 +833,7 @@ export function ChatPanel({ onSend, onAbort, onSafeStop, onFileClick, onAnswerQu
   // may update only the assistant bubble timestamp while reusing the same content
   // array. If we returned the cached normalized object in that case, the UI would
   // keep showing the first-token time.
-  const normalizeCache = useRef(new Map<string, { contentRef: ContentBlock[]; timestamp: number; result: ChatMessage }>());
+  const normalizeCache = useRef(new Map<string, { contentRef: ContentBlock[]; timestamp: number; streaming: boolean; result: ChatMessage }>());
   useEffect(() => {
     normalizeCache.current.clear();
   }, [activeSessionId]);
@@ -750,12 +850,12 @@ export function ChatPanel({ onSend, onAbort, onSafeStop, onFileClick, onAnswerQu
     const cache = normalizeCache.current;
     const entry = cache.get(msg.id);
     // Same content array + same timestamp → cache hit (fast path for non-streaming messages)
-    if (entry && entry.contentRef === msg.content && entry.timestamp === msg.timestamp) return entry.result;
+    if (entry && entry.contentRef === msg.content && entry.timestamp === msg.timestamp && entry.streaming === isStreaming) return entry.result;
     // Content or timestamp changed: re-normalize / refresh metadata
-    const normalized = { ...msg, content: normalizeContentBlocks(msg.content) };
-    cache.set(msg.id, { contentRef: msg.content, timestamp: msg.timestamp, result: normalized });
+    const normalized = { ...msg, content: normalizeContentBlocks(msg.content, [], isStreaming) };
+    cache.set(msg.id, { contentRef: msg.content, timestamp: msg.timestamp, streaming: isStreaming, result: normalized });
     return normalized;
-  }, []);
+  }, [isStreaming]);
 
   // ── Scroll: always start at bottom ──
   //
@@ -776,7 +876,7 @@ export function ChatPanel({ onSend, onAbort, onSafeStop, onFileClick, onAnswerQu
     // below the last message. Aligning the last item to the end can leave that
     // footer outside the viewport, which makes Virtuoso report "not at bottom"
     // and triggers a visible followOutput/atBottomStateChange tug-of-war.
-    const scroller = scrollWrapRef.current?.querySelector('[data-testid="virtuoso-scroller"]') as HTMLElement | null;
+    const scroller = scrollWrapRef.current?.querySelector('[data-testid="virtuoso-scroller"], [data-chat-scroll="plain"]') as HTMLElement | null;
     if (scroller) {
       const nextTop = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
       if (Math.abs(scroller.scrollTop - nextTop) > 1) {
@@ -811,6 +911,7 @@ export function ChatPanel({ onSend, onAbort, onSafeStop, onFileClick, onAnswerQu
   });
 
   const markHistoryReadingIntent = useCallback((source: 'scroll' | 'jump' = 'scroll') => {
+    scrollInteractionGeneration.current++;
     bottomRearmSuppressedUntil.current = Date.now() + USER_SCROLL_UP_REARM_GRACE_MS;
     if (isStreaming) streamingHistoryReadLock.current = true;
     markUserReadingHistory(source);
@@ -882,7 +983,7 @@ export function ChatPanel({ onSend, onAbort, onSafeStop, onFileClick, onAnswerQu
       }
       scrollToBottomRef.current();
       // Check stability: if scrollTop unchanged for 3 frames (~50ms), position settled.
-      const el = document.querySelector('[data-virtuoso-scroller]') as HTMLElement | null;
+      const el = scrollWrapRef.current?.querySelector('[data-virtuoso-scroller], [data-chat-scroll="plain"]') as HTMLElement | null;
       const currentTop = el?.scrollTop ?? -2;
       if (currentTop === prevScrollTop) {
         stableFrames++;
@@ -906,10 +1007,27 @@ export function ChatPanel({ onSend, onAbort, onSafeStop, onFileClick, onAnswerQu
   // History-owned revisits disable all bottom
   // settle writers before restoring their stable message anchor.
   const bottomSettledSessionRef = useRef<string | null>(null);
+  const restoreReady = mergedMessages.length > 0;
+  const viewportRenderer = mergedMessages.length <= PLAIN_MESSAGE_LIMIT ? 'plain' : 'virtuoso';
+  const deepLinkTargetReady = mergedMessages.some(message => `#m-${message.shortId}` === messageAnchorHash);
+  useMessageAnchorHistory({
+    sessionId: activeSessionId,
+    hash: messageAnchorHash,
+    ready: !renderSessionLoading,
+    targetReady: deepLinkTargetReady,
+    loadMore: onLoadMore,
+  });
+  const restoreLatest = useRef({ sessionRestorePlan, mergedMessages, markPinnedToBottom, scrollToBottom, updateVisibleRangeFromDom });
+  useLayoutEffect(() => {
+    restoreLatest.current = { sessionRestorePlan, mergedMessages, markPinnedToBottom, scrollToBottom, updateVisibleRangeFromDom };
+  });
   useEffect(() => {
-    if (!activeSessionId) {
+    const { sessionRestorePlan, mergedMessages, markPinnedToBottom, scrollToBottom, updateVisibleRangeFromDom } = restoreLatest.current;
+    const visit = viewportVisitRef.current;
+    if (!activeSessionId || !isChatForeground) {
       bottomSettledSessionRef.current = null;
       restoredSessionRef.current = null;
+      restoreInProgressRef.current = false;
       return;
     }
     if (mergedMessages.length === 0) {
@@ -924,6 +1042,8 @@ export function ChatPanel({ onSend, onAbort, onSafeStop, onFileClick, onAnswerQu
       settleUntil.current = 0;
       switchSettleUntil.current = 0;
       cancelAnimationFrame(settleRafRef.current);
+      settleRafRef.current = 0;
+      bottomSettledSessionRef.current = null;
       return;
     }
 
@@ -938,6 +1058,8 @@ export function ChatPanel({ onSend, onAbort, onSafeStop, onFileClick, onAnswerQu
       settleUntil.current = 0;
       switchSettleUntil.current = 0;
       cancelAnimationFrame(settleRafRef.current);
+      settleRafRef.current = 0;
+      const interactionGeneration = scrollInteractionGeneration.current;
       traceChatScroll('restore-requested', {
         activeSessionId,
         renderer: mergedMessages.length <= PLAIN_MESSAGE_LIMIT ? 'plain' : 'virtuoso',
@@ -945,20 +1067,25 @@ export function ChatPanel({ onSend, onAbort, onSafeStop, onFileClick, onAnswerQu
         anchorMessageId: sessionRestorePlan.snapshot.anchorMessageId,
       });
 
+      const currentAnchorIndex = () => restoreLatest.current.mergedMessages.findIndex(
+        message => message.id === sessionRestorePlan.snapshot.anchorMessageId);
       const issueAnchorScroll = () => {
-        if (mergedMessages.length > PLAIN_MESSAGE_LIMIT) {
-          virtuosoRef.current?.scrollToIndex({ index: sessionRestorePlan.anchorIndex, align: 'start', behavior: 'auto' });
+        const index = currentAnchorIndex();
+        if (viewportVisitRef.current !== visit || useSessionStore.getState().activeSessionId !== activeSessionId
+          || scrollInteractionGeneration.current !== interactionGeneration || index < 0) return;
+        if (restoreLatest.current.mergedMessages.length > PLAIN_MESSAGE_LIMIT) {
+          virtuosoRef.current?.scrollToIndex({ index, align: 'start', behavior: 'auto' });
         }
       };
 
       const applyRestore = (allowFallback = false): { applied: boolean; delta: number } => {
-        if (restoreAttemptRef.current !== restoreAttempt || useSessionStore.getState().activeSessionId !== activeSessionId) {
+        if (viewportVisitRef.current !== visit || restoreAttemptRef.current !== restoreAttempt || useSessionStore.getState().activeSessionId !== activeSessionId) {
           return { applied: false, delta: 0 };
         }
         const wrap = scrollWrapRef.current;
         const scroller = (wrap?.querySelector('[data-testid="virtuoso-scroller"]') as HTMLElement | null)
           || (wrap?.querySelector('[data-chat-scroll="plain"]') as HTMLElement | null);
-        const anchor = wrap?.querySelector(`[data-msg-index="${sessionRestorePlan.anchorIndex}"]`) as HTMLElement | null;
+        const anchor = wrap?.querySelector(`[data-msg-index="${currentAnchorIndex()}"]`) as HTMLElement | null;
         if (!scroller || !anchor) {
           if (!allowFallback) return { applied: false, delta: 0 };
           traceChatScroll('restore-fallback', { activeSessionId, reason: 'anchor-dom-missing', anchorIndex: sessionRestorePlan.anchorIndex });
@@ -987,10 +1114,15 @@ export function ChatPanel({ onSend, onAbort, onSafeStop, onFileClick, onAnswerQu
       const finishRestore = () => {
         if (restoreAttemptRef.current !== restoreAttempt) return;
         restoreInProgressRef.current = false;
-        updateVisibleRangeFromDom({ startIndex: sessionRestorePlan.anchorIndex, endIndex: sessionRestorePlan.anchorIndex });
+        const index = currentAnchorIndex();
+        restoreLatest.current.updateVisibleRangeFromDom({ startIndex: index, endIndex: index });
       };
       const keepAnchorStable = () => {
-        if (restoreAttemptRef.current !== restoreAttempt || useSessionStore.getState().activeSessionId !== activeSessionId) return;
+        if (scrollInteractionGeneration.current !== interactionGeneration) {
+          finishRestore();
+          return;
+        }
+        if (viewportVisitRef.current !== visit || restoreAttemptRef.current !== restoreAttempt || useSessionStore.getState().activeSessionId !== activeSessionId) return;
         const elapsed = Date.now() - settleStartedAt;
         // Re-issue the virtualized index request early while Virtuoso may still
         // be replacing estimated row heights with measured heights.
@@ -1014,6 +1146,8 @@ export function ChatPanel({ onSend, onAbort, onSafeStop, onFileClick, onAnswerQu
         innerRaf = requestAnimationFrame(keepAnchorStable);
       });
       return () => {
+        restoreInProgressRef.current = false;
+        bottomSettledSessionRef.current = null;
         if (restoreAttemptRef.current === restoreAttempt) restoreAttemptRef.current++;
         cancelAnimationFrame(raf);
         cancelAnimationFrame(innerRaf);
@@ -1021,6 +1155,7 @@ export function ChatPanel({ onSend, onAbort, onSafeStop, onFileClick, onAnswerQu
       };
     }
 
+    restoreInProgressRef.current = false;
     restoredSessionRef.current = null;
     const now = markPinnedToBottom('session');
     traceChatScroll('session-settle', { activeSessionId, messageCount: mergedMessages.length, reason: sessionRestorePlan.reason });
@@ -1028,12 +1163,61 @@ export function ChatPanel({ onSend, onAbort, onSafeStop, onFileClick, onAnswerQu
     switchSettleUntil.current = now + 3500;
     scrollToBottom();
     startSettleLoop(2000); // 2s max settle
-    requestAnimationFrame(() => {
+    const rangeRaf = requestAnimationFrame(() => {
       const last = Math.max(0, mergedMessages.length - 1);
       updateVisibleRangeFromDom({ startIndex: last, endIndex: last });
     });
-    return () => cancelAnimationFrame(settleRafRef.current);
-  }, [activeSessionId, mergedMessages.length, sessionRestorePlan, hasExplicitMessageAnchor, scrollToBottom, startSettleLoop, updateVisibleRangeFromDom, markPinnedToBottom, conversationViewport.onRestoreAnchorStart, conversationViewport.onRestoreAnchorEnd]);
+    return () => {
+      cancelAnimationFrame(rangeRaf);
+      cancelAnimationFrame(settleRafRef.current);
+      settleRafRef.current = 0;
+      bottomSettledSessionRef.current = null;
+    };
+  }, [activeSessionId, isChatForeground, restoreReady, viewportRenderer, hasExplicitMessageAnchor, startSettleLoop, conversationViewport.onRestoreAnchorStart, conversationViewport.onRestoreAnchorEnd]);
+
+  useEffect(() => {
+    const scroller = scrollWrapRef.current?.querySelector<HTMLElement>('[data-virtuoso-scroller], [data-chat-scroll="plain"]');
+    if (!scroller || typeof ResizeObserver === 'undefined') return;
+    return observeBottomLayout(scroller,
+      () => !userScrolledUp.current && !restoreInProgressRef.current
+        && useSessionStore.getState().activeSessionId === activeSessionId,
+      () => markHistoryReadingIntent('scroll'));
+  }, [activeSessionId, restoreReady, viewportRenderer, markHistoryReadingIntent]);
+
+  useEffect(() => {
+    if (!activeSessionId || !isChatForeground || typeof ResizeObserver === 'undefined') return;
+    const scroller = scrollWrapRef.current?.querySelector<HTMLElement>('[data-testid="virtuoso-scroller"], [data-virtuoso-scroller], [data-chat-scroll="plain"]');
+    if (!scroller) return;
+    let raf = 0;
+    let lastWidth = scroller.clientWidth;
+    let lastHeight = scroller.clientHeight;
+    const observer = new ResizeObserver(() => {
+      const width = scroller.clientWidth;
+      const height = scroller.clientHeight;
+      if (width === lastWidth && height === lastHeight) return;
+      lastWidth = width;
+      lastHeight = height;
+      if (!userScrolledUp.current || restoreInProgressRef.current) return;
+      cancelAnimationFrame(raf);
+      const visit = viewportVisitRef.current;
+      raf = requestAnimationFrame(() => {
+        if (viewportVisitRef.current !== visit || useSessionStore.getState().activeSessionId !== activeSessionId
+          || useSessionStore.getState().visibleChatSessionId !== activeSessionId) return;
+        const snapshot = getSessionViewportSnapshot(activeSessionId);
+        if (!snapshot || snapshot.atBottom || !snapshot.anchorMessageId) return;
+        const anchor = scroller.querySelector<HTMLElement>(`[data-msg-id="${CSS.escape(snapshot.anchorMessageId)}"]`);
+        if (!anchor) return;
+        const delta = anchor.getBoundingClientRect().top - scroller.getBoundingClientRect().top - snapshot.anchorOffsetPx;
+        if (Math.abs(delta) > 1) scroller.scrollTop += delta;
+        traceChatScroll('layout-anchor-corrected', { activeSessionId, delta, width, height });
+      });
+    });
+    observer.observe(scroller);
+    return () => {
+      observer.disconnect();
+      cancelAnimationFrame(raf);
+    };
+  }, [activeSessionId, isChatForeground, restoreReady, viewportRenderer]);
 
   // ─── Phase 3 메시지 앵커 (issue #11 / #160) ───────────────────────────────
   // URL fragment `#m-<shortId>` 로 진입 시 해당 메시지를 화면 상단 근처로 scroll.
@@ -1066,15 +1250,33 @@ export function ChatPanel({ onSend, onAbort, onSafeStop, onFileClick, onAnswerQu
   }, [activeSessionId]);
 
   useEffect(() => {
+    let disposed = false;
+    const visit = viewportVisitRef.current;
+    const frames = new Set<number>();
+    const timers = new Set<ReturnType<typeof setTimeout>>();
+    const deferFrame = (callback: () => void) => {
+      const id = requestAnimationFrame(() => { frames.delete(id); if (!disposed) callback(); });
+      frames.add(id);
+    };
+    const deferTimer = (callback: () => void, ms: number) => {
+      const id = setTimeout(() => { timers.delete(id); if (!disposed) callback(); }, ms);
+      timers.add(id);
+    };
+    let claimedShortId: string | null = null;
+    let claimedInteractionGeneration: number | null = null;
     const tryScroll = () => {
+      if (renderSessionLoading || !isChatForeground) return;
       const m = window.location.hash.match(/^#m-([a-z2-9]{8})$/);
-      if (!m) return;
+      if (!m) { anchorProcessedRef.current = null; return; }
       const shortId = m[1];
       if (anchorProcessedRef.current === shortId) return;
-      if (mergedMessages.length === 0) return; // wait for messages
-      const idx = mergedMessages.findIndex((msg) => msg.shortId === shortId);
+      if (restoreLatest.current.mergedMessages.length === 0) return; // wait for messages
+      const idx = restoreLatest.current.mergedMessages.findIndex((msg) => msg.shortId === shortId);
       if (idx < 0) return; // 미로드 (페이지네이션) — backfill 미완 케이스도 동일
       anchorProcessedRef.current = shortId;
+      claimedShortId = shortId;
+      const interactionGeneration = scrollInteractionGeneration.current;
+      claimedInteractionGeneration = interactionGeneration;
 
       // 가드 — 다른 scroll-to-bottom effects 의 scrollToBottom() 이 *userScrolledUp
       // guard* 를 통과하지 못하도록 + settle loop 즉시 종료.
@@ -1084,9 +1286,13 @@ export function ChatPanel({ onSend, onAbort, onSafeStop, onFileClick, onAnswerQu
       settleUntil.current = 0;
       switchSettleUntil.current = 0;
 
+      const currentLinkIndex = () => restoreLatest.current.mergedMessages.findIndex(msg => msg.shortId === shortId);
       const highlightTarget = () => {
+        if (disposed || viewportVisitRef.current !== visit || scrollInteractionGeneration.current !== interactionGeneration
+          || useSessionStore.getState().activeSessionId !== activeSessionId
+          || window.location.hash !== `#m-${shortId}`) return;
         const wrap = scrollWrapRef.current;
-        const target = wrap?.querySelector(`[data-msg-index="${idx}"]`) as HTMLElement | null;
+        const target = wrap?.querySelector(`[data-msg-index="${currentLinkIndex()}"]`) as HTMLElement | null;
         if (!target) return;
 
         const previous = wrap?.querySelector('[data-deep-link-highlight="true"]') as HTMLElement | null;
@@ -1111,10 +1317,13 @@ export function ChatPanel({ onSend, onAbort, onSafeStop, onFileClick, onAnswerQu
       };
 
       const doScroll = () => {
-        if (mergedMessages.length <= PLAIN_MESSAGE_LIMIT) {
+        if (disposed || viewportVisitRef.current !== visit || scrollInteractionGeneration.current !== interactionGeneration
+          || useSessionStore.getState().activeSessionId !== activeSessionId
+          || window.location.hash !== `#m-${shortId}` || currentLinkIndex() < 0) return;
+        if (restoreLatest.current.mergedMessages.length <= PLAIN_MESSAGE_LIMIT) {
           const wrap = scrollWrapRef.current;
           const scroller = wrap?.querySelector('[data-chat-scroll="plain"]') as HTMLElement | null;
-          const target = wrap?.querySelector(`[data-msg-index="${idx}"]`) as HTMLElement | null;
+          const target = wrap?.querySelector(`[data-msg-index="${currentLinkIndex()}"]`) as HTMLElement | null;
           if (scroller && target) {
             const scrollerRect = scroller.getBoundingClientRect();
             const targetRect = target.getBoundingClientRect();
@@ -1123,48 +1332,34 @@ export function ChatPanel({ onSend, onAbort, onSafeStop, onFileClick, onAnswerQu
           }
           return;
         }
-        virtuosoRef.current?.scrollToIndex({ index: idx, align: 'start', behavior: 'auto' });
-        requestAnimationFrame(highlightTarget);
+        virtuosoRef.current?.scrollToIndex({ index: currentLinkIndex(), align: 'start', behavior: 'auto' });
+        deferFrame(highlightTarget);
       };
       // 여러 timing 재시도 — Virtuoso defaultItemHeight estimation vs 실제 측정
       // 차이로 첫 try 가 잘못된 위치에 떨어질 수 있음. measurement 안정화될 때까지
       // 반복해서 동일 index 로 정렬.
-      requestAnimationFrame(doScroll);
-      setTimeout(doScroll, 200);
-      setTimeout(doScroll, 500);
-      setTimeout(doScroll, 1200);
-      setTimeout(doScroll, 2500);
+      deferFrame(doScroll);
+      deferTimer(doScroll, 200);
+      deferTimer(doScroll, 500);
+      deferTimer(doScroll, 1200);
+      deferTimer(doScroll, 2500);
     };
     tryScroll();
-    // hash 변경 (같은 세션 안에서 anchor 클릭) 도 처리
-    window.addEventListener('hashchange', tryScroll);
-    return () => window.removeEventListener('hashchange', tryScroll);
-  }, [mergedMessages, activeSessionId]);
+    // Hash state is the sole request owner; no competing hashchange writer.
+    return () => {
+      disposed = true;
+      // A loading/foreground transition may unmount the scroller and cancel all
+      // pending writes. Release that request so the ready viewport can retry,
+      // but never revive a request cancelled by deliberate user interaction.
+      if (claimedShortId && anchorProcessedRef.current === claimedShortId
+        && scrollInteractionGeneration.current === claimedInteractionGeneration) {
+        anchorProcessedRef.current = null;
+      }
+      frames.forEach(cancelAnimationFrame);
+      timers.forEach(clearTimeout);
+    };
+  }, [messageAnchorHash, deepLinkTargetReady, activeSessionId, renderSessionLoading, isChatForeground]);
   // ─── /Phase 3 메시지 앵커 ────────────────────────────────────────────────
-
-  // Cache-miss: messages arrive after empty mount → scroll to bottom.
-  const hadMessages = useRef(false);
-  useEffect(() => {
-    if (activeSessionId) hadMessages.current = false;
-  }, [activeSessionId]);
-  useEffect(() => {
-    const has = mergedMessages.length > 0;
-    if (has && !hadMessages.current) {
-      hadMessages.current = true;
-      if (sessionRestorePlan.kind === 'anchor' || hasExplicitMessageAnchor) return;
-      const now = markPinnedToBottom('messages-loaded');
-      traceChatScroll('messages-loaded', { activeSessionId, messageCount: mergedMessages.length });
-      settleUntil.current = now + 1500;
-      scrollToBottom();
-      startSettleLoop(1500);
-      requestAnimationFrame(() => {
-        const last = Math.max(0, mergedMessages.length - 1);
-        updateVisibleRangeFromDom({ startIndex: last, endIndex: last });
-      });
-      return () => cancelAnimationFrame(settleRafRef.current);
-    }
-    hadMessages.current = has;
-  }, [mergedMessages.length, sessionRestorePlan, hasExplicitMessageAnchor, scrollToBottom, startSettleLoop, updateVisibleRangeFromDom, markPinnedToBottom, activeSessionId]);
 
   // When streaming starts → scroll to bottom only if user hasn't scrolled up
   const prevStreaming = useRef(isStreaming);
@@ -1347,6 +1542,7 @@ export function ChatPanel({ onSend, onAbort, onSafeStop, onFileClick, onAnswerQu
     if (nextUserIndex >= 0) jumpToMessage(nextUserIndex);
   }, [nextUserIndex, jumpToMessage]);
 
+  const shortcutBindings = useShortcutStore(s => s.bindings);
   // Keyboard shortcuts for chat navigation.
   // - Option/Alt+↑/↓ jumps between user turns.
   // - Plain ↑/↓ scrolls by ~80% of the chat viewport, but does not steal
@@ -1377,10 +1573,14 @@ export function ChatPanel({ onSend, onAbort, onSafeStop, onFileClick, onAnswerQu
 
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.isComposing) return;
-      if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+      if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown'
+        && !matchesShortcut(e, shortcutBindings['chat.previous']) && !matchesShortcut(e, shortcutBindings['chat.next'])) return;
 
-      if (e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
-        if (e.key === 'ArrowUp') {
+      if (e.defaultPrevented || e.repeat || document.querySelector('[aria-modal="true"], [data-shortcut-settings]')) return;
+      const previous = matchesShortcut(e, shortcutBindings['chat.previous']);
+      const next = matchesShortcut(e, shortcutBindings['chat.next']);
+      if (previous || next) {
+        if (previous) {
           if (!canJumpPrev) return;
           e.preventDefault();
           e.stopPropagation();
@@ -1415,13 +1615,10 @@ export function ChatPanel({ onSend, onAbort, onSafeStop, onFileClick, onAnswerQu
 
     window.addEventListener('keydown', onKeyDown, true);
     return () => window.removeEventListener('keydown', onKeyDown, true);
-  }, [canJumpPrev, jumpPrevUser, nextUserIndex, jumpNextUser, markHistoryReadingIntent]);
+  }, [canJumpPrev, jumpPrevUser, nextUserIndex, jumpNextUser, markHistoryReadingIntent, shortcutBindings]);
 
-  // preparing: 사용자가 메시지 보낸 직후 ~ 첫 콘텐츠 도착 전 구간.
-  // 이 구간에 아바타 + 점 3개 플레이스홀더를 보여주면 "AI가 듣고 있다"는
-  // 느낌을 준다. Pi/Claude 모두 동일. 첫 콘텐츠(thinking 또는 text)가
-  // 도착하면 phase가 streaming으로 바뀌어 자동으로 사라진다.
-  const showAssistantPlaceholder = displayTurnPhase === 'preparing'
+  // Keep non-streaming live phases visible in the status above the composer.
+  const showActiveTurnNotice = displayTurnPhase === 'preparing'
     || displayTurnPhase === 'awaiting_user'
     || displayTurnPhase === 'compacting'
     || displayTurnPhase === 'stalled'
@@ -1472,14 +1669,13 @@ export function ChatPanel({ onSend, onAbort, onSafeStop, onFileClick, onAnswerQu
     return false;
   }, [conversationViewport.shouldAutoFollow]);
 
-  // ── Detect explicit user scroll intent on the Virtuoso scroller ──
-  // We listen for upward wheel ticks and touchmove deltas. The Virtuoso
-  // scroller is the first scrollable child of the wrapper div.
+  // Detect explicit user scroll intent in both renderers. Layout-only
+  // movement must not disable bottom following.
   useEffect(() => {
     const wrap = scrollWrapRef.current;
     if (!wrap) return;
     const scroller = wrap.querySelector('[data-testid="virtuoso-scroller"]') as HTMLElement | null
-      || wrap.querySelector('div[style*="overflow"]') as HTMLElement | null;
+      || wrap.querySelector('[data-chat-scroll="plain"]') as HTMLElement | null;
     if (!scroller) return;
 
     const captureCurrentViewport = () => {
@@ -1511,7 +1707,7 @@ export function ChatPanel({ onSend, onAbort, onSafeStop, onFileClick, onAnswerQu
     };
     // Keyboard scroll-up
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'PageUp' || e.key === 'ArrowUp' || (e.key === 'Home')) markScrolledUp();
+      if (e.key === 'PageUp' || e.key === 'ArrowUp' || e.key === 'Home' || (e.key === ' ' && e.shiftKey)) markScrolledUp();
     };
 
     scroller.addEventListener('scroll', onScroll, { passive: true });
@@ -1529,6 +1725,8 @@ export function ChatPanel({ onSend, onAbort, onSafeStop, onFileClick, onAnswerQu
   }, [activeSessionId, mergedMessages.length > 0, saveChatScrollSnapshot, topVisibleIndex, bottomVisibleIndex, markHistoryReadingIntent, mergedMessages.length, updateVisibleRangeFromDom]);
 
   const jumpToLatest = useCallback(() => {
+    scrollInteractionGeneration.current++;
+    restoreInProgressRef.current = false;
     streamingHistoryReadLock.current = false;
     const now = markPinnedToBottom('jump-latest');
     traceChatScroll('jump-latest', { messageCount: mergedMessages.length });
@@ -1543,7 +1741,9 @@ export function ChatPanel({ onSend, onAbort, onSafeStop, onFileClick, onAnswerQu
     });
     scrollToBottom();
     startSettleLoop(1000);
+    const visit = viewportVisitRef.current;
     requestAnimationFrame(() => {
+      if (viewportVisitRef.current !== visit) return;
       scrollToBottom();
       updateVisibleRangeFromDom({
         startIndex: Math.max(0, mergedMessages.length - 1),
@@ -1589,8 +1789,6 @@ export function ChatPanel({ onSend, onAbort, onSafeStop, onFileClick, onAnswerQu
     return -1;
   }, [latestUserIndex, mergedMessages]);
 
-  const hasAssistantAfterLatestUser = latestAssistantAfterLatestUserIndex >= 0;
-
   const isTurnVisuallyActive = displayTurnPhase === 'preparing'
     || displayTurnPhase === 'streaming'
     || displayTurnPhase === 'tool_running'
@@ -1598,13 +1796,16 @@ export function ChatPanel({ onSend, onAbort, onSafeStop, onFileClick, onAnswerQu
     || displayTurnPhase === 'stalled'
     || isStreaming;
 
-  const showInlineAssistantPlaceholder = latestUserIndex >= 0
-    && isTurnVisuallyActive
-    && !hasAssistantAfterLatestUser;
-
   // ── Render a single message row for Virtuoso ──
   // normalizeContentBlocks runs once per message via getNormalized cache —
   // not on every Virtuoso re-render. This was the dominant per-token cost.
+  const handleCancelQueued = useCallback((messageId: string) => {
+    const text = useChatStore.getState().cancelQueuedMessage(messageId);
+    if (text) {
+      window.dispatchEvent(new CustomEvent('restore-input-text', { detail: text }));
+    }
+  }, []);
+
   const renderMessage = useCallback((index: number) => {
     const raw = mergedMessages[index];
     if (!raw) return null;
@@ -1623,10 +1824,9 @@ export function ChatPanel({ onSend, onAbort, onSafeStop, onFileClick, onAnswerQu
           ? msg.id === activeAssistantMessageId
           : index === latestAssistantAfterLatestUserIndex
       );
-    const showPlaceholderAfterThisMessage = showInlineAssistantPlaceholder && index === latestUserIndex;
     return (
       <>
-        <div className={`px-3 md:px-6 ${isUserContinuation ? 'pt-0 pb-0.5' : 'py-0.5'}`}>
+        <div className={`mx-auto w-full max-w-[1080px] px-3 md:px-6 ${isUserContinuation ? 'pt-0 pb-0.5' : 'py-0.5'}`}>
           <MessageBubble
             key={msg.id}
             message={msg}
@@ -1634,26 +1834,15 @@ export function ChatPanel({ onSend, onAbort, onSafeStop, onFileClick, onAnswerQu
             onOpenAssistantHome={showAssistantCharacter ? openActiveProjectHome : undefined}
             onFileClick={onFileClick}
             onRetry={onSend}
-            onCancelQueued={(messageId) => {
-              const text = useChatStore.getState().cancelQueuedMessage(messageId);
-              if (text) {
-                window.dispatchEvent(new CustomEvent('restore-input-text', { detail: text }));
-              }
-            }}
-            showMetrics={msg.role === 'assistant' && msg.durationMs != null && !(isStreaming && !!activeAssistantMessageId && index === mergedMessages.length - 1)}
+            onCancelQueued={handleCancelQueued}
+            showMetrics={msg.role === 'assistant' && !msg.metadata?.assistantSegmentOf && msg.durationMs != null && !(isStreaming && !!activeAssistantMessageId && index === mergedMessages.length - 1)}
             isLastAssistant={isLatestAssistant}
-            showTodoSnapshots={isLatestAssistant}
             isContinuation={isUserContinuation}
           />
         </div>
-        {showPlaceholderAfterThisMessage && (
-          <div className="px-3 md:px-6 py-0.5">
-            <AssistantPendingMessageRow />
-          </div>
-        )}
       </>
     );
-  }, [mergedMessages, activeAssistantMessageId, latestUserIndex, latestAssistantAfterLatestUserIndex, showInlineAssistantPlaceholder, displayTurnPhase, isTurnVisuallyActive, isStreaming, onFileClick, onSend, getNormalized, showAssistantCharacter, activeProject, openActiveProjectHome]);
+  }, [mergedMessages, activeAssistantMessageId, latestUserIndex, latestAssistantAfterLatestUserIndex, isTurnVisuallyActive, isStreaming, onFileClick, onSend, getNormalized, showAssistantCharacter, activeProject, openActiveProjectHome, handleCancelQueued]);
 
   // ── Header: "Load More" indicator ──
   const headerComponent = useMemo(() => {
@@ -1682,28 +1871,25 @@ export function ChatPanel({ onSend, onAbort, onSafeStop, onFileClick, onAnswerQu
   }, [hasMoreMessages, loadingMoreMessages, handleStartReached]);
 
   // ── Active turn status / live timer ──
-  // Keep this OUTSIDE the Virtuoso/PlainMessageList scroll content. While a run
-  // is active the live timer updates every second; if that footer lives inside
-  // the virtualized list, Virtuoso re-measures the list bottom and can visibly
-  // tug the viewport when the user is already at the bottom.
-  const showLiveTurnFooter = isStreaming || showAssistantPlaceholder;
-  const activeTurnFooter = useMemo(() => {
-    if (!showLiveTurnFooter) return null;
-    return (
-      <div className="shrink-0 px-3 md:px-6 pt-1 pb-1 flex justify-start pointer-events-none">
-        <ActiveTurnStatusPill phase={displayTurnPhase} />
-      </div>
-    );
-  }, [showLiveTurnFooter, displayTurnPhase]);
+  // Keep the live timer outside the virtualized message list so its once-per-second
+  // updates do not re-measure the list bottom and tug the reading viewport.
+  const showLiveTurnFooter = isStreaming || showActiveTurnNotice;
+  const navModifier = typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/i.test(
+    (navigator as Navigator & { userAgentData?: { platform?: string } }).userAgentData?.platform || navigator.platform || navigator.userAgent
+  ) ? '⌥' : 'Alt+';
   const stoppedTurnFooter = useMemo(() => {
     if (showLiveTurnFooter || activeTurnTerminal?.outcome !== 'stopped') return null;
     return <StoppedTurnStatusBox forced={activeTurnTerminal.reason === 'forced_stop'} />;
   }, [activeTurnTerminal?.outcome, activeTurnTerminal?.reason, showLiveTurnFooter]);
 
   return (
-    <div className="flex h-full relative overflow-hidden">
+    <div className="relative flex h-full min-w-0 max-w-full overflow-hidden">
       {/* Main chat area */}
-      <div className="flex flex-col flex-1 min-w-0 h-full">
+      <div className="relative flex h-full min-w-0 max-w-full flex-1 flex-col overflow-x-hidden">
+
+        {activeSessionId && (
+          <SessionWaitAlarmCard key={activeSessionId} sessionId={activeSessionId} isStreaming={isStreaming} />
+        )}
 
         {/* Conversation branch provenance — immutable source session remains available. */}
         {activeSession?.parentSessionId && activeSession?.sourceMessageId && activeSession?.label === 'conversation_branch' && (
@@ -1734,7 +1920,8 @@ export function ChatPanel({ onSend, onAbort, onSafeStop, onFileClick, onAnswerQu
             </div>
           </div>
         )}
-        {/* Messages area */}
+        {/* Conversation viewport, excluding the composer and turn notices. */}
+        <div className="relative flex min-h-0 flex-1 flex-col">
         {renderMessages.length === 0 && renderSessionLoading ? (
           /* Loading skeleton while switching sessions */
           <div className="flex-1 overflow-y-auto px-3 md:px-6">
@@ -1753,7 +1940,7 @@ export function ChatPanel({ onSend, onAbort, onSafeStop, onFileClick, onAnswerQu
           </div>
         ) : renderMessages.length === 0 ? (
           /* Genuinely empty session — keep the default model; model changes live in the header menu. */
-          <EmptyState session={activeSession} project={activeProject} onStart={onSend} />
+          <SessionWelcome project={activeProject} content={welcome.content} isLoading={welcome.isLoading} onInteraction={welcome.onInteraction} onStart={onSend} />
         ) : mergedMessages.length <= PLAIN_MESSAGE_LIMIT ? (
           /* Plain scroll for small conversations — no virtualization = no mount/unmount flash.
            * Above PLAIN_MESSAGE_LIMIT, switch to Virtuoso earlier so long/visual-heavy
@@ -1781,11 +1968,11 @@ export function ChatPanel({ onSend, onAbort, onSafeStop, onFileClick, onAnswerQu
           />
         ) : (
           /* Virtualized list for large conversations */
-          <div ref={scrollWrapRef} className="flex-1 min-h-0 relative">
+          <div ref={scrollWrapRef} className="relative min-h-0 min-w-0 max-w-full flex-1 overflow-x-hidden">
           <Virtuoso
             key={activeSessionId}
             ref={virtuosoRef}
-            className="h-full"
+            className="h-full min-w-0 max-w-full overflow-x-hidden"
             style={{ overscrollBehavior: 'contain' }}
             data={mergedMessages}
             computeItemKey={(_idx, item) => item.id}
@@ -1794,7 +1981,7 @@ export function ChatPanel({ onSend, onAbort, onSafeStop, onFileClick, onAnswerQu
             initialTopMostItemIndex={sessionRestorePlan.kind === 'anchor' ? sessionRestorePlan.anchorIndex : mergedMessages.length - 1}
             alignToBottom={true}
             itemContent={(index) => (
-              <div data-msg-index={index} data-msg-id={mergedMessages[index]?.id}>
+              <div data-msg-index={index} data-msg-id={mergedMessages[index]?.id} className="min-w-0 max-w-full overflow-x-hidden">
                 {renderMessage(index)}
               </div>
             )}
@@ -1818,7 +2005,7 @@ export function ChatPanel({ onSend, onAbort, onSafeStop, onFileClick, onAnswerQu
               const isWithinUserScrollUpGesture = userScrolledUp.current && atBottom && now < bottomRearmSuppressedUntil.current;
               const isStreamingHistoryReadLocked = userScrolledUp.current && atBottom && isStreaming && streamingHistoryReadLock.current;
               const metrics = getCurrentScrollerMetrics();
-              if (metrics && !isWithinUserScrollUpGesture && !isStreamingHistoryReadLocked) conversationViewport.onUserScroll(metrics);
+              if (metrics && (userScrolledUp.current || (atBottom && metrics.scrollHeight - metrics.scrollTop - metrics.clientHeight < 80)) && !isWithinUserScrollUpGesture && !isStreamingHistoryReadLocked) conversationViewport.onUserScroll(metrics);
               if (restoreInProgressRef.current) {
                 isAtBottom.current = false;
                 return;
@@ -1848,8 +2035,8 @@ export function ChatPanel({ onSend, onAbort, onSafeStop, onFileClick, onAnswerQu
                 scrollToBottom();
                 return;
               }
-              isAtBottom.current = atBottom;
-              saveChatScrollSnapshot({ topVisibleIndex, atBottom });
+              isAtBottom.current = true;
+              saveChatScrollSnapshot({ topVisibleIndex, atBottom: true });
               if (atBottom) {
                 const anchor = mergedMessages.at(-1);
                 captureViewportSnapshot({
@@ -1884,9 +2071,26 @@ export function ChatPanel({ onSend, onAbort, onSafeStop, onFileClick, onAnswerQu
           </div>
         )}
 
-        {/* Autocompact banner removed: compacting status is already shown above the input box. */}
+        {/* Question navigation is centered within the conversation viewport. */}
+        {renderMessages.length > 0 && (canJumpPrev || nextUserIndex >= 0) && (
+          <nav aria-label={t('previousQuestion', { shortcut: `${navModifier}↑` }) + ' / ' + t('nextQuestion', { shortcut: `${navModifier}↓` })} className="absolute right-1 top-1/2 z-30 flex -translate-y-1/2 flex-col rounded-md border border-surface-700/70 bg-surface-900/95 shadow-lg md:right-2">
+            <button type="button" onClick={jumpPrevUser} disabled={!canJumpPrev}
+              aria-label={t('previousQuestion', { shortcut: `${navModifier}↑` })}
+              title={t('previousQuestion', { shortcut: `${navModifier}↑` })}
+              className="flex h-7 w-4 items-center justify-center rounded-t-md text-surface-300 hover:bg-surface-700 disabled:cursor-default disabled:opacity-30">
+              <svg className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24" aria-hidden="true"><path d="m5 15 7-7 7 7" /></svg>
+            </button>
+            <button type="button" onClick={jumpNextUser} disabled={nextUserIndex < 0}
+              aria-label={t('nextQuestion', { shortcut: `${navModifier}↓` })}
+              title={t('nextQuestion', { shortcut: `${navModifier}↓` })}
+              className="flex h-7 w-4 items-center justify-center rounded-b-md text-surface-300 hover:bg-surface-700 disabled:cursor-default disabled:opacity-30">
+              <svg className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24" aria-hidden="true"><path d="m19 9-7 7-7-7" /></svg>
+            </button>
+          </nav>
+        )}
+        </div>
 
-        {activeTurnFooter}
+        <ChatFeedback sessionId={activeSessionId} />
         {stoppedTurnFooter}
 
         {floatingQuestion && (
@@ -1894,11 +2098,11 @@ export function ChatPanel({ onSend, onAbort, onSafeStop, onFileClick, onAnswerQu
             data-testid="floating-question-layer"
             className={isQuestionMinimized
               ? 'pointer-events-none absolute inset-x-0 bottom-[7.25rem] z-30 flex justify-center px-3 md:bottom-[8.5rem] md:px-6'
-              : 'pointer-events-none absolute inset-0 z-30 flex items-center justify-center px-3 py-20 md:px-6 md:py-24'}
+              : 'pointer-events-none absolute inset-x-0 top-0 bottom-[7.25rem] z-30 flex items-center justify-center px-3 py-3 md:bottom-[8.5rem] md:px-6 md:py-6'}
           >
             <div className={isQuestionMinimized
               ? 'pointer-events-auto w-full max-w-[42rem]'
-              : 'pointer-events-auto flex max-h-[min(76vh,44rem)] w-full max-w-[42rem] overscroll-contain rounded-[24px]'}
+              : 'pointer-events-auto flex h-full min-h-0 max-h-[44rem] w-full max-w-[42rem] flex-col justify-center overscroll-contain rounded-[24px]'}
             >
               <FloatingQuestionCard
                 question={floatingQuestion}
@@ -1914,17 +2118,16 @@ export function ChatPanel({ onSend, onAbort, onSafeStop, onFileClick, onAnswerQu
 
         {/* Input. AskUserQuestion now lives in a non-modal dock layer above it,
             so the chat history remains scrollable behind the question card. */}
-        <div className="shrink-0 px-3 md:px-6 pb-2 md:pb-6 relative z-20">
+        <div className="relative z-20 mx-auto w-full max-w-[1080px] min-w-0 shrink-0 overflow-visible px-3 pb-2 md:px-6 md:pb-5">
           <InputBox
+            activeTurnStatus={showLiveTurnFooter ? <ActiveTurnStatusPill phase={displayTurnPhase} /> : null}
+            onInteraction={welcome.onInteraction}
             onSend={onSend}
             onAbort={onAbort}
-            onSafeStop={onSafeStop}
+            onStopImmediately={onStopImmediately}
             onAnswerQuestion={handleAnswerFromCard}
-            onJumpPrevUser={jumpPrevUser}
-            onJumpNextUser={jumpNextUser}
-            hasPrevUser={canJumpPrev}
-            hasNextUser={nextUserIndex >= 0}
           />
+          <StatusLine isTurnActive={showLiveTurnFooter} />
         </div>
 
       </div>
@@ -1935,9 +2138,8 @@ export function ChatPanel({ onSend, onAbort, onSafeStop, onFileClick, onAnswerQu
 /* ── Turn status helpers ── */
 
 function formatActiveTurnDuration(ms: number): string {
-  if (ms < 1000) return '0.0s';
-  const s = ms / 1000;
-  if (s < 60) return `${s.toFixed(1)}s`;
+  const s = Math.floor(Math.max(0, ms) / 1000);
+  if (s < 60) return `${s}s`;
   const m = Math.floor(s / 60);
   const rem = Math.floor(s % 60);
   return `${m}m ${rem}s`;
@@ -2029,16 +2231,15 @@ function StoppedTurnStatusBox({ forced }: { forced: boolean }) {
   );
 }
 
-function ActiveTurnStatusPill({ phase }: { phase: TurnPhase }) {
+export function ActiveTurnStatusPill({ phase }: { phase: TurnPhase }) {
   const { t } = useTranslation('chat');
   const statusLines = t('activeTurnStatusLines', { returnObjects: true }) as string[];
   const isAwaitingUser = phase === 'awaiting_user';
-  const isStreaming = useChatStore((s) => s.isStreaming);
   const turnStartTime = useChatStore((s) => s.turnStartTime);
   const [elapsed, setElapsed] = useState(0);
 
   useEffect(() => {
-    if (!isStreaming || !turnStartTime) {
+    if (isAwaitingUser || !turnStartTime) {
       setElapsed((current) => (current === 0 ? current : 0));
       return;
     }
@@ -2046,7 +2247,7 @@ function ActiveTurnStatusPill({ phase }: { phase: TurnPhase }) {
     setElapsed(nextElapsed());
     const iv = setInterval(() => setElapsed(nextElapsed()), 1000);
     return () => clearInterval(iv);
-  }, [isStreaming, turnStartTime]);
+  }, [isAwaitingUser, turnStartTime]);
 
   const statusLine = useMemo(
     () => phaseLabel(t, phase, statusLines, turnStartTime),
@@ -2054,7 +2255,7 @@ function ActiveTurnStatusPill({ phase }: { phase: TurnPhase }) {
   );
 
   return (
-    <div className={`inline-flex items-center gap-2 rounded-full border px-2.5 py-1.5 text-[13px] font-medium shadow-[0_10px_30px_rgba(0,0,0,0.18)] backdrop-blur-xl ${
+    <div role="status" data-testid="active-turn-status" className={`tower-active-turn-pill pointer-events-auto max-w-full rounded-lg bg-surface-900 inline-flex items-center gap-2 border-l-2 px-2 py-1 text-[13px] font-medium ${
       isAwaitingUser
         ? 'tone-warning tone-bg-soft tone-border tone-text'
         : 'tower-active-turn-pill'
@@ -2081,24 +2282,6 @@ function phaseLabel(t: (key: string) => string, phase: TurnPhase, statusLines: s
     stopped: 'stopped', error: 'error',
   };
   return t(`turnPhase.${phaseKeys[phase] || 'working'}`);
-}
-
-function AssistantPendingMessageRow() {
-  const { t } = useTranslation('chat');
-  return (
-    <div className="flex gap-3 py-5 justify-start group/message">
-      <div className="flex flex-col items-center gap-1 shrink-0 mt-0.5">
-        <span className="tower-assistant-mark tower-assistant-mark--active" title="Tower AI" aria-label="Tower AI">
-          <SequentialTowerMark compact />
-        </span>
-      </div>
-      <div className="min-w-0 overflow-hidden flex-1">
-        <div className="relative min-h-7 space-y-2">
-          <span className="sr-only">{t('turnPhase.pendingAssistant')}</span>
-        </div>
-      </div>
-    </div>
-  );
 }
 
 function AssistantPlaceholder({ phase }: { phase: TurnPhase }) {
@@ -2139,137 +2322,6 @@ function AssistantPlaceholder({ phase }: { phase: TurnPhase }) {
           </div>
         )}
         <TurnMetricsBar />
-      </div>
-    </div>
-  );
-}
-
-/* ── Empty State ── */
-
-function TowerLearningVisual() {
-  const { t } = useTranslation('chat');
-  return (
-    <div className="tower-empty-visual" aria-hidden="true">
-      <div className="tower-empty-visual__halo" />
-      <div className="tower-empty-visual__orbit tower-empty-visual__orbit--outer">
-        <span className="tower-empty-visual__node tower-empty-visual__node--top" />
-        <span className="tower-empty-visual__node tower-empty-visual__node--right" />
-        <span className="tower-empty-visual__node tower-empty-visual__node--bottom" />
-        <span className="tower-empty-visual__node tower-empty-visual__node--left" />
-      </div>
-      <div className="tower-empty-visual__orbit tower-empty-visual__orbit--inner">
-        <span className="tower-empty-visual__spark tower-empty-visual__spark--a" />
-        <span className="tower-empty-visual__spark tower-empty-visual__spark--b" />
-        <span className="tower-empty-visual__spark tower-empty-visual__spark--c" />
-      </div>
-      <span className="tower-empty-visual__label tower-empty-visual__label--knowledge">{t('emptyState.visualKnowledge')}</span>
-      <span className="tower-empty-visual__label tower-empty-visual__label--tools">{t('emptyState.visualTools')}</span>
-      <span className="tower-empty-visual__label tower-empty-visual__label--files">{t('emptyState.visualFiles')}</span>
-      <span className="tower-empty-visual__label tower-empty-visual__label--agents">AI</span>
-      <div className="tower-empty-visual__core">
-        <span className="tower-empty-visual__bar tower-empty-visual__bar--1" />
-        <span className="tower-empty-visual__bar tower-empty-visual__bar--2" />
-        <span className="tower-empty-visual__bar tower-empty-visual__bar--3" />
-      </div>
-    </div>
-  );
-}
-
-function EmptyState({ session, project, onStart }: {
-  session: import('@tower/shared').SessionMeta | null;
-  project: import('@tower/shared').Project | null;
-  onStart: (message: string) => void;
-}) {
-  const { t } = useTranslation('chat');
-  const emptyStatePrompts = t('emptyState.prompts', { returnObjects: true }) as string[];
-  const agentStarters = t('emptyState.agentStarters', { returnObjects: true }) as string[];
-  const sessions = useSessionStore((s) => s.sessions);
-  const [guideSeen, setGuideSeen] = useState(() => hasSeenTowerGuide());
-  const currentUsername = typeof window !== 'undefined' ? localStorage.getItem('username') : null;
-  const hasOwnSession = !!currentUsername && sessions.some((session) => session.ownerUsername === currentUsername);
-  const shouldShowGuideCta = !guideSeen || !hasOwnSession;
-  useEffect(() => {
-    const update = () => setGuideSeen(hasSeenTowerGuide());
-    window.addEventListener(TOUR_STATE_CHANGED_EVENT, update);
-    window.addEventListener('storage', update);
-    return () => {
-      window.removeEventListener(TOUR_STATE_CHANGED_EVENT, update);
-      window.removeEventListener('storage', update);
-    };
-  }, []);
-  const startTour = () => window.dispatchEvent(new CustomEvent('tower-start-tour', { detail: { tourId: 'beginner' } }));
-  const startChatGuide = () => {
-    markTowerGuideSeen();
-    window.dispatchEvent(new CustomEvent('restore-input-text', { detail: '/tower-intro ' }));
-  };
-  if (session?.agentCreationCommandId && project) {
-    const teammateName = project.agent?.displayName || project.name;
-    return (
-      <div className="flex-1 overflow-y-auto px-3 md:px-6">
-        <div className="mx-auto flex min-h-full max-w-xl flex-col items-center justify-center py-10 text-center">
-          <AgentIdentityAvatar project={project} className="h-20 w-20" />
-          <div className="mt-5 text-xs font-bold uppercase tracking-[0.16em] text-primary-300">{t('emptyState.firstTask')}</div>
-          <h2 className="mt-2 text-2xl font-black tracking-tight text-gray-100">{t('emptyState.assignFirstTask', { name: teammateName })}</h2>
-          <p className="mt-2 max-w-lg text-[15px] leading-6 text-gray-400">
-            {t('emptyState.firstTaskHint')}
-          </p>
-          <div className="mt-5 grid w-full gap-2 sm:grid-cols-3">
-            {agentStarters.map((starter) => (
-              <button
-                key={starter}
-                type="button"
-                onClick={() => onStart(starter)}
-                className="rounded-2xl border border-surface-700 bg-surface-900/70 px-4 py-3 text-sm font-semibold text-gray-200 transition hover:border-primary-500/50 hover:bg-primary-500/10"
-              >
-                {starter}
-              </button>
-            ))}
-          </div>
-        </div>
-      </div>
-    );
-  }
-  return (
-    <div className="flex-1 overflow-y-auto px-3 md:px-6">
-      <div className="flex min-h-full flex-col items-center justify-center py-10 text-center max-w-2xl mx-auto">
-        <TowerLearningVisual />
-        <h2 className="mt-5 text-3xl font-bold text-gray-100 tracking-tight">{t('emptyState.headline')}</h2>
-        <p className="mt-2 max-w-xl text-[16px] leading-relaxed text-gray-400">
-          {t('emptyState.description')}
-          <br className="hidden sm:block" />
-          {t('emptyState.descriptionFollowup')}
-        </p>
-        <div className="mt-5 flex max-w-xl flex-wrap justify-center gap-2">
-          {emptyStatePrompts.map((prompt) => (
-            <span
-              key={prompt}
-              className="rounded-full border border-surface-700/65 bg-surface-900/60 px-3 py-1.5 text-[14px] font-medium text-gray-300 shadow-sm"
-            >
-              {prompt}
-            </span>
-          ))}
-        </div>
-        <p className="mt-4 text-[13px] text-gray-400">
-          {t('emptyState.helpPrefix')} <span className="font-medium text-gray-300">/tower-intro</span> {t('emptyState.helpMiddle')} <span className="font-medium text-gray-300">/</span> {t('emptyState.helpSuffix')}
-        </p>
-        {shouldShowGuideCta && (
-          <div className="mt-3 flex flex-wrap justify-center gap-2">
-            <button
-              type="button"
-              onClick={startTour}
-              className="rounded-full border border-primary-500/30 bg-primary-500/10 px-3.5 py-1.5 text-[13px] font-semibold text-primary-300 transition-colors hover:border-primary-500/50 hover:bg-primary-500/15"
-            >
-              {t('emptyState.startGuide')}
-            </button>
-            <button
-              type="button"
-              onClick={startChatGuide}
-              className="rounded-full border border-surface-700/70 bg-surface-900/50 px-3.5 py-1.5 text-[13px] font-semibold text-gray-300 hover:border-surface-600 hover:bg-surface-800/70 hover:text-gray-100"
-            >
-              {t('emptyState.askInChat')}
-            </button>
-          </div>
-        )}
       </div>
     </div>
   );

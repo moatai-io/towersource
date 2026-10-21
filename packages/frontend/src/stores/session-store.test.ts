@@ -118,6 +118,18 @@ describe('session list scope reconciliation', () => {
     expect(useSessionStore.getState().projectSessionsLoading.has('project-a')).toBe(false);
   });
 
+  it('preserves a newly created session when an older project snapshot arrives late', async () => {
+    useSessionStore.setState({ sessions: [session('old', 'project-a', '2026-08-20T01:00:00Z')] });
+    let resolveFetch!: (value: unknown) => void;
+    global.fetch = vi.fn(() => new Promise(resolve => { resolveFetch = resolve; })) as any;
+    const loading = useSessionStore.getState().hydrateProjectSessions('project-a');
+    const created = session('just-created', 'project-a', '2026-08-20T02:00:00Z');
+    useSessionStore.getState().addSession(created);
+    resolveFetch({ ok: true, json: async () => [] });
+    await loading;
+    expect(useSessionStore.getState().sessions.map(s => s.id)).toEqual(['just-created']);
+  });
+
   it('allows a failed project hydration to be retried', async () => {
     global.fetch = vi.fn()
       .mockResolvedValueOnce({ ok: false, status: 503, json: async () => ({}) })
@@ -353,6 +365,25 @@ describe('setSessionStreaming', () => {
     expect(useSessionStore.getState().recentlyReadSessionUntil).toEqual({ s2: 1 });
     expect(JSON.parse(localStorage.getItem('tower:latest-dismissed-keys:v1:admin') || '[]'))
       .toEqual(['s3:2026-07-03T00:00:00.000Z']);
+  });
+
+  it('lets authoritative server read state clear stale local unread attention', async () => {
+    localStorage.setItem('username', 'admin');
+    useSessionStore.setState({
+      unreadSessions: new Set(['stale-session']),
+      recentlyReadSessionUntil: {},
+    } as any);
+    global.fetch = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        entries: [{ sessionId: 'stale-session', state: 'recently_read' }],
+      }),
+    })) as any;
+
+    await useSessionStore.getState().hydrateLatestAttentionFromServer();
+
+    expect(useSessionStore.getState().unreadSessions.has('stale-session')).toBe(false);
+    expect(useSessionStore.getState().recentlyReadSessionUntil).toEqual({ 'stale-session': 1 });
   });
 
   it('does not erase a live unread completion when a stale hydration finishes later', async () => {

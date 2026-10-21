@@ -33,3 +33,18 @@ describe('Primary Agent creation intents',()=>{
     await expect(consumePrimaryAgentCreationIntent({approvalIntentId:'intent-1',commandId:'command-2',actorUserId:7,sourceProjectId:'talent',approvedCardHash:hash,payload})).rejects.toThrow('unused');
   });
 });
+
+describe('reserved execution authority in staffing', () => {
+  beforeEach(() => queryOne.mockReset());
+  it.each(['member', 'operator', 'admin'])('rejects superuser creation preview even for %s without writing an intent', async actorRole => {
+    await expect(createPrimaryAgentCreationIntent({ actorUserId: 7, actorRole, sourceProjectId: 'general', payload: { ...payload, authorityPolicy: { superuser: true } } }))
+      .rejects.toThrow('AGENT_EXECUTION_AUTHORITY_RESERVED');
+    expect(queryOne).not.toHaveBeenCalled();
+  });
+  it('rejects an older privileged staffing intent before consuming it', async () => {
+    const privileged = { ...payload, authorityPolicy: { superuser: true } };
+    await expect(consumePrimaryAgentCreationIntent({ approvalIntentId: 'old-intent', commandId: 'command', actorUserId: 7, sourceProjectId: 'general', approvedCardHash: primaryAgentStaffingHash(privileged), payload: privileged }))
+      .rejects.toThrow('AGENT_EXECUTION_AUTHORITY_RESERVED');
+    expect(queryOne).not.toHaveBeenCalled();
+  });
+});

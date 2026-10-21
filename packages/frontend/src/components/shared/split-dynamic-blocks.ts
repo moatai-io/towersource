@@ -1,7 +1,7 @@
 export const VISUAL_LANGUAGES = [
   'mermaid', 'chart', 'datatable', 'html-sandbox', 'svg', 'timeline', 'map', 'secure-input',
   'steps', 'diff', 'form', 'kanban', 'terminal', 'comparison',
-  'treemap', 'gallery', 'audio', 'browser-popup', 'browser-live', 'cad-evidence',
+  'treemap', 'gallery', 'audio', 'browser-popup', 'browser-live',
 ] as const;
 
 export type VisualLang = typeof VISUAL_LANGUAGES[number];

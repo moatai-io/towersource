@@ -3,67 +3,28 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const source = fs.readFileSync(path.resolve(import.meta.dirname, './AdminPanel.tsx'), 'utf8');
-const locale = (language: 'en' | 'ko') => JSON.parse(
-  fs.readFileSync(path.resolve(import.meta.dirname, `../../locales/${language}/admin.json`), 'utf8'),
-);
+const locale = (language: 'en' | 'ko') => JSON.parse(fs.readFileSync(path.resolve(import.meta.dirname, `../../locales/${language}/admin.json`), 'utf8'));
 
 describe('Admin Panel compact navigation contract', () => {
-  it('uses dedicated short labels for top-level and connection detail tabs', () => {
-    for (const key of ['users', 'agents', 'usage', 'ai', 'runtime', 'connections', 'system']) {
-      expect(source).toContain(`t('navigation.${key}')`);
-    }
-    for (const key of ['management', 'agents', 'advanced']) {
-      expect(source).toContain(`t('credentialConnections.detailTabs.${key}')`);
-    }
-    expect(source).not.toContain("renderTab('agents', t('agentManagement'))");
-    expect(source).not.toContain("['management', t('credentialConnections.managementTab')]");
+  it('uses short top-level labels', () => {
+    for (const key of ['users', 'agents', 'usage', 'ai', 'connections', 'system']) expect(source).toContain(`t('navigation.${key}')`);
+    expect(source).toContain("renderTab('runtime', t('runtimeBoxTab'))");
+    for (const language of ['en', 'ko'] as const) for (const value of Object.values(locale(language).navigation) as string[]) expect(value.length).toBeLessThanOrEqual(12);
   });
 
-  it('keeps navigation labels within compact copy budgets', () => {
+  it('uses compact direct Connection action labels', () => {
     for (const language of ['en', 'ko'] as const) {
-      const admin = locale(language);
-      for (const value of Object.values(admin.navigation) as string[]) {
-        expect(value.length).toBeLessThanOrEqual(12);
-      }
-      for (const value of Object.values(admin.credentialConnections.detailTabs) as string[]) {
-        expect(value.length).toBeLessThanOrEqual(10);
-      }
+      const labels = locale(language).credentialConnections;
+      for (const key of ['replace', 'enable', 'disable', 'delete']) expect(labels[key].length).toBeLessThanOrEqual(12);
     }
+    for (const key of ['replace', 'enable', 'disable', 'delete']) expect(source).toContain(`t('credentialConnections.${key}')`);
   });
 
-  it('keeps connection action labels within button copy budgets', () => {
-    for (const language of ['en', 'ko'] as const) {
-      const labels = locale(language).credentialConnections.actionLabels;
-      for (const value of Object.values(labels) as string[]) {
-        expect(value.length).toBeLessThanOrEqual(14);
-      }
-    }
-    expect(source).toContain("t('credentialConnections.actionLabels.connect')");
-    expect(source).toContain("t('credentialConnections.actionLabels.copyPrompt')");
-    expect(source).toContain("title={t('credentialConnections.copyDiagnosticPrompt')}");
-  });
-
-  it('keeps advanced credential actions within compact copy budgets', () => {
-    for (const language of ['en', 'ko'] as const) {
-      const labels = locale(language).credentialConnections.advancedActions;
-      for (const value of Object.values(labels) as string[]) {
-        expect(value.length).toBeLessThanOrEqual(16);
-      }
-    }
-    expect(source).toContain("t('credentialConnections.advancedActions.reveal')");
-    expect(source).toContain("t('credentialConnections.advancedActions.reviewAndReplace')");
-    expect(source).not.toContain('>원문 보기</button>');
-    expect(source).not.toContain('>영향 확인 후 교체</button>');
-  });
-
-  it('keeps tabs and connection actions responsive on narrow screens', () => {
+  it('keeps top-level navigation and Connection cards responsive', () => {
     expect(source).toContain('shrink-0 whitespace-nowrap px-3 py-2');
     expect(source).toContain('flex shrink-0 overflow-x-auto');
     expect(source).toContain('px-2 sm:px-6');
-    expect(source).toContain('grid w-full grid-cols-2 gap-2 lg:flex');
-    expect(source).toContain('grid w-full grid-cols-2 gap-2 sm:flex');
-    expect(source).toContain('min-h-10 flex-1');
-    expect(source).toContain('mt-3 grid grid-cols-2 gap-2 sm:flex sm:flex-wrap');
-    expect(source).toContain('mt-3 min-h-10 w-full');
+    expect(source).toContain('space-y-3');
+    expect(source).toContain('flex flex-wrap gap-2');
   });
 });

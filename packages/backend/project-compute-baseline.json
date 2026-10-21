@@ -8,22 +8,111 @@
     "projectNode": "Project별 패키지는 package.json + lock file + node_modules로 관리"
   },
   "commands": {
-    "core": ["bash", "git", "curl", "wget", "jq", "yq", "openssl", "tar", "gzip", "find", "sed", "awk", "grep", "rg", "fd", "rsync", "file", "less", "zip", "unzip", "xz"],
-    "languages": ["node", "npm", "npx", "pnpm", "python", "pip", "uv", "java"],
-    "build": ["gcc", "g++", "make", "pkg-config"],
-    "documents": ["pandoc", "typst", "libreoffice", "soffice", "pdftoppm", "pdfinfo", "pdftotext", "qpdf", "gs", "tesseract", "rsvg-convert"],
-    "media": ["ffmpeg", "convert", "identify"],
-    "browser": ["chromium"],
-    "publishing": ["mmdc"],
+    "core": [
+      "bash",
+      "git",
+      "curl",
+      "wget",
+      "jq",
+      "yq",
+      "openssl",
+      "tar",
+      "gzip",
+      "find",
+      "sed",
+      "awk",
+      "grep",
+      "rg",
+      "fd",
+      "rsync",
+      "file",
+      "less",
+      "zip",
+      "unzip",
+      "xz"
+    ],
+    "languages": [
+      "node",
+      "npm",
+      "npx",
+      "pnpm",
+      "python",
+      "pip",
+      "uv",
+      "java"
+    ],
+    "build": [
+      "gcc",
+      "g++",
+      "make",
+      "pkg-config"
+    ],
+    "documents": [
+      "pandoc",
+      "typst",
+      "libreoffice",
+      "soffice",
+      "pdftoppm",
+      "pdfinfo",
+      "pdftotext",
+      "qpdf",
+      "gs",
+      "tesseract",
+      "rsvg-convert"
+    ],
+    "media": [
+      "ffmpeg",
+      "convert",
+      "identify"
+    ],
+    "browser": [
+      "chromium"
+    ],
+    "publishing": [
+      "mmdc",
+      "marp",
+      "svgo",
+      "tower-html-render"
+    ],
     "tower": []
   },
   "optionalCommands": {
-    "runtimeBoxPublishing": ["marp", "playwright", "svgo", "tower-html-render", "runtime-skill-doctor"],
-    "connectionTools": ["gws"]
+    "runtimeBoxPublishing": [],
+    "connectionTools": [
+      "gws"
+    ]
   },
-  "pythonImports": ["PIL", "pypdf", "pdfplumber", "fitz", "openpyxl", "docx", "pptx", "reportlab", "pandas", "matplotlib", "yaml", "bs4", "lxml", "requests"],
-  "ocrLanguages": ["eng", "kor"],
-  "fontFamilies": ["Pretendard", "Noto Sans CJK KR", "NanumGothic", "Noto Color Emoji", "Inter"],
+  "pythonImports": [
+    "PIL",
+    "pypdf",
+    "pdfplumber",
+    "fitz",
+    "openpyxl",
+    "docx",
+    "pptx",
+    "reportlab",
+    "pandas",
+    "matplotlib",
+    "yaml",
+    "bs4",
+    "lxml",
+    "requests"
+  ],
+  "ocrLanguages": [
+    "eng",
+    "kor"
+  ],
+  "fontFamilies": [
+    "Pretendard",
+    "Noto Sans CJK KR",
+    "Noto Serif CJK KR",
+    "NanumGothic",
+    "NanumGothicCoding",
+    "Noto Color Emoji",
+    "Inter",
+    "DejaVu Sans",
+    "Liberation Sans"
+  ],
   "versionFloors": {
     "node": "22",
     "python": "3.13",
@@ -32,6 +121,25 @@
     "typst": "0.15",
     "playwright": "1.61"
   },
-  "projectLocalOnly": ["application Python libraries beyond pythonImports", "application npm packages", "database servers", "Project-specific system daemons"],
-  "operatorOnly": ["docker", "systemctl", "pm2", "kubectl", "az"]
+  "projectLocalOnly": [
+    "application Python libraries beyond pythonImports",
+    "application npm packages",
+    "database servers",
+    "Project-specific system daemons"
+  ],
+  "operatorOnly": [
+    "docker",
+    "systemctl",
+    "pm2",
+    "kubectl",
+    "az"
+  ],
+  "genericFontFamilies": {
+    "sans-serif": "Noto Sans CJK KR|Pretendard|DejaVu Sans|Liberation Sans",
+    "serif": "Noto Serif CJK KR|DejaVu Serif|Liberation Serif",
+    "monospace": "NanumGothicCoding|DejaVu Sans Mono|Liberation Mono"
+  },
+  "nodeImports": [
+    "playwright-core"
+  ]
 }

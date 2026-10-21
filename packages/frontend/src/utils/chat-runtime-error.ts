@@ -38,6 +38,10 @@ export function presentChatRuntimeError(errorCode?: string): ChatRuntimeErrorPre
       return { message: runtimeErrorText('commandUnsupported'), tone: 'warning' };
     case 'COMPACT_FAILED':
       return { message: runtimeErrorText('compactFailed'), tone: 'warning' };
+    case 'MODEL_NOT_SELECTABLE':
+      return { message: runtimeErrorText('modelNotSelectable'), tone: 'error' };
+    case 'MODEL_PRESET_UNAVAILABLE':
+      return { message: runtimeErrorText('modelPresetUnavailable'), tone: 'error' };
     default:
       return { message: runtimeErrorText('default'), tone: 'error' };
   }

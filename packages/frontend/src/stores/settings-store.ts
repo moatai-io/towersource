@@ -4,6 +4,7 @@ import { getInitialLanguage } from '../i18n';
 export interface ServerConfig {
   version: string;
   gitSha?: string;
+  sourceRev?: string | null;
   buildTime?: string;
   buildId?: string;
   publicUrl?: string | null;
@@ -27,22 +28,16 @@ export interface ServerConfig {
   agentFirstEnabled?: boolean;
   /** External Agent deployment management surface. Enabled on supported Agent-first VMs. */
   aiServicesEnabled?: boolean;
-  /** Internal-only Workspace Apps / DIY ERP Connector beta. Full operator VM only by default. */
-  workspaceAppsEnabled?: boolean;
-  /** Selects the 업무 tab implementation while the connector pilot is dogfooded. */
-  workspaceAppsMode?: 'local-metadata' | 'frappe-connector-pilot';
   /** Low-level Harness lifecycle administration. Full VM only. */
   harnessAdministrationEnabled?: boolean;
   /** Feature flag from /api/config. Default off when absent. */
   inlineEditEnabled?: boolean;
-  /** Turn Rewind / immutable conversation branch. Managed self-hosted servers default off. */
+  /** Turn Rewind / immutable conversation branch. Enabled by default on every server type. */
   turnRewindEnabled?: boolean;
   /** Feature flag from /api/config. Default off when absent. */
   previewDirectEditEnabled?: boolean;
   /** Internal full-VM-only Beta workbench. Default off when absent. */
   betaWorkbenchEnabled?: boolean;
-  /** Dev-first CAD Workbench beta surface. Default off when absent. */
-  cadWorkbenchBetaEnabled?: boolean;
 }
 
 export type ThemeId = 'dark' | 'light';

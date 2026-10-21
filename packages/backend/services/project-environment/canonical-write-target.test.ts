@@ -1,0 +1,15 @@
+import { generateKeyPairSync } from 'node:crypto';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+const mocks = vi.hoisted(() => ({ worker:vi.fn(), secret:vi.fn(), token:vi.fn() }));
+vi.mock('../execution/worker/worker-repository.js',()=>({getPersistedWorkbenchWorker:mocks.worker}));
+vi.mock('../secret/secret-store.js',()=>({getSecretForProjectBinding:mocks.secret}));
+vi.mock('../execution/worker/worker-transport-credentials.js',()=>({resolveWorkbenchWorkerTransportToken:mocks.token}));
+import { resolveCanonicalWriteTarget } from './canonical-write-target.js';
+const config = { workerId:'w', deploymentId:'development', baseUrl:'http://127.0.0.1:9000', projectIds:['p'], signingSecretName:'test-signing' };
+beforeEach(()=>{vi.resetAllMocks(); mocks.worker.mockResolvedValue({workerId:'w',deploymentId:'development',baseUrl:config.baseUrl,status:'healthy'}); mocks.token.mockResolvedValue('synthetic-token'); mocks.secret.mockResolvedValue(generateKeyPairSync('ed25519').privateKey.export({type:'pkcs8',format:'pem'}));});
+afterEach(()=>vi.unstubAllEnvs());
+it('is disabled without explicit installation config',async()=>{expect(await resolveCanonicalWriteTarget('p',{})).toBeUndefined();expect(mocks.worker).not.toHaveBeenCalled();});
+it('resolves only an explicitly selected canary Project',async()=>{const env={TOWER_CANONICAL_WRITE_TARGET:JSON.stringify(config)};expect(await resolveCanonicalWriteTarget('other',env)).toBeUndefined(); const result=await resolveCanonicalWriteTarget('p',env);expect(result?.workerId).toBe('w');expect(result?.signingKey.type).toBe('private');});
+it.each([{baseUrl:'https://remote.example.com'},{projectIds:[]},{unexpected:true},{signingSecretName:''}])('rejects invalid config %j',async extra=>{await expect(resolveCanonicalWriteTarget('p',{TOWER_CANONICAL_WRITE_TARGET:JSON.stringify({...config,...extra})})).rejects.toThrow('CONFIG_INVALID');expect(mocks.secret).not.toHaveBeenCalled();});
+it.each([null,{workerId:'w',deploymentId:'other',baseUrl:config.baseUrl,status:'healthy'},{workerId:'w',deploymentId:'development',baseUrl:config.baseUrl,status:'draining'},{workerId:'w',deploymentId:'development',baseUrl:'http://127.0.0.1:9001',status:'healthy'}])('fails closed on unavailable or changed Worker %j',async worker=>{mocks.worker.mockResolvedValue(worker);await expect(resolveCanonicalWriteTarget('p',{TOWER_CANONICAL_WRITE_TARGET:JSON.stringify(config)})).rejects.toThrow('UNAVAILABLE');expect(mocks.secret).not.toHaveBeenCalled();});
+it('does not expose key-provider failures',async()=>{mocks.secret.mockRejectedValue(new Error('sensitive provider detail'));await expect(resolveCanonicalWriteTarget('p',{TOWER_CANONICAL_WRITE_TARGET:JSON.stringify(config)})).rejects.toThrow('CREDENTIAL_UNAVAILABLE');});

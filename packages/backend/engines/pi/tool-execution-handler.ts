@@ -17,8 +17,18 @@ export function handlePiToolExecutionEnd(event: any): PiToolExecutionEndResult {
       : JSON.stringify(event.result);
 
   const toolName = String(event.toolName || '').toLowerCase();
-  const filePath = event.args?.path || event.args?.file_path;
-  const editedFile = (toolName === 'write' || toolName === 'edit') && filePath
+  const isMarkdownWrite = ['create_markdown_artifact', 'update_markdown_artifact'].includes(toolName);
+  let filePath = event.args?.path || event.args?.file_path;
+  let succeeded = !event.isError && !event.result?.isError;
+  if (isMarkdownWrite) {
+    // Markdown receipts own the canonical persisted path. Input paths may be relative.
+    let receipt: any;
+    try { receipt = JSON.parse(resultText); } catch { /* No receipt means no verified save. */ }
+    succeeded = succeeded && receipt?.ok === true && receipt?.artifact === 'markdown';
+    filePath = receipt?.path;
+  }
+  const editedFile = succeeded && (toolName === 'write' || toolName === 'edit' || isMarkdownWrite)
+    && typeof filePath === 'string' && filePath.length > 0
     ? { filePath, toolName: event.toolName || toolName }
     : undefined;
 

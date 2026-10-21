@@ -24,11 +24,13 @@ import {
   type RuntimeBoxLifecycleLockHeld,
 } from './runtime-box-lifecycle-lock.js';
 import { withWorkbenchToolPath } from './workbench-tools.js';
-import { getPersistedWorkbenchWorker } from './workbench-worker-repository.js';
-import { resolveWorkbenchWorkerTransportToken } from './workbench-worker-transport-credentials.js';
-import { createRemoteWorkbenchHttpTransport } from './workbench-remote-http-transport.js';
+import { getPersistedWorkbenchWorker } from '../execution/worker/worker-repository.js';
+import { resolveWorkbenchWorkerTransportToken } from '../execution/worker/worker-transport-credentials.js';
+import { createRemoteWorkbenchHttpTransport } from '../execution/worker/worker-http-transport.js';
 import { readRemoteWorkerServiceLogs, stopRemoteWorkerService } from './workbench-remote-service-registry.js';
-import type { RemoteWorkbenchWorkerTransport } from './workbench-remote-job-runner.js';
+import type { RemoteWorkbenchWorkerTransport } from '../execution/remote-job-runner.js';
+import { resolveProjectEnvironmentDeploymentId } from '../project-environment/project-environment-deployment.js';
+import { listProjectWorkspaceAuthorities } from '../project-environment/project-workspace-authority.js';
 
 // ── Docker exec helper ───────────────────────────────────────────────────
 
@@ -123,14 +125,40 @@ function makePreviewUrl(token: string): string {
   return `/api/runtime-box/preview/${token}/`;
 }
 
-async function remoteServiceTransport(svc: ServiceRow, actorUserId?: number): Promise<RemoteWorkbenchWorkerTransport> {
+export async function remoteServiceTransport(
+  svc: ServiceRow,
+  actorUserId?: number,
+  dependencies: {
+    getWorker: typeof getPersistedWorkbenchWorker;
+    listAuthorities: typeof listProjectWorkspaceAuthorities;
+    deploymentId: string;
+    resolveToken: typeof resolveWorkbenchWorkerTransportToken;
+    readProjectRoot(projectId: string): Promise<string | undefined>;
+    createTransport: typeof createRemoteWorkbenchHttpTransport;
+  } = {
+    getWorker: getPersistedWorkbenchWorker,
+    listAuthorities: listProjectWorkspaceAuthorities,
+    deploymentId: resolveProjectEnvironmentDeploymentId(),
+    resolveToken: resolveWorkbenchWorkerTransportToken,
+    readProjectRoot: async projectId => (await queryOne<{ root_path: string }>('SELECT root_path FROM projects WHERE id=$1', [projectId]))?.root_path,
+    createTransport: createRemoteWorkbenchHttpTransport,
+  },
+): Promise<RemoteWorkbenchWorkerTransport> {
   if (svc.runner_kind !== 'remote-worker' || !svc.worker_id) throw new RuntimeBoxError(`service ${svc.id} is not a remote Worker service`);
-  const worker = await getPersistedWorkbenchWorker(svc.worker_id, { staleAfterMs: 300_000 });
-  if (!worker || !worker.projectIds.includes(svc.project_id)) throw new RuntimeBoxError(`worker ${svc.worker_id} is unavailable for service ${svc.id}`);
+  const worker = await dependencies.getWorker(svc.worker_id, { staleAfterMs: 300_000 });
+  if (!worker) throw new RuntimeBoxError(`worker ${svc.worker_id} is unavailable for service ${svc.id}`);
+  const authority = (await dependencies.listAuthorities(dependencies.deploymentId))
+    .find(row => row.project_id === svc.project_id && row.deployment_id === dependencies.deploymentId);
+  const canonicalReady = authority?.storage_kind === 'host' && authority.worker_id === null && authority.state === 'ready';
+  if (!canonicalReady && !worker.projectIds.includes(svc.project_id)) {
+    throw new RuntimeBoxError(`worker ${svc.worker_id} is unavailable for service ${svc.id}`);
+  }
   const userId = actorUserId ?? svc.owner_user_id ?? svc.created_by ?? 1;
-  const token = await resolveWorkbenchWorkerTransportToken(svc.worker_id, userId);
+  const token = await dependencies.resolveToken(svc.worker_id, userId);
   if (!token) throw new RuntimeBoxError(`worker ${svc.worker_id} transport credential is not configured`);
-  return createRemoteWorkbenchHttpTransport({ workerId: worker.workerId, baseUrl: worker.baseUrl, token });
+  const projectRoot = canonicalReady ? await dependencies.readProjectRoot(svc.project_id) : undefined;
+  if (canonicalReady && !projectRoot) throw new RuntimeBoxError(`canonical Project root is unavailable for service ${svc.id}`);
+  return dependencies.createTransport({ workerId: worker.workerId, baseUrl: worker.baseUrl, token, projectRoot });
 }
 
 // ── 서비스 등록 ───────────────────────────────────────────────────────────
@@ -430,7 +458,9 @@ export async function readServiceLogs(serviceId: number, tail = 100, actorUserId
   const svc = await queryServiceOne('SELECT * FROM runtime_box_services WHERE id = $1', [serviceId]);
   if (!svc) throw new RuntimeBoxError(`service ${serviceId} not found`);
   if (svc.runner_kind === 'remote-worker') {
-    return readRemoteWorkerServiceLogs({ service: svc, transport: await remoteServiceTransport(svc, actorUserId), tail });
+    const effectiveActorUserId = actorUserId ?? svc.created_by;
+    if (!effectiveActorUserId) throw new RuntimeBoxError('Remote Worker service logs require actor attribution');
+    return readRemoteWorkerServiceLogs({ service: svc, actorUserId: effectiveActorUserId, transport: await remoteServiceTransport(svc, effectiveActorUserId), tail });
   }
   if (!svc.log_path) return '(service has no log_path yet)';
   if (svc.box_id == null) return '(Runtime Box service has no box_id)';
@@ -541,7 +571,9 @@ export async function stopService(serviceId: number, actorUserId?: number): Prom
   );
   if (!candidate) throw new RuntimeBoxError(`service ${serviceId} not found`);
   if (candidate.runner_kind === 'remote-worker') {
-    return stopRemoteWorkerService({ service: candidate, transport: await remoteServiceTransport(candidate, actorUserId) });
+    const effectiveActorUserId = actorUserId ?? candidate.created_by;
+    if (!effectiveActorUserId) throw new RuntimeBoxError('Remote Worker service stop requires actor attribution');
+    return stopRemoteWorkerService({ service: candidate, actorUserId: effectiveActorUserId, transport: await remoteServiceTransport(candidate, effectiveActorUserId) });
   }
   if (candidate.box_id == null) throw new RuntimeBoxError(`service ${serviceId} has no Runtime Box owner`);
   return withRuntimeBoxLifecycleLock(candidate.box_id, held =>

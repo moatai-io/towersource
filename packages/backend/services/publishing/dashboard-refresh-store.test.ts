@@ -1,0 +1,11 @@
+import {beforeEach,it,expect,vi} from 'vitest';
+const m=vi.hoisted(()=>({query:vi.fn()}));
+vi.mock('../../db/pg-repo.js',()=>({transaction:(f:any)=>f({query:m.query})}));
+import {claimDashboardRefresh} from './dashboard-refresh-store';
+const row={enabled:true,version:2,owner_project_id:'p',automation_id:'a'};
+beforeEach(()=>vi.clearAllMocks());
+it('locks and claims a server-resolved binding',async()=>{m.query.mockResolvedValueOnce({rows:[row]}).mockResolvedValueOnce({rows:[{}]});expect(await claimDashboardRefresh('pub',1,'request_0123456789',2)).toEqual({kind:'claimed',binding:{publicationId:'pub',ownerProjectId:'p',automationId:'a',version:2}});expect(m.query.mock.calls[0][0]).toContain('FOR UPDATE')});
+it('returns prior claim instead of scheduling another run',async()=>{m.query.mockResolvedValueOnce({rows:[row]}).mockResolvedValueOnce({rows:[]}).mockResolvedValueOnce({rows:[{state:'claimed',binding_version:2,run_id:null,result_status:null}]});expect((await claimDashboardRefresh('pub',1,'request_0123456789',2)).kind).toBe('existing')});
+it('rejects stale approval version',async()=>{m.query.mockResolvedValueOnce({rows:[row]});await expect(claimDashboardRefresh('pub',1,'request_0123456789',1)).rejects.toThrow('binding_unavailable');expect(m.query).toHaveBeenCalledTimes(1)});
+it('rejects disabled bindings',async()=>{m.query.mockResolvedValueOnce({rows:[{...row,enabled:false}]});await expect(claimDashboardRefresh('pub',1,'request_0123456789',2)).rejects.toThrow()});
+it('rejects malformed requests before database access',async()=>{await expect(claimDashboardRefresh('pub',1,'x',2)).rejects.toThrow('invalid_refresh_request');expect(m.query).not.toHaveBeenCalled()});

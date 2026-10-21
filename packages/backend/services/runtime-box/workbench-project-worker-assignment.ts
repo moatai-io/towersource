@@ -49,9 +49,10 @@ export async function requestProjectWorkerAssignment(input: {
   return row;
 }
 
-/** Claim one retryable desire. Expired preparing leases return to the queue. */
+/** Claim a pending desire for this Worker. Failed desires require explicit re-request; expired leases require recovery review. */
 export async function claimProjectWorkerAssignment(input: {
   deploymentId: string;
+  workerId: string;
   leaseSeconds?: number;
   owner?: string;
 }): Promise<ProjectWorkerAssignmentDesire | undefined> {
@@ -59,14 +60,23 @@ export async function claimProjectWorkerAssignment(input: {
   const owner = input.owner?.trim() || `assignment-reconciler:${randomUUID()}`;
   return transaction(async client => {
     const db = withClient(client);
+    // Serialize claims for one shared Worker across transactions. The durable
+    // preparing/recovery row holds the exclusion after this transaction ends.
+    const lock = await db.queryOne<{ locked: boolean }>(
+      'SELECT pg_try_advisory_xact_lock(hashtext($1),hashtext($2)) AS locked',
+      [`worker-assignment:${input.deploymentId}`, input.workerId],
+    );
+    if (!lock?.locked) return undefined;
     const candidate = await db.queryOne<ProjectWorkerAssignmentDesire>(
       `SELECT * FROM project_worker_assignment_desires
-       WHERE deployment_id=$1 AND (
-         status='pending' OR status='failed' OR
-         (status='preparing' AND lease_expires_at<NOW())
-       )
+       WHERE deployment_id=$1 AND desired_worker_id=$2 AND status='pending'
+         AND NOT EXISTS (
+           SELECT 1 FROM project_worker_assignment_desires busy
+           WHERE busy.deployment_id=$1 AND busy.desired_worker_id=$2
+             AND busy.status IN ('preparing','recovery_required')
+         )
        ORDER BY updated_at,project_id FOR UPDATE SKIP LOCKED LIMIT 1`,
-      [input.deploymentId],
+      [input.deploymentId, input.workerId],
     );
     if (!candidate) return undefined;
     return db.queryOne<ProjectWorkerAssignmentDesire>(

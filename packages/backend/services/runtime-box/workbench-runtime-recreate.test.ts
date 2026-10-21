@@ -90,6 +90,21 @@ describe('Workbench Runtime recreate orchestration', () => {
     expect(queryOne).not.toHaveBeenCalledWith(expect.stringContaining("SET consumed_at=NOW()"), expect.anything());
   });
 
+  it('leaves the exact intent unused when the Runtime activity lock is contended at apply time', async () => {
+    const { tryWithRuntimeBoxActivityLock } = await import('./runtime-box-activity-lock.js');
+    vi.mocked(tryWithRuntimeBoxActivityLock).mockResolvedValueOnce({ acquired: false });
+    const dependencies = deps();
+
+    await expect(applyWorkbenchRuntimeRecreate({
+      projectId: 'project-a', projectRoot: '/p', intentId: 'i', proposalHash: 'a'.repeat(64),
+      confirmed: true, serviceImpactAcknowledged: true, actor, dependencies,
+    })).rejects.toMatchObject({ code: 'ACTIVE_EXECUTION' });
+
+    expect(dependencies.snapshot).not.toHaveBeenCalled();
+    expect(dependencies.recreate).not.toHaveBeenCalled();
+    expect(queryOne).not.toHaveBeenCalledWith(expect.stringContaining('SET consumed_at=NOW()'), expect.anything());
+  });
+
   it('records stage/audit after destructive lifecycle failure and never reports false success', async () => {
     const failing = deps({ recreate: vi.fn().mockImplementation(async input => { input.onDestructiveStart(); throw new Error('create failed'); }) });
     await expect(applyWorkbenchRuntimeRecreate({ projectId: 'project-a', projectRoot: '/p', intentId: 'i', proposalHash: 'a'.repeat(64), confirmed: true, serviceImpactAcknowledged: true, actor, dependencies: failing })).rejects.toThrow('create failed');

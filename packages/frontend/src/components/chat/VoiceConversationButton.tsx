@@ -1,7 +1,11 @@
 /** Owns: Browser microphone connection for Tower's ephemeral LiveKit voice mode. */
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useReducer, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Room, RoomEvent, type LocalAudioTrack, type RemoteTrack, type RemoteTrackPublication } from 'livekit-client';
+import { Room, RoomEvent, type LocalAudioTrack, type RemoteTrack, type RemoteTrackPublication, type RemoteParticipant } from 'livekit-client';
+
+import { isVoiceEnabled } from '../../config/voice-feature';
+import { VoiceLiveTranscript } from './VoiceLiveTranscript';
+import { initialVoiceTranscriptState, parseVoiceUiMessage, voiceTranscriptReducer, VOICE_UI_TOPIC } from './VoiceLiveTranscript.reducer';
 
 interface VoiceConversationButtonProps {
   sessionId: string | null;
@@ -10,7 +14,11 @@ interface VoiceConversationButtonProps {
 type VoiceState = 'idle' | 'connecting' | 'listening' | 'speaking' | 'error';
 type PlaybackStatus = 'waiting' | 'participant' | 'track' | 'playing' | 'blocked';
 
-export function VoiceConversationButton({ sessionId, inferenceTtsProvider = 'cartesia' }: VoiceConversationButtonProps) {
+export function VoiceConversationButton(props: VoiceConversationButtonProps) {
+  return isVoiceEnabled() ? <EnabledVoiceConversationButton {...props} /> : null;
+}
+
+function EnabledVoiceConversationButton({ sessionId, inferenceTtsProvider = 'cartesia' }: VoiceConversationButtonProps) {
   const { t } = useTranslation('chat');
   const [state, setState] = useState<VoiceState>('idle');
   const [audioLevel, setAudioLevel] = useState(0);
@@ -18,6 +26,11 @@ export function VoiceConversationButton({ sessionId, inferenceTtsProvider = 'car
   const [playbackBlocked, setPlaybackBlocked] = useState(false);
   const [playbackStatus, setPlaybackStatus] = useState<PlaybackStatus>('waiting');
   const [microphonePublished, setMicrophonePublished] = useState(false);
+  const [audioPlaying, setAudioPlaying] = useState(false);
+  const [transcript, dispatchTranscript] = useReducer(voiceTranscriptReducer, initialVoiceTranscriptState);
+  const agentIdentityRef = useRef<string | null>(null);
+  const reconnectingRef = useRef(false);
+  const generationRef = useRef(0);
   const roomRef = useRef<Room | null>(null);
   const voiceSessionIdRef = useRef<string | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -25,10 +38,18 @@ export function VoiceConversationButton({ sessionId, inferenceTtsProvider = 'car
   const subscriptionTimerRef = useRef<number | null>(null);
   const remoteAudioRef = useRef<HTMLAudioElement | null>(null);
 
+  const resetTranscript = () => {
+    agentIdentityRef.current = null;
+    setAudioPlaying(false);
+    dispatchTranscript({ type: 'clear' });
+  };
+
   const stop = async () => {
+    generationRef.current += 1;
+    resetTranscript();
     const room = roomRef.current;
     roomRef.current = null;
-    room?.disconnect();
+    void room?.disconnect();
     if (remoteAudioRef.current) {
       remoteAudioRef.current.pause();
       remoteAudioRef.current.srcObject = null;
@@ -56,7 +77,10 @@ export function VoiceConversationButton({ sessionId, inferenceTtsProvider = 'car
   };
 
   useEffect(() => () => {
-    roomRef.current?.disconnect();
+    generationRef.current += 1;
+    const room = roomRef.current;
+    roomRef.current = null;
+    void room?.disconnect();
     if (meterFrameRef.current !== null) cancelAnimationFrame(meterFrameRef.current);
     if (subscriptionTimerRef.current !== null) window.clearInterval(subscriptionTimerRef.current);
     void audioContextRef.current?.close();
@@ -64,6 +88,10 @@ export function VoiceConversationButton({ sessionId, inferenceTtsProvider = 'car
 
   const start = async () => {
     if (!sessionId || (state !== 'idle' && state !== 'error')) return;
+    const generation = ++generationRef.current;
+    const isCurrent = () => generationRef.current === generation;
+    resetTranscript();
+    reconnectingRef.current = false;
     setErrorMessage('');
     setState('connecting');
     let connectStage = t('voice.stage.startRequest');
@@ -87,27 +115,57 @@ export function VoiceConversationButton({ sessionId, inferenceTtsProvider = 'car
         throw new Error(result.error || t('voice.noResponse', { status: response.status }));
       }
 
+      if (!isCurrent()) return;
       connectStage = t('voice.stage.liveKit');
       const room = new Room({ adaptiveStream: false, dynacast: false });
       roomRef.current = room;
       voiceSessionIdRef.current = result.voiceSession.id;
+      const isCurrentRoom = () => isCurrent() && roomRef.current === room;
+      const isTrustedAgent = (participant?: RemoteParticipant) => !!participant?.isAgent
+        && room.remoteParticipants.get(participant.identity) === participant
+        && (!agentIdentityRef.current || agentIdentityRef.current === participant.identity);
+      room.on(RoomEvent.DataReceived, (payload, participant, _kind, topic) => {
+        if (!isCurrentRoom() || reconnectingRef.current || topic !== VOICE_UI_TOPIC || !isTrustedAgent(participant)) return;
+        const message = parseVoiceUiMessage(payload);
+        if (!message || !participant) return;
+        agentIdentityRef.current ??= participant.identity;
+        dispatchTranscript({ type: 'receive', message, senderIdentity: participant.identity, isAgent: true });
+      });
+      room.on(RoomEvent.Reconnecting, () => {
+        if (!isCurrentRoom()) return;
+        reconnectingRef.current = true;
+        resetTranscript();
+        setPlaybackStatus('waiting');
+      });
+      room.on(RoomEvent.Reconnected, () => {
+        if (!isCurrentRoom()) return;
+        resetTranscript();
+        reconnectingRef.current = false;
+      });
+      room.on(RoomEvent.Disconnected, () => {
+        if (!isCurrentRoom()) return;
+        void stop();
+      });
       const subscribeToAudio = (publication: RemoteTrackPublication) => {
         if (publication.kind !== 'audio') return;
         setPlaybackStatus('participant');
         if (!publication.isSubscribed) publication.setSubscribed(true);
       };
       room.on(RoomEvent.ParticipantConnected, (participant) => {
+        if (!isCurrentRoom() || !isTrustedAgent(participant)) return;
         setPlaybackStatus('participant');
         participant.audioTrackPublications.forEach(subscribeToAudio);
       });
-      room.on(RoomEvent.TrackPublished, (publication) => subscribeToAudio(publication));
+      room.on(RoomEvent.TrackPublished, (publication, participant) => {
+        if (isCurrentRoom() && isTrustedAgent(participant)) subscribeToAudio(publication);
+      });
       room.on(RoomEvent.TrackSubscriptionFailed, (_trackSid, error) => {
         console.warn('[voice] remote audio subscription failed', error);
         setPlaybackStatus('blocked');
         setErrorMessage(t('voice.audioSubscriptionFailed'));
       });
-      room.on(RoomEvent.TrackSubscribed, (track: RemoteTrack) => {
-        if (track.kind !== 'audio') return;
+      room.on(RoomEvent.TrackSubscribed, (track: RemoteTrack, _publication, participant) => {
+        if (!isCurrentRoom() || !isTrustedAgent(participant) || track.kind !== 'audio') return;
         setPlaybackStatus('track');
         const audio = remoteAudioRef.current;
         if (!audio) return;
@@ -115,34 +173,49 @@ export function VoiceConversationButton({ sessionId, inferenceTtsProvider = 'car
         audio.autoplay = true;
         audio.muted = false;
         audio.volume = 1;
-        audio.onplaying = () => setPlaybackStatus('playing');
-        audio.onerror = () => setPlaybackStatus('blocked');
+        audio.onplaying = () => { if (isCurrentRoom()) { setAudioPlaying(true); setPlaybackStatus('playing'); } };
+        const notPlaying = () => { if (isCurrentRoom()) setAudioPlaying(false); };
+        audio.onpause = notPlaying;
+        audio.onwaiting = notPlaying;
+        audio.onstalled = notPlaying;
+        audio.onended = notPlaying;
+        audio.onerror = () => { if (isCurrentRoom()) { setAudioPlaying(false); setPlaybackStatus('blocked'); } };
         void room.startAudio()
           .then(() => audio.play())
           .then(() => {
+            if (!isCurrentRoom()) return;
             setPlaybackBlocked(false);
             setErrorMessage('');
           })
           .catch((playError) => {
+            if (!isCurrentRoom()) return;
+            setAudioPlaying(false);
             console.warn('[voice] remote audio autoplay blocked', playError);
             setPlaybackBlocked(true);
             setPlaybackStatus('blocked');
             setErrorMessage(t('voice.enablePlaybackHint'));
           });
       });
-      room.on(RoomEvent.TrackUnsubscribed, (track: RemoteTrack) => {
+      room.on(RoomEvent.TrackUnsubscribed, (track: RemoteTrack, _publication, participant) => {
+        if (!isCurrentRoom() || !isTrustedAgent(participant) || track.kind !== 'audio') return;
+        setAudioPlaying(false);
+        setPlaybackStatus('waiting');
         track.detach();
         if (remoteAudioRef.current) remoteAudioRef.current.srcObject = null;
         setState('listening');
       });
       room.on(RoomEvent.ActiveSpeakersChanged, (speakers) => {
-        const remoteSpeaking = speakers.some((speaker) => speaker.identity !== room.localParticipant.identity);
+        if (!isCurrentRoom()) return;
+        const remoteSpeaking = speakers.some((speaker) => speaker.isAgent && (!agentIdentityRef.current || speaker.identity === agentIdentityRef.current));
         setState((current) => current === 'error' || current === 'connecting' ? current : remoteSpeaking ? 'speaking' : 'listening');
       });
       await room.connect(result.livekit.url, result.livekit.token, { autoSubscribe: true });
-      connectStage = t('voice.stage.microphone')
+      if (!isCurrentRoom()) return;
+      connectStage = t('voice.stage.microphone');
       const recoverRemoteAudio = () => {
+        if (!isCurrentRoom() || reconnectingRef.current) return;
         room.remoteParticipants.forEach((participant) => {
+          if (!isTrustedAgent(participant)) return;
           setPlaybackStatus('participant');
           participant.audioTrackPublications.forEach((publication) => {
             subscribeToAudio(publication);
@@ -154,8 +227,8 @@ export function VoiceConversationButton({ sessionId, inferenceTtsProvider = 'car
             audio.muted = false;
             audio.volume = 1;
             void audio.play()
-              .then(() => setPlaybackStatus('playing'))
-              .catch(() => setPlaybackStatus('blocked'));
+              .then(() => { if (isCurrentRoom()) setPlaybackStatus('playing'); })
+              .catch(() => { if (isCurrentRoom()) { setAudioPlaying(false); setPlaybackStatus('blocked'); } });
           });
         });
       };
@@ -163,6 +236,8 @@ export function VoiceConversationButton({ sessionId, inferenceTtsProvider = 'car
       subscriptionTimerRef.current = window.setInterval(recoverRemoteAudio, 500);
       await room.startAudio();
       room.on(RoomEvent.AudioPlaybackStatusChanged, () => {
+        if (!isCurrentRoom()) return;
+        if (!room.canPlaybackAudio) setAudioPlaying(false);
         setPlaybackBlocked(!room.canPlaybackAudio);
         if (!room.canPlaybackAudio) setErrorMessage(t('voice.enablePlaybackHint'));
       });
@@ -171,6 +246,7 @@ export function VoiceConversationButton({ sessionId, inferenceTtsProvider = 'car
         noiseSuppression: true,
         autoGainControl: true,
       });
+      if (!isCurrentRoom()) return;
       const microphone = microphonePublication?.audioTrack as LocalAudioTrack | undefined;
       if (!microphonePublication || !microphone || microphonePublication.isMuted) throw new Error(t('voice.microphonePublishFailed'));
       setMicrophonePublished(true);
@@ -194,6 +270,7 @@ export function VoiceConversationButton({ sessionId, inferenceTtsProvider = 'car
 
       setState('listening');
     } catch (error) {
+      if (!isCurrent()) return;
       console.error('[voice] connection failed', { stage: connectStage, error });
       const detail = error instanceof Error ? error.message : t('voice.unknownError');
       const message = t('voice.stageFailed', { stage: connectStage, detail });
@@ -211,10 +288,13 @@ export function VoiceConversationButton({ sessionId, inferenceTtsProvider = 'car
       const roomPlayback = room.startAudio();
       const elementPlayback = audio.play();
       await Promise.all([roomPlayback, elementPlayback]);
+      if (roomRef.current !== room) return;
       setPlaybackStatus('playing');
       setPlaybackBlocked(false);
       setErrorMessage('');
     } catch (error) {
+      if (roomRef.current !== room) return;
+      setAudioPlaying(false);
       console.warn('[voice] explicit audio playback failed', error);
       setErrorMessage(t('voice.speakerPlaybackFailed'));
     }
@@ -263,8 +343,8 @@ export function VoiceConversationButton({ sessionId, inferenceTtsProvider = 'car
           {bars.map((weight, index) => (
             <span
               key={index}
-              className="w-0.5 rounded-full bg-current transition-[height] duration-75"
-              style={{ height: `${Math.max(3, 3 + audioLevel * 12 * weight)}px` }}
+              className="h-4 w-0.5 origin-center rounded-full bg-current transition-transform duration-75 motion-reduce:transition-none"
+              style={{ transform: `scaleY(${Math.max(0.2, 0.2 + audioLevel * 0.8 * weight)})` }}
             />
           ))}
         </span>
@@ -272,21 +352,24 @@ export function VoiceConversationButton({ sessionId, inferenceTtsProvider = 'car
       <span>{state === 'connecting' ? t('voice.connecting') : playbackBlocked ? t('voice.enableSound') : state === 'speaking' ? t('voice.answering') : active ? t('voice.listening') : state === 'error' ? t('voice.reconnect') : t('voice.conversation')}</span>
     </button>
     {(active || state === 'connecting' || state === 'error') && (
-      <div className={`absolute bottom-full right-0 mb-2 whitespace-nowrap rounded-lg border px-3 py-2 text-xs shadow-lg ${
+      <div className={`absolute bottom-full right-0 z-20 mb-2 w-[min(24rem,calc(100vw-2rem))] whitespace-normal rounded-lg border px-4 py-3 text-xs shadow-lg [overflow-wrap:anywhere] [word-break:keep-all] ${
         state === 'error'
           ? 'border-red-500/25 bg-surface-900 text-red-300'
           : 'border-primary-500/20 bg-surface-900 text-surface-100'
-      }`} role="status" aria-live="polite">
+      }`}>
+        <div role="status" aria-live="polite">
         {state === 'connecting' && t('voice.connectingToSeojun')}
         {state === 'listening' && (errorMessage || (!microphonePublished ? t('voice.checkingMicrophone') : audioLevel > 0.08 ? t('voice.sendingMicrophoneAudio') : t('voice.microphoneReady')))}
         {state === 'speaking' && t('voice.seojunAnswering')}
+        </div>
         {active && (
           <div className="mt-1 flex items-center gap-2 border-t border-surface-700 pt-1 text-[11px] text-surface-300">
             <span>{t('voice.output', { status: t(`voice.playback.${playbackStatus}`) })}</span>
             <button type="button" className="underline hover:text-surface-100" onClick={(event) => { event.stopPropagation(); void testSpeaker(); }}>{t('voice.testSpeaker')}</button>
           </div>
         )}
-        {state === 'error' && t('voice.connectionFailureDetail', { detail: errorMessage || t('voice.checkSettings') })}
+        {state === 'error' && <p role="alert">{t('voice.connectionFailureDetail', { detail: errorMessage || t('voice.checkSettings') })}</p>}
+        {active && <VoiceLiveTranscript transcript={transcript} audioPlaying={audioPlaying && !playbackBlocked} />}
       </div>
     )}
       <audio ref={remoteAudioRef} autoPlay playsInline className="absolute h-px w-px opacity-0" aria-hidden="true" />

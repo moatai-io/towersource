@@ -1,14 +1,17 @@
+import { resolvePiCompactionBudget } from './compaction-budget.js';
 // Owns terminal turn_done emission and forced terminalization for Pi run loop.
 // Public API: PiRunTerminalizer.
 
+import { formatPiProviderErrorForUser, isPiContextOverflowFailure, isPiRequestTooLargeFailure, isPiTowerRequestPreflight } from '../pi-failure-classifier.js';
 import type { EngineCallbacks, TowerMessage } from '../types.js';
 import type { StuckReason } from '../pi-stream-watchdog.js';
 import { getPiResponsesRequestDebugInfo } from './provider-safeguards.js';
 import { classifyPiRunEndFailure, type PiRunEndTerminalizerReason } from './turn-metrics.js';
 import type { PiRunContext } from './run-context.js';
-import { buildPiContextSnapshot } from './run-context.js';
+import { buildPiContextSnapshot, type PiContextSnapshot } from './run-context.js';
 import type { AssistantContinuationIntentSummary } from './continuation-intent.js';
 import { finalizeSessionWorkLedgerRecords } from '../../services/work/work-ledger.js';
+import { assembleTurnEndDecisionState, recordSkippedTurnEndShadow, scheduleTurnEndShadow } from '../../services/session-navigator/turn-end-shadow.js';
 
 const MAX_TRUSTED_ACCEPTED_AT_AGE_MS = 24 * 60 * 60 * 1000;
 
@@ -33,6 +36,7 @@ export function resolvePiTurnDurationMs(params: {
 export interface PiRunTerminalizerState {
   stopReason?: 'stop' | 'length' | 'toolUse' | 'error' | 'aborted';
   assistantSaved: boolean;
+  presentedFiles?: string[];
   currentMsgId: string;
   lastSavedAssistantMsgId: string | null;
   iterationCount: number;
@@ -69,6 +73,8 @@ export class PiRunTerminalizer {
     callbacks: Pick<EngineCallbacks, 'updateMessageMetrics'>;
     eventQueue: TowerMessage[];
     modelLabel: () => string;
+    contextPressure?: () => PiContextSnapshot['pressure'];
+    compactionSettings?: () => { enabled?: boolean; reserveTokens?: number };
     getState: () => PiRunTerminalizerState;
     estimateLiveContextTokens: () => number;
     flushAssistantEvent: () => void;
@@ -83,7 +89,9 @@ export class PiRunTerminalizer {
     beforeTowerTerminal?: () => void;
     /** Current turn acceptance boundary for finalizing only ledger rows touched by this turn. */
     workLedgerTurnStartedAt?: string;
+    turnEndShadow?: { actorUserId: number; projectId: string; userPrompt: string };
     finalizeWorkLedger?: typeof finalizeSessionWorkLedgerRecords;
+    persistTerminalErrorNotice?: (text: string) => void;
   }) {}
 
   get hasTurnDoneFired(): boolean {
@@ -118,8 +126,9 @@ export class PiRunTerminalizer {
     const estimatedLiveContextInput = this.params.estimateLiveContextTokens();
     const actualContextInputTokens = runCtx.actualContextInputTokens();
     const riskContextEstimateTokens = runCtx.riskContextEstimateTokens(estimatedLiveContextInput);
-    const compactReserveTokens = Number(process.env.PI_COMPACTION_RESERVE_TOKENS || 48_000);
-    const compactThresholdTokens = Math.max(0, runCtx.modelContextWindow - compactReserveTokens);
+    const { reserveTokens: compactReserveTokens, thresholdTokens: rawThresholdTokens } =
+      resolvePiCompactionBudget(runCtx.modelContextWindow, this.params.compactionSettings?.());
+    const compactThresholdTokens = Number.isFinite(rawThresholdTokens) && rawThresholdTokens >= 0 ? rawThresholdTokens : undefined;
     const requestDebugInfo = getPiResponsesRequestDebugInfo(sessionId);
     const nextRequestEstimatedTokens = requestDebugInfo?.bodyEstimatedPromptTokens;
     const contextSnapshot = buildPiContextSnapshot({
@@ -128,6 +137,7 @@ export class PiRunTerminalizer {
       estimatedTokens: riskContextEstimateTokens,
       windowTokens: runCtx.modelContextWindow,
     });
+    contextSnapshot.pressure = this.params.contextPressure?.();
     const metricsMsgId = state.assistantSaved
       ? state.currentMsgId
       : (state.lastSavedAssistantMsgId || state.currentMsgId);
@@ -145,6 +155,7 @@ export class PiRunTerminalizer {
         contextInputTokens: actualContextInputTokens,
         contextWindowSize: runCtx.modelContextWindow,
         contextEstimatedTokens: riskContextEstimateTokens,
+        contextCompacted: runCtx.awaitingPostCompactionMeasurement,
         nextRequestEstimatedTokens,
         compactThresholdTokens,
         contextSnapshot,
@@ -169,22 +180,48 @@ export class PiRunTerminalizer {
       });
     }
     const silentErrorCompletion = Boolean(
-      !errorStopReason
-      && state.stopReason === 'error'
-      && !state.lastAssistant?.textTail
+      errorStopReason !== 'aborted'
+      && (state.stopReason === 'error' || errorStopReason === 'error')
+      // A prior tool-use message may contain commentary, but it is not a
+      // completed answer to the provider request that subsequently failed.
+      && (!state.lastAssistant?.textTail || state.lastAssistant.stopReason === 'toolUse')
     );
+    const towerPreflight = silentErrorCompletion && isPiTowerRequestPreflight(state.providerErrorMessage);
+    const bodyTooLarge = silentErrorCompletion && isPiRequestTooLargeFailure(state.providerErrorMessage);
+    const providerOverflow = silentErrorCompletion && isPiContextOverflowFailure(state.providerErrorMessage);
+    const contextRecoveryFailed = silentErrorCompletion && (state.oversizedPreflightRecoveryRequested || bodyTooLarge || providerOverflow);
     if (silentErrorCompletion) {
-      const contextRecoveryFailed = state.oversizedPreflightRecoveryRequested || state.compactionSucceededThisTurn;
+      // A compaction earlier in the turn does not own a later auth/network
+      // failure. Attribute this terminal notice to the current failed request.
       console.warn(`[Pi] empty provider error converted to visible terminal error: session=${sessionId.slice(0, 8)} contextRecoveryFailed=${contextRecoveryFailed}`);
       this.params.eventQueue.push({
         type: 'engine_error',
         sessionId,
-        message: contextRecoveryFailed
-          ? '대화 컨텍스트가 너무 커서 자동 정리를 시도했지만 응답을 복구하지 못했습니다. 같은 세션에서 반복 재시도하지 말고 새 세션으로 작업을 이어가 주세요.'
-          : 'AI 제공자 오류로 실행이 끝났지만 답변 텍스트가 생성되지 않았습니다. 빈 완료로 처리하지 않았습니다. 잠시 후 다시 시도하거나 새 세션에서 이어가 주세요.',
+        message: towerPreflight || bodyTooLarge || providerOverflow
+          ? formatPiProviderErrorForUser(state.providerErrorMessage)
+          : contextRecoveryFailed
+            ? '대화 컨텍스트 자동 정리를 시도했지만 응답을 복구하지 못했습니다. 진행된 작업을 확인한 뒤 후속 요청을 보내주세요.'
+            : !state.providerErrorMessage && state.lastAssistant?.stopReason === 'toolUse'
+              ? '도구 실행 뒤 최종 응답을 이어받지 못했습니다. 완료된 작업을 반복하지 않도록 저장된 작업 상태를 확인한 뒤 이어가 주세요.'
+              : 'AI 제공자 오류로 실행이 끝났지만 답변 텍스트가 생성되지 않았습니다. 빈 완료로 처리하지 않았습니다. 잠시 후 다시 시도하거나 새 세션에서 이어가 주세요.',
         recoverable: true,
-        retryable: !contextRecoveryFailed,
+        retryable: !contextRecoveryFailed && !towerPreflight,
       });
+    }
+    if (silentErrorCompletion) {
+      this.params.persistTerminalErrorNotice?.(towerPreflight || bodyTooLarge || providerOverflow
+        ? formatPiProviderErrorForUser(state.providerErrorMessage)
+        : contextRecoveryFailed
+          ? '대화 컨텍스트 자동 정리를 시도했지만 응답을 복구하지 못했습니다. 진행된 작업을 확인한 뒤 후속 요청을 보내주세요.'
+          : state.providerErrorMessage
+            ? formatPiProviderErrorForUser(state.providerErrorMessage)
+            : state.presentedFiles?.length
+              ? '파일 표시 요청은 완료됐지만 마지막 AI 답변을 전달하지 못했습니다. 채팅에 남아 있는 파일 링크를 확인해 주세요. 기존 결과물을 확인한 뒤 작업을 이어가 주세요.'
+              : state.lastAssistant?.stopReason === 'toolUse'
+                ? '도구 실행 뒤 최종 응답을 이어받지 못했습니다. 도구 작업은 이미 완료됐을 수 있으므로 다시 실행하기 전에 저장된 작업 상태를 확인해 주세요. 작업을 이어가면 완료된 작업을 반복하지 않고 남은 결과를 확인합니다.'
+                : 'AI 응답을 복구하지 못해 실행을 중단했습니다. 요청 크기 또는 제공자 오류를 확인한 후 작업을 이어가 주세요.');
+      this.params.flushAssistantEvent();
+      await this.params.flushDbWrites();
     }
     const effectiveErrorStopReason = errorStopReason || (emptyQueuedCompletion || silentErrorCompletion ? 'error' : undefined);
     const finalizeWorkLedger = this.params.finalizeWorkLedger ?? finalizeSessionWorkLedgerRecords;
@@ -240,20 +277,45 @@ export class PiRunTerminalizer {
       });
     }
 
+    const shadowContext = this.params.turnEndShadow;
+    if (shadowContext && !effectiveErrorStopReason && lastAssistant?.textTail) {
+      const shadowState = assembleTurnEndDecisionState({
+        sessionId,
+        contextRevision: runCtx.assistantMsgIdsThisTurn.length,
+        responseMessageId: metricsMsgId,
+        userPrompt: shadowContext.userPrompt,
+        assistantOutcome: lastAssistant.textTail,
+        continuationIntent: Boolean(lastAssistant.continuationIntent),
+      });
+      if (shadowState) scheduleTurnEndShadow({ state: shadowState, actorUserId: shadowContext.actorUserId, projectId: shadowContext.projectId });
+    } else if (metricsMsgId) {
+      recordSkippedTurnEndShadow({
+        sessionId,
+        responseMessageId: metricsMsgId,
+        contextRevision: runCtx.assistantMsgIdsThisTurn.length,
+        reason: !shadowContext
+          ? 'TURN_END_SHADOW_CONTEXT_MISSING'
+          : effectiveErrorStopReason
+            ? `TURN_END_SHADOW_${effectiveErrorStopReason.toUpperCase()}`
+            : 'TURN_END_SHADOW_ASSISTANT_TEXT_MISSING',
+      });
+    }
+
     this.params.eventQueue.push({
       type: 'turn_done',
       sessionId,
       msgId: metricsMsgId,
       assistantMsgIds: runCtx.assistantMsgIdsThisTurn,
       timestamp: Date.now(),
-      usage: runCtx.usageSummary({
+      usage: { ...runCtx.usageSummary({
         durationMs,
         stopReason: userFacingStopReason,
         contextInputTokens: actualContextInputTokens,
         contextEstimatedTokens: riskContextEstimateTokens,
+        contextCompacted: runCtx.awaitingPostCompactionMeasurement,
         nextRequestEstimatedTokens,
         compactThresholdTokens,
-      }),
+      }), contextSnapshot },
     });
   }
 

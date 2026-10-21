@@ -1,54 +1,65 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { closePgPool, getPgPool, initPg, isPgEnabled } from '../db/pg.js';
+import { compareMigrationHistory, type MigrationHistoryRow } from './migration-history.js';
 
-const mode = process.argv[2] || 'status';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const migrationDir = path.join(__dirname, '..', 'db', 'migrations');
+const usage = 'usage: apply-db-migrations <status [--files-json <path>]|apply>';
 
-function migrationFiles(): string[] {
-  return fs.readdirSync(migrationDir).filter((name) => name.endsWith('.sql')).sort();
+function migrationFiles(filesJson?: string): string[] {
+  if (!filesJson) return fs.readdirSync(migrationDir).filter((name) => name.endsWith('.sql')).sort();
+  // A candidate revision can supply basenames without checking it out or running
+  // its code. This option is read-only and deliberately not accepted by apply.
+  const files: unknown = JSON.parse(fs.readFileSync(filesJson, 'utf8'));
+  if (!Array.isArray(files) || files.some((file) => (
+    typeof file !== 'string' || !file.endsWith('.sql') || /[/\\\u0000]/.test(file)
+  ))) {
+    throw new Error('--files-json must contain a JSON array of SQL file basenames');
+  }
+  return [...new Set(files as string[])].sort();
 }
 
-async function status() {
-  if (!isPgEnabled()) throw new Error('DATABASE_URL is not set');
+async function readHistory(): Promise<MigrationHistoryRow[]> {
   const pool = getPgPool();
   const exists = await pool.query<{ exists: boolean }>("SELECT to_regclass('public._migrations') IS NOT NULL AS exists");
-  const applied = new Set<string>();
-  if (exists.rows[0]?.exists) {
-    const result = await pool.query<{ version: string; name: string | null }>('SELECT version, name FROM _migrations');
-    for (const row of result.rows) {
-      if (row.version) applied.add(row.version);
-      if (row.name) applied.add(row.name.replace(/\.sql$/, ''));
-    }
-  }
-  const pending = migrationFiles().filter((file) => {
-    const key = file.replace(/\.sql$/, '');
-    const legacy = file.split('_')[0];
-    return !applied.has(key) && !applied.has(legacy);
-  });
-  console.log(JSON.stringify({ status: 'ok', pending, pendingCount: pending.length }));
+  if (!exists.rows[0]?.exists) return [];
+  const result = await pool.query<MigrationHistoryRow>('SELECT version, name FROM _migrations ORDER BY version');
+  return result.rows;
 }
 
-async function main() {
+export async function runMigrationCommand(args: string[] = process.argv.slice(2)): Promise<void> {
+  const mode = args[0] || 'status';
+  const filesJson = mode === 'status' && args.length === 3 && args[1] === '--files-json' ? args[2] : undefined;
+  if (!['status', 'apply'].includes(mode) || (args.length > 1 && !filesJson)) throw new Error(usage);
+  if (!isPgEnabled()) throw new Error('DATABASE_URL is not set');
+  // Validate the local SQL inventory before any migration writes. Missing build
+  // assets must not become an empty inventory / successful apply report.
+  const files = migrationFiles(filesJson);
+  if (mode === 'apply') await initPg();
+  const history = await readHistory();
+  const comparison = compareMigrationHistory(files, history);
   if (mode === 'status') {
-    await status();
-  } else if (mode === 'apply') {
-    await initPg();
-    const pool = getPgPool();
-    const result = await pool.query<{ version: string }>('SELECT version FROM _migrations ORDER BY version');
-    console.log(JSON.stringify({ status: 'migrated', applied: result.rows.map((row) => row.version), pending: [], pendingCount: 0 }));
-  } else {
-    throw new Error('usage: apply-db-migrations <status|apply>');
+    console.log(JSON.stringify({ status: 'ok', ...comparison }));
+    return;
   }
+  const incomplete = comparison.pendingCount > 0;
+  console.log(JSON.stringify({
+    status: incomplete ? 'incomplete' : 'migrated',
+    applied: history.map((row) => row.version),
+    ...comparison,
+  }));
+  if (incomplete) throw new Error(`Migration verification failed: ${comparison.pendingCount} pending migration(s) remain`);
 }
 
-main()
-  .catch((error) => {
-    console.error(error instanceof Error ? error.message : String(error));
-    process.exitCode = 1;
-  })
-  .finally(async () => {
-    await closePgPool().catch(() => {});
-  });
+if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
+  runMigrationCommand()
+    .catch((error) => {
+      console.error(error instanceof Error ? error.message : String(error));
+      process.exitCode = 1;
+    })
+    .finally(async () => {
+      await closePgPool().catch(() => {});
+    });
+}

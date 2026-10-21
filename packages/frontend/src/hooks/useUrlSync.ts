@@ -34,9 +34,9 @@ import type { SessionMeta } from '@tower/shared';
  */
 const URL_VIEWS: ReadonlyArray<ActiveView> = [
   'kanban',
-  'history',
   'rooms',
   'inbox',
+  'secretariat',
   'work',
   'schedules',
   'automations',
@@ -152,7 +152,7 @@ interface PopHandlers {
  * don't clobber a `/s/<key>` 또는 `/r/<key>` deep link before it has been
  * restored into the store.
  */
-export function useUrlSync(handlers: PopHandlers, enabled: boolean): void {
+export function useUrlSync(handlers: PopHandlers, enabled: boolean, suppressMirror = false): void {
   const activeSessionId = useSessionStore((s) => s.activeSessionId);
   const activeView = useSessionStore((s) => s.activeView);
   const sessions = useSessionStore((s) => s.sessions);
@@ -163,7 +163,7 @@ export function useUrlSync(handlers: PopHandlers, enabled: boolean): void {
 
   // store → URL (mirror)
   useEffect(() => {
-    if (!enabled) return;
+    if (!enabled || suppressMirror) return;
     const sessionKey = urlKeyForSession(sessions, activeSessionId);
     const systemTab = systemTabs.find((t) => t.id === activeSystemTabId)?.kind ?? null;
     const baseTarget = computeUrl(sessionKey, null, activeView, systemTab);
@@ -198,7 +198,7 @@ export function useUrlSync(handlers: PopHandlers, enabled: boolean): void {
     } else {
       window.history.replaceState(null, '', target);
     }
-  }, [activeSessionId, activeView, sessions, systemTabs, activeSystemTabId, enabled]);
+  }, [activeSessionId, activeView, sessions, systemTabs, activeSystemTabId, enabled, suppressMirror]);
 
   // URL → store (browser back/forward)
   useEffect(() => {
@@ -218,7 +218,7 @@ export function useUrlSync(handlers: PopHandlers, enabled: boolean): void {
       const fStore = useFileStore.getState();
 
       const currentSessionKey = urlKeyForSession(sStore.sessions, sStore.activeSessionId);
-      if (sessionKey !== currentSessionKey) {
+      if (sessionKey !== currentSessionKey || (suppressMirror && !sessionKey)) {
         handlers.onPopSession(sessionKey);
       }
       if (roomKey) handlers.onPopRoom(roomKey);
@@ -240,5 +240,5 @@ export function useUrlSync(handlers: PopHandlers, enabled: boolean): void {
       window.removeEventListener('popstate', handler);
       if (popClearTimerRef.current !== null) window.clearTimeout(popClearTimerRef.current);
     };
-  }, [handlers]);
+  }, [handlers, suppressMirror]);
 }

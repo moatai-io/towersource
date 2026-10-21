@@ -31,7 +31,7 @@ describe('Workstream overview surface', () => {
   });
 
   it('uses a responsive one-column layout before the desktop split', () => {
-    expect(source).toContain('lg:grid-cols-[minmax(0,1.25fr)_minmax(280px,.75fr)]');
+    expect(source).toContain('@min-[52rem]/overview:grid-cols-[minmax(0,1.25fr)_minmax(280px,.75fr)]');
     expect(source).toContain('md:grid-cols-2');
     expect(source).toContain('[word-break:keep-all]');
   });

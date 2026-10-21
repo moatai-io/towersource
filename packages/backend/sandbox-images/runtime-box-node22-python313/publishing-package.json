@@ -2,8 +2,11 @@
   "name": "tower-runtime-box-publishing-tools",
   "private": true,
   "version": "1.0.0",
-  "description": "Locked Node.js publishing tools for the Tower Project Runtime Box.",
+  "description": "Locked Node.js publishing and browser tools shared by Tower Runtime Box and Worker.",
   "dependencies": {
-    "@mermaid-js/mermaid-cli": "11.16.0"
+    "@mermaid-js/mermaid-cli": "11.16.0",
+    "@marp-team/marp-cli": "4.4.1",
+    "playwright-core": "1.61.1",
+    "svgo": "4.0.2"
   }
 }

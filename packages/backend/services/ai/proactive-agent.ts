@@ -8,9 +8,17 @@
  *   1. 새 세션 생성 (기본) — 독립적 대화 시작
  *   2. 기존 세션 주입 — 맥락 연속 (targetSessionId 지정)
  *
- * 설계서: docs/plans/arch_0412_proactive-agent.md
+ * Current execution contract:
+ * - Resolve the active run-as account; reuse Session-send/Project/path access helpers.
+ * - Injection inherits the target Session's Project, cwd, engine and config snapshot.
+ * - Explicit Project/model-engine mismatches fail before Session/message writes.
+ * - Project roots come from projects.root_path, not a derived UUID directory.
+ * Regression: proactive-agent.authority.test.ts.
+ *
+ * Historical design: docs/plans/arch_0412_proactive-agent.md
  */
 
+import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import { claimEngineSessionId, createSession, getEngineSessionId, getSession } from '../session/session-manager.js';
 import { notify } from '../notification-hub.js';
@@ -20,8 +28,13 @@ import { getAllRunningSessionIds } from '../../engines/index.js';
 import type { TowerMessage, EngineCallbacks, SavedMessage } from '../../engines/types.js';
 import { config, getModelDefaults } from '../../config.js';
 import { queryOne } from '../../db/pg-repo.js';
-import { resolveSessionProjectRoot } from '../pm/project-access.js';
+import { canCreateInProject, canSendSessionMessage, getUserAccessiblePaths, isPathAccessible, resolveSessionProjectRoot } from '../pm/project-access.js';
+import { getUserAllowedPath, getUserAuthState } from '../auth/auth.js';
+import { isTowerRole } from '../authority/authorization-policy.js';
+import { isPiPresetMappingReady } from '../model-policy/session-alias.js';
 import { selectSystemPromptFragmentsForMessage } from '../system-prompt-fragments.js';
+import { recordPiUsageEvent } from '../ai-usage/usage-ledger.js';
+import { isModelPolicyId } from './litellm-model-catalog.js';
 
 // ── Types ──
 
@@ -29,7 +42,7 @@ export interface ProactiveTemplate {
   id: string;
   name: string;             // "모닝 브리핑", "태스크 후속"
   prompt: string;           // AI에게 줄 프롬프트
-  model?: string;           // default: Admin AI reply model (Pi GPT by default)
+  model?: string;           // default: Admin Core model for autonomous work
   maxTurns?: number;        // default: 1 (첫 메시지만)
   projectId?: string;
 }
@@ -140,55 +153,102 @@ export async function fireProactive(
   context?: ProactiveContext,
   options?: ProactiveOptions,
 ): Promise<FireResult> {
-  // Rate limit check
-  if (!checkDailyLimit(userId)) {
-    throw new Error(`Daily proactive limit reached (${DAILY_LIMIT}/day) for user ${userId}`);
+  // Reuse current-account and Session-send boundaries from interactive chat.
+  // A background template is not an authority grant.
+  const account = await getUserAuthState(userId);
+  if (!account || account.disabled || account.approvalStatus !== 'active' || !isTowerRole(account.role)) {
+    throw new Error('Proactive run requires an active account');
   }
+  const user = await queryOne<{ username: string }>('SELECT username FROM users WHERE id = $1', [userId]);
+  if (!user?.username) throw new Error('Proactive run user not found');
+  const userRole = account.role;
+  const [allowedPath, accessiblePaths] = await Promise.all([
+    getUserAllowedPath(userId),
+    getUserAccessiblePaths(userId, userRole),
+  ]);
 
-  const cwd = template.projectId
-    ? `${config.workspaceRoot}/projects/${template.projectId}`
-    : config.workspaceRoot;
-
-  let sessionId: string;
+  let cwd: string;
+  let projectId = template.projectId;
+  let sessionProjectRoot: string | undefined;
+  let sessionId!: string;
   let engineSessionId: string | undefined;
+  let configDir: string | null | undefined;
   let engineName = config.defaultEngine || 'pi';
+  let model: string;
   let isInjection = false;
 
-  // ── Mode 1: 기존 세션에 주입 ──
-  if (options?.targetSessionId) {
-    const existing = await getSession(options.targetSessionId);
-    if (!existing) {
-      throw new Error(`Target session not found: ${options.targetSessionId}`);
+  const projectRoot = async (id: string): Promise<string> => {
+    const project = await queryOne<{ root_path: string | null }>(
+      'SELECT root_path FROM projects WHERE id = $1', [id],
+    );
+    if (!project?.root_path || !path.isAbsolute(project.root_path)) {
+      throw new Error('Proactive project has no canonical root');
     }
+    return path.resolve(project.root_path);
+  };
+  // Same model/engine shape guard as the Session creation boundary.
+  const validateModel = (choice: string, engine: string): void => {
+    const matches = engine === 'pi' ? choice.includes('/')
+      : engine === 'claude' ? choice.startsWith('claude-')
+      : !choice.includes('/') && !choice.startsWith('claude-');
+    if (!matches) throw new Error('Proactive model does not match Session engine');
+  };
 
-    // 세션이 현재 streaming 중이면 스킵
-    const runningIds = getAllRunningSessionIds();
-    if (runningIds.includes(options.targetSessionId)) {
+  // ── Mode 1: existing Session is the authority for execution context ──
+  if (options?.targetSessionId) {
+    const access = await canSendSessionMessage(options.targetSessionId, userId, userRole);
+    if (!access.allowed) throw new Error(access.message);
+    const existing = await getSession(options.targetSessionId);
+    if (!existing) throw new Error(`Target session not found: ${options.targetSessionId}`);
+    if (getAllRunningSessionIds().includes(options.targetSessionId)) {
       throw new Error(`Target session is currently streaming: ${options.targetSessionId}`);
     }
-
+    if (template.projectId !== undefined && template.projectId !== (existing.projectId || undefined)) {
+      throw new Error('Proactive target Session project mismatch');
+    }
+    projectId = existing.projectId || undefined;
+    if (!existing.cwd || !path.isAbsolute(existing.cwd)) throw new Error('Proactive target Session cwd is invalid');
+    cwd = path.resolve(existing.cwd);
+    sessionProjectRoot = projectId ? await projectRoot(projectId) : resolveSessionProjectRoot(cwd) ?? undefined;
+    if (sessionProjectRoot && cwd !== sessionProjectRoot && !cwd.startsWith(sessionProjectRoot + path.sep)) {
+      throw new Error('Proactive target Session cwd does not match its Project');
+    }
+    if (!(await isPathAccessible(cwd, userId, userRole))) throw new Error('Proactive target cwd access denied');
     sessionId = existing.id;
     engineName = existing.engine || engineName;
     engineSessionId = getEngineSessionId(existing);
+    configDir = existing.configDir;
+    model = template.model || existing.modelUsed || getModelDefaults().session;
+    validateModel(model, engineName);
     isInjection = true;
+  } else {
+    // ── Mode 2: new Session uses the registered Project root, never projects/<uuid> ──
+    const access = await canCreateInProject(projectId, userId, userRole);
+    if (!access.allowed) throw new Error(access.message);
+    sessionProjectRoot = projectId ? await projectRoot(projectId) : undefined;
+    cwd = sessionProjectRoot || path.resolve(config.workspaceRoot);
+    if (!(await isPathAccessible(cwd, userId, userRole))) throw new Error('Proactive cwd access denied');
+    model = template.model || getModelDefaults().session;
+    validateModel(model, engineName);
   }
-  // ── Mode 2: 새 세션 생성 (기본) ──
-  else {
+
+  // Preserve selection intent for the engine's pinned Harness/model resolver,
+  // but reject unavailable preset mappings before any Session/message writes.
+  if (engineName === 'pi' && !isPiPresetMappingReady(model)) {
+    throw new Error(`MODEL_PRESET_UNAVAILABLE: ${model}`);
+  }
+  // All access/context validation precedes message writes and new Sessions.
+  if (!checkDailyLimit(userId)) {
+    throw new Error(`Daily proactive limit reached (${DAILY_LIMIT}/day) for user ${userId}`);
+  }
+  if (!isInjection) {
     const session = await createSession(
-      `💬 ${template.name}`,
-      cwd,
-      userId,
-      template.projectId || null,
-      config.defaultEngine || 'pi',
-      null,       // roomId
-      null,       // sourceMessageId
-      null,       // parentSessionId
-      'proactive',
+      `💬 ${template.name}`, cwd, userId, projectId || null, engineName,
+      undefined, undefined, undefined, 'proactive', model,
     );
     sessionId = session.id;
-    // Tag as autonomous_run for Mission Control aggregation. Failure is
-    // non-fatal — we'd rather have an unmarked session than abort the run.
-    // See: workspace/decisions/2026-05-04-tower-channel-and-persona.md
+    configDir = session.configDir;
+    // Proactive sessions are autonomous runs, not the user's ongoing chat.
     try {
       const { updateSession } = await import('../session/session-manager.js');
       await updateSession(sessionId, { kind: 'autonomous_run' });
@@ -259,25 +319,36 @@ export async function fireProactive(
     attachToolResult: async () => {},
   };
 
-  const sessionProjectRoot = resolveSessionProjectRoot(cwd)
-    ?? (template.projectId
-      ? (await queryOne<{ root_path: string | null }>('SELECT root_path FROM projects WHERE id = $1', [template.projectId]))?.root_path ?? undefined
-      : undefined);
-
   const runOpts = {
     cwd,
-    model: template.model || getModelDefaults().ai_reply,
+    model,
     userId,
-    userRole: 'admin',
-    engineSessionId,
-    projectId: template.projectId,
+    username: user.username,
+    userRole,
+    allowedPath,
+    accessiblePaths,
+    configDir,
     sessionProjectRoot,
+    projectId,
+    engineSessionId,
     systemPromptFragments: selectSystemPromptFragmentsForMessage(fullPrompt),
     rootTurnId,
   };
 
   try {
     for await (const towerMsg of engine.run(sessionId, fullPrompt, runOpts, callbacks)) {
+      if (towerMsg.type === 'turn_done') {
+        await recordPiUsageEvent({
+          sessionId,
+          rootTurnId,
+          messageId: towerMsg.msgId,
+          usage: towerMsg.usage,
+          requestedModel: runOpts.model,
+          modelPolicyId: isModelPolicyId(runOpts.model) ? runOpts.model.split('/')[1] : undefined,
+        }).catch((error: any) => {
+          console.warn(`[proactive] AI usage ledger write failed: session=${sessionId.slice(0, 8)} error=${error?.message || error}`);
+        });
+      }
       if (towerMsg.type === 'assistant') {
         const text = towerMsg.content
           ?.filter((block) => block.type === 'text' && 'text' in block)
@@ -317,7 +388,7 @@ export async function fireProactive(
       firstMsgPreview || 'AI가 먼저 대화를 시작했습니다.',
       { sessionId, templateId: template.id, isInjection },
       {
-        projectId: template.projectId ?? null,
+        projectId: projectId ?? null,
         sessionId,
         actionUrl: `/s/${sessionId}`,
       },

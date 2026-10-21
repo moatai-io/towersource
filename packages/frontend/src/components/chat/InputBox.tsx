@@ -1,3 +1,9 @@
+import { towerHttpUrl } from '../../features/client-connection/connection';
+import { ToolStartVoiceCue } from './ToolStartVoiceCue';
+import { finalizeDictationForSend } from './dictation-submit';
+import { FileOperationFeedback } from '../../features/file-operation-feedback/FileOperationFeedback';
+import { uploadScope, reportUploadUnknown, reportUploadFailure, clearFileOperation } from '../../features/file-operation-feedback/feedback';
+import { beginAttachmentUpload, hasAttachmentUploads, waitForAttachmentUploads } from '../../utils/attachment-upload-barrier';
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useChatStore, type ChatMessage } from '../../stores/chat-store';
@@ -8,9 +14,15 @@ import { UploadProgressChip } from '../common/UploadProgressChip';
 import { useActiveSessionTurnState } from '../../hooks/useActiveSessionTurnState';
 import { useMediaQuery } from '../../hooks/useMediaQuery';
 import { AttachmentChip } from './AttachmentChip';
+import { ComposerCapabilitiesMenu } from './ComposerCapabilitiesMenu';
+import { updateDictation, type DictationInsertionState } from './dictation-insertion';
+import { DictationButton } from './DictationButton';
+import { AnswerVoiceToggle } from './AnswerVoiceToggle';
+import { SourceReferenceChip } from './SourceReferenceChip';
+import { ATTACH_COMPOSER_SOURCE_EVENT, type AttachComposerSourceDetail, type ComposerSourceReference } from '../files/source-inspector/sourceReference';
 import { CommandPicker, commandIdentityKey, commandNameFields, filterSlashCommands, hasExactCommandMatch as hasExactSlashCommandMatch } from './CommandPicker';
 import { InputResizeHandle, INPUT_MIN_HEIGHT, INPUT_MAX_HEIGHT } from './InputResizeHandle';
-import { toastInfo } from '../../utils/toast';
+import { toastInfo, toastError } from '../../utils/toast';
 import { optimizeBatch, formatBytes } from '../../utils/file-optimizer';
 import { uploadFileBatchWithProgress, type UploadProgressSnapshot } from '../../utils/upload-with-progress';
 
@@ -57,53 +69,21 @@ export interface SendOptions {
   commandTrigger?: 'slash' | 'picker' | 'natural-language';
   /** Internal/background sends should reach the backend without rendering as a user bubble. */
   suppressUserEcho?: boolean;
+  /** Trusted UI attachment sent as a structured frame field; message text is context only. */
+  sourceReference?: ComposerSourceReference;
 }
 
 interface InputBoxProps {
+  activeTurnStatus?: React.ReactNode;
+  /** Freeze a pending welcome before any composer focus, edit or action. */
+  onInteraction?: () => void;
   onSend: (message: string, options?: SendOptions) => void;
   onAbort: () => void;
-  onSafeStop?: () => void;
+  onStopImmediately?: () => void;
   onAnswerQuestion?: (questionId: string, answer: string) => void;
-  /** Jump to the previous user message (the question above the currently visible top). */
-  onJumpPrevUser?: () => void;
-  /** Jump to the next user message (below the currently visible top). */
-  onJumpNextUser?: () => void;
-  /** Whether a previous user message exists relative to the current scroll position. */
-  hasPrevUser?: boolean;
-  /** Whether a next user message exists relative to the current scroll position. */
-  hasNextUser?: boolean;
 }
 
 const DRAFT_PREFIX = 'tower:inputDraft:';
-const COLLAPSED_STEERING_LINES = 3;
-const STEERING_PREVIEW_CHARS_PER_LINE = 88;
-
-function isMacLikePlatform(): boolean {
-  if (typeof navigator === 'undefined') return false;
-  const nav = navigator as Navigator & { userAgentData?: { platform?: string } };
-  const platform = nav.userAgentData?.platform || navigator.platform || navigator.userAgent;
-  return /Mac|iPhone|iPad|iPod/i.test(platform);
-}
-
-function buildSteeringPreview(texts: string[]): { lines: string[]; hiddenLineCount: number; totalLineCount: number } {
-  const lines = texts.flatMap((text) => {
-    const rawLines = text.split(/\r?\n/);
-    return rawLines.flatMap((line) => {
-      if (line.length <= STEERING_PREVIEW_CHARS_PER_LINE) return [line];
-      const chunks: string[] = [];
-      for (let i = 0; i < line.length; i += STEERING_PREVIEW_CHARS_PER_LINE) {
-        chunks.push(line.slice(i, i + STEERING_PREVIEW_CHARS_PER_LINE));
-      }
-      return chunks;
-    });
-  });
-  return {
-    lines: lines.slice(0, COLLAPSED_STEERING_LINES),
-    hiddenLineCount: Math.max(0, lines.length - COLLAPSED_STEERING_LINES),
-    totalLineCount: lines.length,
-  };
-}
-
 function turnStatusText(phase: string, hasQueue: boolean, t: (key: string, options?: Record<string, unknown>) => string): string {
   // Phase 상태(preparing, tool_running 등)는 AssistantPlaceholder가 메시지
   // 영역에서 직접 표시. InputBox 위 박스는 큐 상태만 담당.
@@ -138,6 +118,27 @@ function saveDraft(sessionId: string | null, value: string) {
   } catch { /* storage full */ }
 }
 
+interface ComposerAction {
+  id: string;
+  contextRevision: number;
+  label: string;
+  message: string;
+  intent: 'continue' | 'replan';
+  risk: 'read_only' | 'reversible';
+  origin: 'tower_rule';
+  autoEligible: boolean;
+  rationaleCode?: string;
+}
+
+interface ComposerActionResponse {
+  contextRevision: number;
+  mode: 'guide';
+  source: 'tower_rule';
+  recommendedActionId: null;
+  actions: ComposerAction[];
+  autoMode: { available: false; status: 'coming_soon' };
+}
+
 interface AiComposerSettings {
   enabled: boolean;
   emptyDraftEnabled: boolean;
@@ -162,16 +163,28 @@ const DEFAULT_AI_COMPOSER_SETTINGS: AiComposerSettings = {
   minDraftLength: 4,
 };
 
-export function InputBox({ onSend, onAbort, onSafeStop, onAnswerQuestion, onJumpPrevUser, onJumpNextUser, hasPrevUser, hasNextUser }: InputBoxProps) {
-  const { t } = useTranslation('chat');
+export function InputBox({ onSend, onAbort, onStopImmediately, onAnswerQuestion, onInteraction, activeTurnStatus }: InputBoxProps) {
+  const { t, i18n } = useTranslation('chat');
+  const [dictationEpoch, setDictationEpoch] = useState(0);
+  const dictationAcceptingRef = useRef(false);
+  const dictationRange = useRef<DictationInsertionState>({ start: 0, end: 0, owned: '', transcript: '', snapshot: '' });
   const [input, setInput] = useState('');
   const [ghostSuggestion, setGhostSuggestion] = useState('');
   const [ghostSuffix, setGhostSuffix] = useState('');
   const [composerSettings, setComposerSettings] = useState<AiComposerSettings>(DEFAULT_AI_COMPOSER_SETTINGS);
+  const [composerActions, setComposerActions] = useState<ComposerActionResponse | null>(null);
   const [showCommands, setShowCommands] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [isDragOver, setIsDragOver] = useState(false);
-  const [uploadProgress, setUploadProgress] = useState<UploadProgressSnapshot | null>(null);
+  const uploadProgressBySession = useChatStore((state) => state.attachmentUploadProgress);
+  const [waitingSessionIds, setWaitingSessionIds] = useState<Set<string>>(() => new Set());
+  const waitingSessionIdsRef = useRef(new Set<string>());
+  const composerMountedRef = useRef(true);
+  useEffect(() => {
+    composerMountedRef.current = true;
+    return () => { composerMountedRef.current = false; };
+  }, []);
+  const [sourceReference, setSourceReference] = useState<ComposerSourceReference | null>(null);
   const [queueExpanded, setQueueExpanded] = useState(false);
   const [steerExpanded, setSteerExpanded] = useState(false);
   const selectedCommandTriggerRef = useRef<SendOptions['commandTrigger'] | null>(null);
@@ -179,7 +192,6 @@ export function InputBox({ onSend, onAbort, onSafeStop, onAnswerQuestion, onJump
   const [manualHeight, setManualHeight] = useState<number | null>(() => loadManualHeight());
   // 모바일 분기 (placeholder 문구 + UI 분기). 미세 jitter 흡수 위해 100ms debounce.
   const isMobile = useMediaQuery('(max-width: 640px)', { debounceMs: 100 });
-  const navShortcutLabel = isMacLikePlatform() ? '⌥↑ / ⌥↓' : 'Alt+↑ / Alt+↓';
   // viewport 따라 default max-h 재계산
   const [defaultMaxH, setDefaultMaxH] = useState<number>(() => getDefaultMaxHeight());
   useEffect(() => {
@@ -199,6 +211,13 @@ export function InputBox({ onSend, onAbort, onSafeStop, onAnswerQuestion, onJump
   // so an explicit picker is the only working path on phones).
   const fileInputRef = useRef<HTMLInputElement>(null);
   const currentSessionId = useChatStore((s) => s.sessionId);
+  const uploadProgress = currentSessionId ? uploadProgressBySession[currentSessionId] || null : null;
+  const currentSessionProjectId = useSessionStore((s) =>
+    s.sessions.find((candidate) => candidate.id === currentSessionId)?.projectId
+  );
+  const currentSessionCwd = useSessionStore((s) =>
+    s.sessions.find((candidate) => candidate.id === currentSessionId)?.cwd
+  );
   const activeSession = useSessionStore((s) => s.sessions.find((session) => session.id === s.activeSessionId));
   const isStreaming = useActiveSessionStreaming();
   const activeTurn = useActiveSessionTurnState();
@@ -224,16 +243,7 @@ export function InputBox({ onSend, onAbort, onSafeStop, onAnswerQuestion, onJump
   }, [messages, pendingInjections]);
   const pendingInjectionTexts = visiblePendingInjections.map((it) => it.text);
   const pendingInjectionText = pendingInjectionTexts.join('\n');
-  const steeringPreview = useMemo(() => buildSteeringPreview(pendingInjectionTexts), [pendingInjectionTexts]);
-  const steeringLayerHeight = visiblePendingInjections.length > 0
-    ? (steerExpanded
-      ? 64 + Math.max(steeringPreview.totalLineCount, visiblePendingInjections.length) * 20
-      : Math.min(132, 64 + visiblePendingInjections.length * 24))
-    : 0;
-  // Keep the steering sheet connected to the composer: reserve only the visible
-  // part above the input, then let the composer overlap the lower edge.
-  const steeringLayerOverlap = visiblePendingInjections.length > 0 ? 28 : 0;
-  const steeringLayerReservedHeight = Math.max(0, steeringLayerHeight - steeringLayerOverlap);
+
   useEffect(() => {
     if (!hasQueue && queueExpanded) setQueueExpanded(false);
   }, [hasQueue, queueExpanded]);
@@ -390,10 +400,19 @@ export function InputBox({ onSend, onAbort, onSafeStop, onAnswerQuestion, onJump
     });
   };
 
-  const showQuickReplies = input.trim().length === 0
+  const showQuickReplies = !isStreaming
+    && !['queued', 'preparing', 'streaming', 'tool_running', 'stalled', 'closing', 'awaiting_user', 'compacting'].includes(activeTurn.phase)
+    && input.trim().length === 0
     && attachments.length === 0
     && visiblePendingInjections.length === 0
     && messages.some((m) => m.role === 'assistant');
+  const fallbackActions = useMemo<ComposerAction[]>(() => ([
+    { id: 'continue', contextRevision: 0, label: t('quickContinue'), message: t('continueRequest'), intent: 'continue', risk: 'reversible', origin: 'tower_rule', autoEligible: false },
+  ]), [t]);
+  // The server can still supply a replan/handoff action. Do not surface it as
+  // a context-driven suggestion that could be mistaken for /compact.
+  const visibleComposerActions = (composerActions?.actions?.length ? composerActions.actions : fallbackActions)
+    .filter((action) => action.id !== 'replan');
   const sendQuickReply = (message: string) => {
     const trimmed = message.trim();
     if (!trimmed) return;
@@ -407,6 +426,7 @@ export function InputBox({ onSend, onAbort, onSafeStop, onAnswerQuestion, onJump
     saveDraft(currentSessionId, '');
     setShowCommands(false);
 
+    window.dispatchEvent(new CustomEvent('tower-speech-question', { detail: { sessionId: currentSessionId } }));
     const sid = useChatStore.getState().sessionId || '';
     const isCurrentSessionStreaming = sid
       ? useSessionStore.getState().streamingSessions.has(sid)
@@ -434,21 +454,56 @@ export function InputBox({ onSend, onAbort, onSafeStop, onAnswerQuestion, onJump
     }
   };
 
+  useEffect(() => {
+    if (!currentSessionId || isStreaming || pendingQuestion || !latestAssistantText) {
+      setComposerActions(null);
+      return;
+    }
+    let active = true;
+    const controller = new AbortController();
+    const token = localStorage.getItem('token');
+    const language = i18n.language || 'en';
+    const url = `/api/sessions/${encodeURIComponent(currentSessionId)}/composer-actions?language=${encodeURIComponent(language)}`;
+    const loadActions = async () => {
+      try {
+        const response = await fetch(url, {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+          signal: controller.signal,
+        });
+        const payload = response.ok ? await response.json() as ComposerActionResponse : null;
+        if (!active) return;
+        const actions = Array.isArray(payload?.actions) ? payload.actions.filter(action => (
+          typeof action?.id === 'string'
+          && typeof action?.label === 'string'
+          && typeof action?.message === 'string'
+          && action.message.trim().length > 0
+        )).slice(0, 4) : [];
+        setComposerActions(payload ? { ...payload, actions } : null);
+      } catch (error: any) {
+        if (active && error?.name !== 'AbortError') setComposerActions(null);
+      }
+    };
+    void loadActions();
+    return () => {
+      active = false;
+      controller.abort();
+    };
+  }, [currentSessionId, isStreaming, latestAssistantText, pendingQuestion, i18n.language]);
+
   // Pre-load slash commands from /api/commands so they're available before first message.
   // Fetch on session changes even if a previous session already populated commands:
   // the server registry is authoritative and project manifests must not inherit
   // stale slash items from another project.
   useEffect(() => {
+    let active = true;
+    const controller = new AbortController();
     const tk = localStorage.getItem('token');
     const hdrs: Record<string, string> = {};
     if (tk) hdrs['Authorization'] = `Bearer ${tk}`;
-    const session = useSessionStore.getState().sessions.find(
-      s => s.id === currentSessionId
-    );
     const params = new URLSearchParams();
-    if (session?.projectId) params.set('projectId', session.projectId);
-    if (session?.cwd) params.set('cwd', session.cwd);
-    fetch(`/api/commands${params.toString() ? `?${params.toString()}` : ''}`, { headers: hdrs })
+    if (currentSessionProjectId) params.set('projectId', currentSessionProjectId);
+    if (currentSessionCwd) params.set('cwd', currentSessionCwd);
+    fetch(`/api/commands${params.toString() ? `?${params.toString()}` : ''}`, { headers: hdrs, signal: controller.signal })
       .then((r) => r.ok ? r.json() : [])
       .then((cmds: Array<{
         name: string;
@@ -463,6 +518,7 @@ export function InputBox({ onSend, onAbort, onSafeStop, onAnswerQuestion, onJump
         kind?: string;
         risk?: string;
       }>) => {
+        if (!active) return;
         useChatStore.getState().setSystemInfo({
           slashCommands: cmds.map((c) => ({
             name: c.name.replace(/^\//, ''),
@@ -479,10 +535,15 @@ export function InputBox({ onSend, onAbort, onSafeStop, onAnswerQuestion, onJump
           })),
         });
       })
-      .catch(() => {
+      .catch((error) => {
+        if (!active || error?.name === 'AbortError') return;
         useChatStore.getState().setSystemInfo({ slashCommands: [] });
       });
-  }, [currentSessionId]);
+    return () => {
+      active = false;
+      controller.abort();
+    };
+  }, [currentSessionId, currentSessionProjectId, currentSessionCwd]);
 
   // textarea 높이를 적용하는 헬퍼.
   // manual 모드면 그 값을 고정. auto 면 scrollHeight 와 max 의 min.
@@ -525,6 +586,7 @@ export function InputBox({ onSend, onAbort, onSafeStop, onAnswerQuestion, onJump
   useEffect(() => {
     if (prevSessionRef.current !== currentSessionId) {
       const prevSessionId = prevSessionRef.current;
+      setSourceReference(null);
       // Save only if the draft ref still belongs to that previous session. If a
       // pending React state update from another session is currently visible, do
       // not write it into the previous/new session's localStorage bucket.
@@ -534,6 +596,7 @@ export function InputBox({ onSend, onAbort, onSafeStop, onAnswerQuestion, onJump
       // Load draft for new session
       const restored = loadDraft(currentSessionId);
       setDraftInput(restored, currentSessionId, false);
+      if (restored.trim()) onInteraction?.();
       setQueueExpanded(false);
       prevSessionRef.current = currentSessionId;
       // Restore textarea height. When revisiting a session with an unfinished
@@ -560,7 +623,7 @@ export function InputBox({ onSend, onAbort, onSafeStop, onAnswerQuestion, onJump
       applyTextareaHeight(textareaRef.current);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [manualHeight, defaultMaxH]);
+  }, [input, manualHeight, defaultMaxH]);
 
   const commandQuery = input.startsWith('/') ? input.slice(1).trim().toLocaleLowerCase() : '';
   const filteredCommands = filterSlashCommands(slashCommands, input);
@@ -622,6 +685,7 @@ export function InputBox({ onSend, onAbort, onSafeStop, onAnswerQuestion, onJump
         useChatStore.getState().promoteLatestQueuedUser(msg);
         drainGuardRef.current = true;
         lastSentRef.current = msg;
+        window.dispatchEvent(new CustomEvent('tower-speech-question', { detail: { sessionId: currentSessionId } }));
         onSend(msg);
       }
     } else {
@@ -642,6 +706,20 @@ export function InputBox({ onSend, onAbort, onSafeStop, onAnswerQuestion, onJump
     };
     window.addEventListener('session-busy-requeue', handler);
     return () => window.removeEventListener('session-busy-requeue', handler);
+  }, []);
+
+  // Attach a source-backed HTML selection from the file preview. This is a
+  // reference-only attachment in Phase 1; it does not restrict ordinary chat
+  // write authority.
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent<AttachComposerSourceDetail>).detail;
+      if (!detail?.reference || detail.reference.version !== 1) return;
+      setSourceReference(detail.reference);
+      requestAnimationFrame(() => textareaRef.current?.focus());
+    };
+    window.addEventListener(ATTACH_COMPOSER_SOURCE_EVENT, handler);
+    return () => window.removeEventListener(ATTACH_COMPOSER_SOURCE_EVENT, handler);
   }, []);
 
   // Listen for restore/copy requests — put text back into input or clipboard.
@@ -814,17 +892,44 @@ export function InputBox({ onSend, onAbort, onSafeStop, onAnswerQuestion, onJump
     return `${parts.join('\n\n')}\n\n${text}`.trim();
   };
 
+  const dictationSendPending = useRef(false);
   const handleSubmit = async (immediateInput?: string) => {
-    // Reject re-entry while the previous submit is still awaiting finalize-uploads
-    if (isSubmittingRef.current) return;
+    if (dictationSendPending.current) return;
+    const voiceSession = useSessionStore.getState().activeSessionId;
+    dictationSendPending.current = true;
+    let voiceReady = false;
+    try { const result = finalizeDictationForSend(voiceSession); voiceReady = typeof result === 'boolean' ? result : await result; if (typeof result !== 'boolean') immediateInput = textareaRef.current?.value ?? immediateInput; } finally { dictationSendPending.current = false; }
+    if (!voiceReady || useSessionStore.getState().activeSessionId !== voiceSession) return;
+    // Reject duplicate sends, including the originating session's upload wait.
+    if (isSubmittingRef.current || waitingSessionIdsRef.current.has(useSessionStore.getState().activeSessionId || '')) return;
     // Paste/input events can be followed by Enter before React commits the new
     // controlled value. The textarea's live DOM value is authoritative for a
     // keyboard submit, preventing the first Enter from seeing stale/empty state.
     const trimmed = (typeof immediateInput === 'string' ? immediateInput : input).trim();
+    const submittingSessionId = useSessionStore.getState().activeSessionId;
+    if (submittingSessionId && hasAttachmentUploads(submittingSessionId)) {
+      waitingSessionIdsRef.current.add(submittingSessionId);
+      setWaitingSessionIds(new Set(waitingSessionIdsRef.current));
+      let switched = false;
+      const unsubscribe = useSessionStore.subscribe((state) => {
+        if (state.activeSessionId !== submittingSessionId) switched = true;
+      });
+      try {
+        const success = await waitForAttachmentUploads(submittingSessionId);
+        // Do not send from a stale composer, or discard edits made while waiting.
+        if (!success || switched || !composerMountedRef.current || useSessionStore.getState().activeSessionId !== submittingSessionId
+          || (textareaRef.current && textareaRef.current.value.trim() !== trimmed)) return;
+      } finally {
+        unsubscribe();
+        waitingSessionIdsRef.current.delete(submittingSessionId);
+        if (composerMountedRef.current) setWaitingSessionIds(new Set(waitingSessionIdsRef.current));
+      }
+    }
+    const attachments = useChatStore.getState().attachments;
     const hasContent = trimmed || attachments.length > 0;
     if (!hasContent) return;
 
-    const dedupeText = buildMessageFrom(trimmed, attachments).trim();
+    const dedupeText = `${buildMessageFrom(trimmed, attachments).trim()}${sourceReference ? `\n[source:${sourceReference.id}]` : ''}`;
     const last = lastSubmitRef.current;
     if (last && last.text === dedupeText && Date.now() - last.at < 10_000) {
       return;
@@ -832,6 +937,9 @@ export function InputBox({ onSend, onAbort, onSafeStop, onAnswerQuestion, onJump
     lastSubmitRef.current = { text: dedupeText, at: Date.now() };
 
     isSubmittingRef.current = true;
+    // Seal this recording before clearing the draft. Late final events cannot restore sent text.
+    dictationAcceptingRef.current = false;
+    setDictationEpoch(epoch => epoch + 1);
     try {
       if (pendingQuestion && attachments.length === 0 && onAnswerQuestion) {
         setDraftInput('');
@@ -842,6 +950,13 @@ export function InputBox({ onSend, onAbort, onSafeStop, onAnswerQuestion, onJump
 
       // Clear UI immediately to prevent double-submit
       const currentAttachments = [...attachments];
+      const currentSourceReference = sourceReference;
+      if (currentSourceReference) {
+        // The immutable user bubble records the submitted reference. Never
+        // restore it to the composer automatically: stale chips invite an
+        // accidental second bounded edit and previously caused repeat errors.
+        setSourceReference(null);
+      }
       const submittedFromHeight = textareaRef.current?.offsetHeight ?? null;
       setDraftInput('');
       setShowCommands(false);
@@ -858,13 +973,16 @@ export function InputBox({ onSend, onAbort, onSafeStop, onAnswerQuestion, onJump
       // Build message with stable session:// attachment URIs
       const message = buildMessageFrom(trimmed, currentAttachments);
       const sendOptions: SendOptions | undefined = message.trimStart().startsWith('/') && selectedCommandTriggerRef.current
-        ? { commandTrigger: selectedCommandTriggerRef.current }
-        : undefined;
+        ? { commandTrigger: selectedCommandTriggerRef.current, ...(currentSourceReference ? { sourceReference: currentSourceReference } : {}) }
+        : currentSourceReference
+          ? { sourceReference: currentSourceReference }
+          : undefined;
       selectedCommandTriggerRef.current = null;
 
       // Read from the authoritative per-session streaming store synchronously.
       // This avoids double-sends on fast Enter presses and keeps queue behavior
       // aligned with the sidebar/tool chips.
+      window.dispatchEvent(new CustomEvent('tower-speech-question', { detail: { sessionId: currentSessionId } }));
       const sid = useChatStore.getState().sessionId || '';
       const isCurrentSessionStreaming = sid
         ? useSessionStore.getState().streamingSessions.has(sid)
@@ -969,6 +1087,7 @@ export function InputBox({ onSend, onAbort, onSafeStop, onAnswerQuestion, onJump
   };
 
   const handleInput = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    onInteraction?.();
     const val = e.target.value;
     acceptedCompletionRef.current = '';
     setGhostSuggestion('');
@@ -1043,14 +1162,18 @@ export function InputBox({ onSend, onAbort, onSafeStop, onAnswerQuestion, onJump
     const exchangeRaw = e.dataTransfer.getData('application/x-tower-file-exchange');
     if (exchangeRaw) {
       try {
-        const { decodeExchangeDrag, transferFile } = await import('../../features/file-exchange/fileExchange');
-        const payload = decodeExchangeDrag(exchangeRaw);
         const sessionId = useSessionStore.getState().activeSessionId;
-        if (!payload || !sessionId) {
+        if (!sessionId) {
           toastInfo(t('selectSessionBeforeAttach'));
           return;
         }
-        const receipt = await transferFile(payload.source, { scope: 'session', sessionId }, async () => true);
+        const { transferSessionDrop } = await import('../../features/file-exchange/fileExchangeSessionDrop');
+        const transfer = await transferSessionDrop(exchangeRaw, sessionId);
+        if (!transfer) {
+          toastInfo(t('attachFailed'));
+          return;
+        }
+        const { payload, receipt } = transfer;
         const result = receipt?.result as { attachmentId?: string; uri?: string; name?: string } | null;
         if (receipt?.status === 'completed' && result?.attachmentId && result.uri) {
           useChatStore.getState().addAttachment({
@@ -1113,6 +1236,33 @@ export function InputBox({ onSend, onAbort, onSafeStop, onAnswerQuestion, onJump
 
   // ───── Shared upload helper ─────
   const uploadFilesToServer = async (files: File[]) => {
+    if (files.length === 0) return;
+    const activeSessionId = useSessionStore.getState().activeSessionId;
+    if (!activeSessionId) {
+      toastInfo(t('selectSessionBeforeAttach'));
+      return;
+    }
+    clearFileOperation(uploadScope('attachment', String(activeSessionId)));
+    const finish = beginAttachmentUpload(activeSessionId);
+    try {
+      finish(await uploadFilesForSession(files, activeSessionId));
+    } catch {
+      reportUploadUnknown(uploadScope('attachment', String(activeSessionId)));
+      finish(false);
+    } finally {
+      if (!hasAttachmentUploads(activeSessionId)) {
+        useChatStore.getState().setAttachmentUploadProgress(activeSessionId, null);
+      }
+    }
+  };
+
+  const uploadFilesForSession = async (files: File[], activeSessionId: string): Promise<boolean> => {
+    const setUploadProgress = (progress: UploadProgressSnapshot | null) => {
+      useChatStore.getState().setAttachmentUploadProgress(activeSessionId, progress);
+    };
+    setUploadProgress({ phase: 'processing', loadedBytes: 0,
+      totalBytes: files.reduce((sum, file) => sum + file.size, 0), percent: 0,
+      completedFiles: 0, totalFiles: files.length, currentFileName: files[0]?.name || '' });
     // Client-side optimization pass before hitting the network. For a large
     // PDF batch, preserve one file per user-selected document: splitting every
     // PDF multiplies attachment references and makes eager model inspection more
@@ -1134,23 +1284,8 @@ export function InputBox({ onSend, onAbort, onSafeStop, onAnswerQuestion, onJump
         t('filesOptimized', { count: optimized.changedCount, original: formatBytes(optimized.originalBytes), optimized: formatBytes(optimized.optimizedBytes), saved })
       );
     }
-    const activeSessionId = useSessionStore.getState().activeSessionId;
-    if (!activeSessionId) {
-      toastInfo(t('selectSessionBeforeAttach'));
-      return;
-    }
     try {
       const token = localStorage.getItem('token');
-      const uploadedAttachments: Array<{
-        id: string;
-        name: string;
-        uri: string;
-        promotedUri?: string | null;
-        sizeBytes?: number;
-        mimeType?: string | null;
-        expiresAt?: string;
-        status?: 'session_attachment' | 'project_file';
-      }> = [];
       const uploadFailures: Array<{ name?: string; error?: string }> = [];
       const batches: File[][] = [];
       let currentBatch: File[] = [];
@@ -1183,7 +1318,7 @@ export function InputBox({ onSend, onAbort, onSafeStop, onAnswerQuestion, onJump
       for (const filesInBatch of batches) {
         const batchBytes = filesInBatch.reduce((sum, file) => sum + file.size, 0);
         const data = await uploadFileBatchWithProgress({
-          url: `/api/session-attachments/${encodeURIComponent(activeSessionId)}`,
+          url: towerHttpUrl(`/api/session-attachments/${encodeURIComponent(activeSessionId)}`),
           token,
           files: filesInBatch,
           completedBytes,
@@ -1192,42 +1327,29 @@ export function InputBox({ onSend, onAbort, onSafeStop, onAnswerQuestion, onJump
           totalFiles: optimized.files.length,
           onProgress: setUploadProgress,
         });
-        uploadedAttachments.push(...(data.attachments || []));
         uploadFailures.push(...(data.failures || []));
+        for (const attachment of (data.attachments || [])) {
+          useChatStore.getState().addAttachment({
+            id: `upload-${attachment.id}`,
+            type: 'file',
+            label: attachment.name,
+            content: attachment.promotedUri || attachment.uri,
+            size: attachment.sizeBytes,
+            mimeType: attachment.mimeType || undefined,
+            sessionAttachmentId: attachment.status === 'project_file' ? undefined : attachment.id,
+            expiresAt: attachment.expiresAt || undefined,
+          }, activeSessionId);
+        }
         completedBytes += batchBytes;
         completedFiles += filesInBatch.length;
       }
-      for (const attachment of uploadedAttachments) {
-        useChatStore.getState().addAttachment({
-          id: `upload-${attachment.id}`,
-          type: 'file',
-          label: attachment.name,
-          content: attachment.promotedUri || attachment.uri,
-          size: attachment.sizeBytes,
-          mimeType: attachment.mimeType || undefined,
-          sessionAttachmentId: attachment.status === 'project_file' ? undefined : attachment.id,
-          expiresAt: attachment.expiresAt || undefined,
-        });
-      }
       if (uploadFailures.length > 0) {
-        const names = uploadFailures.slice(0, 3).map(failure => failure.name || t('fileFallback')).join(', ');
-        const rest = uploadFailures.length > 3 ? t('additionalFiles', { count: uploadFailures.length - 3 }) : '';
-        useChatStore.getState().addAttachment({
-          id: `upload-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-          type: 'upload',
-          label: t('partialUploadFailed'),
-          content: `[Upload failed: ${names}${rest}]`,
-        });
+        reportUploadFailure(uploadScope('attachment', String(activeSessionId)), uploadFailures.length, 0, uploadFailures);
       }
+      return uploadFailures.length === 0;
     } catch (error) {
-      useChatStore.getState().addAttachment({
-        id: `upload-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-        type: 'upload',
-        label: 'Upload failed',
-        content: `[Upload failed: ${error instanceof Error ? error.message : 'network error'}]`,
-      });
-    } finally {
-      setUploadProgress(null);
+      reportUploadUnknown(uploadScope('attachment', String(activeSessionId)));
+      return false;
     }
   };
 
@@ -1277,11 +1399,12 @@ export function InputBox({ onSend, onAbort, onSafeStop, onAnswerQuestion, onJump
   };
 
   return (
-    <div className="w-full relative">
+    <div data-chat-composer className="relative min-w-0 w-full max-w-full" onFocusCapture={onInteraction} onPointerDownCapture={onInteraction} onClickCapture={onInteraction}>
+      <FileOperationFeedback scope={uploadScope('attachment', String(currentSessionId))} />
       {/* Turn/runtime status */}
       {turnStatusText(activeTurn.phase, hasQueue, t) && (
         <div className="relative z-[2] mb-2">
-          <div className="flex items-center gap-2 px-4 py-2 bg-surface-900/60 border border-surface-700/50 rounded-xl text-[15px] text-gray-300 backdrop-blur-sm">
+          <div className="tower-composer-status flex items-center gap-2 border-b border-surface-700/45 px-1 pb-2 text-[13px] text-surface-400">
             {activeTurn.phase === 'error' ? (
               <div className="w-2 h-2 rounded-full shrink-0 bg-red-400" />
             ) : (
@@ -1292,7 +1415,7 @@ export function InputBox({ onSend, onAbort, onSafeStop, onAnswerQuestion, onJump
               <button
                 type="button"
                 onClick={() => setQueueExpanded((v) => !v)}
-                className="flex items-center gap-1 text-[13px] px-2 py-0.5 rounded-full bg-primary-500/10 border border-primary-500/20 text-primary-300 hover:bg-primary-500/20 hover:text-primary-200 transition-colors shrink-0"
+                className="flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-[12px] font-medium text-primary-400 transition-colors hover:bg-primary-500/10 hover:text-primary-300"
                 title={queueExpanded ? t('queueClose') : t('queueOpen')}
                 aria-expanded={queueExpanded}
               >
@@ -1309,7 +1432,7 @@ export function InputBox({ onSend, onAbort, onSafeStop, onAnswerQuestion, onJump
             )}
           </div>
           {hasQueue && queueExpanded && (
-            <div className="mt-1.5 rounded-xl border border-surface-700/50 bg-surface-900/40 backdrop-blur-sm overflow-hidden">
+            <div className="mt-1.5 overflow-hidden rounded-lg border border-surface-700/50 bg-surface-900">
               <ul className="divide-y divide-surface-700/40 max-h-60 overflow-y-auto">
                 {currentQueue.map((text, idx) => (
                   <li
@@ -1368,30 +1491,34 @@ export function InputBox({ onSend, onAbort, onSafeStop, onAnswerQuestion, onJump
         </div>
       )}
 
-      {/* Mid-turn injections awaiting agent pickup — rendered as a back layer
-          behind the composer so it feels like a second input sheet, not a
-          floating bubble competing with status text. */}
+      {/* Pending steering and quick replies share one floating stack above the composer. */}
       <div
-        className="relative transition-[padding-top] duration-200"
-        style={{ paddingTop: steeringLayerReservedHeight }}
+        className="relative min-w-0 max-w-full"
       >
+        <div
+          data-testid="floating-composer-companions"
+          className="pointer-events-none absolute inset-x-0 bottom-full z-20 flex flex-col items-start gap-2 bg-transparent pb-2"
+        >
+        {visiblePendingInjections.length === 0 && activeTurnStatus && (
+          <div data-testid="floating-active-turn-status">{activeTurnStatus}</div>
+        )}
         {visiblePendingInjections.length > 0 && (
           <div
-            style={{ minHeight: steeringLayerHeight }}
-            className="tower-steering-sheet pointer-events-none absolute left-0 right-0 top-0 z-0 rounded-t-2xl rounded-b-md backdrop-blur-xl animate-in fade-in slide-in-from-bottom-1 duration-200"
+            className="tower-steering-sheet pointer-events-auto relative w-fit max-w-full rounded-xl"
             aria-label={t('pendingSteering')}
           >
-            <div className="pointer-events-auto flex items-start gap-3 px-3 pb-6 pt-3 sm:px-4 text-[14px]">
+            <div className="pointer-events-auto flex items-start gap-2 px-3 py-2 sm:px-4 text-[13px]">
               <span className="tower-steering-spinner mt-1 w-2.5 h-2.5 border-[1.5px] rounded-full animate-spin shrink-0" />
               <button
                 type="button"
                 onClick={() => setSteerExpanded((v) => !v)}
                 className={`tower-steering-text min-w-0 flex-1 text-left leading-relaxed ${
-                  steerExpanded ? '' : 'max-h-16 overflow-hidden'
+                  steerExpanded ? 'max-h-[min(25vh,12rem)] overflow-y-auto whitespace-pre-wrap' : 'truncate'
                 }`}
                 title={steerExpanded ? t('collapse') : pendingInjectionText}
                 aria-expanded={steerExpanded}
               >
+                <span className="mr-2 text-[12px] font-semibold opacity-75">{t('pendingSteeringLabel')}</span>
                 {steerExpanded ? (
                   <span className="flex flex-col gap-0.5">
                     {visiblePendingInjections.map((it) => (
@@ -1401,18 +1528,7 @@ export function InputBox({ onSend, onAbort, onSafeStop, onAnswerQuestion, onJump
                     ))}
                   </span>
                 ) : (
-                  <span className="flex flex-col gap-0.5">
-                    {steeringPreview.lines.map((line, idx) => (
-                      <span key={`${idx}-${line}`} className="truncate">
-                        {line || ' '}
-                      </span>
-                    ))}
-                    {steeringPreview.hiddenLineCount > 0 && (
-                      <span className="mt-0.5 text-[13px] font-medium opacity-70">
-                        {t('hiddenLines', { count: steeringPreview.hiddenLineCount })}
-                      </span>
-                    )}
-                  </span>
+                  <span>{pendingInjectionTexts.join(' · ').replace(/\n/g, ' ')}</span>
                 )}
               </button>
               <button
@@ -1440,38 +1556,30 @@ export function InputBox({ onSend, onAbort, onSafeStop, onAnswerQuestion, onJump
         )}
 
         {showQuickReplies && (
-          <div className={`relative z-10 flex gap-1.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden ${isMobile ? 'mb-1.5 px-1' : 'mb-2 px-2'}`}>
-            <button
-              type="button"
-              onClick={() => sendQuickReply(t('continueRequest'))}
-              className="shrink-0 rounded-full border border-surface-700/70 bg-surface-900/70 px-2.5 py-1 text-[13px] font-medium text-gray-300 hover:border-surface-600 hover:bg-surface-800/80 hover:text-gray-100 active:bg-surface-700/70"
-            >
-              {t('quickContinue')}
-            </button>
-            <button
-              type="button"
-              onClick={() => sendQuickReply(t('explainRequest'))}
-              className="shrink-0 rounded-full border border-surface-700/70 bg-surface-900/70 px-2.5 py-1 text-[13px] font-medium text-gray-300 hover:border-surface-600 hover:bg-surface-800/80 hover:text-gray-100 active:bg-surface-700/70"
-            >
-              {t('quickExplain')}
-            </button>
-            <button
-              type="button"
-              onClick={() => sendQuickReply(t('saveDecisionRequest'))}
-              className="shrink-0 rounded-full border border-surface-700/70 bg-surface-900/70 px-2.5 py-1 text-[13px] font-medium text-gray-300 hover:border-surface-600 hover:bg-surface-800/80 hover:text-gray-100 active:bg-surface-700/70"
-            >
-              {t('quickSaveDecision')}
-            </button>
+          <div data-testid="floating-quick-replies" className={`pointer-events-none flex max-w-full items-center gap-1.5 overflow-x-auto bg-transparent [scrollbar-width:none] [&::-webkit-scrollbar]:hidden ${isMobile ? 'px-1' : 'px-2'}`} aria-label={t('composerActions')}>
+            {visibleComposerActions.map((action) => (
+              <button
+                key={`${action.contextRevision}:${action.id}`}
+                type="button"
+                onClick={() => sendQuickReply(action.message)}
+                className="pointer-events-auto shrink-0 rounded-full border border-surface-700/70 bg-surface-900 px-2.5 py-1 text-[13px] font-medium text-gray-300 hover:border-surface-600 hover:bg-surface-800/80 hover:text-gray-100 active:bg-surface-700/70"
+                data-origin={action.origin}
+                data-intent={action.intent}
+              >
+                {action.label}
+              </button>
+            ))}
           </div>
         )}
 
+        </div>
+
         <div
         data-tour-id="chat-input"
-        style={{ marginTop: visiblePendingInjections.length > 0 ? -steeringLayerOverlap : 0 }}
-        className={`tower-input-shell relative z-10 rounded-2xl bg-surface-800 shadow-[0_10px_28px_rgba(0,0,0,0.16)] backdrop-blur-xl transition-[box-shadow,background-color,ring-color,margin-top] duration-200 ${
+        className={`tower-input-shell relative z-10 min-w-0 max-w-full rounded-xl border bg-surface-800 transition-[border-color,background-color,margin-top] duration-150 ${
           isDragOver
-            ? 'ring-1 ring-primary-500/45 bg-primary-900/10 shadow-[0_12px_32px_rgba(0,0,0,0.20)]'
-            : 'ring-0 hover:bg-surface-800 focus-within:bg-surface-800 focus-within:shadow-[0_12px_32px_rgba(0,0,0,0.18)]'
+            ? 'border-primary-500/55 bg-primary-900/10'
+            : 'border-surface-700/70 hover:border-surface-600 focus-within:border-primary-500/55'
         }`}
         onDragEnter={handleDragEnter}
         onDragLeave={handleDragLeave}
@@ -1480,8 +1588,8 @@ export function InputBox({ onSend, onAbort, onSafeStop, onAnswerQuestion, onJump
       >
         {/* Drop overlay */}
         {isDragOver && (
-          <div className="absolute inset-0 flex items-center justify-center rounded-2xl bg-primary-900/20 backdrop-blur-sm z-10 pointer-events-none">
-            <span className="text-[15px] text-primary-300 font-medium">Drop here</span>
+          <div className="absolute inset-0 z-10 flex items-center justify-center rounded-xl bg-primary-900/20 pointer-events-none">
+            <span className="text-[15px] text-primary-300 font-medium">{t('dropHere', { defaultValue: '파일을 여기에 놓으세요.' })}</span>
           </div>
         )}
 
@@ -1491,13 +1599,20 @@ export function InputBox({ onSend, onAbort, onSafeStop, onAnswerQuestion, onJump
             selectedIndex={selectedIndex}
             onSelect={selectCommand}
             onHover={setSelectedIndex}
+            anchorRef={textareaRef}
           />
         )}
 
-        {/* Upload progress and attachment chips */}
-        {(uploadProgress || attachments.length > 0) && (
+        {/* Upload progress, file attachments, and source references */}
+        {(uploadProgress || attachments.length > 0 || sourceReference) && (
           <div className="flex flex-wrap items-center gap-1.5 px-3 pt-2.5 pb-0.5">
             {uploadProgress && <UploadProgressChip progress={uploadProgress} />}
+            {waitingSessionIds.has(currentSessionId || '') && (
+              <span role="status" className="text-xs text-surface-400">{t('sendAfterUpload')}</span>
+            )}
+            {sourceReference && (
+              <SourceReferenceChip reference={sourceReference} onRemove={() => setSourceReference(null)} />
+            )}
             {attachments.map((att) => (
               <AttachmentChip
                 key={att.id}
@@ -1533,7 +1648,7 @@ export function InputBox({ onSend, onAbort, onSafeStop, onAnswerQuestion, onJump
           />
         )}
 
-        <div className={`flex items-end relative ${isMobile ? 'gap-0.5 px-1.5 py-1' : 'gap-2 p-2'}`}>
+        <div className={`flex flex-wrap items-end relative [&>*]:order-2 ${isMobile ? 'gap-0.5 px-1.5 py-1' : 'gap-1 p-2'}`}>
           {/* Hidden file picker — opened by the attach button below.
               No `accept` filter so users can pick any file type; mobile picker
               still surfaces "Photo Library / Take Photo / Choose File" naturally
@@ -1545,32 +1660,21 @@ export function InputBox({ onSend, onAbort, onSafeStop, onAnswerQuestion, onJump
             onChange={handleFileInputChange}
             className="hidden"
           />
-          {/* Attach button — primary entry point for mobile photo/file uploads.
-              Desktop users typically use drag&drop or paste, which don't work
-              reliably on mobile browsers. Always-visible button so the path is
-              discoverable on every device. Disabled during streaming to avoid
-              attaching to an in-flight turn (matches Send button rule). */}
-          <button
-            type="button"
-            onClick={() => fileInputRef.current?.click()}
-            disabled={isStreaming || uploadProgress !== null}
-            // disabled 시 opacity-40 → 60 으로 완화. opacity-40 은 어두운 배경에서
-            // 거의 사라진 듯 보여 "버튼이 없어졌다" 오해 유발. 60 은 어두워도 인지 가능.
-            className={`rounded-xl transition-all shrink-0 disabled:opacity-60 disabled:cursor-not-allowed self-end ${
-              isMobile
-                // 모바일: ghost — 배경 없음, 호버/active 만 표시. textarea 가 시각적 주인공.
-                ? 'p-1.5 m-0.5 text-gray-500 hover:text-surface-200 active:bg-surface-700/60'
-                // 데스크탑: surrounding stroke icons 와 맞춘 작은 line icon. 이모지/고해상도 느낌 제거.
-                : 'p-2 m-1 bg-transparent hover:bg-surface-700/45 text-gray-500 hover:text-surface-100'
-            }`}
-            title={isStreaming ? t('streamingAttachDisabled') : t('attachFile')}
-            aria-label={t('attachFile')}
-          >
-            <svg className={isMobile ? 'w-4 h-4' : 'w-[18px] h-[18px]'} fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.9} d="M9.25 12.75l5.5-5.5a2.5 2.5 0 013.54 3.54l-7.25 7.25a4 4 0 01-5.66-5.66l7.05-7.05" />
-            </svg>
-          </button>
-          <div className="relative flex-1 min-w-0">
+          <ComposerCapabilitiesMenu
+            commands={slashCommands}
+            projectId={activeSession?.projectId}
+            sessionId={currentSessionId}
+            attachmentDisabled={isStreaming || uploadProgress !== null}
+            onAttach={() => fileInputRef.current?.click()}
+            onSelectSkill={(command) => {
+              selectedCommandTriggerRef.current = 'picker';
+              const prefix = `/${command.replace(/^\//, '')}`;
+              setDraftInput(`${prefix} ${input.replace(/^\/[^\s]*\s?/, '')}`);
+              setShowCommands(false);
+              requestAnimationFrame(() => textareaRef.current?.focus());
+            }}
+          />
+          <div className="relative min-w-0 !order-1 basis-full w-full">
             {ghostSuffix && input && (
               <div
                 aria-hidden="true"
@@ -1585,20 +1689,6 @@ export function InputBox({ onSend, onAbort, onSafeStop, onAnswerQuestion, onJump
             onChange={handleInput}
             onKeyDown={handleKeyDown}
             onPaste={handlePaste}
-            onFocus={(e) => {
-              // iOS Chrome/Safari: 키보드 슬라이드업 애니메이션(~300ms) 도중
-              // visualViewport.resize 가 띄엄띄엄 도착해 --vvh 가 stale 한 채로
-              // InputBox 가 키보드 뒤로 잠시 숨음 (사용자 보고: "타자 치려 하면
-              // 입력창 사라짐, 한 글자 쳐야 원위치"). main.tsx 의 focusin rAF
-              // 폴링이 1차 안전망이고, 여기서 키보드 안착 후 scrollIntoView 로
-              // 2차 안전망. 백업 보호라 모바일 외에서도 무해.
-              const el = e.currentTarget;
-              setTimeout(() => {
-                if (typeof el.scrollIntoView === 'function') {
-                  el.scrollIntoView({ block: 'end', behavior: 'smooth' });
-                }
-              }, 320);
-            }}
             placeholder={
               // 모바일은 좁은 폭 + placeholder 가 작아도 길면 2줄 점유 → 짧은 문구로 분기.
               activeTurn.phase === 'awaiting_user'
@@ -1614,7 +1704,7 @@ export function InputBox({ onSend, onAbort, onSafeStop, onAnswerQuestion, onJump
             rows={1}
             aria-label={t('messageInput')}
             style={{ maxHeight: `${effectiveMaxH}px`, WebkitOverflowScrolling: 'touch' }}
-            className={`relative z-[1] w-full bg-transparent border-none py-3 text-input-size text-gray-100 placeholder:text-surface-500 placeholder:italic resize-none focus:outline-none focus:ring-0 min-h-[48px] overscroll-contain ${
+            className={`relative z-[1] block min-w-0 w-full max-w-full overflow-x-hidden bg-transparent border-none py-3 text-input-size text-gray-100 placeholder:text-surface-500 placeholder:italic resize-none focus:outline-none focus:ring-0 min-h-[48px] overscroll-contain ${
               isMobile ? 'px-2' : 'px-4'
             }`}
           />
@@ -1637,51 +1727,41 @@ export function InputBox({ onSend, onAbort, onSafeStop, onAnswerQuestion, onJump
             </button>
           )}
 
-          {/* Mini nav: jump to previous / next user message ("질문").
-              Placed BEFORE Stop/Send so its position stays consistent
-              regardless of which action button is currently rendered.
-              Each arrow only shows when that direction has a target.
-              모바일에서도 노출 — 사용자 우선순위 (질문 nav > textarea 폭).
-              모바일에선 한 단계 콤팩트 (w-4 h-3) 로 textarea 폭 보호. */}
-          {(hasPrevUser || hasNextUser) && (
-            <div className={`flex flex-col self-center ${isMobile ? 'gap-0 mr-0' : 'gap-0.5 mr-0.5'}`}>
-              <button
-                type="button"
-                onClick={() => onJumpPrevUser?.()}
-                disabled={!hasPrevUser}
-                className={`flex items-center justify-center rounded text-surface-500 hover:text-gray-200 hover:bg-surface-700/60 disabled:opacity-25 disabled:cursor-default disabled:hover:bg-transparent disabled:hover:text-surface-500 transition-colors ${
-                  isMobile ? 'w-4 h-3.5' : 'w-5 h-4'
-                }`}
-                title={t('previousQuestion', { shortcut: navShortcutLabel })}
-                aria-label={t('previousQuestion', { shortcut: navShortcutLabel })}
-              >
-                <svg className={isMobile ? 'w-2.5 h-2.5' : 'w-3 h-3'} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 15l7-7 7 7" />
-                </svg>
-              </button>
-              <button
-                type="button"
-                onClick={() => onJumpNextUser?.()}
-                disabled={!hasNextUser}
-                className={`flex items-center justify-center rounded text-surface-500 hover:text-gray-200 hover:bg-surface-700/60 disabled:opacity-25 disabled:cursor-default disabled:hover:bg-transparent disabled:hover:text-surface-500 transition-colors ${
-                  isMobile ? 'w-4 h-3.5' : 'w-5 h-4'
-                }`}
-                title={t('nextQuestion', { shortcut: navShortcutLabel })}
-                aria-label={t('nextQuestion', { shortcut: navShortcutLabel })}
-              >
-                <svg className={isMobile ? 'w-2.5 h-2.5' : 'w-3 h-3'} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 9l-7 7-7-7" />
-                </svg>
-              </button>
-            </div>
-          )}
+          <div className="ml-auto flex items-center gap-1">
+          <DictationButton key={`${currentSessionId ?? 'no-session'}:${dictationEpoch}`} sessionId={currentSessionId} mobile={isMobile} disabled={uploadProgress !== null} onStart={() => {
+            window.dispatchEvent(new Event('tower-speech-recording'));
+            dictationAcceptingRef.current = true;
+            dictationRange.current = { start: textareaRef.current?.selectionStart ?? input.length, end: textareaRef.current?.selectionEnd ?? input.length, owned: '', transcript: '', snapshot: input };
+          }} onText={(text) => {
+            if (!dictationAcceptingRef.current) return;
+            const result = updateDictation(draftValueRef.current, text, dictationRange.current);
+            const el = textareaRef.current;
+            const followTail = !el || document.activeElement !== el || el.selectionStart >= el.value.length - 1;
+            const selection = el ? { start: el.selectionStart, end: el.selectionEnd } : null;
+            dictationRange.current = result.state;
+            setDraftInput(result.value);
+            requestAnimationFrame(() => {
+              const textarea = textareaRef.current;
+              if (!textarea) return;
+              applyTextareaHeight(textarea);
+              if (followTail) {
+                textarea.setSelectionRange(result.state.end, result.state.end);
+                textarea.scrollTop = textarea.scrollHeight;
+              } else if (selection) {
+                textarea.setSelectionRange(selection.start, selection.end);
+              }
+            });
+          }} />
+          <ToolStartVoiceCue sessionId={currentSessionId} />
+          <AnswerVoiceToggle sessionId={currentSessionId} />
+          </div>
           {/* Stop always aborts immediately, including active Pi tool calls. */}
-          {isSafeStopAvailable && onSafeStop && (
+          {isSafeStopAvailable && onStopImmediately && (
             <button
               type="button"
-              onClick={onSafeStop}
+              onClick={() => { window.dispatchEvent(new Event('tower-speech-stop')); onStopImmediately(); }}
               className={`bg-transparent hover:bg-red-500/10 rounded-xl transition-all shrink-0 text-red-400 self-end focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-400 ${
-                isMobile ? 'p-1.5 m-0.5' : 'p-2 m-1'
+                isMobile ? 'min-h-12 min-w-12 p-2.5 m-0.5' : 'p-2 m-1'
               }`}
               title={t('stopImmediately')}
               aria-label={t('stopImmediately')}
@@ -1692,9 +1772,10 @@ export function InputBox({ onSend, onAbort, onSafeStop, onAnswerQuestion, onJump
             </button>
           )}
           {/* Non-Pi fallback retains the existing immediate abort behavior. */}
-          {isStreaming && !isSafeStopAvailable && (
+          {isStreaming && !(isSafeStopAvailable && onStopImmediately) && (
             <button
               onClick={() => {
+                window.dispatchEvent(new Event('tower-speech-stop'));
                 // Stop streaming AND restore queued messages to input
                 const sid = useChatStore.getState().sessionId;
                 if (sid) {
@@ -1712,7 +1793,7 @@ export function InputBox({ onSend, onAbort, onSafeStop, onAnswerQuestion, onJump
                 onAbort();
               }}
               className={`bg-transparent hover:bg-red-500/10 rounded-xl transition-all shrink-0 text-red-400 self-end ${
-                isMobile ? 'p-1.5 m-0.5' : 'p-2 m-1'
+                isMobile ? 'min-h-12 min-w-12 p-2.5 m-0.5' : 'p-2 m-1'
               }`}
               title="Stop"
               aria-label={t('stopResponse')}
@@ -1723,16 +1804,25 @@ export function InputBox({ onSend, onAbort, onSafeStop, onAnswerQuestion, onJump
             </button>
           )}
           {/* Send/Queue button — hidden when streaming with empty input (Stop takes its place) */}
-          {!(isStreaming && !input.trim() && attachments.length === 0) && (
+          {!(isStreaming && !input.trim() && attachments.length === 0 && !uploadProgress) && (
             <button
-              onClick={() => { void handleSubmit(); }}
-              disabled={uploadProgress !== null || (!input.trim() && attachments.length === 0)}
-              className={`rounded-xl transition-all disabled:cursor-not-allowed shrink-0 active:scale-95 group self-end ${
-                isMobile ? 'p-1.5 m-0.5' : 'p-2 m-1'
+              type="button"
+              onPointerDown={(event) => {
+                // Keep the keyboard/viewport stable until click is dispatched.
+                // Submit only on click so canceled gestures cannot send messages.
+                if (event.button === 0 && document.activeElement === textareaRef.current) event.preventDefault();
+              }}
+              onMouseDown={(event) => {
+                if (event.button === 0 && document.activeElement === textareaRef.current) event.preventDefault();
+              }}
+              onClick={() => { void handleSubmit(textareaRef.current?.value); }}
+              disabled={waitingSessionIds.has(currentSessionId || '') || (!input.trim() && attachments.length === 0 && !uploadProgress)}
+              className={`inline-flex items-center justify-center rounded-xl transition-colors disabled:cursor-not-allowed shrink-0 self-end ${
+                isMobile ? 'h-12 w-12 p-0' : 'h-10 w-10 p-0'
               } ${
                 isStreaming && (input.trim() || attachments.length > 0)
                   ? 'bg-primary-500/12 hover:bg-primary-500/18 text-primary-300 ring-1 ring-primary-500/20'
-                  : 'bg-primary-600/90 hover:bg-primary-500 disabled:bg-transparent disabled:text-surface-600 disabled:shadow-none text-white shadow-[0_4px_12px_rgba(0,0,0,0.12)]'
+                  : 'bg-primary-600 hover:bg-primary-500 disabled:bg-transparent disabled:text-surface-600 text-white'
               }`}
               title={isStreaming ? (isPiStreamingSession ? 'Steer current Pi turn' : 'Add to queue') : 'Send'}
               aria-label={isStreaming ? (isPiStreamingSession ? t('sendToCurrentPi') : t('addToQueue')) : t('sendMessage')}
@@ -1742,7 +1832,7 @@ export function InputBox({ onSend, onAbort, onSafeStop, onAnswerQuestion, onJump
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
                 </svg>
               ) : (
-                <svg className={`transform group-active:translate-x-[1px] group-active:translate-y-[-1px] group-hover:translate-x-[1px] group-hover:translate-y-[-1px] transition-transform ${isMobile ? 'w-4 h-4' : 'w-5 h-5'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M22 2L11 13M22 2l-7 20-4-9-9-4z" />
                 </svg>
               )}
@@ -1750,6 +1840,8 @@ export function InputBox({ onSend, onAbort, onSafeStop, onAnswerQuestion, onJump
           )}
         </div>
         </div>
+
+
       </div>
 
     </div>

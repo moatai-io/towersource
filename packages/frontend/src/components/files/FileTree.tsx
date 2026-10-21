@@ -1,4 +1,8 @@
-import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import { towerHttpUrl } from '../../features/client-connection/connection';
+import { FileOperationFeedback } from '../../features/file-operation-feedback/FileOperationFeedback';
+import { uploadScope, reportUploadUnknown } from '../../features/file-operation-feedback/feedback';
+import { pasteCutPaths } from './fileClipboard';
+import React, { useState, useEffect, useRef, useMemo, useCallback, useId } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { FileEntry, FileEntrySortMode } from '../../stores/file-store';
 import { useFileStore } from '../../stores/file-store';
@@ -26,6 +30,7 @@ function collectDescendantPaths(entry: FileEntry): string[] {
 }
 
 interface FileTreeProps {
+  uploadFeedbackScope?: string;
   entries: FileEntry[];
   onFileClick: (path: string) => void;
   onDirectoryClick: (path: string) => void;
@@ -277,11 +282,12 @@ export function flattenEntries(entries: FileEntry[]): string[] {
 type FolderDropTargetVariant = 'row' | 'contents';
 
 /** Drop target for a folder row or the open area inside an expanded folder. */
-function FolderDropTarget({ entry, children, onRefreshTree, variant = 'row' }: {
+function FolderDropTarget({ entry, children, onRefreshTree, variant = 'row', uploadFeedbackScope }: {
   entry: FileEntry;
   children: React.ReactNode;
   onRefreshTree?: (targetDir?: string) => void;
   variant?: FolderDropTargetVariant;
+  uploadFeedbackScope: string;
 }) {
   const { t } = useTranslation('files');
   const confirm = useConfirm();
@@ -332,7 +338,7 @@ function FolderDropTarget({ entry, children, onRefreshTree, variant = 'row' }: {
     }
 
     // 2) Existing: external file/folder upload
-    void uploadFilesToDir(entry.path, e, onRefreshTree);
+    void uploadFilesToDir(entry.path, e, uploadFeedbackScope, onRefreshTree);
   };
 
   const activeClass = dragOver
@@ -370,7 +376,7 @@ function FolderDropTarget({ entry, children, onRefreshTree, variant = 'row' }: {
 }
 
 /** Upload files (and folders, preserving structure) to a directory via drag & drop */
-async function uploadFilesToDir(targetDir: string, e: React.DragEvent, onRefreshTree?: (targetDir?: string) => void) {
+async function uploadFilesToDir(targetDir: string, e: React.DragEvent, uploadFeedbackScope: string, onRefreshTree?: (targetDir?: string) => void) {
   // Skip internal drags
   if (e.dataTransfer.getData('application/x-attachment')) return;
 
@@ -379,7 +385,7 @@ async function uploadFilesToDir(targetDir: string, e: React.DragEvent, onRefresh
     items = await readDroppedItems(e.dataTransfer);
   } catch (err) {
     console.error('[filetree] Failed to read dropped items:', err);
-    toastError('Failed to read dropped folder');
+    reportUploadUnknown(uploadFeedbackScope);
     return;
   }
   if (items.length === 0) return;
@@ -387,17 +393,18 @@ async function uploadFilesToDir(targetDir: string, e: React.DragEvent, onRefresh
   const targetName = targetDir.split('/').pop();
 
   try {
-    const { ok, fail } = await uploadDroppedFiles(targetDir, items);
-    notifyUploadResult({ ok, fail }, targetName ? `${targetName}/` : undefined);
+    const result = await uploadDroppedFiles(targetDir, items);
+      const { ok, fail } = result;
+    notifyUploadResult(result, targetName ? `${targetName}/` : undefined, uploadFeedbackScope);
     if (ok > 0) onRefreshTree?.(targetDir);
   } catch (err) {
     console.error('[filetree] File upload error:', err);
-    toastError(`Upload failed: ${err instanceof Error ? err.message : 'Network error'}`);
+    reportUploadUnknown(uploadFeedbackScope);
   }
 }
 
 // ─── Context Menu ───
-type MenuAction = 'newFile' | 'newFolder' | 'uploadHere' | 'paste' | 'moveSelected' | 'rename' | 'delete' | 'newSession' | 'shareFile' | 'download' | 'downloadZip' | 'copyPath' | 'openNewWindow' | 'pin';
+type MenuAction = 'cut' | 'newFile' | 'newFolder' | 'uploadHere' | 'paste' | 'moveSelected' | 'rename' | 'delete' | 'newSession' | 'shareFile' | 'download' | 'downloadZip' | 'copyPath' | 'openNewWindow' | 'pin';
 
 function ContextMenu({ x, y, entry, showNewSession, canPin, canPaste, clipboardCount, selectedCount, isSelectedContext, onAction, onClose, mobile = false }: {
   x: number; y: number; entry: FileEntry;
@@ -444,11 +451,12 @@ function ContextMenu({ x, y, entry, showNewSession, canPin, canPaste, clipboardC
       icon: <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>,
     },
     {
-      action: 'paste', label: clipboardCount > 1 ? `Paste ${clipboardCount} items here` : 'Paste here', show: entry.isDirectory && canPaste,
+      action: 'paste', label: t('pasteItemsHere', { count: clipboardCount }), show: entry.isDirectory && canPaste,
       icon: <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2m-4 0a2 2 0 104 0m-4 0a2 2 0 114 0m-6 8h6m-6 4h6" /></svg>,
     },
+    { action: 'cut', label: t('cutItems'), show: true, icon: null },
     {
-      action: 'moveSelected', label: selectedCount > 1 ? `Move ${selectedCount} items...` : 'Move to folder...', show: isSelectedContext,
+      action: 'moveSelected', label: selectedCount > 1 ? t('moveItemsTitle', { count: selectedCount }) : `${t('moveToFolder')}…`, show: true,
       icon: <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" /></svg>,
     },
     {
@@ -537,7 +545,7 @@ function ContextMenu({ x, y, entry, showNewSession, canPin, canPaste, clipboardC
           </button>
         </React.Fragment>
       ))}
-      <div className="px-4 py-2 text-[13px] text-gray-500 truncate border-t border-surface-700/50 mt-0.5 pt-1">
+      <div translate="no" className="notranslate px-4 py-2 text-[13px] text-gray-500 truncate border-t border-surface-700/50 mt-0.5 pt-1">
         {entry.name}
       </div>
     </>
@@ -600,7 +608,9 @@ function InlineInput({ defaultValue, placeholder, onSubmit, onCancel }: {
   );
 }
 
-export function FileTree({ entries, onFileClick, onDirectoryClick, onPinFile, onNewSessionInFolder, onRefreshTree, depth = 0, flatPaths: parentFlatPaths }: FileTreeProps) {
+export function FileTree({ entries, onFileClick, onDirectoryClick, onPinFile, onNewSessionInFolder, onRefreshTree, depth = 0, flatPaths: parentFlatPaths, uploadFeedbackScope: parentUploadFeedbackScope }: FileTreeProps) {
+  const instanceId = useId();
+  const uploadFeedbackScope = parentUploadFeedbackScope || uploadScope('tree', String(instanceId));
   const { t } = useTranslation('layout');
   const { t: tFiles } = useTranslation('files');
   const confirm = useConfirm();
@@ -677,8 +687,6 @@ export function FileTree({ entries, onFileClick, onDirectoryClick, onPinFile, on
     // Normal click
     if (entry.isDirectory) {
       onDirectoryClick(entry.path);
-    } else if (isPdfPath(entry.path)) {
-      window.open(buildPdfServeUrl(entry.path), '_blank', 'noopener,noreferrer');
     } else {
       onFileClick(entry.path);
     }
@@ -720,9 +728,22 @@ export function FileTree({ entries, onFileClick, onDirectoryClick, onPinFile, on
       return;
     }
 
+    if (action === 'cut') {
+      useFileStore.getState().setFileClipboard(actionPaths, 'cut');
+      return;
+    }
+
     if (action === 'paste') {
       if (!entry.isDirectory || !fileClipboard?.paths.length) return;
       try {
+        if (fileClipboard.mode === 'cut') {
+          const result = await pasteCutPaths(fileClipboard.paths, entry.path, async (oldPath, newPath) => { await apiPost('/api/files/rename', { oldPath, newPath }); });
+          if (result.failed.length) useFileStore.getState().setFileClipboard(result.failed, 'cut');
+          else useFileStore.getState().clearFileClipboard();
+          if (result.failed.length) toastError(tFiles('tree.pasteFailed', { count: result.failed.length }));
+          onRefreshTree?.();
+          return;
+        }
         const result = await apiPost('/api/files/copy', { paths: fileClipboard.paths, targetDir: entry.path });
         if (result.copied > 0) toastQuiet(tFiles('tree.pasted', { count: result.copied }));
         if (result.failed > 0) toastError(tFiles('tree.pasteFailed', { count: result.failed }));
@@ -775,7 +796,7 @@ export function FileTree({ entries, onFileClick, onDirectoryClick, onPinFile, on
       // Native browser download — streams large videos/files without buffering the
       // whole Blob in the renderer process before the save begins.
       const token = localStorage.getItem('token');
-      const url = `/api/files/serve?path=${encodeURIComponent(entry.path)}&download=1${token ? `&token=${encodeURIComponent(token)}` : ''}`;
+      const url = towerHttpUrl(`/api/files/serve?path=${encodeURIComponent(entry.path)}&download=1${token ? `&token=${encodeURIComponent(token)}` : ''}`);
       window.open(url, '_blank');
       return;
     }
@@ -810,9 +831,11 @@ export function FileTree({ entries, onFileClick, onDirectoryClick, onPinFile, on
       try {
         let success = 0;
         let fail = 0;
+        const changedDirectories = new Set<string>();
         for (const path of actionPaths) {
           try {
             await apiPost('/api/files/delete', { path });
+            changedDirectories.add(path.substring(0, path.lastIndexOf('/')) || '/');
             success++;
           } catch {
             fail++;
@@ -821,7 +844,7 @@ export function FileTree({ entries, onFileClick, onDirectoryClick, onPinFile, on
         if (success > 0) toastQuiet(isBulkAction ? tFiles('tree.deleted', { count: success }) : tFiles('tree.deletedOne', { name: displayName }));
         if (fail > 0) toastError(tFiles('tree.deleteFailed', { count: fail }));
         useFileStore.getState().clearSelection();
-        onRefreshTree?.();
+        for (const directory of changedDirectories) onRefreshTree?.(directory);
       } catch (err: any) {
         toastError(err.message || 'Delete failed');
       }
@@ -836,14 +859,15 @@ export function FileTree({ entries, onFileClick, onDirectoryClick, onPinFile, on
     const items = Array.from(files).map((file) => ({ file, relativePath: file.name }));
     const targetName = targetDir.split('/').pop() || targetDir;
     try {
-      const { ok, fail } = await uploadDroppedFiles(targetDir, items);
-      notifyUploadResult({ ok, fail }, `${targetName}/`);
+      const result = await uploadDroppedFiles(targetDir, items);
+      const { ok, fail } = result;
+      notifyUploadResult(result, `${targetName}/`, uploadFeedbackScope);
       if (ok > 0) {
         useFileStore.getState().bumpRefreshTrigger();
         onRefreshTree?.(targetDir);
       }
     } catch (err) {
-      toastError(`Upload failed: ${err instanceof Error ? err.message : 'Network error'}`);
+      reportUploadUnknown(uploadFeedbackScope);
     } finally {
       e.target.value = '';
       folderUploadTargetRef.current = null;
@@ -878,6 +902,7 @@ export function FileTree({ entries, onFileClick, onDirectoryClick, onPinFile, on
 
   return (
     <div>
+      {depth === 0 && <FileOperationFeedback scope={uploadFeedbackScope} />}
       <input ref={folderUploadInputRef} type="file" multiple hidden onChange={handleFolderUpload} />
       {sortedEntries.map((entry) => {
         const isSelected = selectedPaths.has(entry.path);
@@ -898,7 +923,7 @@ export function FileTree({ entries, onFileClick, onDirectoryClick, onPinFile, on
                 />
               </div>
             ) : (
-              <FolderDropTarget entry={entry} onRefreshTree={onRefreshTree}>
+              <FolderDropTarget uploadFeedbackScope={uploadFeedbackScope} entry={entry} onRefreshTree={onRefreshTree}>
                 {/* Select mode checkbox */}
                 {selectMode && (
                   <button
@@ -976,7 +1001,7 @@ export function FileTree({ entries, onFileClick, onDirectoryClick, onPinFile, on
                     <span className="w-3 shrink-0" />
                   )}
                   {!entry.isDirectory && <FileIcon name={entry.name} extension={entry.extension} />}
-                  <span className={`truncate ${entry.isDirectory ? 'font-medium text-gray-200' : 'text-gray-400'}`}>{entry.name}</span>
+                  <span translate="no" className={`notranslate truncate ${entry.isDirectory ? 'font-medium text-gray-200' : 'text-gray-400'}`}>{entry.name}</span>
                   {entry.size !== undefined && !entry.isDirectory && (
                     <span className="ml-auto text-[12px] text-gray-500">
                       {entry.size < 1024 ? `${entry.size}B` : `${(entry.size / 1024).toFixed(1)}K`}
@@ -1003,7 +1028,7 @@ export function FileTree({ entries, onFileClick, onDirectoryClick, onPinFile, on
             )}
             {/* Children + inline new file/folder inputs inside expanded dir */}
             {entry.isDirectory && entry.isExpanded && (
-              <FolderDropTarget entry={entry} onRefreshTree={onRefreshTree} variant="contents">
+              <FolderDropTarget uploadFeedbackScope={uploadFeedbackScope} entry={entry} onRefreshTree={onRefreshTree} variant="contents">
                 <div className={isTouchDevice.current ? 'ml-1 pl-2 border-l border-surface-700/30' : 'ml-1.5 pl-2 border-l border-surface-700/25'}>
                   {/* Inline new file / new folder input */}
                   {inlineInput && (inlineInput.type === 'newFile' || inlineInput.type === 'newFolder') && inlineInput.parentPath === entry.path && (
@@ -1022,6 +1047,7 @@ export function FileTree({ entries, onFileClick, onDirectoryClick, onPinFile, on
                   )}
                   {entry.children && (
                     <FileTree
+                      uploadFeedbackScope={uploadFeedbackScope}
                       entries={entry.children}
                       onFileClick={onFileClick}
                       onDirectoryClick={onDirectoryClick}

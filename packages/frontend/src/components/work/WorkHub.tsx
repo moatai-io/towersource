@@ -4,6 +4,7 @@ import type { SessionMeta } from '@tower/shared';
 import { InboxPanel } from '../inbox/InboxPanel';
 import { ChallengeTimelinePanel } from './ChallengeTimelinePanel';
 import { useSessionStore } from '../../stores/session-store';
+import { AutomationWorkResults } from './AutomationWorkResults';
 
 interface WorkHubProps {
   onSelectSession?: (session: SessionMeta) => void;
@@ -25,7 +26,7 @@ export function WorkHub({ onSelectSession }: WorkHubProps) {
   };
 
   return (
-    <div data-testid="work-hub" className="flex h-full min-h-0 flex-col overflow-y-auto overscroll-y-contain bg-surface-950 md:overflow-hidden">
+    <div data-testid="work-hub" className="@container/work flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-surface-950">
       <header className="shrink-0 border-b border-surface-800/80 bg-surface-950/95 px-4 py-4 backdrop-blur-xl md:px-5 md:py-5">
         <div className="mx-auto max-w-6xl">
           <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-primary-400">{t('workHub.eyebrow')}</p>
@@ -33,7 +34,7 @@ export function WorkHub({ onSelectSession }: WorkHubProps) {
           <p className="mt-1 hidden max-w-2xl text-[13px] leading-5 text-surface-500 sm:block">{t('workHub.description')}</p>
         </div>
       </header>
-      <nav className="sticky top-0 z-20 grid shrink-0 grid-cols-2 gap-1 border-b border-surface-800 bg-surface-950/95 p-2 backdrop-blur-xl lg:hidden" aria-label={t('workHub.mobileSections')}>
+      <nav className="sticky top-0 z-20 grid shrink-0 grid-cols-2 gap-1 border-b border-surface-800 bg-surface-950/95 p-2 backdrop-blur-xl @min-[64rem]/work:hidden" aria-label={t('workHub.mobileSections')}>
         <button
           type="button"
           aria-pressed={mobileSection === 'attention'}
@@ -52,11 +53,12 @@ export function WorkHub({ onSelectSession }: WorkHubProps) {
           {t('workHub.progressTab')}
         </button>
       </nav>
-      <div className="min-h-0 flex-1 lg:grid lg:grid-cols-[minmax(0,1fr)_minmax(320px,380px)]">
-        <main className={`${mobileSection === 'progress' ? 'block' : 'hidden'} min-w-0 lg:block lg:min-h-0`} aria-label={t('workHub.progressTab')}>
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-y-contain @min-[64rem]/work:overflow-hidden @min-[64rem]/work:grid @min-[64rem]/work:grid-cols-[minmax(0,1fr)_minmax(320px,380px)]">
+        <main className={`${mobileSection === 'progress' ? 'block' : 'hidden'} min-w-0 @min-[64rem]/work:block @min-[64rem]/work:min-h-0`} aria-label={t('workHub.progressTab')}>
           <ChallengeTimelinePanel embedded />
         </main>
-        <aside className={`${mobileSection === 'attention' ? 'block' : 'hidden'} min-w-0 border-surface-800/80 lg:block lg:min-h-0 lg:overflow-y-auto lg:border-l`} aria-label={t('workHub.attentionTab')}>
+        <aside className={`${mobileSection === 'attention' ? 'block' : 'hidden'} min-w-0 border-surface-800/80 @min-[64rem]/work:block @min-[64rem]/work:min-h-0 @min-[64rem]/work:overflow-y-auto @min-[64rem]/work:border-l`} aria-label={t('workHub.attentionTab')}>
+          <AutomationWorkResults />
           <InboxPanel variant="work-results" onSelectSession={onSelectSession} />
         </aside>
       </div>

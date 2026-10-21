@@ -1,8 +1,17 @@
+import { retainFrontendAssets } from './services/frontend-assets/retention.js';
+import { reconcileWaitAlarmRoots, startWaitAlarmDispatcher, stopWaitAlarmDispatcher } from './services/agent-sleep/dispatcher.js';
+import {startOutboundCustomerStartup} from './services/customer-provisioning/outbound-customer-startup.js';
+import {startCustomerServiceStartup} from './services/customer-provisioning/customer-service-startup.js';
+import {cpLoginRoutes} from './services/auth/cp-login-route.js';
+import {startPathPublishingListener} from './services/publishing/path-publishing-listener.js';
+import { startServerMaintenance } from './services/server-maintenance/index.js';
 import express from 'express';
+import { createScopeBackendRoute } from './services/runtime-box/worker-scope-backend-route.js';
 import compression from 'compression';
 import cors from 'cors';
 import helmet from 'helmet';
 import http from 'http';
+import { startCustomerDeliveryListener } from './services/customer-provisioning/customer-delivery-listener.js';
 import path from 'path';
 import fs from 'fs';
 import { config, validateConfig } from './config.js';
@@ -10,6 +19,8 @@ import apiRouter from './routes/api.js';
 import gatewayRouter from './routes/gateway.js';
 import workbenchWorkerRouter from './routes/workbench-worker-api.js';
 import voiceApiRouter from './routes/voice-api.js';
+import dictationApiRouter from './routes/dictation-api.js';
+import answerSpeechApiRouter from './routes/answer-speech-api.js';
 import { setupWebSocket, broadcastToAll, broadcastToUser, dispatchDueAgentTurnRetries, serverSideResumeInterrupted } from './routes/ws-handler.js';
 import { initPg, closePgPool, isPgEnabled } from './db/pg.js';
 import { stopFileWatcher } from './services/workspace/file-system.js';
@@ -18,8 +29,11 @@ import { resumeOrphanedTaskMonitoring, hasMonitoredTasks, stopAllMonitors } from
 import { recoverRunningAgentRunsOnStartup, startAgentRunSettlementRecovery, stopAgentRunSettlementRecovery } from './services/agent-workers.js';
 import { cleanupOrphanedSdkProcesses, stopOrphanMonitor, gracefulShutdown, consumeInterruptedSessions, type InterruptedSession } from './services/ai/claude-sdk.js';
 import { consumeInterruptedPiSessionDetails } from './services/ai/pi-session-runtime.js';
-import { shutdownEngines } from './engines/index.js';
+import { getEngine, shutdownEngines } from './engines/index.js';
+import { refreshLiteLLMModelCatalog } from './services/ai/litellm-model-catalog.js';
+import { reloadModels } from './config.js';
 import { startUnifiedScheduler, stopUnifiedScheduler } from './services/task/unified-scheduler.js';
+import { startSecretariatScheduler, stopSecretariatScheduler } from './services/secretariat/scheduler.js';
 import { startReconciler as startPublishingReconciler, stopReconciler as stopPublishingReconciler } from './services/publishing/reconciler.js';
 import { THUMBNAILS_DIR } from './services/publishing/thumbnail-generator.js';
 import { activeSiteMetadata } from './routes/ai-service-public-api.js';
@@ -29,6 +43,7 @@ import { auditStaleSessions } from './services/session/session-manager.js';
 import { startEmptySessionCleanup, stopEmptySessionCleanup } from './services/session/empty-session-cleanup.js';
 import { startAgentWorkerCleanup, stopAgentWorkerCleanup } from './services/agent-worker-cleanup.js';
 import { findOrphanedStartedAgentTurns } from './services/message-store.js';
+import { interruptRestartedSleepTurns } from './services/agent-sleep/sleep.js';
 import { expireUnsafeRestartRecoveryTurns, interruptRestartedWaitingUserTurns } from './services/agent-turn/turn-supervisor.js';
 import { startAgentTurnDispatcher, stopAgentTurnDispatcher } from './services/agent-turn/turn-dispatcher.js';
 import { stopWsSync } from './services/ws-sync.js';
@@ -37,6 +52,8 @@ import { bootstrapLibraryProviders } from './services/skill/skill-registry.js';
 import { backfillTaskProjects } from './services/task/task-manager.js';
 import { scheduleResumableUploadStartupCleanup } from './services/uploads/resumable-upload-cleanup.js';
 import { VERSION, GIT_SHA } from './utils/pkg-info.js';
+import { feedbackIntakeRouter, startFeedbackDelivery, stopFeedbackDelivery } from './services/feedback-intake/runtime.js';
+import { startConfiguredWebhookDispatcher, stopConfiguredWebhookDispatcher, webhookIngressRouter } from './services/connectors/runtime.js';
 
 // CRITICAL: Remove CLAUDECODE env var before anything else
 delete process.env.CLAUDECODE;
@@ -46,6 +63,12 @@ delete process.env.CLAUDECODE;
 validateConfig();
 
 const app = express();
+// Root-installed same-host coordinator service credential, not user/owner input.
+// Registered before body parsing. Unconfigured instances expose no probe route.
+if (process.env.TOWER_SCOPE_INSTALLATION_POLICY) {
+  app.use(createScopeBackendRoute(process.env.TOWER_SCOPE_INSTALLATION_POLICY,
+    () => process.env.TOWER_SCOPE_BACKEND_PROBE_TOKEN || ''));
+}
 app.set('trust proxy', 1); // trust first proxy (Cloudflare) — correct IP for rate limiting
 app.use(helmet({
   contentSecurityPolicy: false,       // breaks Vite HMR + inline scripts
@@ -53,6 +76,11 @@ app.use(helmet({
 }));
 app.use(cors());
 app.use(compression({ threshold: 512 })); // gzip responses > 512 bytes
+// Dedicated external intake parsers must run before the general JSON parser.
+app.use('/api/feedback-intake', feedbackIntakeRouter());
+// Webhook Ingress verifies exact raw bytes and durably queues normalized events.
+// Provider reads, Project authority, and Agent execution run only in the internal dispatcher.
+app.use('/api/webhooks', webhookIngressRouter());
 app.use(express.json({ limit: '10mb' }));
 
 // Gateway routes (full mode only — MUST be before /api catch-all)
@@ -66,9 +94,18 @@ if (config.towerRole === 'full') {
 // still apply the normal Tower auth middleware.
 app.use('/api/workbench-workers', workbenchWorkerRouter);
 app.use('/api', voiceApiRouter);
+app.use('/api', dictationApiRouter);
+app.use('/api', answerSpeechApiRouter);
+
+// Optional CP federation precedes local auth catch-all; disabled unless installed.
+app.use('/api/auth', cpLoginRoutes(process.env));
 
 // API routes
 app.use('/api', apiRouter);
+// API misses must never fall through to static pages or Express's HTML 404.
+app.use('/api', (_req, res) => {
+  res.status(404).json({ error: 'API endpoint not found' });
+});
 
 // Public, generated Publishing Hub thumbnails. Site files themselves are served
 // by nginx from workspace/published/sites/<slug>/; thumbnails are platform-owned
@@ -117,10 +154,16 @@ function renderAgentShareCardSvg(metadata: Record<string, unknown>, baseUrl: str
 // Serve frontend in production
 const frontendPath = config.frontendDir;
 if (fs.existsSync(frontendPath)) {
+  // Complete durable publication before this release can serve its HTML.
+  // Failure is fatal: silently continuing would break the retention guarantee.
+  const retainedAssets = retainFrontendAssets(frontendPath, config.dataDir);
+  app.use('/assets', express.static(retainedAssets, {
+    immutable: true, maxAge: '1y', index: false, dotfiles: 'deny',
+  }));
   // sw.js & index.html must never be cached — ensures PWA updates propagate immediately
   // CDN-Bypass: Cloudflare respects CDN-Cache-Control separately from browser Cache-Control
   app.get('/runtime-config.js', (_req, res) => {
-    const defaultLanguage = process.env.TOWER_DEFAULT_LANGUAGE === 'ko' ? 'ko' : 'en';
+    const defaultLanguage = process.env.TOWER_DEFAULT_LANGUAGE === 'en' ? 'en' : 'ko';
     res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
     res.type('application/javascript').send(
       `window.__TOWER_RUNTIME_CONFIG__=${JSON.stringify({ defaultLanguage })};`,
@@ -163,14 +206,23 @@ if (fs.existsSync(frontendPath)) {
 
   app.use(express.static(frontendPath, {
     setHeaders: (res, filePath) => {
-      // Hashed assets (e.g. index-DRQj5zgr.js) can be cached forever; everything else gets revalidation
-      if (filePath.includes('/assets/')) {
+      // Hashed assets (e.g. index-DRQj5zgr.js) can be cached forever. Fonts are
+      // unhashed but their content never changes between deploys — without this,
+      // every deploy bumps Last-Modified and forces every visitor to re-download
+      // the ~2MB Pretendard woff2 on next load (blocks text/icon rendering while
+      // it revalidates). Everything else still gets revalidation.
+      if (filePath.includes('/assets/') || /\.(woff2?|ttf|otf)$/.test(filePath)) {
         res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
       } else {
         res.setHeader('Cache-Control', 'no-cache');
       }
     },
   }));
+  // Missing modules must be 404, never an HTML SPA fallback (MIME failure).
+  app.use('/assets', (_req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    res.status(404).end();
+  });
   app.get('*', (_req, res) => {
     res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
     res.sendFile(path.join(frontendPath, 'index.html'));
@@ -199,10 +251,19 @@ server.listen(config.port, config.host, async () => {
   `);
 
   // Initialize PostgreSQL (restart trigger) (chat rooms — v3.0 dual DB)
+  let customerDeliveryPgReady = false;
   if (isPgEnabled()) {
     try {
       await initPg();
+      customerDeliveryPgReady = true;
       console.log('[pg] PostgreSQL initialized — chat rooms enabled');
+      // Default OFF. Central schema is separately approved/applied, not auto-migrated.
+      startFeedbackDelivery();
+      try {
+        await startConfiguredWebhookDispatcher();
+      } catch (err) {
+        console.error('[webhook-connectors] Failed to start configured dispatcher:', err);
+      }
       try {
         const { initializeRuntimeBoxCapacity } = await import('./services/runtime-box/runtime-box-capacity.js');
         await initializeRuntimeBoxCapacity();
@@ -236,13 +297,6 @@ server.listen(config.port, config.host, async () => {
         if (updated > 0) console.log(`[sessions] Backfilled short_code for ${updated} sessions`);
       }).catch(err => console.error('[sessions] short_code backfill failed:', err));
 
-      (async () => {
-        const { backfillRoomShortCodes } = await import('./services/room/room-manager.js');
-        return backfillRoomShortCodes();
-      })().then((updated) => {
-        if (updated > 0) console.log(`[rooms] Backfilled short_code for ${updated} rooms`);
-      }).catch(err => console.error('[rooms] short_code backfill failed:', err));
-
       // Backfill short_id for messages created before migration 069 (issue #11 Phase 3).
       // 27만+ rows 라 batched (500/회), fire-and-forget — 부팅을 차단하지 않음.
       (async () => {
@@ -252,19 +306,27 @@ server.listen(config.port, config.host, async () => {
         if (updated > 0) console.log(`[messages] Backfilled short_id for ${updated} messages`);
       }).catch(err => console.error('[messages] short_id backfill failed:', err));
 
-      // Backfill short_id for room_messages created before migration 071 (issue #11 채널 앵커).
-      // 수백 rows 정도라 빠름.
-      (async () => {
-        const { backfillRoomMessageShortIds } = await import('./services/room/room-manager.js');
-        return backfillRoomMessageShortIds();
-      })().then((updated) => {
-        if (updated > 0) console.log(`[room-messages] Backfilled short_id for ${updated} room_messages`);
-      }).catch(err => console.error('[room-messages] short_id backfill failed:', err));
     } catch (err) {
       console.error('[pg] Failed to initialize — chat rooms will be unavailable:', err);
     }
   } else {
     console.log('[pg] DATABASE_URL not set — chat rooms disabled');
+  }
+
+  pathPublishingServer = await startPathPublishingListener(process.env, config.workspaceRoot);
+
+  // Disabled by default. Installed policy/identity/token and separate approved
+  // schema are required; startup never publishes an approval or issues a key.
+  try {
+    if(process.env.TOWER_CUSTOMER_OUTBOUND_CONFIG){
+      customerOutbound = await startOutboundCustomerStartup(process.env,customerDeliveryPgReady);
+      void customerOutbound?.done.then(result=>console.info('[customer-outbound] '+result.status+'; central acceptance remains separate'));
+    }else{
+    customerServiceGroup = await startCustomerServiceStartup(process.env, customerDeliveryPgReady);
+    if(!process.env.TOWER_CUSTOMER_SERVICE_CONFIG)customerDeliveryServer = await startCustomerDeliveryListener(process.env, customerDeliveryPgReady);
+    }
+  } catch {
+    console.warn('[customer-delivery] Private receiver unavailable; explicit installation required');
   }
 
   // 2026-04-17: company 스킬은 DB에 저장하지 않음. library.yaml + ~/.claude/skills/
@@ -338,6 +400,21 @@ server.listen(config.port, config.host, async () => {
 
   if (candidatePassiveMode) {
     console.warn('[startup] Candidate passive mode enabled: schedulers, recovery, cleanup, proactive agent, and background reconcilers are disabled.');
+  } else if (config.piEnabled) {
+    // Once per active backend start, using this VM's own inference connection.
+    // A failed lookup must neither block startup nor replace the last good snapshot.
+    void (async () => {
+      try {
+        const catalog = await refreshLiteLLMModelCatalog();
+        const reloaded = reloadModels();
+        const piEngine = await getEngine('pi') as any;
+        await piEngine.reloadModelRegistry?.();
+        broadcastToAll({ type: 'config_update', models: config.claudeEnabled ? reloaded.claude : [], piModels: reloaded.pi, localModels: config.localEnabled ? reloaded.local : [], defaults: reloaded.defaults, claudeEnabled: config.claudeEnabled, piEnabled: config.piEnabled, localEnabled: config.localEnabled });
+        console.log(`[startup] LiteLLM catalog refreshed: ${catalog.models.length} direct models`);
+      } catch (error) {
+        console.warn('[startup] LiteLLM catalog refresh failed (previous snapshot retained):', error instanceof Error ? error.message : 'unknown error');
+      }
+    })();
   }
 
   // Load interrupted sessions from previous shutdown (before stale cleanup).
@@ -356,6 +433,22 @@ server.listen(config.port, config.host, async () => {
         userMessageId: session.rootTurnId,
         recoverySource: 'shutdown-file',
       });
+    }
+  }
+
+  // In-process sleep timers cannot be reconstructed safely. Fence them before generic recovery.
+  if (!candidatePassiveMode) {
+    try {
+      await reconcileWaitAlarmRoots();
+      const interruptedSleeps = await interruptRestartedSleepTurns();
+      const sleepSessionIds = new Set(interruptedSleeps.map(turn => turn.sessionId));
+      for (let i = interruptedSessions.length - 1; i >= 0; i--) {
+        if (sleepSessionIds.has(interruptedSessions[i].id)) interruptedSessions.splice(i, 1);
+      }
+    } catch (error) {
+      // Do not start orphan replay or the durable retry dispatcher without this fence.
+      console.error('[startup] Sleep recovery fence failed; startup recovery is halted:', error);
+      return;
     }
   }
 
@@ -444,6 +537,7 @@ server.listen(config.port, config.host, async () => {
 
     // Start unified scheduler (checks every 30s for due schedules + legacy tasks)
     startUnifiedScheduler((type, payload) => broadcastToAll({ type, ...payload }));
+    startSecretariatScheduler();
 
     // Session memory cards — refresh only changed sessions whose last card is stale.
     // This is not a blind inactive-session loop: it requires turn_count > covered_turn_count.
@@ -473,6 +567,7 @@ server.listen(config.port, config.host, async () => {
     }
   };
   initNotificationHub(notifBroadcast);
+  startServerMaintenance();
 
   // Initialize proactive agent (AI-initiated conversations)
   if (!candidatePassiveMode) {
@@ -530,6 +625,7 @@ server.listen(config.port, config.host, async () => {
   // or sessions with no active browser tab would be permanently lost.
   // Runs async — does not block server startup.
   if (!candidatePassiveMode) {
+    startWaitAlarmDispatcher();
     startAgentTurnDispatcher({ dispatch: dispatchDueAgentTurnRetries });
     serverSideResumeInterrupted().catch(err => {
       console.error('[auto-resume] Failed to resume interrupted sessions:', err);
@@ -539,37 +635,27 @@ server.listen(config.port, config.host, async () => {
 
 // Graceful shutdown — let orphan CLI processes keep running.
 //
-// gracefulShutdown() (claude-sdk module-level) + shutdownEngines() (per-engine)
-// must run FIRST and SYNCHRONOUSLY so the interrupted-*.json files are flushed
-// to disk before pm2's SIGKILL fallback (default KILL_TIMEOUT=1.6s) can fire.
-// Without shutdownEngines(), Pi sessions silently disappear across restarts
-// because no one writes interrupted-pi-sessions.json.
+// gracefulShutdown() (claude-sdk module-level) must run synchronously so the
+// shutdown handoff starts before pm2's SIGKILL fallback. The async engine and
+// delivery-pump drains must then finish before ws-sync and PostgreSQL close;
+// otherwise a late settlement/recovery write races pool.end().
 // See: workspace/decisions/2026-05-17-restart-interrupted-session-recovery-fix.md
-process.on('SIGINT', () => {
-  console.log('\nShutting down...');
-  void import('./services/agent-communication/delivery-pump.js').then(({ stopDeliveryPump }) => stopDeliveryPump());
-  gracefulShutdown('SIGINT');
-  shutdownEngines().catch(err => console.error('[shutdown] engines:', err));
-  stopUnifiedScheduler();
-  stopAgentTurnDispatcher();
-  stopSessionMemoryCardDueScanner();
-  stopEmptySessionCleanup();
-  stopAgentWorkerCleanup();
-  stopAgentRunSettlementRecovery();
-  stopOrphanMonitor();
-  stopPublishingReconciler();
-  stopAllMonitors();
-  stopFileWatcher();
-  stopWsSync().catch(() => {}).finally(() => {
-    closePgPool().finally(() => server.close(() => process.exit(0)));
-  });
-});
+let shutdownPromise: Promise<void> | null = null;
+let customerOutbound:Awaited<ReturnType<typeof startOutboundCustomerStartup>>;
+let customerServiceGroup: {close():Promise<void>} | undefined;
+let customerDeliveryServer: http.Server | undefined;
+let pathPublishingServer: http.Server | undefined;
 
-process.on('SIGTERM', () => {
-  void import('./services/agent-communication/delivery-pump.js').then(({ stopDeliveryPump }) => stopDeliveryPump());
-  gracefulShutdown('SIGTERM');
-  shutdownEngines().catch(err => console.error('[shutdown] engines:', err));
+function beginShutdown(signal: 'SIGINT' | 'SIGTERM'): void {
+  if (shutdownPromise) return;
+  if (signal === 'SIGINT') console.log('\nShutting down...');
+
+  stopFeedbackDelivery();
+  stopConfiguredWebhookDispatcher();
+  gracefulShutdown(signal);
   stopUnifiedScheduler();
+  stopSecretariatScheduler();
+  stopWaitAlarmDispatcher();
   stopAgentTurnDispatcher();
   stopSessionMemoryCardDueScanner();
   stopEmptySessionCleanup();
@@ -579,10 +665,29 @@ process.on('SIGTERM', () => {
   stopPublishingReconciler();
   stopAllMonitors();
   stopFileWatcher();
-  stopWsSync().catch(() => {}).finally(() => {
-    closePgPool().finally(() => server.close(() => process.exit(0)));
-  });
-});
+
+  shutdownPromise = (async () => {
+    const deliveryPumpStop = import('./services/agent-communication/delivery-pump.js')
+      .then(({ stopDeliveryPump }) => stopDeliveryPump())
+      .catch((err) => console.error('[shutdown] delivery pump:', err));
+    await Promise.allSettled([
+      deliveryPumpStop,
+      shutdownEngines().catch((err) => console.error('[shutdown] engines:', err)),
+    ]);
+    stopWaitAlarmDispatcher();
+    await stopWsSync().catch((err) => console.error('[shutdown] ws sync:', err));
+    await customerOutbound?.close().catch(()=>console.warn('[customer-outbound] shutdown incomplete'));
+    await customerServiceGroup?.close().catch(()=>console.warn('[customer-service] shutdown incomplete'));
+    await new Promise<void>((resolve) => customerDeliveryServer ? customerDeliveryServer.close(() => resolve()) : resolve());
+    await new Promise<void>((resolve) => pathPublishingServer ? pathPublishingServer.close(() => resolve()) : resolve());
+    await closePgPool().catch((err) => console.error('[shutdown] pg pool:', err));
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    process.exit(0);
+  })();
+}
+
+process.on('SIGINT', () => beginShutdown('SIGINT'));
+process.on('SIGTERM', () => beginShutdown('SIGTERM'));
 
 // Prevent SDK "Operation aborted" errors from crashing the entire backend.
 // These occur when abort() is called while the SDK is mid-write to a dead process.

@@ -1,7 +1,7 @@
 import fs from 'fs/promises';
 import path from 'path';
 import { randomUUID } from 'crypto';
-import { resolveProjectApiKeySecretValue } from '../credential-vault/credential-vault-service.js';
+import { resolveGatewayApiClient } from '../gateway-profile/gateway-profile-client.js';
 
 const OUTPUT_DIR = path.resolve(process.cwd(), 'data/generated-agent-characters');
 const ID_RE = /^[0-9a-f-]{36}$/i;
@@ -18,22 +18,25 @@ export class AgentCharacterGenerationError extends Error {
   }
 }
 
-/** Generates one square Korean agent portrait with the Project's Vault-authorized OpenAI Image credential. */
+/** Generates one square Korean agent portrait through the Project-authorized OpenAI Image Gateway route. */
 export async function generateAgentCharacter(opts: { projectId: string; userId: number; prompt: string }): Promise<{ id: string; face: string }> {
-  const resolved = await resolveProjectApiKeySecretValue({
-    projectId: opts.projectId,
-    userId: opts.userId,
-    envName: 'OPENAI_IMAGE_API_KEY',
-    targetType: 'agent-character-generation',
-  });
-  if (!resolved) throw new AgentCharacterGenerationError('credential_unavailable');
+  let gateway;
+  try {
+    gateway = await resolveGatewayApiClient({
+      actorUserId: opts.userId,
+      projectId: opts.projectId,
+      apiId: 'openai-image',
+    });
+  } catch {
+    throw new AgentCharacterGenerationError('credential_unavailable');
+  }
   const prompt = opts.prompt.trim().slice(0, 800);
   if (!prompt) throw new Error('character prompt required');
-  const response = await fetch('https://api.openai.com/v1/images/generations', {
+  const response = await fetch(`${gateway.baseUrl}/images/generations`, {
     method: 'POST',
-    headers: { Authorization: `Bearer ${resolved.value}`, 'Content-Type': 'application/json' },
+    headers: { Authorization: `Bearer ${gateway.apiKey}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      model: 'gpt-image-1',
+      model: 'gpt-image-2.5-sunburst',
       size: '1024x1024',
       quality: 'medium',
       output_format: 'png',

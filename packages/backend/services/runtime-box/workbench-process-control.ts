@@ -1,3 +1,4 @@
+import { latestDownloadProgress, isManagedDownloadCommand, type DownloadProgress } from '../execution/downloads/download-contract.js';
 /**
  * Owns: Common Project Shell process handles over durable Jobs and managed Services.
  * Public API: listWorkbenchProcesses, inspectWorkbenchProcess, readWorkbenchProcessLogs,
@@ -8,9 +9,9 @@
  * Project ownership check at either registry boundary.
  */
 
-import { getWorkbenchJob, listWorkbenchJobs, cancelWorkbenchJob, type WorkbenchJobRow } from './workbench-job-registry.js';
+import { getWorkbenchJob, listWorkbenchJobs, cancelWorkbenchJob, type WorkbenchJobRow } from '../execution/jobs/job-registry.js';
 import { requestLocalWorkbenchJobCancel } from './workbench-job-runner.js';
-import { requestRemoteWorkbenchJobCancel } from './workbench-remote-job-runner.js';
+import { requestRemoteWorkbenchJobCancel } from '../execution/remote-job-runner.js';
 import { listServices, readServiceLogs, stopService } from './service-registry.js';
 import type { ServiceRow } from './types.js';
 
@@ -19,6 +20,8 @@ export type WorkbenchProcessState = 'queued' | 'running' | 'stopping' | 'succeed
 export type WorkbenchProcessHandle = `job:${number}` | `service:${number}`;
 
 export interface WorkbenchProcess {
+  /** Process liveness is not transfer progress. */
+  download?: DownloadProgress & { observation: string };
   handle: WorkbenchProcessHandle;
   kind: WorkbenchProcessKind;
   id: number;
@@ -71,7 +74,16 @@ function serviceState(service: ServiceRow): WorkbenchProcessState {
 
 /** Convert durable Job evidence to the common process projection. */
 export function projectWorkbenchJob(job: WorkbenchJobRow): WorkbenchProcess {
+  const progress = latestDownloadProgress(job.stdout_text);
+  const active = job.status === 'running' || job.status === 'queued';
+  const stale = progress && Date.now() / 1000 - progress.observedAt > Number(progress.idleTimeoutSec ?? 120) + 5;
+  const download = isManagedDownloadCommand(job.command) ? {
+    ...(progress ?? { phase: 'connecting' as const, bytesReceived: 0, bytesWritten: 0, attempt: 0, observedAt: 0 }),
+    observation: progress?.phase === 'blocked' ? 'blocked' : !active && progress?.phase !== 'completed' ? 'interrupted' : !progress ? 'unverified' : stale && active ? 'stale' : progress.phase === 'transferring' && progress.lastDiskGrowthAt && Date.now() / 1000 - progress.lastDiskGrowthAt < Number(progress.idleTimeoutSec ?? 120) + 5 ? 'receiving_bytes' : progress.phase,
+    ...(!active && progress?.phase !== 'completed' && progress?.phase !== 'blocked' ? { nextAction: 'Partial file preserved. Inspect lock owner before resuming; a terminated executor may leave a lock.' } : {}),
+  } : undefined;
   return {
+    download,
     handle: `job:${job.id}`,
     kind: 'job',
     id: job.id,

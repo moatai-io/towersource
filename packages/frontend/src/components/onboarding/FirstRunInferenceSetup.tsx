@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 
 const API_BASE = '/api';
 
-type Provider = 'openrouter' | 'openai-responses-compatible';
+type Provider = 'openrouter';
 
 interface ProviderDraft {
   provider: Provider;
@@ -16,10 +16,6 @@ const PROVIDERS: Record<Provider, Omit<ProviderDraft, 'provider' | 'apiKey'>> = 
   openrouter: {
     baseUrl: 'https://openrouter.ai/api/v1',
     modelId: 'openrouter/auto',
-  },
-  'openai-responses-compatible': {
-    baseUrl: 'https://api.openai.com/v1',
-    modelId: 'gpt-5.6-terra',
   },
 };
 
@@ -102,7 +98,7 @@ export function FirstRunInferenceSetup({ token, onComplete }: { token: string; o
           </div>
 
           <div className="mt-5 grid gap-3 sm:grid-cols-2" role="radiogroup" aria-label={t('provider.choose')}>
-            {(['openrouter', 'openai-responses-compatible'] as Provider[]).map((provider) => {
+            {(['openrouter'] as Provider[]).map((provider) => {
               const selected = draft.provider === provider;
               return (
                 <button key={provider} type="button" role="radio" aria-checked={selected} onClick={() => updateProvider(provider)} className={`rounded-xl border px-4 py-3 text-left transition-colors ${selected ? 'border-primary-500/60 bg-primary-500/10 text-surface-100' : 'border-surface-700 bg-surface-950/55 text-surface-400 hover:border-surface-600'}`}>

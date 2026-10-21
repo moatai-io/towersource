@@ -1,11 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { executeWorkbenchRequest } from '../runtime-box/workbench-execution-broker.js';
+import { executeWorkbenchRequest } from '../execution/execution-broker.js';
 import { createLocalWorkbenchExecutionProvider } from '../runtime-box/workbench-local-execution-provider.js';
 import { runAutomationJob } from './automation-runners.js';
 import { canCreateAutomationJob } from './schedule-permissions.js';
 import type { Automation } from './automation-manager.js';
 
-vi.mock('../runtime-box/workbench-execution-broker.js', () => ({ executeWorkbenchRequest: vi.fn() }));
+vi.mock('../execution/execution-broker.js', () => ({ executeWorkbenchRequest: vi.fn() }));
 vi.mock('../runtime-box/workbench-local-execution-provider.js', () => ({ createLocalWorkbenchExecutionProvider: vi.fn(() => ({ kind: 'local-runtime' })) }));
 vi.mock('../runtime-box/policy.js', () => ({ isRuntimeBoxEnabled: vi.fn(() => true) }));
 vi.mock('../pm/project-membership-manager.js', () => ({ isProjectMember: vi.fn(async () => true) }));

@@ -176,6 +176,15 @@ describe('Engine Contract — sessionProjectRoot wiring (tower-brain regression)
 
     it(`${name} passes sessionProjectRoot into buildToolGuard`, () => {
       const src = readSource(file);
+      if (file === PI_TOOL_ASSEMBLY) {
+        // Pi shares the same root options with its per-call operator guard.
+        const options = src.match(/const guardOptions\s*=\s*\{([^}]+)\}/);
+        expect(options, 'Pi must define shared guard options').not.toBeNull();
+        expect(options![1]).toMatch(/\bsessionProjectRoot\s*[,}]/);
+        expect(src).toMatch(/const guard\s*=\s*buildToolGuard\(guardOptions\)/);
+        expect(src).toMatch(/return buildToolGuard\(\{\s*\.\.\.guardOptions,\s*operatorWriteRoot\s*\}\)/);
+        return;
+      }
       // Find the buildToolGuard call and verify sessionProjectRoot is one of its opts.
       // Span up to ~500 chars to cover multi-line object literals.
       const match = src.match(/buildToolGuard\s*\(\s*\{[\s\S]{0,500}?\}\s*\)/);

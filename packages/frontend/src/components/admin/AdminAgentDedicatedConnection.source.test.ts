@@ -4,13 +4,13 @@ import { describe, expect, it } from 'vitest';
 
 const source = fs.readFileSync(path.join(__dirname, 'AdminPanel.tsx'), 'utf8');
 
-describe('Admin Agent-dedicated Connection boundary', () => {
-  it('keeps dedicated credentials visible but disables cross-Agent connection', () => {
-    expect(source).toContain("connectionScope?: 'shared' | 'agent_dedicated'");
-    expect(source).toContain('dedicatedProjectId?: string | null');
-    expect(source).toContain("selectedConnection.connectionScope === 'agent_dedicated'");
-    expect(source).toContain("t('credentialConnections.dedicatedCredential')");
-    expect(source).toContain("dedicatedElsewhere ? t('credentialConnections.agentDedicated')");
-    expect(source).toContain('disabled={saving || !selectedConnection.enabled || dedicatedElsewhere}');
+describe('Admin and Agent Connection boundary', () => {
+  it('shows VM-wide inventory while keeping Agent Credentials project-owned until promotion', () => {
+    const credentials = source.slice(source.indexOf('function CredentialVaultManagement'), source.indexOf('// ───── System Tab'));
+    expect(credentials).toContain("credential.scope === 'workspace'");
+    expect(credentials).toContain("credential.scope === 'project'");
+    expect(credentials).toContain('credentialConnections.agentCredentials');
+    expect(credentials).toContain('promoteCredential');
+    expect(credentials).not.toContain('dedicatedProjectId');
   });
 });

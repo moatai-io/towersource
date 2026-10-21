@@ -65,17 +65,23 @@ describe('session list metadata access', () => {
     )).toBe(false);
   });
 
-  it('allows only the intentional project-less channel AI system exception', () => {
+  it('does not automatically expose ownerless channel AI metadata', () => {
     expect(isSessionListVisibleToUser(
       row({ user_id: null, project_id: null, label: 'channel_ai' }),
       USER_ID,
       ACCESSIBLE_PROJECTS,
-    )).toBe(true);
+    )).toBe(false);
 
     expect(isSessionListVisibleToUser(
       row({ user_id: null, project_id: null, label: 'temp' }),
       USER_ID,
       ACCESSIBLE_PROJECTS,
     )).toBe(false);
+  });
+  it('fails closed for privileged null sentinels, missing actors and unknown legacy visibility', () => {
+    expect(isSessionListVisibleToUser(row({ visibility: 'private' }), USER_ID, null)).toBe(false);
+    expect(isSessionListVisibleToUser(row({}), undefined, null)).toBe(false);
+    expect(isSessionListVisibleToUser(row({ user_id: null, visibility: null }), USER_ID, ACCESSIBLE_PROJECTS)).toBe(false);
+    expect(isSessionListVisibleToUser(row({ user_id: USER_ID, visibility: 'private' }), USER_ID, null)).toBe(true);
   });
 });

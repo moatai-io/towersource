@@ -70,6 +70,7 @@ export function buildJsonlPathForSession(s: SessionLike): string | null {
 /** Read a .jsonl file and check for task completion markers */
 export function checkJsonlForCompletion(jsonlPath: string): {
   status: 'complete' | 'failed' | 'running';
+  noWork?: boolean;
   reason?: string;
   stages: string[];
 } {
@@ -82,6 +83,9 @@ export function checkJsonlForCompletion(jsonlPath: string): {
       if (!stages.includes(m[1])) stages.push(m[1]);
     }
 
+    if (content.includes('[TASK NONE]') && !content.match(/\[TASK FAILED:/)) {
+      return { status: 'complete', stages, noWork: true };
+    }
     if (content.includes('[TASK COMPLETE]')) {
       return { status: 'complete', stages };
     }

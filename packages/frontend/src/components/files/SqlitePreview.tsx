@@ -1,3 +1,4 @@
+import { towerHttpUrl } from '../../features/client-connection/connection';
 import { useEffect, useState, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import sqlWasmUrl from 'sql.js/dist/sql-wasm.wasm?url';
@@ -45,7 +46,7 @@ export function SqlitePreview({ filePath }: { filePath: string }) {
 
         const token = localStorage.getItem('token') || '';
         const res = await fetch(
-          `/api/files/serve?path=${encodeURIComponent(filePath)}&token=${encodeURIComponent(token)}`
+          towerHttpUrl(`/api/files/serve?path=${encodeURIComponent(filePath)}&token=${encodeURIComponent(token)}`)
         );
         if (!res.ok) throw new Error(`Failed to load file (${res.status})`);
 

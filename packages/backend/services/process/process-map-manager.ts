@@ -4,6 +4,8 @@
  * See: workspace/decisions/2026-06-29-process-map-separate-from-todowrite.md
  */
 
+import { automationResultSessionId, isUnverifiedAiSpawn } from '../task/automation-result-reference.js';
+import { canAccessSession } from '../pm/project-access.js';
 import { v4 as uuidv4 } from 'uuid';
 import { query, queryOne } from '../../db/pg-repo.js';
 import type { Automation, AutomationRun } from '../task/automation-manager.js';
@@ -22,6 +24,7 @@ export interface ProcessEvent {
   sessionId: string | null;
   automationId: string | null;
   runId: string | null;
+  executionId: string | null;
   sourceType: ProcessEventSourceType;
   sourceId: string | null;
   eventType: ProcessEventType;
@@ -76,6 +79,7 @@ function mapEventRow(row: any): ProcessEvent {
     sessionId: row.session_id || null,
     automationId: row.automation_id || null,
     runId: row.run_id || null,
+    executionId: row.execution_id || null,
     sourceType: row.source_type,
     sourceId: row.source_id || null,
     eventType: row.event_type,
@@ -107,6 +111,7 @@ export async function appendProcessEvent(params: {
   sessionId?: string | null;
   automationId?: string | null;
   runId?: string | null;
+  executionId?: string | null;
   sourceType: ProcessEventSourceType;
   sourceId?: string | null;
   eventType: ProcessEventType;
@@ -117,9 +122,9 @@ export async function appendProcessEvent(params: {
   const id = uuidv4();
   const row = await queryOne<any>(`
     INSERT INTO process_events (
-      id, project_id, session_id, automation_id, run_id,
+      id, project_id, session_id, automation_id, run_id, execution_id,
       source_type, source_id, event_type, raw_label, raw_payload, occurred_at
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, COALESCE($11::timestamptz, NOW()))
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, COALESCE($12::timestamptz, NOW()))
     RETURNING *
   `, [
     id,
@@ -127,6 +132,7 @@ export async function appendProcessEvent(params: {
     params.sessionId || null,
     params.automationId || null,
     params.runId || null,
+    params.executionId || null,
     params.sourceType,
     params.sourceId || null,
     params.eventType,
@@ -153,7 +159,7 @@ export async function getPersistedProcessMap(id: string): Promise<ProcessMap | n
 }
 
 function inferRunStatus(run: AutomationRun): ProcessMap['status'] {
-  if (run.status === 'success') return 'completed';
+  if (run.status === 'success' || run.status === 'none') return 'completed';
   if (run.status === 'failed' || run.status === 'aborted') return 'failed';
   return 'running';
 }
@@ -238,13 +244,13 @@ function buildSkillInvocationNodes(events: ProcessEvent[]): ProcessNode[] {
   });
 }
 
-function runEvidence(run: AutomationRun, events: ProcessEvent[]): ProcessNode['evidence'] {
+function runEvidence(run: AutomationRun, events: ProcessEvent[], automation: Automation): ProcessNode['evidence'] {
   const logs = [run.summaryText, run.error, run.stdoutText, run.stderrText]
     .filter((v): v is string => Boolean(v && v.trim()))
     .slice(0, 3);
   return {
     eventIds: events.map((e) => e.id).slice(0, 20),
-    sessionIds: run.resultId ? [run.resultId] : undefined,
+    sessionIds: automationResultSessionId(run, automation) ? [automationResultSessionId(run, automation)!] : undefined,
     logs: logs.length ? logs : undefined,
   };
 }
@@ -511,15 +517,35 @@ export async function getSessionProcessMap(args: {
  * Build a user-facing run-level process map from an automation run and related process events.
  * This is intentionally a coarse projection, not a TodoWrite/checklist graph.
  */
-export async function getAutomationRunProcessMap(automation: Automation, run: AutomationRun): Promise<ProcessMap> {
+export async function getAutomationRunProcessMap(
+  automation: Automation,
+  run: AutomationRun,
+  viewer?: { userId: number; role: string },
+): Promise<ProcessMap> {
   const events = await query<any>(`
     SELECT * FROM process_events
-    WHERE run_id = $1 OR automation_id = $2
+    WHERE run_id = $1 AND automation_id = $2
     ORDER BY occurred_at ASC
     LIMIT 100
   `, [run.id, automation.id]);
-  const mappedEvents = events.map(mapEventRow);
-  const status = inferRunStatus(run);
+  // Process event labels/payloads are unstructured. An event without a Session
+  // cannot prove who may read its contents; only retain verified Session events
+  // in the user-facing HTTP projection. Do not evaluate a payload before ACL.
+  const mayReadSession = async (id: string) => {
+    if (!viewer) return true;
+    try { return (await canAccessSession(id, viewer.userId, viewer.role)).allowed; }
+    catch { return false; }
+  };
+  const mappedEvents: ProcessEvent[] = [];
+  for (const event of events) {
+    if (!viewer || (event.session_id && await mayReadSession(event.session_id))) mappedEvents.push(mapEventRow(event));
+  }
+  const createdBySessionId = automation.createdBySessionId && await mayReadSession(automation.createdBySessionId)
+    ? automation.createdBySessionId : null;
+  const automationSessionId = automation.sessionId && await mayReadSession(automation.sessionId)
+    ? automation.sessionId : null;
+  const unverifiedSpawn = isUnverifiedAiSpawn(run, automation);
+  const status = unverifiedSpawn ? 'blocked' : inferRunStatus(run);
   const owner = inferOwner(automation);
   const level = inferAutomationLevel(automation);
   const failed = status === 'failed';
@@ -535,8 +561,8 @@ export async function getAutomationRunProcessMap(automation: Automation, run: Au
       status: 'completed',
       owner: 'human',
       automationLevel: automation.triggerType === 'manual' ? 'assisted' : 'semi_auto',
-      summary: automation.description || automation.prompt || undefined,
-      evidence: { sessionIds: automation.createdBySessionId ? [automation.createdBySessionId] : undefined },
+      summary: viewer ? undefined : automation.description || automation.prompt || undefined,
+      evidence: { sessionIds: createdBySessionId ? [createdBySessionId] : undefined },
     },
     {
       id: 'trigger',
@@ -555,21 +581,21 @@ export async function getAutomationRunProcessMap(automation: Automation, run: Au
       id: 'execute',
       label: automation.jobType === 'ai_prompt' ? 'AI 작업 실행' : automation.jobType === 'webhook' ? '외부 호출 실행' : automation.jobType === 'monitor' ? '상태 점검 실행' : '코드/스크립트 실행',
       kind: automation.jobType === 'ai_prompt' ? 'ai_step' : automation.jobType === 'webhook' ? 'tool_step' : 'tool_step',
-      status: failed ? 'failed' : status === 'completed' ? 'completed' : 'running',
+      status: unverifiedSpawn ? 'blocked' : failed ? 'failed' : status === 'completed' ? 'completed' : 'running',
       owner,
       automationLevel: level,
-      summary: run.summaryText || run.error || undefined,
-      evidence: runEvidence(run, mappedEvents),
+      summary: unverifiedSpawn ? 'AI 작업 생성은 확인됐지만 실행 완료·외부 발송은 확인되지 않았습니다.' : run.summaryText || run.error || undefined,
+      evidence: runEvidence(run, mappedEvents, automation),
     } satisfies ProcessNode] : []),
     {
       id: failed ? 'blocker' : 'artifact',
       label: failed ? '실패 원인 확인 필요' : '실행 결과 기록',
       kind: failed ? 'blocker' : 'artifact',
-      status: failed ? 'blocked' : 'completed',
+      status: unverifiedSpawn || (status !== 'completed' && !failed) ? 'pending' : failed ? 'blocked' : 'completed',
       owner: failed ? 'human' : 'system',
       automationLevel: failed ? 'manual' : level,
-      summary: failed ? (run.error || '실행 실패') : (run.resultId ? '결과 세션/로그가 연결되었습니다.' : '실행 이력이 저장되었습니다.'),
-      evidence: runEvidence(run, mappedEvents),
+      summary: failed ? (run.error || '실행 실패') : unverifiedSpawn ? 'AI 작업 시작은 확인됐지만 최종 결과는 아직 확인되지 않았습니다.' : status !== 'completed' ? '실행 중입니다.' : (run.resultId ? '결과 세션/로그가 연결되었습니다.' : '실행 이력이 저장되었습니다.'),
+      evidence: runEvidence(run, mappedEvents, automation),
     },
   ];
 
@@ -585,7 +611,7 @@ export async function getAutomationRunProcessMap(automation: Automation, run: Au
     sourceRefs: {
       automationIds: [automation.id],
       runIds: [run.id],
-      sessionIds: [automation.createdBySessionId, automation.sessionId, run.resultId].filter(Boolean),
+      sessionIds: [createdBySessionId, automationSessionId, automationResultSessionId(run, automation) && await mayReadSession(automationResultSessionId(run, automation)!) ? automationResultSessionId(run, automation) : null].filter(Boolean),
     },
     nodes,
     edges,

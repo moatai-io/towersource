@@ -1,3 +1,4 @@
+import type { VoiceEngineTimingSignal } from '../services/voice-runtime/voice-turn-telemetry.js';
 /**
  * Engine abstraction layer — Tower's multi-engine agent system.
  *
@@ -144,9 +145,27 @@ export interface TowerSteerDeliveredMsg {
   text: string;
   /** Display name of the sender, for the inserted bubble. */
   username?: string | null;
+  /** Assistant row being streamed when the steer was consumed. */
+  assistantMsgId?: string;
+  /** Cumulative assistant content visible at the consumption boundary. */
+  assistantContent?: TowerContentBlock[];
+}
+
+/** Per-provider-request context measurement; never increments turn/cost counters. */
+export interface TowerContextUsageMsg {
+  type: 'context_usage';
+  measuredAt: number;
+  sessionId: string;
+  msgId: string;
+  contextInputTokens: number;
+  contextOutputTokens: number;
+  contextWindowSize: number;
+  compactThresholdTokens?: number;
+  contextSnapshot?: MessageMetrics['contextSnapshot'];
 }
 
 export type TowerMessage =
+  | TowerContextUsageMsg
   | TowerAssistantMsg
   | TowerToolResultMsg
   | TowerTurnStatusMsg
@@ -170,7 +189,7 @@ export type TowerMessage =
  * │ inputTokens (REQUIRED)  │ cumulative   │ cumulative   │
  * │ outputTokens (REQUIRED) │ cumulative   │ cumulative   │
  * │ durationMs (REQUIRED)   │ from SDK     │ wall-clock   │
- * │ costUsd                 │ undefined ¹  │ calculated   │
+ * │ costUsd                 │ undefined ¹  │ Tower price-table estimate │
  * │ contextInputTokens      │ last iter    │ last iter    │
  * │ contextWindowSize       │ from SDK     │ from model   │
  * │ numIterations           │ from SDK     │ counted      │
@@ -192,13 +211,15 @@ export interface TowerUsage {
 
   // ── RECOMMENDED: all engines should provide when available ──
   stopReason?: 'stop' | 'length' | 'toolUse' | 'error' | 'aborted';
-  costUsd?: number;           // Pi: auto-calculated, Claude: undefined (subscription)
+  costUsd?: number;           // Pi: Tower price-table estimate across calls; Claude: undefined (subscription)
   contextInputTokens?: number;   // provider-reported actual input-side context (input + cache reads/writes when available)
   contextOutputTokens?: number;  // last iteration output
   contextWindowSize?: number;    // model's context window (e.g. 200000)
-  contextEstimatedTokens?: number; // internal risk estimate; not user-facing CTX
+  contextEstimatedTokens?: number;
+  contextCompacted?: boolean; // internal risk estimate; not user-facing CTX
   nextRequestEstimatedTokens?: number; // outgoing request/body estimate for preflight diagnostics
   compactThresholdTokens?: number; // operational compaction threshold
+  contextSnapshot?: MessageMetrics['contextSnapshot'];
   numIterations?: number;        // how many LLM API calls in this turn
 
   // ── OPTIONAL: engine-specific cache breakdown ──
@@ -216,6 +237,11 @@ export interface TowerUsage {
 export type EffortLevel = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 
 export interface RunOpts {
+  /** Private secretary uses native session continuity without granting tools. */
+  secretaryConversation?: boolean;
+  secretarySourceRead?: (source: { projectId: string; sessionId: string }) => void;
+  /** Server-only initialization turn: no tools or external lookups. */
+  initialInterview?: boolean;
   cwd: string;
   model?: string;
   effort?: EffortLevel;
@@ -255,6 +281,8 @@ export interface RunOpts {
   /** Optional provider-cache identity override for synthetic sessions such as channel AI. */
   logicalSessionId?: string;
   projectId?: string;         // for credential rotation (resolves to CLAUDE_CONFIG_DIR)
+  /** Pi MCP gateway opt-outs for this run; persisted session selection is rechecked dynamically. */
+  mcpExcludedServerNames?: string[];
   /** Explicit published Harness selection. Omitted means the compatibility tower-default Harness. */
   harnessId?: string;
   /** Exact immutable Harness and Runtime Profile tuple for privileged synthetic eval runs. */
@@ -282,6 +310,12 @@ export interface RunOpts {
 }
 
 export interface EngineCallbacks {
+  /** Server-only, allowlisted value-free voice latency milestones. */
+  onVoiceTiming?(event: VoiceEngineTimingSignal): void;
+  /** Optional server-only voice consumer. Only provider-confirmed final_answer text is eligible.
+   * Cumulative snapshot for one assistant message; unknown-phase UI prose is never sufficient.
+   */
+  onVoiceAnswerSnapshot?(event: { rootTurnId: string; sessionId: string; messageId: string; text: string; channel: 'final_answer' }): void;
   /**
    * Pause execution to ask the user a question.
    * ws-handler manages the WS broadcasting and pending question state.
@@ -295,6 +329,8 @@ export interface EngineCallbacks {
   /** Persist engine-specific session ID for resume */
   claimSessionId(engineSessionId: string): void | Promise<void>;
 
+  /** Initial interview persistence verdict after all streaming writes settle. */
+  initialArtifactOutcome?(): Promise<{savedMessageId?:string;reason?:string}>;
   /** Save a message to DB */
   saveMessage(msg: SavedMessage): void | Promise<void>;
 
@@ -382,13 +418,14 @@ export interface MessageMetrics {
   contextWindowSize?: number;
   /** Internal conservative context/risk estimate; not the user-facing actual CTX. */
   contextEstimatedTokens?: number;
+  contextCompacted?: boolean;
   /** Outgoing request/body estimate used for preflight diagnostics. */
   nextRequestEstimatedTokens?: number;
   /** Operational threshold at which Tower/Pi should compact. */
   compactThresholdTokens?: number;
   /**
-   * Shadow-only context contract. Existing CTX display and compaction policy
-   * continue to use the flattened fields until this snapshot is validated.
+   * Context evidence contract. Input measurement stays independent of pressure.
+   * Optional pressure drives only the explicitly labelled Tower pressure display.
    */
   contextSnapshot?: {
     actualTokens?: number;
@@ -399,6 +436,7 @@ export interface MessageMetrics {
     requestSource: 'sanitized-request' | 'none';
     capturedAt: string;
     terminal: boolean;
+    pressure?: { tokens: number; thresholdTokens: number; policy: 'tower-pre-prompt'; source: 'projection' | 'usage-or-transcript'; observedAt: number };
   };
 }
 
@@ -408,6 +446,9 @@ export interface MessageMetrics {
  */
 export interface QuickReplyOpts {
   model?: string;
+  /** Bounded tool-free background jobs may cancel provider work and cap output. */
+  signal?: AbortSignal;
+  maxOutputTokens?: number;
   systemPrompt: string;
   /** Stable logical session id for provider cache affinity; must not contain raw titles/emails. */
   logicalSessionId?: string;

@@ -3,6 +3,7 @@
 
 import type { TowerMessage } from '../types.js';
 import { isPiCompactionNoOpMessage } from './compaction-outcome.js';
+import { formatPiProviderErrorForUser, isPiTowerRequestPreflight } from '../pi-failure-classifier.js';
 
 export function handlePiCompactionStart(params: {
   event: any;
@@ -52,9 +53,10 @@ export function handlePiCompactionEnd(params: {
     };
   }
 
-  const reason = event.errorMessage
-    ? String(event.errorMessage).slice(0, 240)
+  const fullReason = event.errorMessage
+    ? String(event.errorMessage)
     : 'no compaction result was produced';
+  const reason = fullReason.slice(0, 240);
   if (isPiCompactionNoOpMessage(reason)) {
     console.log(`[Pi] compaction_noop: session=${sessionId.slice(0, 8)} reason=${reason}`);
     return {
@@ -72,7 +74,9 @@ export function handlePiCompactionEnd(params: {
       {
         type: 'engine_error',
         sessionId,
-        message: `Pi context compaction did not complete: ${reason}`,
+        message: isPiTowerRequestPreflight(fullReason)
+          ? formatPiProviderErrorForUser(fullReason)
+          : `Pi context compaction did not complete: ${reason}`,
         recoverable: true,
       },
     ],

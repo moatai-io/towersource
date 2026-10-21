@@ -57,7 +57,7 @@ describe('computeUrl', () => {
     expect(computeUrl(SHORT, ROOM_SHORT, 'kanban')).toBe(`/s/${SHORT}?view=kanban`);
   });
 
-  it.each(['kanban', 'history', 'inbox', 'work', 'schedules', 'automations', 'beta'] as const)(
+  it.each(['kanban', 'inbox', 'secretariat', 'work', 'schedules', 'automations', 'beta'] as const)(
     'serializes global view %s (rooms 제외)',
     (view) => {
       expect(computeUrl(null, null, view)).toBe(`/?view=${view}`);
@@ -66,6 +66,10 @@ describe('computeUrl', () => {
 });
 
 describe('parseUrl', () => {
+  it('restores the private secretariat surface', () => {
+    expect(parseUrl('/', '?view=secretariat')).toEqual({ sessionKey: null, roomKey: null, view: 'secretariat', systemTab: null });
+  });
+
   it('extracts UUID from /s/:uuid (옛 링크)', () => {
     expect(parseUrl(`/s/${UUID}`, '')).toEqual({ sessionKey: UUID, roomKey: null, view: null, systemTab: null });
   });

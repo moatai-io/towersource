@@ -61,7 +61,8 @@ describe('Pi managed Workbench tool surface', () => {
     expect(names).not.toContain('project_shell');
     expect(names).not.toContain('project_runtime_box_shell');
     expect(names).toContain('project_process');
-    expect(names).toContain('project_shell_legacy');
+    expect(names).toContain('project_download');
+    expect(names).not.toContain('project_shell_legacy');
     expect(names).not.toContain('workbench_execute');
     expect(names).toContain('workbench_job_list');
     expect(names).toContain('workbench_job_get');
@@ -92,44 +93,45 @@ describe('Pi managed Workbench tool surface', () => {
     expect(names).not.toContain('workbench_runtime_apply_recreate');
   });
 
-  it('presents compatibility Projects with the same bash name', () => {
-    const customerManagerNames = createRuntimeBoxPiTools({ ...context, userRole: 'customer_manager' }).map(tool => tool.name);
-    expect(customerManagerNames).toContain('bash');
-    expect(customerManagerNames).not.toContain('project_shell');
-    expect(customerManagerNames).not.toContain('project_shell_legacy');
-    expect(customerManagerNames).not.toContain('project_process');
-    expect(customerManagerNames).not.toContain('workbench_job_list');
-    expect(customerManagerNames).not.toContain('service_start');
-    expect(customerManagerNames).not.toContain('workbench_tool_inspect');
-    expect(customerManagerNames).not.toContain('workbench_tool_preview_acquisition');
-    expect(customerManagerNames).not.toContain('workbench_tool_preview_change');
-    expect(customerManagerNames).not.toContain('workbench_tool_apply_change');
-    expect(customerManagerNames).not.toContain('workbench_runtime_preview_recreate');
-    expect(customerManagerNames).not.toContain('workbench_runtime_apply_recreate');
-
+  it('routes ordinary Projects through Project Environment without requiring a Workbench rollout', () => {
     const otherProjectNames = createRuntimeBoxPiTools({ ...context, projectId: 'project-b', userRole: 'member', workbenchRolloutEnabled: false }).map(tool => tool.name);
-    expect(otherProjectNames).toContain('bash');
+    expect(otherProjectNames).toEqual(expect.arrayContaining(['bash', 'project_process', 'pdf_render']));
     expect(otherProjectNames).not.toContain('project_shell');
     expect(otherProjectNames).not.toContain('project_shell_legacy');
-    expect(otherProjectNames).not.toContain('project_process');
+    expect(otherProjectNames).not.toContain('workbench_tool_inspect');
   });
 
-  it('lets an explicit DB disable use compatibility bash without Workbench surfaces', () => {
+  it('keeps Worker-first bash while removing Runtime Box-only surfaces when compatibility is disabled', () => {
+    const names = createRuntimeBoxPiTools({ ...context, workbenchRolloutEnabled: true, runtimeBoxCompatibilityEnabled: false }).map(tool => tool.name);
+    expect(names).toContain('bash');
+    expect(names).toContain('project_process');
+    expect(names).toContain('project_download');
+    expect(names).not.toContain('pdf_render');
+    expect(names).not.toContain('service_start');
+    expect(names).not.toContain('service_logs');
+    expect(names).not.toContain('service_stop');
+  });
+
+  it('keeps Project Environment bash for unbound Projects when compatibility is disabled', () => {
+    const names = createRuntimeBoxPiTools({ ...context, projectId: 'project-b', userRole: 'member', workbenchRolloutEnabled: false, runtimeBoxCompatibilityEnabled: false }).map(tool => tool.name);
+    expect(names).toEqual(expect.arrayContaining(['bash', 'project_process']));
+    expect(names).not.toContain('pdf_render');
+  });
+
+  it('limits an explicit DB rollout disable to Workbench management surfaces', () => {
     const names = createRuntimeBoxPiTools({ ...context, workbenchRolloutEnabled: false }).map(tool => tool.name);
     expect(names).toContain('bash');
     expect(names).not.toContain('project_shell');
     expect(names).not.toContain('project_shell_legacy');
-    expect(names).not.toContain('project_process');
+    expect(names).toContain('project_process');
+    expect(names).toContain('project_download');
     expect(names).not.toContain('workbench_tool_inspect');
     expect(names).not.toContain('workbench_runtime_preview_recreate');
   });
 
-  it('refuses member and customer_manager mutation previews', async () => {
-    const params = { expectedRevision: 1, reason: 'needed', action: { kind: 'install', manager: 'uv-tool', tool: { name: 'ruff', version: '0.12.0', entrypoints: ['ruff'] } } };
-    for (const userRole of ['member', 'customer_manager']) {
-      const tool: any = createRuntimeBoxPiTools({ ...context, userRole }).find(tool => tool.name === 'workbench_tool_preview_change');
-      expect(tool).toBeUndefined();
-    }
+  it('refuses member mutation previews', async () => {
+    const tool: any = createRuntimeBoxPiTools({ ...context, userRole: 'member' }).find(tool => tool.name === 'workbench_tool_preview_change');
+    expect(tool).toBeUndefined();
     expect(previewWorkbenchToolChange).not.toHaveBeenCalled();
   });
 

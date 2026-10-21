@@ -92,7 +92,7 @@ run('Agent Credential disposable PostgreSQL vertical slice', () => {
 
   afterAll(async () => {
     await modules?.pg?.closePgPool?.().catch(() => undefined);
-    await docker('rm', '-f', pgName).catch(() => undefined);
+    await docker('rm', '-f', '-v', pgName).catch(() => undefined);
     if (projectRoot) await rm(projectRoot, { recursive: true, force: true });
     for (const [key, value] of Object.entries(previousEnv)) {
       if (value === undefined) delete process.env[key];
@@ -109,18 +109,10 @@ run('Agent Credential disposable PostgreSQL vertical slice', () => {
       secretValue: firstSecret,
       defaultEnvName: envName,
       scope: 'project',
+      projectId,
       metadata: {
-        connection_type: 'agent',
-        agent_project_id: projectId,
         capability: 'database',
       },
-      actorUserId: creatorUserId,
-    });
-    await modules.vault.setProjectCredentialPolicy({
-      projectId,
-      credentialId,
-      mode: 'allow',
-      targetEnvName: envName,
       actorUserId: creatorUserId,
     });
 
@@ -169,11 +161,11 @@ run('Agent Credential disposable PostgreSQL vertical slice', () => {
     expect(afterRotate.env[envName]).toBe(rotatedSecret);
     expect(afterRotate.env[envName]).not.toBe(firstSecret);
 
-    await modules.vault.setProjectCredentialPolicy({
+    await modules.vault.updateCredentialLifecycle({
       projectId,
       credentialId,
-      mode: 'deny',
-      targetEnvName: envName,
+      scope: 'project',
+      enabled: false,
       actorUserId: creatorUserId,
     });
     const denied = await modules.vault.resolveRuntimeBoxApiKeyEnv({ projectId, userId: runtimeUserId });

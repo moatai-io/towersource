@@ -1,3 +1,5 @@
+import type { ContextMeasurement } from '../utils/context-measurement';
+import type { UploadProgressSnapshot } from '../utils/upload-with-progress';
 import { create } from 'zustand';
 
 // --- Message Queue lifecycle ---
@@ -69,6 +71,7 @@ export interface ContentBlock {
   title?: string;
   sha256?: string;
   status?: 'saved' | 'pending' | 'skipped' | 'error';
+  operation?: 'create' | 'update';
   error?: string;
   /** Provider commentary/preamble channel. `progress` renders as user-visible assistant prose; hidden stays private. */
   phase?: 'commentary';
@@ -78,7 +81,7 @@ export interface ContentBlock {
   agentRun?: AgentRunBlock;
 }
 
-export type PresentFileEvent = { path: string; split: 'right'; sessionId?: string; deliveryId?: string; focus?: boolean; label?: string };
+export type PresentFileEvent = { path: string; split: 'right'; sessionId?: string; deliveryId?: string; focus?: boolean; reveal?: boolean; label?: string };
 
 function extractPresentFileEvents(messages: ChatMessage[]): PresentFileEvent[] {
   const events: PresentFileEvent[] = [];
@@ -90,13 +93,14 @@ function extractPresentFileEvents(messages: ChatMessage[]): PresentFileEvent[] {
       if (block.type === 'tool_use' && tool.id && tool.name) toolNamesById.set(tool.id, tool.name);
 
       const sourceToolName = block.type === 'tool_result' && tool.id ? toolNamesById.get(tool.id) : tool.name;
-      const opensViewer = sourceToolName === 'present_file' || sourceToolName === 'personal_note_append';
+      const opensViewer = sourceToolName === 'present_file' || sourceToolName === 'personal_note_append' || (['create_markdown_artifact', 'update_markdown_artifact'].includes(sourceToolName || ''));
       if (!opensViewer || !tool.result) continue;
 
       try {
         const parsed = JSON.parse(tool.result);
+        if (['create_markdown_artifact', 'update_markdown_artifact'].includes(sourceToolName || '') && parsed.presentation !== 'viewer') continue;
         const target = typeof parsed.path === 'string' ? parsed.path : typeof parsed.uri === 'string' ? parsed.uri : null;
-        if (parsed?.ok && target) events.push({ path: target, split: 'right', deliveryId: tool.id, focus: parsed.focus !== false, label: parsed.label });
+        if (parsed?.ok && target) events.push({ path: target, split: 'right', deliveryId: tool.id, focus: parsed.focus !== false, ...(parsed.reveal === true ? { reveal: true } : {}), label: parsed.label });
       } catch { /* ignore non-JSON/error result */ }
     }
   }
@@ -138,6 +142,7 @@ export interface ChatMessage {
   /** Model context window captured with this assistant turn, when provider reports it. */
   contextWindowSize?: number;
   /** Post-compaction/live-context estimate. Lower than raw provider input after compact. */
+  contextCompacted?: boolean;
   contextEstimatedTokens?: number;
   stopReason?: 'stop' | 'length' | 'toolUse' | 'error' | 'aborted';
   /**
@@ -151,6 +156,7 @@ export interface ChatMessage {
 }
 
 export interface CostInfo {
+  contextMeasurement?: ContextMeasurement;
   totalCost: number;
   inputTokens: number;
   outputTokens: number;
@@ -164,7 +170,10 @@ export interface CostInfo {
   // Context window tracking (from SDK last iteration)
   contextInputTokens: number;   // provider-reported input-side usage for the turn
   contextOutputTokens: number;  // last iteration output
+  contextSnapshot?: unknown;
+  compactThresholdTokens?: number;
   contextWindowSize: number;    // model's context window (e.g. 200000)
+  contextCompacted?: boolean;
   contextEstimatedTokens?: number; // post-compaction/live-context estimate when raw input is stale
 }
 
@@ -218,6 +227,8 @@ export interface Attachment {
 export interface PendingQuestion {
   questionId: string;
   sessionId: string;
+  submissionStatus?: 'pending' | 'submitting' | 'send_failed';
+  submissionError?: string;
   questions: Array<{
     question: string;
     header?: string;
@@ -251,7 +262,7 @@ export interface SessionTurnState {
   activeToolSummary?: string;
   /** Assistant message id for the currently streaming turn, once the first assistant frame arrives. */
   activeAssistantMessageId?: string;
-  pendingQuestionId?: string;
+  pendingQuestionId?: string | null;
   errorMessage?: string;
   /** Safe-stop request accepted; active foreground work may still be finishing. */
   stopRequested?: boolean;
@@ -273,6 +284,9 @@ interface ChatState {
   cost: CostInfo;
   rateLimit: RateLimitInfo | null;
   attachments: Attachment[];
+  attachmentDrafts: Record<string, Attachment[]>;
+  attachmentUploadProgress: Record<string, UploadProgressSnapshot | null>;
+  setAttachmentUploadProgress: (sessionId: string, progress: UploadProgressSnapshot | null) => void;
   pendingQuestion: PendingQuestion | null;
   compactingSessionId: string | null;
   sessionStartTime: number | null;
@@ -343,7 +357,7 @@ interface ChatState {
   drainPendingInjections: (sessionId: string) => Array<{ id: string; text: string; order?: number }>;
   retryMessage: (id: string) => string | null;
   setLastTurnMetrics: (m: TurnMetrics | null) => void;
-  addAttachment: (att: Attachment) => void;
+  addAttachment: (att: Attachment, sessionId?: string) => void;
   removeAttachment: (id: string) => void;
   clearAttachments: () => void;
   setPendingQuestion: (pq: PendingQuestion | null) => void;
@@ -375,6 +389,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
   cost: { totalCost: 0, inputTokens: 0, outputTokens: 0, cumulativeInputTokens: 0, cumulativeOutputTokens: 0, turnCount: 0, contextInputTokens: 0, contextOutputTokens: 0, contextWindowSize: 0, contextEstimatedTokens: 0 },
   rateLimit: null,
   attachments: [],
+  attachmentDrafts: {},
+  attachmentUploadProgress: {},
+  setAttachmentUploadProgress: (sessionId, progress) => set((state) => ({
+    attachmentUploadProgress: { ...state.attachmentUploadProgress, [sessionId]: progress },
+  })),
   pendingQuestion: null,
   compactingSessionId: null,
   sessionStartTime: null,
@@ -664,7 +683,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   setStreaming: (v) => set({ isStreaming: v }),
   setCompacting: (sessionId) => set({ compactingSessionId: sessionId }),
-  setSessionId: (id) => set({ sessionId: id }),
+  setSessionId: (id) => set((state) => {
+    if (id === state.sessionId) return {};
+    const attachmentDrafts = { ...state.attachmentDrafts };
+    if (state.sessionId) attachmentDrafts[state.sessionId] = state.attachments;
+    return { sessionId: id, attachmentDrafts, attachments: id ? attachmentDrafts[id] || [] : [] };
+  }),
   setEngineSessionId: (id) => set({ engineSessionId: id }),
   setSystemInfo: (info) =>
     set((s) => {
@@ -724,7 +748,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     });
     return changed ? { messages: msgs } : s;
   }),
-  clearMessages: () => set({ messages: [], cost: { totalCost: 0, inputTokens: 0, outputTokens: 0, cumulativeInputTokens: 0, cumulativeOutputTokens: 0, turnCount: 0, contextInputTokens: 0, contextOutputTokens: 0, contextWindowSize: 0, contextEstimatedTokens: 0 }, rateLimit: null, pendingQuestion: null, lastTurnMetrics: null, hasMoreMessages: false, loadingMoreMessages: false, oldestMessageId: null, compactingSessionId: null, turnStateBySession: {}, engineSessionId: null }),
+  clearMessages: () => set({ messages: [], cost: { totalCost: 0, inputTokens: 0, outputTokens: 0, cumulativeInputTokens: 0, cumulativeOutputTokens: 0, turnCount: 0, contextInputTokens: 0, contextOutputTokens: 0, contextWindowSize: 0, contextEstimatedTokens: 0 }, rateLimit: null, pendingQuestion: null, lastTurnMetrics: null, hasMoreMessages: false, loadingMoreMessages: false, oldestMessageId: null, compactingSessionId: null, engineSessionId: null }),
   setSessionStartTime: (time) => set({ sessionStartTime: time }),
   setTurnStartTime: (time) => set({ turnStartTime: time }),
   markPendingDelivered: () =>
@@ -780,12 +804,18 @@ export const useChatStore = create<ChatState>((set, get) => ({
     return text;
   },
   setLastTurnMetrics: (m) => set({ lastTurnMetrics: m }),
-  addAttachment: (att) => set((s) => {
-    if (s.attachments.some((a) => a.id === att.id)) return s;
-    return { attachments: [...s.attachments, att] };
+  addAttachment: (att, sessionId) => set((state) => {
+    const owner = sessionId ?? state.sessionId;
+    if (!owner || owner === state.sessionId) return state.attachments.some((a) => a.id === att.id) ? {} : { attachments: [...state.attachments, att] };
+    return { attachmentDrafts: {
+      ...state.attachmentDrafts,
+      [owner]: (state.attachmentDrafts[owner] || []).some((a) => a.id === att.id)
+        ? state.attachmentDrafts[owner] : [...(state.attachmentDrafts[owner] || []), att],
+    } };
   }),
-  removeAttachment: (id) => set((s) => ({ attachments: s.attachments.filter((a) => a.id !== id) })),
-  clearAttachments: () => set({ attachments: [] }),
+  removeAttachment: (id) => set((state) => ({ attachments: state.attachments.filter((a) => a.id !== id) })),
+  clearAttachments: () => set((state) => ({ attachments: [], attachmentDrafts: state.sessionId
+    ? { ...state.attachmentDrafts, [state.sessionId]: [] } : state.attachmentDrafts })),
   setPendingQuestion: (pq) => set({ pendingQuestion: pq }),
 
   updateMessageMetrics: (id, metrics) =>
@@ -921,7 +951,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       turnStateBySession: {
         ...s.turnStateBySession,
         [sessionId]: {
-          phase,
+          phase: prev?.pendingQuestionId && meta.pendingQuestionId === undefined && phase !== 'stopped' && phase !== 'error' ? 'awaiting_user' : phase,
           startedAt: meta.startedAt ?? (startsNewTurn ? Date.now() : (prev?.startedAt ?? (phase === 'preparing' ? Date.now() : null))),
           lastActivityAt: meta.lastActivityAt ?? Date.now(),
           pendingMessageCount: meta.pendingMessageCount ?? s.messageQueue[sessionId]?.length ?? prev?.pendingMessageCount ?? 0,
@@ -932,7 +962,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           activeAssistantMessageId: phase === 'preparing' || phase === 'idle' || phase === 'done' || phase === 'stopped' || phase === 'error'
             ? meta.activeAssistantMessageId
             : (meta.activeAssistantMessageId ?? prev?.activeAssistantMessageId),
-          pendingQuestionId: meta.pendingQuestionId ?? prev?.pendingQuestionId,
+          pendingQuestionId: meta.pendingQuestionId !== undefined ? meta.pendingQuestionId : (phase === 'stopped' || phase === 'error' ? null : prev?.pendingQuestionId),
           errorMessage: meta.errorMessage ?? (phase === 'error' ? prev?.errorMessage : undefined),
           read,
         },

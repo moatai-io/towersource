@@ -3,28 +3,35 @@
  *
  * Owns: reading `.tower/mcp/manifest.json`, validating safe MCP server
  * definitions, resolving project-granted Credential Vault secrets, and exposing
- * stdio or approved streamable-HTTP MCP servers as Pi ToolDefinition objects.
- * Public API: loadProjectMcpTools.
+ * stdio or approved streamable-HTTP MCP servers through a lazy search/call gateway.
+ * Public API: createProjectMcpGatewayTools, inspectProjectMcpConfiguration.
  *
  * Design intent: external MCPs must be scoped to a single Tower project and
  * user credential grants. Host-global MCP config is intentionally ignored so
  * admin-installed tools do not leak into member sessions.
  */
 
-import fs from 'fs/promises';
 import path from 'path';
-import { Type, type TSchema } from '@sinclair/typebox';
+import { Type } from '@sinclair/typebox';
+import Ajv from 'ajv';
 import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport, getDefaultEnvironment } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import { assertProjectMcpExecution } from './project-mcp-access.js';
+import { createProjectMcpOAuthProvider } from './project-mcp-oauth.js';
+import { projectMcpFetch } from './project-mcp-network.js';
+import { readManagedMcpManifest } from './project-mcp-manifest.js';
 import { resolveProjectApiKeySecretValue } from '../credential-vault/credential-vault-service.js';
 
 const MANIFEST_RELATIVE_PATH = '.tower/mcp/manifest.json';
 const MAX_SERVERS = 8;
 const MAX_TOOLS_PER_SERVER = 80;
+const DEFAULT_SEARCH_LIMIT = 5;
+const MAX_SEARCH_LIMIT = 8;
 const DEFAULT_CALL_TIMEOUT_MS = 45_000;
 const MAX_CALL_TIMEOUT_MS = 120_000;
+const mcpArgumentsValidator = new Ajv({ strict: false, allErrors: true });
 
 const VALID_SERVER_NAME_RE = /^[a-z][a-z0-9_-]{0,63}$/;
 const VALID_TOOL_NAME_RE = /^[A-Za-z0-9_.-]{1,128}$/;
@@ -36,6 +43,8 @@ export interface ProjectMcpLoadOptions {
   userId?: number;
   userRole?: string;
   sessionId: string;
+  /** Fresh session-specific opt-out check before discovery and every invocation. */
+  isServerAllowed?: (serverName: string) => Promise<boolean>;
 }
 
 interface ProjectMcpManifest {
@@ -61,6 +70,8 @@ export interface ProjectMcpServerManifest {
   enabled?: boolean;
   description?: string;
   timeoutMs?: number;
+  authType?: 'oauth' | 'none';
+  displayName?: string;
 }
 
 interface ProjectMcpCatalogEntry {
@@ -142,6 +153,7 @@ function validateServerManifest(server: ProjectMcpServerManifest, index: number)
     problems.push(`server[${index}].name must match ${VALID_SERVER_NAME_RE}`);
   }
   if (server.catalogId && !PROJECT_MCP_CATALOG[server.catalogId]) problems.push(`server[${index}].catalogId is not in the approved project MCP catalog`);
+  if (server.authType !== undefined && !['oauth', 'none'].includes(server.authType)) problems.push(`server[${index}].authType must be oauth or none`);
   if (server.type && server.type !== 'stdio' && server.type !== 'streamable-http') problems.push(`server[${index}].type must be "stdio" or "streamable-http"`);
   if ((server.type ?? 'stdio') === 'stdio' && (!server.command || typeof server.command !== 'string')) problems.push(`server[${index}].command is required for stdio`);
   if (server.type === 'streamable-http' && (!server.url || !server.url.startsWith('https://'))) problems.push(`server[${index}].url must be an https URL`);
@@ -160,18 +172,8 @@ function validateServerManifest(server: ProjectMcpServerManifest, index: number)
   return problems;
 }
 
-async function readManifest(projectRoot: string): Promise<ProjectMcpManifest | null> {
-  const manifestPath = path.join(projectRoot, MANIFEST_RELATIVE_PATH);
-  let text: string;
-  try {
-    text = await fs.readFile(manifestPath, 'utf8');
-  } catch (err: any) {
-    if (err?.code === 'ENOENT') return null;
-    throw err;
-  }
-  const parsed = JSON.parse(text) as unknown;
-  if (!isPlainObject(parsed)) throw new Error('project MCP manifest must be a JSON object');
-  return parsed as ProjectMcpManifest;
+async function readManifest(projectRoot: string): Promise<ProjectMcpManifest> {
+  return readManagedMcpManifest(projectRoot);
 }
 
 async function resolveServerEnv(server: ProjectMcpServerManifest, opts: Required<Pick<ProjectMcpLoadOptions, 'projectId' | 'userId'>>): Promise<Record<string, string>> {
@@ -201,11 +203,6 @@ async function resolveServerEnv(server: ProjectMcpServerManifest, opts: Required
   return env;
 }
 
-function schemaToTypeBox(inputSchema: unknown): TSchema {
-  const schema = isPlainObject(inputSchema) ? inputSchema : { type: 'object', properties: {} };
-  return Type.Unsafe<unknown>(schema) as TSchema;
-}
-
 function mapMcpContent(content: any[] | undefined, isError: boolean) {
   const out: Array<{ type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string }> = [];
   for (const block of Array.isArray(content) ? content : []) {
@@ -227,7 +224,12 @@ async function mountServer(projectRoot: string, server: ProjectMcpServerManifest
     for (const secret of server.secrets ?? []) {
       if (secret.header) headers.set(secret.header, resolvedSecrets[secret.env]);
     }
-    transport = new StreamableHTTPClientTransport(new URL(server.url), { requestInit: { headers } });
+    transport = new StreamableHTTPClientTransport(new URL(server.url), {
+      requestInit: { headers },
+      fetch: projectMcpFetch,
+      authProvider: server.authType === 'oauth'
+        ? await createProjectMcpOAuthProvider(opts.projectId, server.name, server.url, opts.userId) : undefined,
+    });
   } else {
     if (!server.command) throw new Error(`project MCP server ${server.name} has no command after validation`);
     transport = new StdioClientTransport({
@@ -243,28 +245,55 @@ async function mountServer(projectRoot: string, server: ProjectMcpServerManifest
   return { manifest: server, client, transport };
 }
 
-function makeTool(server: MountedProjectMcpServer, tool: any): ToolDefinition | null {
+interface ProjectMcpCatalogTool {
+  id: string;
+  name: string;
+  description: string;
+  inputSchema: Record<string, unknown>;
+  server: MountedProjectMcpServer;
+}
+
+function catalogTool(server: MountedProjectMcpServer, tool: any): ProjectMcpCatalogTool | null {
   if (!tool?.name || typeof tool.name !== 'string' || !VALID_TOOL_NAME_RE.test(tool.name)) return null;
   const prefix = normalizeToolPrefix(server.manifest);
-  const piToolName = `${prefix}__${sanitizeName(tool.name)}`;
-  const timeoutMs = Math.min(Math.max(server.manifest.timeoutMs ?? DEFAULT_CALL_TIMEOUT_MS, 1_000), MAX_CALL_TIMEOUT_MS);
   return {
-    name: piToolName,
-    label: piToolName,
+    id: `${prefix}__${sanitizeName(tool.name)}`,
+    name: tool.name,
     description: tool.description || `${server.manifest.description || server.manifest.name} MCP tool ${tool.name}`,
-    parameters: schemaToTypeBox(tool.inputSchema),
-    async execute(_toolCallId: string, params: any, signal: AbortSignal | undefined) {
-      const timeout = AbortSignal.timeout(timeoutMs);
-      const composite = signal ? AbortSignal.any([signal, timeout]) : timeout;
-      try {
-        const result = await server.client.callTool({ name: tool.name, arguments: params ?? {} }, undefined, { signal: composite, timeout: timeoutMs, maxTotalTimeout: timeoutMs });
-        const isError = !!(result as any)?.isError;
-        return { content: mapMcpContent((result as any)?.content, isError), details: undefined };
-      } catch (err: any) {
-        return { content: [{ type: 'text' as const, text: `[Project MCP tool error] ${piToolName}: ${err?.message || String(err)}` }], details: undefined };
+    inputSchema: isPlainObject(tool.inputSchema) ? tool.inputSchema : { type: 'object', properties: {} },
+    server,
+  };
+}
+
+function tokenizeSearchQuery(query: string): string[] {
+  return query.toLocaleLowerCase().split(/[^\p{L}\p{N}_.-]+/u).map(token => token.trim()).filter(Boolean);
+}
+
+export function rankProjectMcpCatalogTools<T extends Pick<ProjectMcpCatalogTool, 'id' | 'name' | 'description'>>(
+  tools: T[],
+  query: string,
+): T[] {
+  const normalized = query.trim().toLocaleLowerCase();
+  const tokens = tokenizeSearchQuery(query);
+  if (!normalized || tokens.length === 0) return [];
+  return tools
+    .map(tool => {
+      const id = tool.id.toLocaleLowerCase();
+      const name = tool.name.toLocaleLowerCase();
+      const description = tool.description.toLocaleLowerCase();
+      let score = 0;
+      if (id === normalized || name === normalized) score += 100;
+      if (id.includes(normalized) || name.includes(normalized)) score += 30;
+      if (description.includes(normalized)) score += 20;
+      for (const token of tokens) {
+        if (id.includes(token) || name.includes(token)) score += 8;
+        if (description.includes(token)) score += 3;
       }
-    },
-  } as ToolDefinition;
+      return { tool, score };
+    })
+    .filter(candidate => candidate.score > 0)
+    .sort((a, b) => b.score - a.score || a.tool.id.localeCompare(b.tool.id))
+    .map(candidate => candidate.tool);
 }
 
 export interface ProjectMcpConfigurationSummary {
@@ -312,24 +341,35 @@ export async function inspectProjectMcpConfiguration(projectRoot: string): Promi
   };
 }
 
-/**
- * Load project-scoped MCP tools. Agent Store is a managed baseline when its
- * project credential policy allows access; a manifest can explicitly disable it.
- */
-export async function loadProjectMcpTools(opts: ProjectMcpLoadOptions): Promise<ToolDefinition[]> {
+async function currentDefinitions(opts: ProjectMcpLoadOptions): Promise<ProjectMcpServerManifest[]> {
+  const manifest = await readManifest(opts.projectRoot!);
+  const declared = manifest.servers ?? [];
+  return (declared.some(s => s.catalogId === 'agent-store') ? declared : [{ name: 'agent-store', catalogId: 'agent-store' }, ...declared])
+    .filter(s => s.enabled !== false).slice(0, MAX_SERVERS).map(applyCatalogDefaults);
+}
+async function assertRuntimeServerAllowed(opts: ProjectMcpLoadOptions, server: ProjectMcpServerManifest): Promise<void> {
+  if (!opts.projectId || !opts.userId || !opts.projectRoot) throw new Error('Agent execution authority required');
+  const access = await assertProjectMcpExecution(opts.projectId, opts.userId, opts.projectRoot);
+  const privileged = access?.role === 'admin' || access?.role === 'operator';
+  if (!privileged && !server.catalogId && (server.type !== 'streamable-http' || server.env || server.headers || server.secrets || server.command || server.args || server.cwd)) throw new Error('Custom process/credential overrides require current admin/operator authority');
+  if (opts.isServerAllowed && !await opts.isServerAllowed(server.name)) throw new Error('MCP disabled for session');
+  const current = (await currentDefinitions(opts)).find(s => s.name === server.name);
+  if (!current || JSON.stringify(current) !== JSON.stringify(server)) throw new Error('MCP configuration changed');
+}
+async function loadProjectMcpCatalog(opts: ProjectMcpLoadOptions): Promise<ProjectMcpCatalogTool[]> {
   if (!opts.projectRoot || !opts.projectId || !opts.userId) return [];
-  const isPrivilegedUser = opts.userRole === 'admin' || opts.userRole === 'operator';
+  const access = await assertProjectMcpExecution(opts.projectId!, opts.userId!, opts.projectRoot);
+  const isPrivilegedUser = access?.role === 'admin' || access?.role === 'operator';
   const manifest = await readManifest(opts.projectRoot);
-  // Agent Store is the managed baseline whenever its project credential policy
-  // allows access. A project manifest may explicitly disable it by declaring an
-  // agent-store catalog entry with enabled=false.
+  // Agent Store remains available to every project when its workspace/project
+  // credential is available. Availability does not imply eager schema projection.
   const declaredServers = manifest?.servers ?? [];
   const agentStoreDeclaration = declaredServers.find(server => server.catalogId === 'agent-store');
   const baselineServers = agentStoreDeclaration
     ? declaredServers
     : [{ name: 'agent-store', catalogId: 'agent-store' }, ...declaredServers];
   const servers = baselineServers.filter(server => server.enabled !== false).slice(0, MAX_SERVERS).map(applyCatalogDefaults);
-  const tools: ToolDefinition[] = [];
+  const tools: ProjectMcpCatalogTool[] = [];
   for (let index = 0; index < servers.length; index += 1) {
     const server = servers[index];
     const problems = validateServerManifest(server, index);
@@ -337,21 +377,130 @@ export async function loadProjectMcpTools(opts: ProjectMcpLoadOptions): Promise<
       console.warn(`[project-mcp] invalid server manifest skipped: ${problems.join('; ')}`);
       continue;
     }
-    if (!isPrivilegedUser && !server.catalogId) {
+    if (!isPrivilegedUser && !server.catalogId && server.type !== 'streamable-http') {
       console.warn(`[project-mcp] custom stdio server ${server.name} skipped: members may only mount approved catalog MCP providers`);
       continue;
     }
+    if (!isPrivilegedUser && !server.catalogId && (server.env || server.headers || server.secrets || server.command || server.args || server.cwd)) {
+      console.warn(`[project-mcp] skipped ${server.name}: member HTTP connections cannot override credentials or process settings`);
+      continue;
+    }
     try {
+      await assertRuntimeServerAllowed(opts, server);
       const mounted = await mountServer(opts.projectRoot, server, { projectId: opts.projectId, userId: opts.userId });
       const listed = await mounted.client.listTools({}, { timeout: 15_000, maxTotalTimeout: 15_000 });
       for (const tool of (listed.tools ?? []).slice(0, MAX_TOOLS_PER_SERVER)) {
-        const piTool = makeTool(mounted, tool);
-        if (piTool) tools.push(piTool);
+        const entry = catalogTool(mounted, tool);
+        if (entry) tools.push(entry);
       }
-      console.log(`[project-mcp] mounted ${server.name}: ${Math.min(listed.tools?.length ?? 0, MAX_TOOLS_PER_SERVER)} tools`);
+      console.log(`[project-mcp] cataloged ${server.name}: ${Math.min(listed.tools?.length ?? 0, MAX_TOOLS_PER_SERVER)} tools (deferred)`);
     } catch (err: any) {
-      console.warn(`[project-mcp] failed to mount ${server.name}: ${err?.message || String(err)}`);
+      console.warn(`[project-mcp] failed to catalog ${server.name}`);
     }
   }
   return tools;
+}
+
+function textResult(text: string, isError = false) {
+  return { content: [{ type: 'text' as const, text }], isError, details: undefined };
+}
+
+/**
+ * Expose a bounded search/call gateway instead of projecting every external MCP
+ * tool schema into the model context. The catalog is loaded lazily on first use
+ * and reused for the remainder of this tool assembly/session runtime.
+ */
+export function createProjectMcpGatewayTools(opts: ProjectMcpLoadOptions): ToolDefinition[] {
+  if (!opts.projectRoot || !opts.projectId || !opts.userId) return [];
+  let catalogPromise: Promise<ProjectMcpCatalogTool[]> | null = null;
+  const discoveredToolIds = new Set<string>();
+  const getCatalog = () => catalogPromise ??= loadProjectMcpCatalog(opts);
+
+  const searchTool = {
+    name: 'mcp_search_tools',
+    label: 'Search MCP Tools',
+    description: 'Search organization-provided external and domain MCP capabilities without loading every tool schema. Use when a request needs specialized external data or actions not covered by currently visible tools.',
+    promptSnippet: 'Search organization-provided MCP capabilities when the request needs a specialized external function that is not currently visible.',
+    promptGuidelines: [
+      'Use mcp_search_tools when the user asks for a specialized external capability, names a domain data task, asks what integrations can do, or the visible tools cannot perform the request.',
+      'Do not search MCP for ordinary conversation, writing, code editing, or work already supported by a visible first-party tool.',
+      'Search results are metadata only. Call only a returned tool id with mcp_call_tool.',
+    ],
+    parameters: Type.Object({
+      query: Type.String({ description: 'Natural-language capability to find, such as "아파트 실거래 조회" or "사업자 상태 확인".' }),
+      limit: Type.Optional(Type.Number({ description: `Maximum candidates. Default ${DEFAULT_SEARCH_LIMIT}, max ${MAX_SEARCH_LIMIT}.` })),
+    }),
+    async execute(_toolCallId: string, input: { query: string; limit?: number }) {
+      try {
+        const catalog = await getCatalog();
+        const limit = Math.max(1, Math.min(input.limit || DEFAULT_SEARCH_LIMIT, MAX_SEARCH_LIMIT));
+        const allowed: ProjectMcpCatalogTool[] = [];
+        for (const tool of catalog) {
+          try { await assertRuntimeServerAllowed(opts, tool.server.manifest); allowed.push(tool); } catch { /* hide revoked/disabled */ }
+        }
+        const matches = rankProjectMcpCatalogTools(allowed, input.query).slice(0, limit).map(tool => {
+          discoveredToolIds.add(tool.id);
+          return {
+            id: tool.id,
+            description: tool.description,
+            inputSchema: tool.inputSchema,
+          };
+        });
+        return textResult(JSON.stringify({ query: input.query, matches, totalCatalogTools: allowed.length }, null, 2));
+      } catch (err: any) {
+        return textResult('MCP search failed; check Agent connection settings.', true);
+      }
+    },
+  } as unknown as ToolDefinition;
+
+  const callTool = {
+    name: 'mcp_call_tool',
+    label: 'Call MCP Tool',
+    description: 'Call one organization-provided MCP tool by an exact id returned from mcp_search_tools. The server validates arguments against the original MCP schema.',
+    promptSnippet: 'Call an MCP capability only after discovering its exact id with mcp_search_tools.',
+    promptGuidelines: [
+      'Call only an exact tool id returned by mcp_search_tools in this session.',
+      'Do not guess tool ids. Search again when the capability or required arguments are unclear.',
+      'External writes or destructive actions remain subject to Tower approval and connector policy.',
+    ],
+    parameters: Type.Object({
+      toolId: Type.String({ description: 'Exact id returned by mcp_search_tools.' }),
+      arguments: Type.Optional(Type.Record(Type.String(), Type.Unknown(), { description: 'Arguments matching the inputSchema returned by mcp_search_tools.' })),
+    }),
+    async execute(_toolCallId: string, input: { toolId: string; arguments?: Record<string, unknown> }, signal: AbortSignal | undefined) {
+      try {
+        if (!discoveredToolIds.has(input.toolId)) {
+          return textResult(`MCP tool was not discovered in this session: ${input.toolId}. Use mcp_search_tools first.`, true);
+        }
+        const catalog = await getCatalog();
+        const tool = catalog.find(candidate => candidate.id === input.toolId);
+        if (!tool) return textResult(`MCP tool not found or not available in this project: ${input.toolId}. Use mcp_search_tools again.`, true);
+        await assertRuntimeServerAllowed(opts, tool.server.manifest);
+        const args = input.arguments ?? {};
+        let validArguments = false;
+        try {
+          validArguments = mcpArgumentsValidator.validate(tool.inputSchema, args);
+        } catch {
+          return textResult(`MCP tool has an invalid inputSchema and cannot be called safely: ${input.toolId}.`, true);
+        }
+        if (!validArguments) {
+          return textResult(`MCP tool arguments do not match the discovered inputSchema for ${input.toolId}.`, true);
+        }
+        const timeoutMs = Math.min(Math.max(tool.server.manifest.timeoutMs ?? DEFAULT_CALL_TIMEOUT_MS, 1_000), MAX_CALL_TIMEOUT_MS);
+        const timeout = AbortSignal.timeout(timeoutMs);
+        const composite = signal ? AbortSignal.any([signal, timeout]) : timeout;
+        const result = await tool.server.client.callTool(
+          { name: tool.name, arguments: args },
+          undefined,
+          { signal: composite, timeout: timeoutMs, maxTotalTimeout: timeoutMs },
+        );
+        const isError = !!(result as any)?.isError;
+        return { content: mapMcpContent((result as any)?.content, isError), isError, details: undefined };
+      } catch (err: any) {
+        return textResult('MCP call failed; the connection may be disabled or require authentication.', true);
+      }
+    },
+  } as unknown as ToolDefinition;
+
+  return [searchTool, callTool];
 }

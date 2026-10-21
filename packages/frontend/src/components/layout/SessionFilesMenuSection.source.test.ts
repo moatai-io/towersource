@@ -4,14 +4,15 @@ import { describe, expect, it } from 'vitest';
 
 const header = fs.readFileSync(path.resolve(import.meta.dirname, './Header.tsx'), 'utf8');
 const sidebar = fs.readFileSync(path.resolve(import.meta.dirname, './Sidebar.tsx'), 'utf8');
+const sidebarFilesSurface = fs.readFileSync(path.resolve(import.meta.dirname, './SidebarFilesSurface.tsx'), 'utf8');
 const app = fs.readFileSync(path.resolve(import.meta.dirname, '../../App.tsx'), 'utf8');
 const section = fs.readFileSync(path.resolve(import.meta.dirname, './SessionFilesMenuSection.tsx'), 'utf8');
 
 describe('Session files hamburger menu', () => {
   it('keeps one compact second-level entry in the hamburger menu and reuses it in Folders', () => {
     expect(sidebar).not.toContain('SidebarSessionFilesPanel');
-    expect(sidebar).toContain('<SessionFilesMenuSection');
-    expect(sidebar).toContain('placement="sidebar"');
+    expect(sidebarFilesSurface).toContain('<SessionFilesMenuSection');
+    expect(sidebarFilesSurface).toContain('placement="sidebar"');
     expect(header).not.toContain("<MenuSection label={t('thisSessionFiles')} />");
     expect(header).toContain('<SessionFilesMenuSection');
     expect(section).toContain("aria-haspopup=\"dialog\"");
@@ -47,4 +48,16 @@ describe('Session files hamburger menu', () => {
     expect(section).not.toContain('{parentPath(file.path)}');
     expect(header).toContain('isMobile={isMobile}');
   });
+  it('refreshes when the file panel opens as well as when the session changes', () => {
+    expect(section).toContain('[activeSessionId, panelOpen]');
+    expect(section).toContain('cancelled = true');
+    expect(section).toContain('window.clearInterval(interval)');
+  });
+
+  it('clears stale paths on session/panel refresh and failed requests', () => {
+    expect(section).toContain("setFiles([]);\n    setProjectMissing(false);\n    let cancelled = false;");
+    expect(section).toContain('if (!fallbackResponse.ok) {\n          setFiles([]);');
+    expect(section).toContain('if (!cancelled) {\n          setFiles([]);');
+  });
+
 });

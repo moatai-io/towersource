@@ -55,7 +55,8 @@ export function deriveConnectionReadiness(input: ConnectionReadinessInput): Conn
   if (!input.enabled || input.existingStatus === 'disabled') effectiveStatus = 'disabled';
   else if (input.existingStatus === 'needs_attention' || input.attentionProjectCount > 0) effectiveStatus = 'needs_attention';
   else if (input.connectedProjectCount === 0) effectiveStatus = 'off';
-  else if (providerHealth.status === 'ready') effectiveStatus = 'ready';
+  else if (input.materializationFailed) effectiveStatus = 'needs_attention';
+  else if (providerHealth.status === 'ready' && input.lastMaterializedAt) effectiveStatus = 'ready';
   else if (['invalid', 'reauth_required', 'degraded'].includes(providerHealth.status)) effectiveStatus = 'needs_attention';
   else effectiveStatus = 'connected_unverified';
 

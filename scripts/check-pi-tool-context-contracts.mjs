@@ -8,10 +8,14 @@
  * safely, and avoid shared singleton temp files such as /tmp/tower_py_run.py.
  *
  * This is intentionally source-level and cheap so it can run in preflight.
+ * Wrapper calls are checked structurally by pi-tool-wrapper-contract.mjs:
+ * additional named options (e.g. resolveGuard) preserve the root requirement.
+ * Regression tests: node --test scripts/pi-tool-wrapper-contract.test.mjs
  */
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { inspectPiWrapperContexts } from './pi-tool-wrapper-contract.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
@@ -127,20 +131,11 @@ for (const forbidden of ['pdfReadTool', 'excelWriteTool', 'excelDiffTool', 'exce
   }
 }
 
-if (!/wrapPiTools\(piTools, guard, \{ projectRoot: sessionProjectRoot \}\)/.test(assembly)) {
-  violations.push({
-    file: assemblyRel,
-    line: 1,
-    text: 'wrapPiTools(piTools, guard, { projectRoot: sessionProjectRoot })',
-    message: 'Pi built-in tools must pass projectRoot into the ACL wrapper so /workspace paths are checked against the host project root.',
-  });
-}
-if (!/wrapPiTools\(\[\.\.\.piTools, \.\.\.customTools, \.\.\.mcpTools(?:, \.\.\.projectMcpTools)?\], guard, \{ projectRoot: sessionProjectRoot \}\)/.test(assembly)) {
-  violations.push({
-    file: assemblyRel,
-    line: 1,
-    text: 'wrapPiTools([...piTools, ...customTools, ...mcpTools, ...projectMcpTools], guard, { projectRoot: sessionProjectRoot })',
-    message: 'Pi custom/MCP tools must pass projectRoot into the ACL wrapper so /workspace paths are checked against the host project root.',
+const wrapperContexts = inspectPiWrapperContexts(assembly);
+for (const group of ['builtins', 'custom', 'all']) {
+  if (!wrapperContexts[group]) violations.push({
+    file: assemblyRel, line: 1, text: `wrapPiTools context: ${group}`,
+    message: 'Every ACL wrapper must explicitly pass projectRoot: sessionProjectRoot; additional named options are allowed, overrides are not.',
   });
 }
 

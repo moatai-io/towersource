@@ -68,7 +68,7 @@ export async function getAgentPurgeJob(jobId: string): Promise<JobRow | undefine
 
 async function cleanupDedicatedCredentials(projectId: string) {
   const credentials = await query<{ id: string; secret_name: string }>(`SELECT id,secret_name FROM workspace_credentials
-    WHERE scope='project' AND metadata->>'agent_project_id'=$1`, [projectId]);
+    WHERE scope='project' AND project_id=$1`, [projectId]);
   for (const credential of credentials) {
     const otherCredential = await queryOne(`SELECT id FROM workspace_credentials WHERE secret_name=$1 AND id<>$2 LIMIT 1`, [credential.secret_name, credential.id]);
     if (otherCredential) throw new Error(`SHARED_SECRET_NAME:${credential.id}`);

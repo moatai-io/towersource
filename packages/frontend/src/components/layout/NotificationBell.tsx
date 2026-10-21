@@ -1,12 +1,12 @@
+import { towerHttpUrl, readBrowserAuthToken } from '../../features/client-connection/connection';
 import React, { useEffect, useRef, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useRoomStore } from '../../stores/room-store';
 import { useSessionStore, type SessionMeta } from '../../stores/session-store';
 
-const API = import.meta.env.VITE_API_URL || '';
 
 function getToken() {
-  return localStorage.getItem('token') || '';
+  return readBrowserAuthToken() || '';
 }
 
 function notificationAge(dateStr: string): { unit: 'now' | 'minute' | 'hour' | 'day'; count: number } {
@@ -56,7 +56,7 @@ export function NotificationBell({ onSelectSession }: NotificationBellProps) {
 
   // Fetch notifications on mount
   useEffect(() => {
-    fetch(`${API}/api/notifications`, {
+    fetch(towerHttpUrl(`/api/notifications`), {
       headers: { Authorization: `Bearer ${getToken()}` },
     })
       .then((r) => r.json())
@@ -79,7 +79,7 @@ export function NotificationBell({ onSelectSession }: NotificationBellProps) {
 
   const handleMarkAllRead = useCallback(() => {
     markAllRead();
-    fetch(`${API}/api/notifications/read-all`, {
+    fetch(towerHttpUrl(`/api/notifications/read-all`), {
       method: 'POST',
       headers: { Authorization: `Bearer ${getToken()}` },
     }).catch(() => {});
@@ -93,7 +93,7 @@ export function NotificationBell({ onSelectSession }: NotificationBellProps) {
     if (typeof sessionId === 'string' && sessionId) {
       useSessionStore.getState().markSessionRead(sessionId);
     }
-    fetch(`${API}/api/notifications/${notifId}/read`, {
+    fetch(towerHttpUrl(`/api/notifications/${notifId}/read`), {
       method: 'POST',
       headers: { Authorization: `Bearer ${getToken()}` },
     }).catch(() => {});
@@ -175,7 +175,7 @@ export function NotificationBell({ onSelectSession }: NotificationBellProps) {
                       // Ensure session is in store (proactive sessions may not be loaded yet)
                       const store = useSessionStore.getState();
                       if (!store.sessions.find((s) => s.id === sessionId)) {
-                        fetch(`${API}/api/sessions/${sessionId}`, {
+                        fetch(towerHttpUrl(`/api/sessions/${sessionId}`), {
                           headers: { Authorization: `Bearer ${getToken()}` },
                         })
                           .then((r) => r.json())

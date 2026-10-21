@@ -2,20 +2,16 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 const route = readFileSync(new URL('../../routes/credential-vault-api.ts', import.meta.url), 'utf8');
+const reliability = readFileSync(new URL('./connection-reliability.ts', import.meta.url), 'utf8');
 
-describe('Connection probe route contract', () => {
-  it('requires Agent manager access and an allowed project binding', () => {
-    expect(route).toContain("router.post('/connections/:connectionId/projects/:projectId/probe'");
-    expect(route).toContain('const allowed = await assertProjectConnectionManager(req, projectId)');
-    expect(route).toContain("p.mode IN ('allow', 'override', 'inherit')");
-    expect(route).toContain("p.mode IS NULL AND c.scope IN ('workspace', 'internal-default')");
-    expect(route).toContain("pp.mode = 'allow'");
-    expect(route).toContain("WHERE wc.scope = 'personal'");
+describe('Connection diagnostics contract', () => {
+  it('removes provider probe mutation routes and policy gates', () => {
+    expect(route).not.toMatch(/\/probe'|probeConnection|project_credential_policies|credential_profiles/);
   });
 
-  it('delegates to the secret-safe provider probe without accepting a browser secret', () => {
-    expect(route).toContain('res.json(await probeConnection({');
-    expect(route).not.toContain('probeConnection({ secret');
-    expect(route).toContain("code: 'PROJECT_ACCESS_REQUIRED'");
+  it('keeps secret-free Agent catalog and status diagnostics', () => {
+    expect(route).toContain("router.get('/projects/:projectId/connections/catalog'");
+    expect(reliability).toContain('diagnoseProjectConnectionStatus');
+    expect(reliability).not.toContain('runtime.env');
   });
 });

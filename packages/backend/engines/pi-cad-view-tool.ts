@@ -21,7 +21,7 @@ import { existsSync } from 'fs';
 import { Type } from '@sinclair/typebox';
 import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
 import type { AgentToolResult } from '@earendil-works/pi-coding-agent';
-import { prepareFileRepresentation } from '../services/content-safety/file-representation-gateway.js';
+import { prepareFileRepresentation, withPreparedLocalFile } from '../services/content-safety/file-representation-gateway.js';
 import { applyModelOutputBudget } from '../services/content-safety/model-output-budget-gateway.js';
 
 export interface CadViewContext {
@@ -812,38 +812,40 @@ export function createCadViewTool(ctx: CadViewContext): ToolDefinition {
           sessionId: ctx.sessionId,
           userId: ctx.userId,
         });
-        const rendered = await renderCadToCachedImage({
-          cwd: ctx.cwd,
-          path: prepared.path,
-          width: params.width,
-          height: params.height,
-          background: params.background,
-          monochrome: params.monochrome,
+        return await withPreparedLocalFile(prepared, undefined, 100 * 1024 * 1024, async localPath => {
+          const rendered = await renderCadToCachedImage({
+            cwd: ctx.cwd,
+            path: localPath,
+            width: params.width,
+            height: params.height,
+            background: params.background,
+            monochrome: params.monochrome,
+          });
+          const content: AgentToolResult<any>['content'] = [{
+            type: 'text',
+            text: [
+              'Viewed CAD drawing with vision [image/png]',
+              `[Source: ${prepared.temporary ? prepared.source : rendered.cadPath}]`,
+              `[Renderer: ${rendered.renderer}; size: ${rendered.image.width}x${rendered.image.height}; cache: ${rendered.cacheHit ? 'hit' : 'miss'}]`,
+              `[Rendered image is stored in Tower internal cache, not in the project folder.]`,
+              ...rendered.notes.map((note) => `[Note: ${note}]`),
+              '[CAD view]',
+            ].join('\n'),
+          } as any, await imageContentForFile(rendered.image.path) as any];
+          const budgeted = applyModelOutputBudget(content, { maxImages: 1 });
+          return {
+            content: budgeted.content,
+            details: {
+              cadViewed: true,
+              renderer: rendered.renderer,
+              cacheHit: rendered.cacheHit,
+              cacheDir: rendered.cacheDir,
+              imagePath: rendered.image.path,
+              attachmentRepresentation: prepared.decision,
+              outputBudget: budgeted,
+            },
+          };
         });
-        const content: AgentToolResult<any>['content'] = [{
-          type: 'text',
-          text: [
-            'Viewed CAD drawing with vision [image/png]',
-            `[Source: ${rendered.cadPath}]`,
-            `[Renderer: ${rendered.renderer}; size: ${rendered.image.width}x${rendered.image.height}; cache: ${rendered.cacheHit ? 'hit' : 'miss'}]`,
-            `[Rendered image is stored in Tower internal cache, not in the project folder.]`,
-            ...rendered.notes.map((note) => `[Note: ${note}]`),
-            '[CAD view]',
-          ].join('\n'),
-        } as any, await imageContentForFile(rendered.image.path) as any];
-        const budgeted = applyModelOutputBudget(content, { maxImages: 1 });
-        return {
-          content: budgeted.content,
-          details: {
-            cadViewed: true,
-            renderer: rendered.renderer,
-            cacheHit: rendered.cacheHit,
-            cacheDir: rendered.cacheDir,
-            imagePath: rendered.image.path,
-            attachmentRepresentation: prepared.decision,
-            outputBudget: budgeted,
-          },
-        };
       } catch (error) {
         return {
           content: [{ type: 'text', text: `[cad_view error] ${(error as Error).message}` } as any],

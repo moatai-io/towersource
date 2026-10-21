@@ -8,7 +8,7 @@ describe('Sidebar session files polling', () => {
     expect(source).toContain("if (document.visibilityState === 'visible') void fetchFiles()");
     expect(source).toContain("document.addEventListener('visibilitychange', pollIfVisible)");
     expect(source).toContain("document.removeEventListener('visibilitychange', pollIfVisible)");
-    expect(source).toContain('}, [activeSessionId]);');
+    expect(source).toContain('}, [activeSessionId, panelOpen]);');
   });
 
   it('still performs one immediate fetch when the active session changes', () => {

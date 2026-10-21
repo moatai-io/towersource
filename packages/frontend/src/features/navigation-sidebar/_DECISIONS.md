@@ -10,3 +10,10 @@
 - 최근 Session timeline은 날짜 라벨과 인접 Project run만 순수 모델로 계산한다. 전체 최근순을 Project별로 재정렬하지 않아 사용자의 활동 시간축을 보존한다.
 - timeline 표현은 props-only 컴포넌트로 두고, 선택·최근 목록 숨김·이름 변경·favorite·Project 이동 callback은 `Sidebar.tsx`가 계속 소유한다.
 - Agent rail 모델은 conversation filter를 받지 않는다. teammate 탐색과 running 상태가 우측 Session filter 때문에 사라지지 않도록 전체 Project·Session snapshot만 입력받는다.
+
+## Agent display-name rename
+
+- Agent rail 우클릭 이름 변경은 표시값과 동일한 `agent.displayName`을 편집하고, 홈 설정과 같은 `PATCH /api/projects/:id/agent-profile`을 사용한다. `project.name`과 저장 경로는 바꾸지 않는다.
+- 프로필 API는 전달되지 않은 텍스트 필드를 SQL conflict update에서 보존한다. 명시적 빈 문자열/null은 선택적 텍스트를 지울 수 있지만 표시 이름은 1–120자여야 한다. 이름 변경은 역할·캐릭터·약속·스킬·권한을 덮어쓰지 않는다.
+- 실패 시 기존 입력과 대화상자를 유지하고 번역된 오류를 보여준다. 성공 응답으로 Project store를 갱신한다.
+- 구현: `Sidebar.tsx`, `rename-agent.ts`, backend `routes/api.ts`. 검증: `rename-agent.test.ts`, backend `routes/agent-role-boundaries.test.ts`. 브라우저/운영 검증은 별도다.

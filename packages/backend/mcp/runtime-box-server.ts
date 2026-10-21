@@ -36,7 +36,7 @@ import {
 import {
   classifyCommand,
   extractPortFromCommand,
-} from '../services/runtime-box/command-classifier.js';
+} from '../services/execution/command-classifier.js';
 import { RUNTIME_BOX_EXEC_TIMEOUT_MAX_SEC } from '../services/runtime-box/types.js';
 import type { RuntimeContext } from '../services/runtime-box/types.js';
 

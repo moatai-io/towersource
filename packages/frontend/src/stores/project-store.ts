@@ -1,3 +1,4 @@
+import { towerHttpUrl } from '../features/client-connection/connection';
 /**
  * Owns: project list state + per-(project,label) collapse state.
  * Public API: useProjectStore() — projects[], collapsedProjects, collapsedLabels,
@@ -120,7 +121,7 @@ function sortedPinnedIds(projects: Project[]): string[] {
 
 async function persistPinnedProjects(projects: Project[]) {
   try {
-    const res = await fetch('/api/projects/pins', {
+    const res = await fetch(towerHttpUrl('/api/projects/pins'), {
       method: 'PUT',
       headers: getAuthHeaders(),
       body: JSON.stringify({ projectIds: sortedPinnedIds(projects) }),

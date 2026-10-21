@@ -23,7 +23,7 @@ describe('ChatPanel scroll source guards', () => {
     expect(src).toContain("querySelectorAll('[data-msg-index]')");
     expect(src).toContain('Virtuoso\'s rangeChanged reports the rendered/overscanned range');
     expect(src).toMatch(/itemContent=\{\(index\) => \(/);
-    expect(src).toMatch(/<div data-msg-index=\{index\} data-msg-id=\{mergedMessages\[index\]\?\.id\}>/);
+    expect(src).toMatch(/<div data-msg-index=\{index\} data-msg-id=\{mergedMessages\[index\]\?\.id\} className="min-w-0 max-w-full overflow-x-hidden">/);
     expect(src).toMatch(/updateVisibleRangeFromDom\(\{ startIndex, endIndex \}\);/);
   });
 
@@ -79,7 +79,7 @@ describe('ChatPanel scroll source guards', () => {
     expect(src).toContain('if (isStreaming) streamingHistoryReadLock.current = true;');
     expect(src).toContain('const isWithinUserScrollUpGesture = userScrolledUp.current && atBottom && now < bottomRearmSuppressedUntil.current;');
     expect(src).toContain('const isStreamingHistoryReadLocked = userScrolledUp.current && atBottom && isStreaming && streamingHistoryReadLock.current;');
-    expect(src).toContain('if (metrics && !isWithinUserScrollUpGesture && !isStreamingHistoryReadLocked) conversationViewport.onUserScroll(metrics);');
+    expect(src).toContain('if (metrics && (userScrolledUp.current || (atBottom && metrics.scrollHeight - metrics.scrollTop - metrics.clientHeight < 80)) && !isWithinUserScrollUpGesture && !isStreamingHistoryReadLocked) conversationViewport.onUserScroll(metrics);');
     expect(src).toContain('if (now < bottomRearmSuppressedUntil.current || (isStreaming && streamingHistoryReadLock.current))');
     expect(src).toContain('streamingHistoryReadLock.current = false;');
   });
@@ -88,8 +88,8 @@ describe('ChatPanel scroll source guards', () => {
     const src = fs.readFileSync(CHAT_PANEL_PATH, 'utf-8');
 
     expect(src).toContain('const markPlainHistoryReadingIntent = useCallback');
-    expect(src).toContain('if (isStreaming && event.deltaY < 0) markPlainHistoryReadingIntent();');
-    expect(src).toContain('if (isStreaming && y - plainTouchStartY.current > 24) markPlainHistoryReadingIntent();');
+    expect(src).toContain('if (event.deltaY < 0) markPlainHistoryReadingIntent();');
+    expect(src).toContain('if (y - plainTouchStartY.current > 24) markPlainHistoryReadingIntent();');
     expect(src).toContain('if (atBottom && userScrolledUpRef.current && !isStreaming)');
   });
 
@@ -121,7 +121,7 @@ describe('ChatPanel scroll source guards', () => {
     const src = fs.readFileSync(CHAT_PANEL_PATH, 'utf-8');
 
     expect(src).toContain('if (hasExplicitMessageAnchor)');
-    expect(src).toContain("if (sessionRestorePlan.kind === 'anchor' || hasExplicitMessageAnchor) return;");
+    expect(src).toContain("() => !userScrolledUp.current && !restoreInProgressRef.current");
     expect(src).toContain('if (!userScrolledUp.current)');
   });
 
@@ -136,7 +136,7 @@ describe('ChatPanel scroll source guards', () => {
     const src = fs.readFileSync(CHAT_PANEL_PATH, 'utf-8');
 
     expect(src).toContain("scrollTop += targetRect.top - scrollerRect.top - 24");
-    expect(src).toContain("scrollToIndex({ index: idx, align: 'start', behavior: 'auto' })");
+    expect(src).toContain("scrollToIndex({ index: currentLinkIndex(), align: 'start', behavior: 'auto' })");
     expect(src).toContain("target.classList.add('ring-1', 'ring-primary-500/25', 'bg-primary-500/5', 'rounded-xl')");
     expect(src).toContain("target.setAttribute('data-deep-link-highlight', 'true')");
     expect(src).toContain("target.focus({ preventScroll: true })");
@@ -149,20 +149,21 @@ describe('ChatPanel scroll source guards', () => {
 
     expect(src).toContain('markPinnedToBottom,');
     expect(src).toContain("markPinnedToBottom('session')");
-    expect(src).toContain("markPinnedToBottom('messages-loaded')");
+    expect(src).toContain("const restoreReady = mergedMessages.length > 0;");
     expect(src).toContain("markPinnedToBottom('jump-latest')");
   });
 
   it('captures synchronously before App clears the previous session on tab switch', () => {
     const src = fs.readFileSync(CHAT_PANEL_PATH, 'utf-8');
-    const app = fs.readFileSync(APP_PATH, 'utf-8');
+    const selection = fs.readFileSync(path.resolve(import.meta.dirname, '../../hooks/useSessionSelection.ts'), 'utf-8');
 
     expect(src).toContain("window.addEventListener('tower-capture-chat-viewport', captureActiveViewportBeforeSwitch)");
     expect(src).toContain('cancelAnimationFrame(visibleRangeRafRef.current)');
-    expect(src).toContain('if (useSessionStore.getState().activeSessionId !== activeSessionId) return;');
+    expect(src).toContain('viewportCaptureTokenRef.current !== viewportCaptureToken');
+    expect(src).toContain('useSessionStore.getState().activeSessionId !== activeSessionId');
     expect(src).toContain("traceChatScroll('snapshot-before-switch'");
-    expect(app).toContain("window.dispatchEvent(new CustomEvent('tower-capture-chat-viewport'))");
-    expect(app.indexOf("window.dispatchEvent(new CustomEvent('tower-capture-chat-viewport'))")).toBeLessThan(app.indexOf('clearMessages();', app.indexOf('const handleSelectSession')));
+    expect(selection).toContain("window.dispatchEvent(new CustomEvent('tower-capture-chat-viewport'))");
+    expect(selection.indexOf("window.dispatchEvent(new CustomEvent('tower-capture-chat-viewport'))")).toBeLessThan(selection.indexOf('clearMessages();', selection.indexOf('const handleSelectSession')));
   });
 
   it('captures native Virtuoso scroll even when the rendered range does not change', () => {
@@ -172,12 +173,31 @@ describe('ChatPanel scroll source guards', () => {
     expect(src).toContain('updateVisibleRangeFromDom({ startIndex: topVisibleIndex, endIndex: bottomVisibleIndex })');
   });
 
+  it('treats file and system tab detours as distinct chat viewport visits', () => {
+    const src = fs.readFileSync(CHAT_PANEL_PATH, 'utf-8');
+
+    expect(src).toContain('const isChatForeground = !!activeSessionId && visibleChatSessionId === activeSessionId;');
+    expect(src).toContain("${isChatForeground ? 'foreground' : 'background'}");
+    expect(src).toContain('if (!isChatForeground) return;');
+    expect(src).toContain('return () => captureActiveViewportBeforeSwitch();');
+    expect(src).toContain('useSessionStore.getState().visibleChatSessionId !== activeSessionId');
+  });
+
+  it('keeps the saved history anchor stable when the chat viewport is resized', () => {
+    const src = fs.readFileSync(CHAT_PANEL_PATH, 'utf-8');
+
+    expect(src).toContain('const observer = new ResizeObserver(() => {');
+    expect(src).toContain('if (!userScrolledUp.current || restoreInProgressRef.current) return;');
+    expect(src).toContain('snapshot.anchorMessageId');
+    expect(src).toContain("traceChatScroll('layout-anchor-corrected'");
+  });
+
   it('feeds Virtuoso atBottomStateChange scroller metrics into conversation viewport unless history reading still owns the viewport', () => {
     const src = fs.readFileSync(CHAT_PANEL_PATH, 'utf-8');
 
     expect(src).toContain('getCurrentScrollerMetrics,');
     expect(src).toContain('const metrics = getCurrentScrollerMetrics();');
-    expect(src).toContain('if (metrics && !isWithinUserScrollUpGesture && !isStreamingHistoryReadLocked) conversationViewport.onUserScroll(metrics);');
+    expect(src).toContain('if (metrics && (userScrolledUp.current || (atBottom && metrics.scrollHeight - metrics.scrollTop - metrics.clientHeight < 80)) && !isWithinUserScrollUpGesture && !isStreamingHistoryReadLocked) conversationViewport.onUserScroll(metrics);');
   });
 
   it('uses activeAssistantMessageId as the live assistant gate when available', () => {

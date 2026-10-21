@@ -5,7 +5,8 @@
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
-import { getTeamskillsProjectRoot, getTeamskillsSkillRoot, isSafeSkillName } from './teamskills-source.js';
+import { getTeamskillsProjectRoot, isSafeSkillName } from './teamskills-source.js';
+import { resolveTrustedTeamskillsSkillSource } from './managed-teamskills-source.js';
 import { scanSkillBundleForMaterialization } from './skill-materialization-scanner.js';
 import type { SkillAccessGrant, SkillPortability, SkillRuntimeRequirements, SkillVisibility } from '@tower/shared';
 
@@ -27,6 +28,7 @@ export interface RegistrySkillBundle {
   rootPath: string;
   skillPath: string;
   requiredSecrets: string[];
+  gatewayApis: Array<{ apiId: string; apiKeyEnv: string; baseUrlEnv: string }>;
   canonicalId: string;
   bundleDigest: string;
   sourceCommit?: string;
@@ -61,7 +63,9 @@ export function resolveRegistrySkillBundle(
 
 function resolveTeamskillsBundle(skillName: string): RegistrySkillBundle | null {
   if (!isSafeSkillName(skillName)) return null;
-  const rootPath = path.resolve(getTeamskillsSkillRoot(skillName));
+  const selected = resolveTrustedTeamskillsSkillSource(skillName);
+  if (!selected) return null;
+  const rootPath = path.resolve(selected);
   const skillPath = path.join(rootPath, 'SKILL.md');
   if (!fs.existsSync(skillPath)) return null;
   const skillYamlPath = path.join(rootPath, 'skill.yaml');
@@ -69,6 +73,7 @@ function resolveTeamskillsBundle(skillName: string): RegistrySkillBundle | null 
   const skillYaml = safeReadText(skillYamlPath);
   const version = parseSimpleMetadataField(skillYaml, 'version') || parseSimpleMetadataField(skillMd, 'version') || '';
   const requiredSecrets = parseSimpleMetadataArray(skillYaml, 'requiredSecrets');
+  const gatewayApis = parseGatewayApis(skillYaml);
   const sourceProject = parseSimpleMetadataField(skillYaml, 'sourceProject') || 'teamskills';
   const sourcePath = parseSimpleMetadataField(skillYaml, 'sourcePath') || path.posix.join('skills', skillName);
   const origin = parseSimpleMetadataField(skillYaml, 'origin') || 'org';
@@ -84,6 +89,7 @@ function resolveTeamskillsBundle(skillName: string): RegistrySkillBundle | null 
     rootPath,
     skillPath,
     requiredSecrets,
+    gatewayApis,
     canonicalId: `tower://org/teamskills/${skillName}`,
     bundleDigest: computeBundleDigest(files),
     ...(sourceCommit ? { sourceCommit } : {}),
@@ -129,6 +135,24 @@ function parseSimpleMetadataField(content: string, field: string): string {
   if (!content) return '';
   const match = content.match(new RegExp(`^${field}:\\s*['\"]?([^'\"\\n]+)['\"]?\\s*$`, 'm'));
   return match?.[1]?.trim() ?? '';
+}
+
+function parseGatewayApis(content: string): Array<{ apiId: string; apiKeyEnv: string; baseUrlEnv: string }> {
+  const line = content.match(/^gatewayApis:\s*(.+)\s*$/m)?.[1]?.trim();
+  if (!line) return [];
+  const raw = ((line.startsWith("'") && line.endsWith("'")) || (line.startsWith('"') && line.endsWith('"')))
+    ? line.slice(1, -1)
+    : line;
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((item): item is { apiId: string; apiKeyEnv: string; baseUrlEnv: string } =>
+      item && typeof item.apiId === 'string' && /^[a-z0-9][a-z0-9-]{0,63}$/.test(item.apiId)
+      && typeof item.apiKeyEnv === 'string' && /^[A-Z][A-Z0-9_]{0,63}$/.test(item.apiKeyEnv)
+      && typeof item.baseUrlEnv === 'string' && /^[A-Z][A-Z0-9_]{0,63}$/.test(item.baseUrlEnv));
+  } catch {
+    return [];
+  }
 }
 
 function parseSimpleMetadataArray(content: string, field: string): string[] {

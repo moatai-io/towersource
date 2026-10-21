@@ -6,7 +6,7 @@
  * showing files recently edited by *other sessions in the same project*.
  *
  * Owns: GET /api/sessions/:id/project-recent-files data layer.
- * Public API: getProjectRecentFiles(sessionId, limit?).
+ * Public API: getProjectRecentFiles(sessionId, viewer, limit?).
  *
  * Data source:
  *   session_file_edits JOIN sessions ON sessions.id = session_file_edits.session_id
@@ -26,6 +26,8 @@
 import { query, queryOne } from '../../db/pg-repo.js';
 import type { ProjectRecentFilesResponse, ProjectRecentFile } from '@tower/shared';
 import { isUserFacingSessionFile } from './session-file-filter.js';
+import { sessionAudienceSql } from '../pm/session-audience.js';
+import { filterAccessibleSessionFiles, type SessionFileViewer } from './session-file-access.js';
 
 const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 50;
@@ -41,6 +43,7 @@ const MAX_LIMIT = 50;
  */
 export async function getProjectRecentFiles(
   sessionId: string,
+  viewer: SessionFileViewer,
   limit = DEFAULT_LIMIT,
 ): Promise<ProjectRecentFilesResponse> {
   const started = Date.now();
@@ -84,14 +87,16 @@ export async function getProjectRecentFiles(
      JOIN sessions s ON s.id = sfe.session_id
      WHERE s.project_id = $1
        AND sfe.session_id != $2
+       AND ${sessionAudienceSql('s', '$4')}
      GROUP BY sfe.file_path
      ORDER BY MAX(sfe.created_at) DESC
      LIMIT $3`,
-    [projectId, sessionId, fetchN],
+    [projectId, sessionId, fetchN, viewer.userId],
   );
 
-  const files: ProjectRecentFile[] = rows
-    .filter((r) => isUserFacingSessionFile(r.file_path))
+  const files: ProjectRecentFile[] = (await filterAccessibleSessionFiles(
+    rows.filter((r) => isUserFacingSessionFile(r.file_path)), viewer,
+  ))
     .slice(0, n)
     .map((r) => ({
       path: r.file_path,

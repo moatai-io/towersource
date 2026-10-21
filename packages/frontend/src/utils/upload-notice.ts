@@ -1,24 +1,20 @@
 import i18n from '../i18n';
-import { toastError, toastSuccess } from './toast';
+import { toastSuccess } from './toast';
+import { clearFileOperation, reportUploadFailure } from '../features/file-operation-feedback/feedback';
 
 export interface UploadNoticeResult {
   ok: number;
   fail: number;
+  results?: Array<{ error?: string }>;
 }
 
-/**
- * Emit one terminal notice for an upload batch.
- * Progress belongs at the drop target/file surface; callers must not announce
- * a separate "uploading" toast before invoking this helper.
- */
-export function notifyUploadResult({ ok, fail }: UploadNoticeResult, targetLabel?: string): void {
-  const target = targetLabel ? ` · ${targetLabel}` : '';
+/** Failure belongs to the originating surface; success keeps its existing toast. */
+export function notifyUploadResult({ ok, fail, results }: UploadNoticeResult, targetLabel?: string, scope = 'upload:sidebar'): void {
   if (fail > 0) {
-    const successPart = ok > 0 ? i18n.t('uploadNotice.successPart', { ns: 'common', ok }) : '';
-    toastError(i18n.t('uploadNotice.failed', { ns: 'common', successPart, fail, target }));
+    reportUploadFailure(scope, fail, ok, results);
     return;
   }
-  if (ok > 0) {
-    toastSuccess(i18n.t('uploadNotice.success', { ns: 'common', ok, target }));
-  }
+  clearFileOperation(scope);
+  const target = targetLabel ? ` · ${targetLabel}` : '';
+  if (ok > 0) toastSuccess(i18n.t('uploadNotice.success', { ns: 'common', ok, target }));
 }

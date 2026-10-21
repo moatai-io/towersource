@@ -10,16 +10,15 @@ import 'katex/dist/katex.min.css';
 const MermaidBlock = React.lazy(() => import('../chat/MermaidBlock').then((module) => ({ default: module.MermaidBlock })));
 import { splitDynamicBlocks, type DynamicBlock } from './split-dynamic-blocks';
 import { useActiveSessionStreaming } from '../../hooks/useActiveSessionStreaming';
-import { fileServeUrl, fileThumbnailUrl, hasPreviewableFileExt, isPreviewableImageFilePath, isTowerLocalPath, openTowerFileInBrowserTab, revealTowerFileInSidebar, splitFilePathsInText as splitTowerFilePathsInText } from '../../utils/file-path-links';
+import { downloadTowerFile, fileServeUrl, fileThumbnailUrl, hasPreviewableFileExt, isPreviewableImageFilePath, isTowerLocalPath, openTowerFileInBrowserTab, revealTowerFileInSidebar, splitFilePathsInText as splitTowerFilePathsInText } from '../../utils/file-path-links';
 import { normalizeMarkdownEmphasisBoundaries } from '../../utils/markdown-emphasis';
 import { remarkGfmPlugin } from '../../utils/markdown-plugins';
 
 // remark-math: disable inline $ to avoid $100 / $USD conflicts
 const remarkMathOptions = { singleDollarTextMath: false };
 
-// Lazy-loaded visual blocks
-// Frequently-used blocks are preloaded after initial render (see bottom of file)
-// so they're available instantly when scrolling into view.
+// Lazy-loaded visual blocks. Keep these demand-driven: idle-time preloading can
+// compete with session bootstrap before the first message becomes visible.
 const ChartBlock = React.lazy(() => import('../chat/ChartBlock'));
 const SecureInputBlock = React.lazy(() => import('../chat/SecureInputBlock'));
 const DataTableBlock = React.lazy(() => import('../chat/DataTableBlock'));
@@ -38,7 +37,6 @@ const GalleryBlock = React.lazy(() => import('../chat/GalleryBlock'));
 const AudioBlock = React.lazy(() => import('../chat/AudioBlock'));
 const BrowserPopupBlock = React.lazy(() => import('../chat/BrowserPopupBlock'));
 const BrowserLiveBlock = React.lazy(() => import('../chat/BrowserLiveBlock'));
-const CadEvidenceBlock = React.lazy(() => import('../chat/CadEvidenceBlock'));
 
 /* ── Skeleton / Fallback ── */
 
@@ -47,7 +45,7 @@ function BlockSkeleton({ type }: { type: string }) {
     <div className="my-2 rounded-lg border border-surface-700/40 bg-surface-900/60 p-4 animate-pulse">
       <div className="h-4 w-24 bg-surface-700/50 rounded mb-2" />
       <div className="h-32 bg-surface-700/30 rounded" />
-      <span className="text-[12px] text-gray-600 mt-1 block">{type} loading…</span>
+      <span className="text-[12px] text-gray-600 mt-1 block">{i18n.t('blockLoading', { ns: 'chat', defaultValue: '{{type}} 콘텐츠를 불러오는 중…', type })}</span>
     </div>
   );
 }
@@ -116,39 +114,6 @@ async function copyFilePath(filePath: string) {
   }
 }
 
-function downloadTowerFile(filePath: string) {
-  const link = document.createElement('a');
-  const serveUrl = new URL(fileServeUrl(filePath), window.location.origin);
-  serveUrl.searchParams.set('download', '1');
-  link.href = serveUrl.toString();
-  link.download = filePath.split('/').pop() || 'download';
-  link.rel = 'noopener';
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-}
-
-async function saveTowerFileToPersonal(filePath: string) {
-  try {
-    const source = await fetch(fileServeUrl(filePath));
-    if (!source.ok) throw new Error(i18n.t('files:richContent.readFailed'));
-    const blob = await source.blob();
-    const fileName = filePath.split('/').pop() || 'saved-file';
-    const form = new FormData();
-    form.append('directory', 'files');
-    form.append('files', new File([blob], fileName, { type: blob.type || 'application/octet-stream' }));
-    const token = localStorage.getItem('token');
-    const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
-    const saved = await fetch('/api/personal-space/files/upload', { method: 'POST', headers, body: form });
-    if (!saved.ok) {
-      const body = await saved.json().catch(() => ({}));
-      throw new Error(body.error || i18n.t('files:richContent.savePersonalFailed'));
-    }
-    toastSuccess(i18n.t('files:richContent.savedPersonal'));
-  } catch (error) {
-    toastError(error instanceof Error ? error.message : i18n.t('files:richContent.savePersonalFailed'));
-  }
-}
 
 function FilePathContextTarget({ filePath, children }: { filePath: string; children: React.ReactNode }) {
   const [menu, setMenu] = React.useState<{ x: number; y: number } | null>(null);
@@ -202,22 +167,11 @@ function FilePathContextTarget({ filePath, children }: { filePath: string; child
             role="menuitem"
             className="flex w-full items-center rounded-md px-3 py-2 text-left hover:bg-surface-800"
             onClick={() => {
-              downloadTowerFile(filePath);
+              void downloadTowerFile(filePath).catch(error => toastError(error.message));
               setMenu(null);
             }}
           >
             {i18n.t('files:richContent.download')}
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            className="flex w-full items-center rounded-md px-3 py-2 text-left hover:bg-surface-800"
-            onClick={() => {
-              void saveTowerFileToPersonal(filePath);
-              setMenu(null);
-            }}
-          >
-            {i18n.t('files:richContent.savePersonal')}
           </button>
           <button
             type="button"
@@ -304,6 +258,20 @@ interface MdComponentsOptions {
   onFileClick?: (path: string) => void;
 }
 
+function linkifyTowerPathsInChildren(
+  children: React.ReactNode,
+  onFileClick?: (path: string) => void,
+): React.ReactNode {
+  if (!onFileClick) return children;
+  return React.Children.map(children, (child) => {
+    if (typeof child !== 'string') return child;
+    const parts = splitTowerFilePathsInText(child, onFileClick, (filePath, key) => (
+      <FilePathInlineLink key={key} filePath={filePath} onFileClick={onFileClick} />
+    ));
+    return parts.length > 0 ? <>{parts}</> : child;
+  });
+}
+
 function buildMdComponents({ onFileClick }: MdComponentsOptions = {}) {
   return {
     img({ src, alt, ...props }: Record<string, any>) {
@@ -353,6 +321,13 @@ function buildMdComponents({ onFileClick }: MdComponentsOptions = {}) {
     // See: workspace/decisions/2026-05-07-workspace-file-link-policy-and-fleet-healthcheck.md
     a({ href, children, ...props }: Record<string, any>) {
       const url = String(href || '');
+      if (isTowerLocalPath(url) && !hasPreviewableFileExt(url) && /\.[a-zA-Z0-9]{1,12}$/.test(url) && !url.endsWith('/')) {
+        return <button type="button" className="cursor-pointer underline" onClick={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          void downloadTowerFile(url).catch(error => toastError(error.message));
+        }}>{children}</button>;
+      }
       const isWorkspaceFile =
         onFileClick &&
         isTowerLocalPath(url) &&
@@ -425,20 +400,14 @@ function buildMdComponents({ onFileClick }: MdComponentsOptions = {}) {
         </span>
       );
     },
-    // Detect file paths in plain text paragraphs
+    // Detect file paths in plain text paragraphs and tight-list items. GFM
+    // omits a <p> wrapper for tight lists, so handling only paragraphs leaves
+    // the most common artifact handoff format (`- ~/workspace/...`) inert.
     p({ children, ...props }: Record<string, any>) {
-      if (!onFileClick) {
-        return <p {...props}>{children}</p>;
-      }
-      // Process string children to find file paths
-      const processed = React.Children.map(children, (child) => {
-        if (typeof child !== 'string') return child;
-        const parts = splitTowerFilePathsInText(child, onFileClick, (filePath, key) => (
-          <FilePathInlineLink key={key} filePath={filePath} onFileClick={onFileClick} />
-        ));
-        return parts.length > 0 ? <>{parts}</> : child;
-      });
-      return <p {...props}>{processed}</p>;
+      return <p {...props}>{linkifyTowerPathsInChildren(children, onFileClick)}</p>;
+    },
+    li({ children, ...props }: Record<string, any>) {
+      return <li {...props}>{linkifyTowerPathsInChildren(children, onFileClick)}</li>;
     },
     pre({ children }: { children?: React.ReactNode }) {
       const codeText = extractCodeText(children);
@@ -605,7 +574,7 @@ function isPlainJsonObjectOrArray(text: string): boolean {
 function PlainJsonBlock({ text }: { text: string }) {
   return (
     <pre
-      aria-label="JSON response"
+      aria-label={i18n.t('jsonResponse', { ns: 'chat', defaultValue: 'JSON 응답' })}
       className="relative group/code my-2 max-w-none overflow-x-auto whitespace-pre-wrap break-words rounded-lg border border-surface-700/45 bg-surface-950/60 p-4 text-sm leading-relaxed text-gray-100"
     >
       <code>{text.trim()}</code>
@@ -734,28 +703,7 @@ function RichSegmentInner({ seg, mdComponents, onFileClick, colorMode }: { seg: 
   if (seg.type === 'browser-live') {
     return <LazyBlock type="browser-live"><BrowserLiveBlock raw={seg.content} fallbackCode={seg.raw} /></LazyBlock>;
   }
-  if (seg.type === 'cad-evidence') {
-    return <LazyBlock type="cad-evidence"><CadEvidenceBlock raw={seg.content} fallbackCode={seg.raw} /></LazyBlock>;
-  }
   return <BlockFallback raw={seg.raw} error={`${seg.type} renderer not yet available`} />;
 }
 
 export { BlockSkeleton };
-
-// ── Preload frequently-used chunks after initial page render ──
-// These blocks appear in most AI conversations. Loading them eagerly in background
-// eliminates the Suspense flash when scrolling into messages that contain them.
-// Rare blocks (map, gallery, browser-*) remain fully lazy.
-if (typeof window !== 'undefined' && import.meta.env.MODE !== 'test') {
-  const scheduleIdle = typeof requestIdleCallback === 'function' ? requestIdleCallback : (cb: () => void) => setTimeout(cb, 2000);
-  scheduleIdle(() => {
-    import('../chat/ChartBlock');
-    import('../chat/DataTableBlock');
-    import('../chat/TimelineBlock');
-    import('../chat/StepsBlock');
-    import('../chat/DiffBlock');
-    import('../chat/ComparisonBlock');
-    import('../chat/TerminalBlock');
-    import('../chat/KanbanBlock');
-  });
-}

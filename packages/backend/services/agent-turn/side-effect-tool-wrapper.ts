@@ -12,7 +12,7 @@ import {
 } from './side-effect-ledger.js';
 
 const SAFE_READ_TOOLS = new Set([
-  'read', 'grep', 'find', 'ls', 'excel_read', 'excel_query', 'excel_diff',
+  'read_markdown_artifact', 'read', 'grep', 'find', 'ls', 'excel_read', 'excel_query', 'excel_diff',
   'pdf_read', 'pdf_view', 'cad_view', 'webfetch', 'websearch', 'memory_search',
   'conversation_search', 'session_transcript_read', 'sharedtasklist',
   'service_list', 'service_logs', 'mcp__agent-worker__persistent_agent_list',
@@ -22,6 +22,10 @@ const SAFE_READ_TOOLS = new Set([
 const UNGUARDED_TOOLS = new Set([
   'askuserquestion',
   'todowrite',
+  'wait',
+  'mcp__wait__wait',
+  'sleep',
+  'mcp__sleep__sleep',
   'mcp__tower-spawn__get_spawned_response',
   'mcp__tower-spawn__list_spawned_sessions',
 ]);

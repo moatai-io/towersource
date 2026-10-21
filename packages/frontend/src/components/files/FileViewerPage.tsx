@@ -1,3 +1,8 @@
+import { towerHttpUrl } from '../../features/client-connection/connection';
+import { PricingFilePreview, isPricingAppFile } from '../interactive-apps/PricingFilePreview';
+import { FileOperationFeedback } from '../../features/file-operation-feedback/FileOperationFeedback';
+import { saveFileOperation } from '../../features/file-operation-feedback/save-operation';
+import { saveScope } from '../../features/file-operation-feedback/feedback';
 import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { toastSuccess, toastError } from '../../utils/toast';
 import { MarkdownReadSurface } from './MarkdownReadSurface';
@@ -103,7 +108,7 @@ function ImagePreview({ filePath }: { filePath: string }) {
   const token = localStorage.getItem('token') || '';
   const src = filePath.startsWith('/api/session-attachments/')
     ? filePath
-    : `/api/files/serve?path=${encodeURIComponent(filePath)}&token=${encodeURIComponent(token)}`;
+    : towerHttpUrl(`/api/files/serve?path=${encodeURIComponent(filePath)}&token=${encodeURIComponent(token)}`);
   return (
     <div className="flex-1 flex items-center justify-center bg-surface-900 p-4 overflow-auto">
       <img src={src} alt={filePath.split('/').pop()} className="max-w-full max-h-full object-contain" />
@@ -112,32 +117,14 @@ function ImagePreview({ filePath }: { filePath: string }) {
 }
 
 function PdfPreview({ filePath }: { filePath: string }) {
-  const { t } = useTranslation('files');
   const src = buildPdfServeUrl(filePath);
-  const downloadSrc = buildPdfServeUrl(filePath, { download: true });
-  const fileName = decodeName(filePath.split('/').pop() || 'document.pdf');
   return (
-    <div className="flex-1 flex items-center justify-center bg-surface-950 p-6">
-      <div className="max-w-md rounded-2xl border border-surface-700 bg-surface-900/80 p-6 text-center shadow-xl">
-        <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-primary-500/15 text-primary-300">
-          <svg className="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
-          </svg>
-        </div>
-        <h2 className="text-lg font-semibold text-surface-100">{t('pdfOpensInBrowserTab')}</h2>
-        <p className="mt-2 break-words text-sm text-surface-400">{fileName}</p>
-        <p className="mt-3 text-sm leading-6 text-surface-500">
-          {t('pdfBrowserViewerHint')}
-        </p>
-        <div className="mt-5 flex flex-col gap-2 sm:flex-row sm:justify-center">
-          <a href={src} target="_blank" rel="noopener noreferrer" className="rounded-lg bg-primary-600 px-4 py-2 text-sm font-semibold text-white hover:bg-primary-500">
-            {t('openInNewBrowserTab')}
-          </a>
-          <a href={downloadSrc} target="_blank" rel="noopener noreferrer" className="rounded-lg border border-surface-700 px-4 py-2 text-sm font-semibold text-surface-300 hover:bg-surface-800 hover:text-surface-100">
-            {t('download')}
-          </a>
-        </div>
-      </div>
+    <div className="flex-1 min-h-0 bg-surface-950">
+      <iframe
+        src={src}
+        title={decodeName(filePath.split('/').pop() || 'document.pdf')}
+        className="h-full w-full border-0 bg-white"
+      />
     </div>
   );
 }
@@ -145,7 +132,7 @@ function PdfPreview({ filePath }: { filePath: string }) {
 function VideoPreview({ filePath }: { filePath: string }) {
   const { t } = useTranslation('files');
   const token = localStorage.getItem('token') || '';
-  const src = `/api/files/serve?path=${encodeURIComponent(filePath)}&token=${encodeURIComponent(token)}`;
+  const src = towerHttpUrl(`/api/files/serve?path=${encodeURIComponent(filePath)}&token=${encodeURIComponent(token)}`);
   const fileName = filePath.split('/').pop() || 'video';
   return (
     <div className="flex-1 flex flex-col items-center justify-center gap-3 bg-black p-4">
@@ -198,6 +185,8 @@ export function FileViewerPage() {
   const defaultMode: FileViewerMode = PREVIEWABLE.has(language) ? 'preview' : 'source';
 
   const [mode, setMode] = useState<FileViewerMode>(explicitMode || defaultMode);
+  const currentFilePath = useRef(filePath);
+  currentFilePath.current = filePath;
   const [content, setContent] = useState('');
   const [originalContent, setOriginalContent] = useState('');
   const [loading, setLoading] = useState(true);
@@ -286,19 +275,12 @@ export function FileViewerPage() {
   }, [loadFileContent, modified, t]);
 
   const handleSave = useCallback(async (nextContent = content) => {
-    try {
-      const res = await fetch('/api/files/write', {
-        method: 'POST',
-        headers: getAuthHeaders(),
-        body: JSON.stringify({ path: filePath, content: nextContent }),
-      });
-      if (!res.ok) throw new Error((await res.json()).error || 'Save failed');
-      setContent(nextContent);
-      setOriginalContent(nextContent);
-      toastSuccess(t('saved'));
-    } catch (err: any) {
-      toastError(err.message || t('saveFailed'));
-    }
+    await saveFileOperation(filePath, () => fetch('/api/files/write', {
+      method: 'POST', headers: getAuthHeaders(),
+      body: JSON.stringify({ path: filePath, content: nextContent }),
+    }), () => {
+      if (currentFilePath.current === filePath) setOriginalContent(nextContent);
+    });
   }, [filePath, content, t]);
 
   // Ctrl+S / ⌘S saves from both Raw and rendered Edit modes.
@@ -350,7 +332,7 @@ export function FileViewerPage() {
           else if (p !== '.') normalized.push(p);
         }
         resolvedPath = normalized.join('/');
-        const apiUrl = `/api/files/serve?path=${encodeURIComponent(resolvedPath)}&token=${encodeURIComponent(token)}`;
+        const apiUrl = towerHttpUrl(`/api/files/serve?path=${encodeURIComponent(resolvedPath)}&token=${encodeURIComponent(token)}`);
         return <img src={apiUrl} alt={alt} {...props} style={{ maxWidth: '100%' }} />;
       },
       code({ className, children, ...props }: React.HTMLAttributes<HTMLElement> & { children?: React.ReactNode }) {
@@ -377,6 +359,7 @@ export function FileViewerPage() {
 
   return (
     <div className="h-screen flex flex-col bg-surface-900 text-gray-200">
+      <FileOperationFeedback scope={saveScope(filePath)} />
       {showShareModal && <ShareModal filePath={filePath} onClose={() => setShowShareModal(false)} />}
 
       {/* Header */}
@@ -548,14 +531,15 @@ export function FileViewerPage() {
           </div>
         </React.Suspense>
       )}
-      {mode === 'preview' && CODE_PREVIEW_FORMATS.has(language) && (
+      {mode === 'preview' && isPricingAppFile(filePath) && <PricingFilePreview content={content} />}
+      {mode === 'preview' && !isPricingAppFile(filePath) && CODE_PREVIEW_FORMATS.has(language) && (
         <div className="flex-1 min-h-0 overflow-hidden bg-surface-950">
           <CodeEditor value={content} language={language} readOnly formatForDisplay />
         </div>
       )}
       {mode === 'preview' && TEXT_PREVIEW_FORMATS.has(language) && <TextPreview content={content} language={language} selectableRef={textSelectableRef} />}
       {mode === 'preview' && language === 'html' && (
-        <HtmlPreviewSurface content={content} className="flex-1 relative" />
+        <HtmlPreviewSurface content={content} filePath={filePath} className="flex-1 relative" />
       )}
       {mode === 'edit' && language === 'html' && hasDirectEdit && (
         <HtmlDirectEditSurface

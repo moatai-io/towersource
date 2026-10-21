@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { execute, query, queryOne } from '../../db/pg-repo.js';
-import { appendWorkbenchJobOutput, cancelWorkbenchJob, claimWorkbenchJob, createWorkbenchJob, heartbeatWorkbenchJob, listWorkbenchJobs, reconcileStaleWorkbenchJobs, runClaimedWorkbenchJob } from './workbench-job-registry.js';
+import { appendWorkbenchJobOutput, cancelWorkbenchJob, claimWorkbenchJob, createWorkbenchJob, heartbeatWorkbenchJob, listWorkbenchJobs, reconcileStaleWorkbenchJobs, runClaimedWorkbenchJob } from '../execution/jobs/job-registry.js';
 
 vi.mock('../../db/pg-repo.js', () => ({ queryOne: vi.fn(), query: vi.fn(), execute: vi.fn() }));
 
@@ -73,4 +73,21 @@ describe('Workbench durable Job registry', () => {
     const result = await runClaimedWorkbenchJob({ job: row({ status: 'running', claim_token: 'claim' }) as any, run: async () => { throw new Error('boom'); } });
     expect(result.job).toMatchObject({ status: 'failed', error_code: 'RUNNER_ERROR' });
   });
+});
+
+describe('download Job limits', () => {
+ it('keeps ordinary jobs bounded and extends only exact managed downloads', async () => {
+  const { buildDownloadCommand } = await import('../execution/downloads/download-contract.js');
+  vi.mocked(queryOne).mockResolvedValue(row);
+  await createWorkbenchJob({projectId:'p',userId:7,sessionId:'s',command:'sleep 3600',timeoutSec:3600});
+  expect(vi.mocked(queryOne).mock.calls.at(-1)?.[1]?.[7]).toBe(3600);
+  const command=buildDownloadCommand({url:'https://dataset.example/data',destination:'data'});
+  await createWorkbenchJob({projectId:'p',userId:7,sessionId:'s',command,timeoutSec:86400});
+  expect(vi.mocked(queryOne).mock.calls.at(-1)?.[1]?.[7]).toBe(86400);
+ });
+ it('preserves the most recent progress for a managed download stream', async () => {
+  vi.mocked(execute).mockResolvedValue({changes:1});
+  await appendWorkbenchJobOutput({jobId:1,projectId:'p',claimToken:'claim',stream:'stdout',chunk:'progress',preserveTail:true});
+  expect(vi.mocked(execute).mock.calls.at(-1)?.[0]).toContain('stdout_text=RIGHT(');
+ });
 });

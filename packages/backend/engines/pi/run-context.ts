@@ -4,21 +4,12 @@
  */
 
 import crypto from 'crypto';
-import type { TowerContentBlock } from '../types.js';
+import type { MessageMetrics, TowerContentBlock } from '../types.js';
 import { ContentAccumulator } from './message-adapter.js';
 import { extractPiUsageDelta } from './message-end-policy.js';
 import { chooseContextRiskEstimateTokens, normalizeIterationCount } from './turn-metrics.js';
 
-export interface PiContextSnapshot {
-  actualTokens?: number;
-  requestTokens?: number;
-  estimatedTokens?: number;
-  windowTokens: number;
-  actualSource: 'provider' | 'cache-reconstructed' | 'none';
-  requestSource: 'sanitized-request' | 'none';
-  capturedAt: string;
-  terminal: boolean;
-}
+export type PiContextSnapshot = NonNullable<MessageMetrics['contextSnapshot']>;
 
 export function buildPiContextSnapshot(params: {
   actualTokens: number;
@@ -69,6 +60,7 @@ export interface PiRunUsageSummary {
   contextOutputTokens: number;
   contextWindowSize: number;
   contextEstimatedTokens?: number;
+  contextCompacted?: boolean;
   nextRequestEstimatedTokens?: number;
   compactThresholdTokens?: number;
   numIterations: number;
@@ -97,7 +89,20 @@ export class PiRunContext {
   lastIterationReasoning = 0;
   cumulativeCostUsd = 0;
   lastCostUsd: number | undefined;
+  private lastValidContextInput = 0;
   compactionSucceededThisTurn = false;
+  private lastRecordedCompactionCount = -1;
+
+  /** Invalidate stale usage once per durable compaction, not once per callback. */
+  recordCompactionSuccess(persistedCount: number): void {
+    if (!Number.isInteger(persistedCount) || persistedCount <= this.lastRecordedCompactionCount) return;
+    this.lastRecordedCompactionCount = persistedCount;
+    this.compactionSucceededThisTurn = true;
+    this.lastValidContextInput = 0;
+  }
+  get awaitingPostCompactionMeasurement(): boolean {
+    return this.compactionSucceededThisTurn && this.lastValidContextInput === 0;
+  }
 
   constructor(private readonly params: {
     modelContextWindow: number;
@@ -146,6 +151,8 @@ export class PiRunContext {
     this.cumulativeCacheWrite += delta.cacheWrite;
     this.cumulativeReasoning += delta.reasoning;
     if (typeof delta.costUsd === 'number') this.cumulativeCostUsd += delta.costUsd;
+    const measuredInput = delta.input + delta.cacheRead + delta.cacheWrite;
+    if (measuredInput > 0) this.lastValidContextInput = measuredInput;
     this.lastIterationInput = delta.input;
     this.lastIterationOutput = delta.output;
     this.lastIterationCacheRead = delta.cacheRead;
@@ -156,12 +163,12 @@ export class PiRunContext {
   }
 
   actualContextInputTokens(): number {
-    return this.lastIterationInput + this.lastIterationCacheRead + this.lastIterationCacheWrite;
+    return this.lastValidContextInput;
   }
 
   riskContextEstimateTokens(estimatedLiveContextInput: number): number {
     return chooseContextRiskEstimateTokens({
-      compactionSucceededThisTurn: this.compactionSucceededThisTurn,
+      compactionSucceededThisTurn: this.awaitingPostCompactionMeasurement,
       estimatedLiveContextInput,
       actualContextInput: this.actualContextInputTokens(),
     });
@@ -172,6 +179,7 @@ export class PiRunContext {
     stopReason?: 'stop' | 'length' | 'toolUse' | 'error' | 'aborted';
     contextInputTokens: number;
     contextEstimatedTokens?: number;
+    contextCompacted?: boolean;
     nextRequestEstimatedTokens?: number;
     compactThresholdTokens?: number;
   }): PiRunUsageSummary {
@@ -185,6 +193,7 @@ export class PiRunContext {
       contextOutputTokens: this.lastIterationOutput,
       contextWindowSize: this.modelContextWindow,
       contextEstimatedTokens: params.contextEstimatedTokens,
+      contextCompacted: params.contextCompacted,
       nextRequestEstimatedTokens: params.nextRequestEstimatedTokens,
       compactThresholdTokens: params.compactThresholdTokens,
       numIterations: normalizeIterationCount(this.iterationCount),

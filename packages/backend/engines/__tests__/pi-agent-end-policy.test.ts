@@ -1,7 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
+import { getModelDefaults } from '../../config.js';
 import {
   analyzePiAgentEndError,
   getCodexFallbackModelSpecs,
+  getCompactionFallbackModelSpecs,
   isCodexAuthInvalidatedError,
   isCodexUsageLimitError,
 } from '../pi/agent-end-policy.js';
@@ -14,9 +16,14 @@ describe('Pi agent_end policy', () => {
     expect(isCodexAuthInvalidatedError('please try signing in again')).toBe(true);
   });
 
-  it('resolves Codex fallback specs from env-style comma list or default', () => {
-    expect(getCodexFallbackModelSpecs('litellm/a, openrouter/b ,,')).toEqual(['litellm/a', 'openrouter/b']);
-    expect(getCodexFallbackModelSpecs('')).toEqual(['azure-openai-responses-eastus2/gpt-5.5']);
+  it('allows only Router/OpenRouter recovery, independently of compaction', () => {
+    expect(getCodexFallbackModelSpecs('azure-openai-responses-eastus2/gpt-5.5, litellm-responses/smartest, openai-codex/gpt-5.5, openrouter/moonshotai/kimi-k2.6'))
+      .toEqual(['litellm-responses/smartest', 'openrouter/moonshotai/kimi-k2.6']);
+    expect(getCodexFallbackModelSpecs('')).toEqual([getModelDefaults().session]);
+    expect(getCompactionFallbackModelSpecs('')).toEqual([]);
+    expect(getCompactionFallbackModelSpecs('azure-openai-responses/gpt-5.5,litellm-responses/mini')).toEqual(['litellm-responses/mini']);
+    expect(getCompactionFallbackModelSpecs('openrouter/moonshotai/kimi-k2.6')).toEqual(['openrouter/moonshotai/kimi-k2.6']);
+    expect(getCompactionFallbackModelSpecs('litellm-responses/gpt55')).toEqual([]);
   });
 
   it('returns null when there is no assistant error', () => {

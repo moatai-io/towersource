@@ -1,3 +1,4 @@
+import { isSessionSleeping, MAX_SLEEP_SECONDS, nextClaudeMessageWithSleep } from '../agent-sleep/sleep.js';
 import { query, type SDKMessage, type Query, type Options, type CanUseTool } from '@anthropic-ai/claude-agent-sdk';
 import { postToolUsePublishingTracker } from '../publishing/hook.js';
 import { preToolUseConnectorGuard, BLOCKED_TOOL_NAMES } from '../security/connector-guard.js';
@@ -438,6 +439,11 @@ export async function* executeQuery(
     ENABLE_PROMPT_CACHING_1H: process.env.ENABLE_PROMPT_CACHING_1H ?? '1',
   };
   if (options.configDir) injectedEnv.CLAUDE_CONFIG_DIR = options.configDir;
+  // SDK in-process MCP lacks a per-server timeout. Keep Tower's normal idle watchdog
+  // for other tools, while raising SDK's hard tool cap enough for bounded sleep.
+  if (options.mcpServers?.wait) {
+    injectedEnv.MCP_TOOL_TIMEOUT = String(Math.max(Number(injectedEnv.MCP_TOOL_TIMEOUT) || 0, (MAX_SLEEP_SECONDS + 60) * 1000));
+  }
 
   const queryOptions: Options = {
     abortController,
@@ -636,16 +642,11 @@ export async function* executeQuery(
     const iterator = response[Symbol.asyncIterator]();
     try {
       while (true) {
-        const timeoutMs = lastWasToolResult ? AFTER_TOOL_IDLE_MS : STREAM_IDLE_MS;
-        const next = await Promise.race([
-          iterator.next(),
-          new Promise<IteratorResult<SDKMessage>>((_, reject) => setTimeout(() => {
-            const phase = lastWasToolResult ? 'after tool_result' : 'stream idle';
-            reject(new Error(`Claude stream watchdog timeout (${phase}, ${Math.round(timeoutMs / 1000)}s)`));
-          }, timeoutMs)),
-        ]);
+        const timeoutMs: number = lastWasToolResult ? AFTER_TOOL_IDLE_MS : STREAM_IDLE_MS;
+        const phase: string = lastWasToolResult ? 'after tool_result' : 'stream idle';
+        const next: IteratorResult<SDKMessage> = await nextClaudeMessageWithSleep(iterator.next(), timeoutMs, () => isSessionSleeping(sessionId), phase);
         if (next.done) break;
-        const message = next.value;
+        const message: SDKMessage = next.value;
 
         if (message.type === 'system' && message.subtype === 'init') {
           // Promote current claudeSessionId to prev before overwriting
@@ -805,4 +806,9 @@ export function cleanupSession(sessionId: string) {
     session.abortController.abort();
   }
   activeSessions.delete(sessionId);
+}
+
+/** The in-process sleep MCP server uses the same cancellation boundary as the SDK run. */
+export function getSessionAbortSignal(sessionId: string): AbortSignal | undefined {
+  return activeSessions.get(sessionId)?.abortController.signal;
 }

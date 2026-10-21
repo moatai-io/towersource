@@ -1,12 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { canAccessSessionMock, getMessagesPaginatedMock } = vi.hoisted(() => ({
+const { canAccessSessionMock, getMessagesPaginatedMock, getSessionByKeyMock } = vi.hoisted(() => ({
   canAccessSessionMock: vi.fn(),
   getMessagesPaginatedMock: vi.fn(),
+  getSessionByKeyMock: vi.fn(),
 }));
 
 vi.mock('../../services/pm/project-access.js', () => ({ canAccessSession: canAccessSessionMock }));
 vi.mock('../../services/message-store.js', () => ({ getMessagesPaginated: getMessagesPaginatedMock }));
+vi.mock('../../services/session/session-manager.js', () => ({ getSessionByKey: getSessionByKeyMock }));
 
 import { createSessionTranscriptReadTool, fitTranscriptToContext } from '../pi-session-transcript-tool.js';
 
@@ -14,6 +16,17 @@ describe('Pi session_transcript_read tool', () => {
   beforeEach(() => {
     canAccessSessionMock.mockReset();
     getMessagesPaginatedMock.mockReset();
+    getSessionByKeyMock.mockReset();
+  });
+
+  it('describes the admin exception without promising blanket operator access', () => {
+    const tool = createSessionTranscriptReadTool({ userId: 7, userRole: 'operator' });
+
+    expect(tool.description).toContain('Platform admins have a session-read exception');
+    expect(tool.description).toContain('Operators do not have blanket access');
+    expect(tool.description).toContain('An internal session link does not grant access');
+    expect(tool.description).toContain('instead of using WebFetch');
+    expect(tool.description).not.toContain('Admin/operator may read any session');
   });
 
   it('returns only visible user/assistant text and pagination metadata', async () => {
@@ -102,13 +115,44 @@ describe('Pi session_transcript_read tool', () => {
     expect(result.content[0].text).not.toContain('사용자 문장');
   });
 
-  it('denies inaccessible sessions without loading messages', async () => {
-    canAccessSessionMock.mockResolvedValueOnce({ allowed: false, status: 403, message: 'Access denied: private session' });
+  it('resolves an 8-character short code before applying access checks and reading messages', async () => {
+    getSessionByKeyMock.mockResolvedValueOnce({ id: 'canonical-session-id', shortCode: 'ehre4g4p' });
+    canAccessSessionMock.mockResolvedValueOnce({ allowed: true });
+    getMessagesPaginatedMock.mockResolvedValueOnce({
+      messages: [{ id: 'u1', role: 'user', content: [{ type: 'text', text: 'short code transcript' }] }],
+      hasMore: false,
+      oldestId: 'u1',
+    });
+
     const tool = createSessionTranscriptReadTool({ userId: 8, userRole: 'member' });
+    const result = await tool.execute('call-short-code', { session_id: 'ehre4g4p' });
+
+    expect(getSessionByKeyMock).toHaveBeenCalledWith('ehre4g4p', 8);
+    expect(canAccessSessionMock).toHaveBeenCalledWith('canonical-session-id', 8, 'member');
+    expect(getMessagesPaginatedMock).toHaveBeenCalledWith('canonical-session-id', { limit: 20, before: undefined });
+    expect(result.content[0].text).toContain('short code transcript');
+    expect(result.details).toMatchObject({ sessionId: 'canonical-session-id', sessionKey: 'ehre4g4p' });
+  });
+
+  it('fails closed when a short code does not resolve', async () => {
+    getSessionByKeyMock.mockResolvedValueOnce(null);
+    const tool = createSessionTranscriptReadTool({ userId: 8, userRole: 'member' });
+    const result = await tool.execute('call-missing-short-code', { session_id: 'ehre4g4p' });
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('session not found for short code');
+    expect(canAccessSessionMock).not.toHaveBeenCalled();
+    expect(getMessagesPaginatedMock).not.toHaveBeenCalled();
+  });
+
+  it.each(['member', 'operator'])('denies inaccessible sessions for %s without loading messages', async (userRole) => {
+    canAccessSessionMock.mockResolvedValueOnce({ allowed: false, status: 403, message: 'Access denied: private session' });
+    const tool = createSessionTranscriptReadTool({ userId: 8, userRole });
     const result = await tool.execute('call-3', { session_id: 'private-session' });
 
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain('403');
+    expect(canAccessSessionMock).toHaveBeenCalledWith('private-session', 8, userRole);
     expect(getMessagesPaginatedMock).not.toHaveBeenCalled();
   });
 

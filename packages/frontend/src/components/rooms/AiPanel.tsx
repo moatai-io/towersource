@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
+import type { TFunction } from 'i18next';
 import { useAiPanelStore, fetchPanelThreads, createPanelThread, deletePanelThread, fetchThreadMessages } from '../../stores/ai-panel-store';
 import { useSessionStore } from '../../stores/session-store';
 import type { ChatMessage, ContentBlock } from '../../stores/chat-store';
@@ -16,46 +17,6 @@ import { RunIndicator } from '../common/RunIndicator';
 const AI_PANEL_WIDTH_KEY = 'tower:ai-panel:width';
 const AI_PANEL_DEFAULT_WIDTH = 360;
 
-type CadSelectionLookup = 'none' | 'text' | 'block' | 'entity' | 'semantic' | 'miss' | 'geometry' | 'geometry-tile';
-
-type CadSelectionKind = 'view-candidate' | 'evidence' | 'entity' | 'area' | 'semantic-object';
-
-interface CadSelectionChangeDetail {
-  path: string;
-  cadModelArtifactPath?: string;
-  cadGeometryManifestPath?: string;
-  view?: {
-    candidateId?: string;
-    viewId?: string;
-    label?: string;
-    kind?: 'overview' | 'layout' | 'view' | 'title-block' | 'table' | 'detail';
-    bbox?: { minX: number; minY: number; maxX: number; maxY: number };
-  };
-  viewport?: {
-    zoom: number;
-    pan: { x: number; y: number };
-  };
-  selection: {
-    type: CadSelectionKind;
-    primitiveId?: string;
-    label?: string;
-    bounds?: [number, number, number, number];
-    entityId?: string;
-    textId?: string;
-    blockInstanceId?: string;
-    semanticObjectId?: string;
-    cadModelArtifactPath?: string;
-    handle?: string;
-    block?: string;
-    layer?: string;
-    text?: string;
-    confidence?: string;
-    lookup?: CadSelectionLookup;
-  };
-}
-
-const currentCadSelectionByPath = new Map<string, CadSelectionChangeDetail>();
-let pendingCadWorkbenchAction: { path: string; prompt: string } | null = null;
 
 function clampAiPanelWidth(width: number): number {
   return Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, Math.round(width)));
@@ -71,14 +32,14 @@ function loadAiPanelWidth(): number {
   }
 }
 
-function formatRelativeTime(dateStr: string): string {
+function formatRelativeTime(dateStr: string, t: TFunction<'rooms'>): string {
   const now = Date.now();
   const then = new Date(dateStr).getTime();
   const diff = now - then;
-  if (diff < 60_000) return 'just now';
-  if (diff < 3600_000) return `${Math.floor(diff / 60_000)}m`;
-  if (diff < 86400_000) return `${Math.floor(diff / 3600_000)}h`;
-  return `${Math.floor(diff / 86400_000)}d`;
+  if (diff < 60_000) return t('aiPanelCopy.justNow');
+  if (diff < 3600_000) return t('aiPanelCopy.minutesAgo', { count: Math.floor(diff / 60_000) });
+  if (diff < 86400_000) return t('aiPanelCopy.hoursAgo', { count: Math.floor(diff / 3600_000) });
+  return t('aiPanelCopy.daysAgo', { count: Math.floor(diff / 86400_000) });
 }
 
 // ── Thread List ──
@@ -104,9 +65,9 @@ function ThreadList({ onSelectThread, onNewThread, onNewProjectThread, onDeleteT
             <button
               onClick={onNewProjectThread}
               className="tone-action tone-success rounded px-1.5 py-1 text-[12px] font-medium"
-              title="New shared project thread"
+              title={t('aiPanelCopy.newSharedThread')}
             >
-              shared project
+              {t('aiPanelCopy.sharedProject')}
             </button>
           )}
           <button
@@ -175,15 +136,15 @@ function ThreadList({ onSelectThread, onNewThread, onNewProjectThread, onDeleteT
                         )}
                         {thread.name}
                       </span>
-                      <span className="text-[12px] text-gray-600 shrink-0">{formatRelativeTime(thread.updatedAt)}</span>
+                      <span className="text-[12px] text-gray-600 shrink-0">{formatRelativeTime(thread.updatedAt, t)}</span>
                     </div>
                     <div className="text-[12px] text-gray-600 mt-0.5">
                       {[
                         thread.turnCount ? `${thread.turnCount} turns` : null,
                         thread.engine && thread.engine !== 'claude' ? thread.engine : null,
                         isSharedInPanel ? 'shared with project' : isOwnProjectThread ? 'my project thread' : 'only visible here',
-                        isProjectThread ? 'project thread' : null,
-                        isAgent ? 'subagent' : null,
+                        isProjectThread ? t('aiPanelCopy.projectThread') : null,
+                        isAgent ? t('aiPanelCopy.subagent') : null,
                       ].filter(Boolean).join(' · ') || t('thread.noConversationYet')}
                     </div>
                   </button>
@@ -194,16 +155,16 @@ function ThreadList({ onSelectThread, onNewThread, onNewProjectThread, onDeleteT
                           type="button"
                           onClick={async (e) => { e.stopPropagation(); await onDeleteThread(thread.id); setConfirmDeleteId(null); }}
                           className="rounded px-1.5 py-1 text-[12px] font-medium text-red-300 hover:bg-red-500/15"
-                          aria-label={`Confirm delete thread ${thread.name}`}
+                          aria-label={t('aiPanelCopy.confirmDeleteThread', { name: thread.name })}
                         >
-                          Delete
+                          {t('aiPanelCopy.delete')}
                         </button>
                         <button
                           type="button"
                           onClick={(e) => { e.stopPropagation(); setConfirmDeleteId(null); }}
                           className="rounded px-1.5 py-1 text-[12px] text-gray-500 hover:bg-surface-700 hover:text-gray-300"
                         >
-                          Cancel
+                          {t('aiPanelCopy.cancel')}
                         </button>
                       </div>
                     ) : (
@@ -211,8 +172,8 @@ function ThreadList({ onSelectThread, onNewThread, onNewProjectThread, onDeleteT
                         type="button"
                         onClick={(e) => { e.stopPropagation(); setConfirmDeleteId(thread.id); }}
                         className="rounded p-1 text-gray-700 opacity-0 transition-all hover:bg-red-500/10 hover:text-red-300 group-hover:opacity-100 focus:opacity-100"
-                        title="Delete thread"
-                        aria-label={`Delete thread ${thread.name}`}
+                        title={t('aiPanelCopy.deleteThread')}
+                        aria-label={t('aiPanelCopy.deleteNamedThread', { name: thread.name })}
                       >
                         <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
                           <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
@@ -283,7 +244,8 @@ function PanelToolChip({ block, isLast, isStreaming, onFileClick }: { block: Con
 
 function PanelMessage({ message, onFileClick, isStreaming }: { message: ChatMessage; onFileClick?: (path: string) => void; isStreaming: boolean }) {
   const isUser = message.role === 'user';
-  const lastToolIndex = message.content.map((b, i) => b.type === 'tool_use' && b.toolUse ? i : -1).filter((i) => i >= 0).pop() ?? -1;
+  const content = normalizeContentBlocks(message.content, [], isStreaming);
+  const lastToolIndex = content.map((b, i) => b.type === 'tool_use' && b.toolUse ? i : -1).filter((i) => i >= 0).pop() ?? -1;
 
   return (
     <div className={`px-3 py-2.5 ${isUser ? 'bg-surface-800/20' : ''}`}>
@@ -292,8 +254,8 @@ function PanelMessage({ message, onFileClick, isStreaming }: { message: ChatMess
           {isUser ? 'U' : 'AI'}
         </div>
         <div className="min-w-0 flex-1 text-[15px] leading-relaxed text-gray-200">
-          {message.content.map((block, i) => {
-            if (block.type === 'text' && block.text) {
+          {content.map((block, i) => {
+            if ((block.type === 'text' || block.type === 'artifact_markdown') && block.text) {
               return <RichContent key={i} text={block.text} onFileClick={onFileClick} />;
             }
             if (block.type === 'tool_use' && block.toolUse) {
@@ -324,48 +286,16 @@ function basename(path: string): string {
   return idx === -1 ? path : path.slice(idx + 1);
 }
 
-function cadSelectionTitle(selection?: CadSelectionChangeDetail | null): string | null {
-  if (!selection) return null;
-  const s = selection.selection;
-  return s.label || s.text || s.block || selection.view?.label || s.semanticObjectId || s.entityId || s.handle || null;
-}
-
-function cadSelectionMeta(selection?: CadSelectionChangeDetail | null): string {
-  if (!selection) return '';
-  const s = selection.selection;
-  return [
-    s.semanticObjectId ? `semantic ${s.semanticObjectId}` : null,
-    s.entityId ? `entity ${s.entityId}` : null,
-    s.handle ? `handle ${s.handle}` : null,
-    s.block ? `block ${s.block}` : null,
-    s.layer ? `layer ${s.layer}` : null,
-    s.lookup ? `lookup ${s.lookup}` : null,
-  ].filter(Boolean).join(' · ');
-}
-
 function buildSurfaceHint() {
   const anchor = useAiPanelStore.getState().fileAnchor;
   if (!anchor?.path) return undefined;
   const isCad = anchor.language === 'cad' || /\.(dxf|dwg)$/i.test(anchor.path);
-  const cadSelection = isCad ? currentCadSelectionByPath.get(anchor.path) : undefined;
   return {
     type: anchor.language === 'automation' ? 'automation' : 'file',
     title: anchor.title || basename(anchor.path),
     path: anchor.path,
     language: anchor.language,
-    ...(isCad ? {
-      harness: 'cad',
-      capabilities: [
-        'preview',
-        'qa',
-        'text-index',
-        'layer-summary',
-        'block-index',
-        'rfq-intake',
-        'dry-run-change-planned',
-      ],
-      cadSelection,
-    } : {}),
+    ...(isCad ? { harness: 'cad', capabilities: ['preview'] } : {}),
   };
 }
 
@@ -384,7 +314,6 @@ function ThreadView({ onBack, onEnsureThread, onFileClick, draft = false }: {
   const contextType = useAiPanelStore((s) => s.contextType);
   const fileAnchor = useAiPanelStore((s) => s.fileAnchor);
   const [input, setInput] = useState('');
-  const [currentCadSelection, setCurrentCadSelection] = useState<CadSelectionChangeDetail | null>(null);
   const [creatingThread, setCreatingThread] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -393,54 +322,24 @@ function ThreadView({ onBack, onEnsureThread, onFileClick, draft = false }: {
   const isCadFileAnchor = fileAnchor?.language === 'cad' || /\.(dxf|dwg)$/i.test(fileAnchor?.path || '');
 
   useEffect(() => {
-    if (!isCadFileAnchor || !fileAnchor?.path) {
-      setCurrentCadSelection(null);
-      return;
-    }
-    setCurrentCadSelection(currentCadSelectionByPath.get(fileAnchor.path) || null);
-  }, [fileAnchor?.path, isCadFileAnchor]);
-
-  useEffect(() => {
-    const handler = (event: Event) => {
-      const detail = (event as CustomEvent<CadSelectionChangeDetail>).detail;
-      if (!detail?.path || !detail.selection) return;
-      currentCadSelectionByPath.set(detail.path, detail);
-      if (fileAnchor?.path === detail.path) setCurrentCadSelection(detail);
-    };
-    window.addEventListener('tower:cad-selection-change', handler as EventListener);
-    return () => window.removeEventListener('tower:cad-selection-change', handler as EventListener);
-  }, [fileAnchor?.path]);
-
-  useEffect(() => {
-    const applyAction = (detail?: { path?: string; prompt?: string }) => {
-      if (!detail?.prompt || !detail.path || detail.path !== fileAnchor?.path) return false;
-      setInput(detail.prompt);
-      window.setTimeout(() => inputRef.current?.focus(), 0);
-      return true;
-    };
-    if (pendingCadWorkbenchAction && applyAction(pendingCadWorkbenchAction)) pendingCadWorkbenchAction = null;
-    const handler = (event: Event) => {
-      const detail = (event as CustomEvent<{ path?: string; prompt?: string }>).detail;
-      if (!applyAction(detail) && detail?.path && detail.prompt) pendingCadWorkbenchAction = { path: detail.path, prompt: detail.prompt };
-    };
-    window.addEventListener('tower:cad-workbench-action', handler as EventListener);
-    return () => window.removeEventListener('tower:cad-workbench-action', handler as EventListener);
-  }, [fileAnchor?.path]);
-
-  useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'instant' });
   }, [messages.length, pendingQuestion?.questionId]);
 
   const handleAnswerQuestion = useCallback((questionId: string, answer: string) => {
     const ws = (window as any).__towerWs;
-    if (!ws || ws.readyState !== WebSocket.OPEN || !activeThreadId) return;
+    const store = useAiPanelStore.getState();
+    const pendingQuestion = store.pendingQuestion?.questionId === questionId ? store.pendingQuestion : null;
+    if (!ws || ws.readyState !== WebSocket.OPEN || !activeThreadId) {
+      if (pendingQuestion) store.setPendingQuestion({ ...pendingQuestion, submissionStatus: 'send_failed', submissionError: 'websocket_not_ready' });
+      return;
+    }
     ws.send(JSON.stringify({
       type: 'answer_question',
       sessionId: activeThreadId,
       questionId,
       answer,
     }));
-    useAiPanelStore.getState().setPendingQuestion(null);
+    if (pendingQuestion) store.setPendingQuestion({ ...pendingQuestion, submissionStatus: 'submitting', submissionError: undefined });
   }, [activeThreadId]);
 
   const handleSend = useCallback(async (immediateInput?: string) => {
@@ -508,9 +407,7 @@ function ThreadView({ onBack, onEnsureThread, onFileClick, draft = false }: {
   }, [handleSend]);
 
   const isAutomationAnchor = fileAnchor?.language === 'automation' || fileAnchor?.path?.startsWith('automation:');
-  const emptyMessage = isCadFileAnchor
-    ? 'CAD Workbench beta'
-    : isAutomationAnchor
+  const emptyMessage = isAutomationAnchor
       ? 'Automation Workbench AI'
       : fileAnchor
         ? 'Ask AI about this file'
@@ -549,7 +446,7 @@ function ThreadView({ onBack, onEnsureThread, onFileClick, draft = false }: {
           <button
             onClick={onBack}
             className="p-1 hover:bg-surface-700 rounded transition-colors text-gray-400 hover:text-gray-200"
-            aria-label="Back to threads"
+            aria-label={t('aiPanelCopy.backToThreads')}
           >
             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
@@ -563,15 +460,7 @@ function ThreadView({ onBack, onEnsureThread, onFileClick, draft = false }: {
           {fileAnchor && (
             <div className="mt-0.5 flex min-w-0 items-center gap-1 text-[12px] text-primary-300/90" title={fileAnchor.path}>
               <span aria-hidden="true">{isCadFileAnchor ? '📐' : isAutomationAnchor ? '⏰' : '📎'}</span>
-              <span className="truncate">{isCadFileAnchor ? t('thread.cadWorkbenchPrefix') : isAutomationAnchor ? t('thread.automationPrefix') : t('thread.currentFilePrefix')}{fileAnchor.title || basename(fileAnchor.path)}</span>
-              {isCadFileAnchor && <span className="shrink-0 rounded-full border border-amber-400/30 bg-amber-400/10 px-1 py-0.5 text-[10px] font-bold text-amber-200">beta</span>}
-            </div>
-          )}
-          {isCadFileAnchor && currentCadSelection && (
-            <div className="mt-1 flex min-w-0 items-center gap-1 text-[11px] text-cyan-200/90" title={cadSelectionMeta(currentCadSelection)}>
-              <span className="shrink-0 rounded-full border border-cyan-400/30 bg-cyan-400/10 px-1.5 py-0.5 font-semibold text-cyan-200">{t('thread.currentCadSelection')}</span>
-              <span className="truncate">{cadSelectionTitle(currentCadSelection) || t('thread.selectionArea')}</span>
-              {cadSelectionMeta(currentCadSelection) && <span className="truncate text-cyan-200/55">· {cadSelectionMeta(currentCadSelection)}</span>}
+              <span className="truncate">{isAutomationAnchor ? t('thread.automationPrefix') : t('thread.currentFilePrefix')}{fileAnchor.title || basename(fileAnchor.path)}</span>
             </div>
           )}
         </div>
@@ -641,8 +530,8 @@ function ThreadView({ onBack, onEnsureThread, onFileClick, draft = false }: {
               type="button"
               onClick={handleStop}
               className="shrink-0 rounded-lg bg-red-500/10 p-1.5 text-red-300 transition-colors hover:bg-red-500/20"
-              aria-label="Stop AI panel response"
-              title="Stop"
+              aria-label={t('aiPanelCopy.stopResponse')}
+              title={t('aiPanelCopy.stop')}
             >
               <svg className="h-3.5 w-3.5" fill="currentColor" viewBox="0 0 20 20">
                 <rect x="5" y="5" width="10" height="10" rx="2" />
@@ -680,17 +569,6 @@ export function AiPanel({ onFileClick }: { onFileClick?: (path: string) => void 
   const activeSessionId = useSessionStore((s) => s.activeSessionId);
   const activeSession = useSessionStore((s) => s.sessions.find((session) => session.id === s.activeSessionId));
   const [panelWidth, setPanelWidth] = useState(loadAiPanelWidth);
-
-  useEffect(() => {
-    const handler = (event: Event) => {
-      const detail = (event as CustomEvent<{ path?: string; prompt?: string }>).detail;
-      if (!detail?.path || !detail.prompt) return;
-      pendingCadWorkbenchAction = { path: detail.path, prompt: detail.prompt };
-      useAiPanelStore.getState().setOpen(true);
-    };
-    window.addEventListener('tower:cad-workbench-action', handler as EventListener);
-    return () => window.removeEventListener('tower:cad-workbench-action', handler as EventListener);
-  }, []);
 
   const handlePanelResize = useCallback((width: number) => {
     const nextWidth = clampAiPanelWidth(width);
@@ -759,7 +637,7 @@ export function AiPanel({ onFileClick }: { onFileClick?: (path: string) => void 
           const towerMsg = data.message;
           const msgId = towerMsg.msgId;
           if (!msgId) return;
-          const content: ContentBlock[] = normalizeContentBlocks(towerMsg.content || []);
+          const content: ContentBlock[] = normalizeContentBlocks(towerMsg.content || [], [], true);
 
           // Update existing or add new
           const existing = store.messages.find((m) => m.id === msgId);
@@ -808,6 +686,20 @@ export function AiPanel({ onFileClick }: { onFileClick?: (path: string) => void 
           const pq = store.pendingQuestion;
           if (pq && pq.questionId === data.questionId) {
             store.setPendingQuestion(null);
+          }
+        }
+
+        if (data.type === 'answer_question_ack' && data.sessionId === store.activeThreadId) {
+          const pq = store.pendingQuestion;
+          if (pq?.questionId === data.questionId) store.setPendingQuestion(null);
+          store.setStreaming(true);
+        }
+
+        if (data.type === 'answer_question_error' && data.sessionId === store.activeThreadId) {
+          const pq = store.pendingQuestion;
+          if (pq && pq.questionId === data.questionId) {
+            store.setPendingQuestion({ ...pq, submissionStatus: 'send_failed', submissionError: data.reason || 'answer_not_delivered' });
+            store.setStreaming(false);
           }
         }
 

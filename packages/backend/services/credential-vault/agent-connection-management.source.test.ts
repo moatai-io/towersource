@@ -3,64 +3,20 @@ import { describe, expect, it } from 'vitest';
 
 const route = readFileSync(new URL('../../routes/credential-vault-api.ts', import.meta.url), 'utf8');
 
-describe('Agent Connection management route contract', () => {
-  it('centralizes project-scoped Connection manager authorization', () => {
+describe('simplified Agent Connection catalog contract', () => {
+  it('authorizes Agent managers once for credential and catalog operations', () => {
     expect(route).toContain('async function assertProjectConnectionManager');
-    expect(route).toContain("if (isPrivilegedRole(role)) return { ok: true, userId }");
-    expect(route).toContain("role === 'viewer' || role === 'guest'");
-    expect(route).toContain("['owner', 'admin', 'member'].includes(membershipRole ?? '')");
-    expect(route).toContain('Number(rows[0].creator_user_id) === userId');
+    expect(route).toContain("['owner', 'admin', 'member'].includes(rows[0].membership_role ?? '')");
   });
 
-  it('uses Agent manager authorization for project Connection binding changes', () => {
-    expect(route).toContain("router.put('/connections/:connectionId/projects/:projectId'");
-    expect(route).toContain('const allowed = await assertProjectConnectionManager(req, projectId)');
-    expect(route).not.toContain("router.put('/connections/:connectionId/projects/:projectId', async (req, res) => {\n  const allowed = assertAdmin(req)");
+  it('catalogs team-shared automatic and current-Agent dedicated credentials only', () => {
+    expect(route).toContain("allowedProjectCredentialWhere('c', '$1')");
+    expect(route).toContain("connectionScope: row.scope === 'workspace' ? 'team_shared' : 'agent_dedicated'");
+    expect(route).toContain("automatic: row.scope === 'workspace'");
   });
 
-  it('offers a secret-free Organization Connection catalog for Agent managers', () => {
-    expect(route).toContain("router.get('/projects/:projectId/connections/catalog'");
-    expect(route).toContain('const allowed = await assertProjectConnectionManager(req, projectId)');
-    expect(route).toContain("c.enabled = true AND c.scope = 'workspace'");
-    expect(route).toContain("wc.scope IN ('personal', 'internal-default')");
-    expect(route).not.toContain('connections/catalog/secrets');
-  });
-
-  it('promotes multi-field credential_group rows to one Connection contract', () => {
-    expect(route).toContain("id: `group:${row.id}`");
-    expect(route).toContain("connectionType: 'credential_group'");
-    expect(route).toContain('fieldCount: Number(row.field_count)');
-    expect(route).toContain('connectedFieldCount: Number(row.allowed_count)');
-    expect(route).toContain("metadata->>'credential_group'");
-    expect(route).toContain("String(intent.connection_id).startsWith('group:')");
-    expect(route).toContain("code: 'CREDENTIAL_GROUP_INCOMPLETE'");
-    expect(route).toContain('credential_group: intent.source_id');
-    expect(route).toContain('const credentialsByGroup = new Map<string, any[]>()');
-    expect(route).toContain("source: 'group'");
-    expect(route).toContain("reason: connected ? 'all grouped credentials connected'");
-  });
-
-  it('uses manager authorization and stored preview intents for connect/disconnect', () => {
-    expect(route).toContain("router.post('/connections/:connectionId/preview'");
-    expect(route).toContain("router.post('/connections/:connectionId/apply'");
-    expect(route).toContain('credential_connection_change_intents');
-    expect(route).toContain('proposal_hash = $4');
-    expect(route).toContain("status = 'previewed' AND consumed_at IS NULL AND expires_at > now()");
-    expect(route).toContain('const allowed = await assertProjectConnectionManager(req, intent.project_id)');
-    expect(route).toContain("scope IN ('workspace', 'internal-default')");
-    expect(route).toContain("WHERE wc.scope = 'personal'");
-    expect(route).not.toContain("scope IN ('workspace', 'internal-default', 'personal')");
-  });
-
-  it('keeps Agent-dedicated project credentials visible while marking their connection boundary', () => {
-    expect(route).toContain("WHERE scope <> 'personal'\n          ORDER BY provider, id");
-    expect(route).toContain("connectionScope: credential.scope === 'project' ? 'agent_dedicated' : 'shared'");
-    expect(route).toContain("dedicatedProjectId: credential.scope === 'project'");
-    expect(route).toContain("connectionScope: members.every(member => member.scope === 'project') ? 'agent_dedicated' : 'shared'");
-  });
-
-  it('does not widen workspace defaults or raw secret administration', () => {
-    expect(route).toContain("router.put('/connection-defaults/:connectionId', async (req, res) => {\n  const allowed = assertAdmin(req)");
-    expect(route).toContain("router.post('/credentials/:credentialId/reveal', async (req, res) => {\n  const allowed = assertAdmin(req)");
+  it('has no grant/default/intent/challenge/compare/target-sync route surface', () => {
+    expect(route).not.toMatch(/project-policies|connection-defaults|\/preview'|\/apply'|reveal-challenges|\/compare'|\/targets/);
+    expect(route).not.toMatch(/credential_profiles|workspace_connection_defaults|credential_connection_change_intents|credential_target_syncs/);
   });
 });

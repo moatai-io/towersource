@@ -27,7 +27,7 @@ export async function archiveExpiredEmptySessions(): Promise<number> {
   const result = await execute(
     `UPDATE sessions s
         SET archived = 1,
-            updated_at = now()
+            archived_at = now()
       WHERE (s.archived IS NULL OR s.archived = 0)
         AND s.created_at < now() - ($1 * interval '1 hour')
         AND s.updated_at < now() - ($1 * interval '1 hour')

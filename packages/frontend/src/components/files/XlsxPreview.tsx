@@ -1,3 +1,4 @@
+import { towerHttpUrl } from '../../features/client-connection/connection';
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { PreviewCell, SheetPreview } from './XlsxPreview.worker';
@@ -64,7 +65,7 @@ export function XlsxPreview({ filePath, cacheKey }: { filePath: string; cacheKey
 
         const token = localStorage.getItem('token') || '';
         const res = await fetch(
-          `/api/files/serve?path=${encodeURIComponent(filePath)}&token=${encodeURIComponent(token)}${cacheKey ? `&v=${encodeURIComponent(cacheKey)}` : ''}`,
+          towerHttpUrl(`/api/files/serve?path=${encodeURIComponent(filePath)}&token=${encodeURIComponent(token)}${cacheKey ? `&v=${encodeURIComponent(cacheKey)}` : ''}`),
         );
         if (!res.ok) throw new Error(`Failed to load file (${res.status})`);
 

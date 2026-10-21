@@ -63,7 +63,7 @@ export function PersonalNotePicker({ token, onClose, onCreate, onOpen }: Persona
       <div className="w-full max-w-xl overflow-hidden rounded-2xl border border-surface-700 bg-surface-950 shadow-2xl" onMouseDown={(event) => event.stopPropagation()}>
         <div className="flex items-center justify-between border-b border-surface-800 px-4 py-3">
           <div>
-            <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-primary-300">Personal Space</div>
+            <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-primary-300">{t('personalSpace')}</div>
             <h2 className="mt-0.5 text-base font-bold text-surface-100">{t('personalNotePicker.title')}</h2>
           </div>
           <button type="button" onClick={onClose} className="rounded-md px-2 py-1 text-surface-400 hover:bg-surface-800 hover:text-surface-100" aria-label={t('personalNotePicker.close')}>×</button>

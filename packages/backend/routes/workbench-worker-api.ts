@@ -1,3 +1,7 @@
+import { loadCanonicalWritePublicKey } from '../services/runtime-box/canonical-write-public-key.js';
+import type { KeyObject } from 'node:crypto';
+import { canonicalFileWriteScopeSchema } from '../services/runtime-box/canonical-file-write-grant.js';
+import { recheckCanonicalTextWrite } from '../services/project-environment/canonical-text-delegation.js';
 /**
  * Owns: authenticated Worker registration/heartbeat and operator Worker lifecycle API.
  * Public API: Express router mounted at /api/workbench-workers.
@@ -12,13 +16,13 @@ import {
   listPersistedWorkbenchWorkers,
   setPersistedWorkbenchWorkerDrain,
   upsertWorkbenchWorker,
-} from '../services/runtime-box/workbench-worker-repository.js';
+} from '../services/execution/worker/worker-repository.js';
 import { issueWorkbenchWorkerIdentity, verifyWorkbenchWorkerIdentity, type WorkbenchWorkerIdentity } from '../services/runtime-box/workbench-worker-identity.js';
 import {
   configureWorkbenchWorkerTransportCredential,
   getWorkbenchWorkerTransportCredentialBinding,
   removeWorkbenchWorkerTransportCredentialBinding,
-} from '../services/runtime-box/workbench-worker-transport-credentials.js';
+} from '../services/execution/worker/worker-transport-credentials.js';
 import { applyProjectWorkerEmergencyFallback, previewProjectWorkerEmergencyFallback } from '../services/runtime-box/workbench-project-emergency-fallback.js';
 import { applyProjectWorkstationChange, previewProjectWorkstationChange, verifyProjectWorkstationChangeSmoke } from '../services/runtime-box/workbench-project-workstation-change.js';
 import {
@@ -71,7 +75,7 @@ const emergencyFallbackApplySchema = z.object({
 const workstationChangePreviewSchema = z.object({
   deploymentId: z.string().regex(/^[a-zA-Z0-9._-]{1,120}$/),
   targetWorkerId: z.string().min(1).max(120),
-  authorityMode: z.enum(['project','operator-plane']).default('project'),
+  authorityMode: z.literal('project').default('project'),
   reason: z.string().min(1).max(500),
   sessionId: z.string().max(200).optional(),
 }).strict();
@@ -119,6 +123,27 @@ export async function workbenchWorkerIdentityMiddleware(req: WorkerRequest, res:
   req.workbenchWorker = identity;
   next();
 }
+
+/** Installation supplies a trusted public key; body cannot select keys or actors.
+ * Default deployment mounts a closed route until key provisioning is implemented.
+ */
+export function createCanonicalWriteRecheckRouter(verificationKey?: KeyObject) {
+  const endpoint = Router();
+  const bodySchema = z.object({ token: z.string().min(1).max(32768), scope: canonicalFileWriteScopeSchema }).strict();
+  endpoint.post('/canonical-write/recheck', (req, res, next) => {
+    if (!verificationKey) { res.status(404).json({ error: 'CANONICAL_WRITE_RECHECK_UNAVAILABLE' }); return; }
+    next();
+  }, workbenchWorkerIdentityMiddleware, async (req: WorkerRequest, res) => {
+    const body = bodySchema.safeParse(req.body);
+    if (!body.success) { res.status(400).json({ error: 'CANONICAL_WRITE_RECHECK_INVALID' }); return; }
+    try {
+      await recheckCanonicalTextWrite({ ...body.data, authenticatedWorkerId: req.workbenchWorker!.workerId, verificationKey: verificationKey! });
+      res.status(204).end();
+    } catch { res.status(403).json({ error: 'CANONICAL_WRITE_RECHECK_DENIED' }); }
+  });
+  return endpoint;
+}
+router.use(createCanonicalWriteRecheckRouter(loadCanonicalWritePublicKey(process.env.TOWER_CANONICAL_WRITE_PUBLIC_KEY_FILE)));
 
 router.post('/register', workbenchWorkerIdentityMiddleware, async (req: WorkerRequest, res) => {
   const parsed = registrationSchema.safeParse(req.body);

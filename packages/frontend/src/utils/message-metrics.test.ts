@@ -23,3 +23,10 @@ describe('contextInputFromUsageOrRow', () => {
     })).toBe(0);
   });
 });
+
+
+it('requires confirmed compaction before replacing measured persisted input', () => {
+  const usage = { context_input_tokens: 83791, context_estimated_tokens: 20000 };
+  expect(contextInputFromUsageOrRow({ metadata: { usage } })).toBe(83791);
+  expect(contextInputFromUsageOrRow({ metadata: { usage: { ...usage, context_compacted: true } } })).toBe(20000);
+});

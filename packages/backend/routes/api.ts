@@ -1,3 +1,17 @@
+import { joinAgentAsAdministrator } from '../services/pm/admin-agent-membership.js';
+import { atDeployStage, deployErrorResponse } from '../services/deploy/deploy-error.js';
+import { emailTargetAccess } from '../services/account-security/email-management-access.js';
+import { getPgPoolDiagnostics } from '../db/pg.js';
+import { assertCredentialManagementAccess } from '../services/credential-vault/credential-management-access.js';
+import { canManageUserRole } from '../services/authority/user-management-policy.js';
+import { assertOrdinaryAgentCreationAuthority } from '../services/authority/agent-authority-policy-update.js';
+import { configureLiteLLMVm } from '../services/ai/litellm-setup.js';
+import { getLiteLLMModelCatalog, refreshLiteLLMModelCatalog, setLiteLLMModelSelectable } from '../services/ai/litellm-model-catalog.js';
+import { getAiUsageBreakdown } from '../services/ai-usage/usage-ledger.js';
+import { utcUsageWindow, usageSeries } from '../services/ai-usage/usage-period.js';
+import { fetchLiteLLMSelfServiceUsage, liteLLMUsageIdentity } from '../services/ai-usage/litellm-usage-client.js';
+import { readRouterUsage } from '../services/ai-usage/litellm-usage-snapshot.js';
+import { validRouterUsageQuery } from '../services/ai-usage/usage-request.js';
 import { Response, Router } from 'express';
 import { deriveAgentCareerLevel, highestAgentCareerLevel, type AgentCareerLevel, type AgentCareerMetrics } from '@tower/shared';
 import multer from 'multer';
@@ -7,17 +21,25 @@ import http from 'http';
 import runtimeBoxRouter from './runtime-box-api.js';
 import credentialVaultRouter from './credential-vault-api.js';
 import resumableUploadRouter from './resumable-upload-api.js';
-import personalSpaceRouter from './personal-space-api.js';
 import sessionAttachmentRouter from './session-attachment-api.js';
 import fileExchangeRouter from './file-exchange-api.js';
+import agentDirectoryRouter from './agent-directory-api.js';
+import agentTeamsRouter from './agent-teams.js';
+import agentVisualTeamsRouter from './agent-visual-teams.js';
 import projectFilesRouter from './project-files/project-files-router.js';
-import { resolveWorkerFileAuthorityForHostPath, uploadWorkerProjectFile } from '../services/runtime-box/workbench-project-file-authority.js';
+import automationCreateRouter from './automation-create-api.js';
+import automationResultsRouter from './automation-results-api.js';
+import sessionWelcomeRouter from './session-welcome-api.js';
+import sessionWaitRouter from './session-wait-api.js';
+import secretariatRouter from './secretariat-api.js';
+import { assertProjectSharedMutationForHostPath, openWorkerProjectFileStream, resolveWorkerFileAuthorityForHostPath, uploadWorkerProjectFile } from '../services/runtime-box/workbench-project-file-authority.js';
 import { mirrorWorkerProjectMutation } from '../services/runtime-box/workbench-project-derived-mirror.js';
 import sessionCoreRouter from './session-core/session-core-router.js';
+import sessionMcpSelectionRouter from './session-core/session-mcp-selection-router.js';
+import projectMcpRouter, { publicProjectMcpOAuthRouter } from './project-mcp-api.js';
 import { isPathAllowedByCoarseRootOrAcl } from './project-files/project-files-access.js';
 import aiServiceRouter from './ai-service-api.js';
 import aiServicePublicRouter from './ai-service-public-api.js';
-import workspaceAppsRouter from './workspace-apps-api.js';
 import harnessRouter from './harness-api.js';
 import primaryAgentRouter from './primary-agent-api.js';
 import { inspectProjectMcpConfiguration } from '../services/project-mcp/project-mcp-loader.js';
@@ -25,9 +47,10 @@ import {
   authenticateUser, createUser, hasUsers, generateToken, generateScopedToken, verifyToken, authMiddleware, extractToken,
   adminMiddleware, operatorOrAboveMiddleware, listUsers, updateUserRole,
   resetUserPassword, disableUser, getUserAllowedPath, getUserRole,
-  updateUserProfile, updateUserUsername, changeOwnPassword, getOwnProfile, recordAuthEvent,
-  UsernameTakenError, InvalidUsernameError,
+  updateUserProfile, updateUserUsername, changeOwnPassword, getOwnProfile, recordAuthEvent, completeAuthenticationSuccess,
+  UsernameTakenError, InvalidUsernameError, UserManagementForbiddenError, getUserAuthState,
 } from '../services/auth/auth.js';
+import { reactivateUser, listUserAuthEvents } from '../services/auth/user-management.js';
 import {
   approveSignupUser,
   createSignupInviteCode,
@@ -41,8 +64,40 @@ import {
 } from '../services/auth/signup-invites.js';
 import { getAiComposerSettings, getDefaultResponseLanguage, getSignupApprovalMode, setAiComposerSettings, setDefaultResponseLanguage, setSignupApprovalMode } from '../services/settings/app-settings.js';
 import {
+  AccountEmailConflictError,
+  AccountEmailDeliveryError,
+  AccountEmailNotFoundError,
+  AccountEmailStateError,
+  acceptAccountEmailInvitation,
+  cancelAccountEmailInvitation,
+  cancelPendingExistingUserEmail,
+  createAccountEmailInvitation,
+  createAdminManagedAccount,
+  inspectAccountEmailInvitation,
+  listAccountEmailInvitations,
+  registerExistingUserEmail,
+  resendAccountEmailInvitation,
+  resendExistingUserEmail,
+  verifyExistingUserEmail,
+} from '../services/account-security/account-email-service.js';
+import { requiresBrowserLoginOtp } from '../services/account-security/config.js';
+import { consumePasswordReset, PasswordResetInvalidError, requestPasswordReset } from '../services/account-security/password-reset-service.js';
+import { AccountEmailValidationError, cancelLoginEmailEnrollment, resendLoginEmailEnrollment, shouldEnrollLoginEmail, startLoginEmailEnrollment, submitLoginEmailEnrollment, verifyLoginEmailEnrollment } from '../services/account-security/login-email-enrollment.js';
+import {
+  LoginOtpDeliveryError,
+  LoginOtpInvalidError,
+  LoginOtpNotFoundError,
+  LoginOtpNotReadyError,
+  LoginOtpRateLimitError,
+  LoginOtpStateError,
+  cancelLoginOtpChallenge,
+  createLoginOtpChallenge,
+  getAccountEmailReadiness,
+  resendLoginOtpChallenge,
+  verifyLoginOtpChallenge,
+} from '../services/account-security/login-otp-service.js';
+import {
   createSession, getSession, updateSession, deleteSession,
-  getArchivedSessions, restoreSession, permanentlyDeleteSession,
   scanClaudeNativeSessions,
   cloneSession,
   recordEngineSwitch,
@@ -50,6 +105,7 @@ import {
 import { branchConversation, rewindConversationForReplay, type ConversationBranchMode } from '../services/session/conversation-branch.js';
 import { getRelatedSessionsByFiles } from '../services/session/session-backlinks.js';
 import { deleteUserSessionAttention, getUserSessionAttention, upsertUserSessionAttention } from '../services/session/session-attention.js';
+import { getSessionUserState, markAiResponseRead, setSessionSubscription } from '../services/session/session-user-state.js';
 import { getTouchedFiles } from '../services/session/session-touched-files.js';
 import { getProjectRecentFiles } from '../services/session/session-project-files.js';
 import { applyConfirmedCheckpointRestore, previewCheckpointRestore } from '../services/agent-turn/file-checkpoint-restore.js';
@@ -57,6 +113,7 @@ import { getCheckpointOwner, getTurnCheckpoint, loadCheckpointFileChanges } from
 import { getProjectActivityGraph } from '../services/session/project-activity-graph.js';
 import { getFileTree, getFileTreeAsync, invalidateTreeCache, readFile, writeFile, writeFileBinary, isPathSafe, isPathWritable, createDirectory, deleteEntry, renameEntry, copyEntry, expandHome } from '../services/workspace/file-system.js';
 import fs from 'fs';
+import { Readable } from 'node:stream';
 import archiver from 'archiver';
 import { getCommandsForUser, listSkills, getSkill, getSkillRegistryDoctor, copySkillToPersonal, createSkill, updateSkill, deleteSkill, setUserSkillPref, getUserSkillPref, bootstrapLibraryProviders, shareProjectSkillToCompany } from '../services/skill/skill-registry.js';
 import { loadProjectAgentDefinitions, saveProjectAgentDefinition } from '../services/agent-definitions.js';
@@ -66,7 +123,7 @@ import { getMessages, saveMessage } from '../services/message-store.js';
 import { switchEngine } from '../services/session/engine-switch.js';
 import { getEngine } from '../engines/index.js';
 import { v4 as uuidv4 } from 'uuid';
-import { generateSessionName } from '../services/auto-namer.js';
+import { autoNameSession } from '../services/session/auto-name-session.js';
 import { generateSummary } from '../services/ai/summarizer.js';
 import { runUtilityTextTask } from '../services/ai/utility-agent.js';
 import {
@@ -76,21 +133,24 @@ import {
 import {
   getLog, getFileDiff, manualCommit, rollbackToCommit,
 } from '../services/git/git-manager.js';
-import { config, availableModels, loadModelsFile, saveModelsFile, reloadModels, getModelDefaults, normalizePiSessionModelId } from '../config.js';
+import { config, availableModels, loadModelsFile, saveModelsFile, reloadModels, getModelDefaults, normalizePiSessionModelId, isSelectablePiModelId } from '../config.js';
+import { persistPiSessionChoice } from '../services/model-policy/session-alias.js';
+import { isReasoningEffort, reasoningEffortsForChoice, reasoningEffortsForModel } from '../services/model-policy/reasoning-efforts.js';
 import { getInferenceProviderReadiness } from '../services/ai/inference-provider-readiness.js';
 import { configureInferenceProvider, inferenceSetupStatus, probeInferenceProvider, type PublicInferenceProvider } from '../services/ai/inference-provider-setup.js';
 import { oauthManager } from '../services/auth/oauth-manager-instance.js';
 import { getGoogleOAuthReadiness, getGoogleAuthUrl, exchangeGoogleCode, getGoogleUserInfo, GOOGLE_DEFAULT_SCOPES } from '../services/auth/google-oauth.js';
 import { findOAuthProvider, listOAuthProviders } from '../services/auth/oauth-provider-registry.js';
 import { setSecret, SecretAccessDeniedError } from '../services/secret/secret-store.js';
-import { hasProjectApiKeyCredential, upsertAgentGwsCredential, upsertOrganizationGwsCredential } from '../services/credential-vault/credential-vault-service.js';
+import { upsertAgentGwsCredential, upsertOrganizationGwsCredential } from '../services/credential-vault/credential-vault-service.js';
+import { resolveGatewayApiClient } from '../services/gateway-profile/gateway-profile-client.js';
 import { AgentCharacterGenerationError, generateAgentCharacter, generatedCharacterPath } from '../services/agent-character/generated-character.js';
 import { search } from '../services/workspace/search.js';
 import { scanNotesIndex, type NotesIndexMode } from '../services/workspace/notes-index.js';
 import { buildWorkspaceKnowledgeGraph } from '../services/workspace/knowledge-graph.js';
 import { extractTextFromContent } from '../utils/text.js';
 import { getVersionInfo } from '../utils/pkg-info.js';
-import { createTask, getTasks, getTask, updateTask, deleteTask, reorderTasks, getDistinctCwds, getArchivedTasks, restoreTask, permanentlyDeleteTask, getChildTasks, backfillTaskProjects } from '../services/task/task-manager.js';
+import { createTask, getTasks, getTask, updateTask, deleteTask, reorderTasks, getDistinctCwds, getChildTasks, backfillTaskProjects } from '../services/task/task-manager.js';
 import { removeWorktree } from '../services/git/worktree-manager.js';
 import { broadcast, broadcastToAll, broadcastToUser, disconnectUserSockets } from './ws-handler.js';
 import { appendMeetingChunk, createMeetingRun, endMeetingRun, getMeetingRun, type MeetingAudioSource } from '../services/meeting-recorder/meeting-recorder.js';
@@ -102,9 +162,9 @@ import {
 import { createFileLink, getFileLinkByShortId } from '../services/workspace/file-link-manager.js';
 import { appendFileTransferEventSafe } from '../services/workspace/file-transfer-audit.js';
 import fsPromises from 'fs/promises';
-import { execute, query, queryOne } from '../db/pg-repo.js';
+import { execute, query, queryOne, transaction } from '../db/pg-repo.js';
 import {
-  getProjects, getProject, createProject, updateProject, retireProject, restoreProject,
+  getProjects, getProject, searchAccessibleProjects, createProject, updateProject, retireProject, restoreProject,
   moveSessionToProject, reorderProjects, saveUserProjectPins, SessionRuntimeRebindRequiredError,
 } from '../services/pm/project-manager.js';
 import { listAdminAgents, previewAgentPurge } from '../services/pm/agent-purge-preview.js';
@@ -118,7 +178,7 @@ import {
   isProjectOwner, isProjectMember, getAccessibleProjectIds, getProjectMembershipIds,
 } from '../services/pm/project-membership-manager.js';
 import {
-  canAccessSession, canDeleteSession, canAccessRoom, canAccessTask, canCreateInProject, isPathAccessible,
+  canAccessSession, canAdministerSession, canMutateSessionMetadata, canDeleteSession, canAccessRoom, canAccessTask, canCreateInProject, isPathAccessible,
   isPathWritableByRole, isPrivilegedRole, isAdminOrOperator, isDotfileDenied, resolveSessionProjectRoot,
 } from '../services/pm/project-access.js';
 import {
@@ -624,16 +684,21 @@ router.get('/auth/status', async (_req, res) => {
 // as X-Tower-User-Id etc. to the upstream tool container. The tool can then
 // trust those headers for owner ACL checks.
 // 결정: workspace/decisions/2026-05-07-execution-sandbox-q14a-nginx-mvp.md
-router.get('/auth/check', (req, res) => {
+router.get('/auth/check', async (req, res) => {
   if (!config.authEnabled) return res.sendStatus(200);
   const rawToken = extractToken(req);
   if (!rawToken) return res.sendStatus(401);
   const payload = verifyToken(rawToken);
-  if (!payload) return res.sendStatus(401);
-  if (payload.userId) res.set('X-User-Id', String(payload.userId));
-  if (payload.username) res.set('X-Username', payload.username);
-  if (payload.role) res.set('X-Role', payload.role);
-  res.sendStatus(200);
+  if (!payload?.userId) return res.sendStatus(401);
+  try {
+    const state = await getUserAuthState(payload.userId);
+    if (!state || state.disabled || state.approvalStatus !== 'active' || Number(payload.authEpoch ?? 0) !== state.authEpoch
+        || (!payload.aud && typeof (payload as any).iat === 'number' && state.passwordChangedAt > (payload as any).iat * 1000 + 2000)) return res.sendStatus(401);
+    res.set('X-User-Id', String(payload.userId));
+    res.set('X-Username', payload.username);
+    res.set('X-Role', state.role);
+    return res.sendStatus(200);
+  } catch { return res.sendStatus(503); }
 });
 
 // Helper: set tower_token cookie alongside JSON response
@@ -694,7 +759,7 @@ router.post('/auth/setup', authMutationLimiter, async (req, res) => {
     } catch (bootstrapError) {
       console.warn('[auth] Failed to request OSS local Worker bootstrap after first admin creation', bootstrapError);
     }
-    const token = generateToken({ userId: user.id, username: user.username, role: user.role });
+    const token = generateToken({ userId: user.id, username: user.username, role: user.role, authEpoch: 0 });
     setTokenCookie(res, token);
     res.json({ token, user: { id: user.id, username: user.username, role: user.role } });
   } catch (err: any) {
@@ -705,75 +770,190 @@ router.post('/auth/setup', authMutationLimiter, async (req, res) => {
   }
 });
 
-router.post('/auth/signup', authMutationLimiter, async (req, res) => {
-  const { inviteCode, username, password, displayName, affiliation } = req.body ?? {};
-  if (!inviteCode || !username || !password || !displayName) {
-    return res.status(400).json({ error: 'inviteCode, username, password, and displayName are required' });
+router.post('/auth/signup', authMutationLimiter, async (_req, res) => {
+  // Shared invite codes cannot verify an email. Existing accounts may still log in,
+  // but all new accounts must use an email-backed creation path.
+  return res.status(410).json({ error: 'Signup by shared invite code is no longer available. Contact an administrator.' });
+});
+
+router.get('/auth/account-invitation/:token', authMutationLimiter, async (req, res) => {
+  try {
+    res.json(await inspectAccountEmailInvitation(req.params.token as string));
+  } catch (error: any) {
+    if (error instanceof AccountEmailNotFoundError) return res.status(404).json({ error: error.message });
+    res.status(400).json({ error: 'Invitation could not be inspected' });
+  }
+});
+
+router.post('/auth/account-invitation/:token/accept', authMutationLimiter, async (req, res) => {
+  const { username, password, passwordConfirm, displayName, affiliation } = req.body ?? {};
+  if (!username || !password || !passwordConfirm || !displayName) {
+    return res.status(400).json({ error: 'username, password, passwordConfirm, and displayName are required' });
   }
   try {
-    const approvalMode = await getSignupApprovalMode();
-    const user = await requestSignup({ inviteCode, username, password, displayName, affiliation, approvalMode });
+    const user = await acceptAccountEmailInvitation({ token: req.params.token as string, username, password, passwordConfirm, displayName, affiliation });
+    res.json({ ok: true, user });
+  } catch (error: any) {
+    if (error instanceof AccountEmailNotFoundError) return res.status(404).json({ error: error.message });
+    if (error instanceof InvalidUsernameError || error instanceof AccountEmailStateError) return res.status(400).json({ error: error.message });
+    if (error instanceof UsernameTakenError || error instanceof AccountEmailConflictError || error.message?.includes('duplicate key')) return res.status(409).json({ error: 'Account information is already in use' });
+    res.status(500).json({ error: 'Account invitation could not be accepted' });
+  }
+});
 
-    // Admins should know immediately who tries to enter the workspace.
-    // Notification failure must not block signup.
-    try {
-      const admins = await query<{ id: number }>(
-        `SELECT id FROM users WHERE disabled = 0 AND role = 'admin' AND id <> $1`,
-        [user.id],
-      );
-      const adminIds = admins.map((row) => row.id);
-      if (adminIds.length > 0) {
-        const { notifyMany } = await import('../services/notification-hub.js');
-        await notifyMany(
-          adminIds,
-          null,
-          'system.announcement',
-          approvalMode === 'manual' ? '새 가입 승인이 필요합니다' : '새 사용자가 가입했습니다',
-          approvalMode === 'manual'
-            ? `${displayName} (${user.username}) 님이 초대 코드로 가입 신청했습니다.`
-            : `${displayName} (${user.username}) 님이 초대 코드로 가입했습니다.`,
-          {
-            event: 'signup.completed',
-            userId: user.id,
-            username: user.username,
-            displayName,
-            affiliation: affiliation || null,
-            inviteCode,
-            approvalMode,
-            approvalStatus: user.approval_status,
-          },
-          { priority: 'normal', actionUrl: '/', defaultChannels: ['in_app', 'toast'] },
-        );
-      }
-    } catch (notifyErr) {
-      console.warn('[auth/signup] failed to notify admins:', notifyErr);
-    }
+router.post('/auth/account-email/verify', authMutationLimiter, async (req, res) => {
+  if (!req.body?.token) return res.status(400).json({ error: 'Verification token is required' });
+  try {
+    res.json({ ok: true, ...(await verifyExistingUserEmail(req.body.token)) });
+  } catch (error: any) {
+    if (error instanceof AccountEmailNotFoundError) return res.status(404).json({ error: error.message });
+    res.status(400).json({ error: 'Email could not be verified' });
+  }
+});
 
-    res.json({ ok: true, user, approvalMode });
-  } catch (err: any) {
-    if (err instanceof InvalidInviteCodeError) return res.status(400).json({ error: err.message });
-    if (err instanceof InvalidUsernameError) return res.status(400).json({ error: err.message });
-    if (err instanceof UsernameTakenError) return res.status(409).json({ error: err.message });
-    if (err.message?.includes('duplicate key')) return res.status(409).json({ error: 'Username already exists' });
-    res.status(500).json({ error: err.message });
+// Admin-triggered recovery never accepts an arbitrary recipient or exposes a reset token.
+router.post('/admin/users/:id/password-reset-email', authMiddleware, adminMiddleware, async (req, res) => {
+  const targetUserId = Number(req.params.id);
+  if (!Number.isSafeInteger(targetUserId) || targetUserId <= 0) return res.status(400).json({ error: 'Invalid user ID' });
+  const identity = await queryOne<{ email: string }>(
+    `SELECT e.email FROM users u JOIN account_email_identities e ON e.id=u.primary_email_identity_id AND e.user_id=u.id
+     WHERE u.id=$1 AND e.state='verified' AND u.disabled=0 AND u.approval_status='active'`, [targetUserId]);
+  if (!identity) return res.status(409).json({ error: '활성 계정에 인증된 기본 이메일이 필요합니다.' });
+  try {
+    const result = await requestPasswordReset({ email: identity.email, targetUserId, actorUserId: (req as any).user.userId, ip: req.ip || req.socket.remoteAddress || null });
+    if (result === 'unavailable') return res.status(409).json({ error: '발송 조건을 만족하지 않거나 요청 제한에 도달했습니다. 잠시 후 다시 시도해 주세요.' });
+    if (result === 'delivery_failed') return res.status(503).json({ error: '재설정 메일 발송에 실패했습니다. 메일 서비스 상태를 확인해 주세요.' });
+    return res.json({ ok: true });
+  } catch { return res.status(503).json({ error: '재설정 메일 요청을 처리하지 못했습니다.' }); }
+});
+
+router.post('/auth/password-reset/request', async (req, res) => {
+  // The IP-only limiter lives in PostgreSQL; public status and body stay identical.
+  if (typeof req.body?.email === 'string' && req.body.email.length <= 320) {
+    try { await requestPasswordReset({ email: req.body.email, ip: req.ip || req.socket.remoteAddress || null }); }
+    catch { /* Do not disclose account state or mail readiness. */ }
+  }
+  res.json({ ok: true });
+});
+const passwordResetConfirmLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 10,
+  message: { error: 'Too many attempts. Try again later.' }, standardHeaders: true, legacyHeaders: false,
+  keyGenerator: req => `auth:reset-confirm:ip:${ipKeyGenerator(req.ip || req.socket.remoteAddress || '0.0.0.0')}` });
+router.post('/auth/password-reset/confirm', passwordResetConfirmLimiter, async (req, res) => {
+  try {
+    const reset = await consumePasswordReset({ token: req.body?.token, password: req.body?.password });
+    disconnectUserSockets(reset.userId, 'password_changed');
+    res.json({ ok: true });
+  } catch (error) {
+    if (error instanceof PasswordResetInvalidError) return res.status(400).json({ error: error.message });
+    throw error;
   }
 });
 
 router.post('/auth/login', authLoginLimiter, async (req, res) => {
-  const { username, password } = req.body;
-  const result = await authenticateUser(username, password, {
+  const { username, password } = req.body || {};
+  const context = {
     ip: req.ip || req.socket.remoteAddress || null,
     userAgent: req.get('user-agent') || null,
-  });
+  };
+  // Always defer success until the authenticated user ID has been checked against
+  // the pilot allowlist; never decide using an untrusted username from the request.
+  const result = await authenticateUser(username, password, { ...context, deferSuccess:true });
   if (!result.ok || !result.payload) {
     if (result.reason === 'pending_approval') return res.status(403).json({ error: 'Account is pending admin approval' });
     if (result.reason === 'rejected') return res.status(403).json({ error: 'Account was rejected by an admin' });
     if (result.reason === 'suspended') return res.status(403).json({ error: 'Account is suspended' });
     return res.status(401).json({ error: 'Invalid credentials' });
   }
+  if (requiresBrowserLoginOtp(result.payload.userId)) {
+    try {
+      if (await shouldEnrollLoginEmail(result.payload.userId)) return res.status(202).json(await startLoginEmailEnrollment({ payload: result.payload, passwordChangedAt: result.passwordChangedAt ?? null, requestIp: context.ip, userAgent: context.userAgent }));
+      return res.status(202).json(await createLoginOtpChallenge({ payload: result.payload, requestIp: context.ip, userAgent: context.userAgent }));
+    } catch (error) {
+      if (error instanceof LoginOtpNotReadyError) return res.status(503).json({ error: 'Email OTP login is not ready', code: error.code });
+      if (error instanceof LoginOtpDeliveryError) return res.status(503).json({ error: 'OTP delivery failed', code: error.code });
+      if (error instanceof LoginOtpStateError) return res.status(410).json({ error: error.message, code: error.code });
+      throw error;
+    }
+  }
+  await completeAuthenticationSuccess({userId:result.payload.userId,username:result.payload.username,ip:context.ip,userAgent:context.userAgent});
   const token = generateToken(result.payload);
   setTokenCookie(res, token);
   res.json({ token, user: result.payload });
+});
+
+// The enrollment challenge is an opaque pre-session bearer capability, not a JWT.
+// Reject malformed bodies before touching the DB; every mutation is rate limited.
+const enrollmentContext = (req: any) => ({ requestIp:req.ip||req.socket.remoteAddress||null, userAgent:req.get('user-agent')||null });
+const validEnrollmentId = (id:unknown):id is string => typeof id==='string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+function enrollmentFailure(error: unknown, res: Response) {
+  if (error instanceof AccountEmailValidationError) return res.status(400).json({error:error.message,code:error.code});
+  if (error instanceof LoginOtpInvalidError) return res.status(401).json({error:error.message,code:error.code});
+  if (error instanceof LoginOtpNotFoundError) return res.status(404).json({error:error.message,code:error.code});
+  if (error instanceof LoginOtpRateLimitError) return res.status(429).json({error:error.message,code:error.code});
+  if (error instanceof LoginOtpNotReadyError || error instanceof LoginOtpDeliveryError) return res.status(503).json({error:error.message,code:error.code});
+  if (error instanceof LoginOtpStateError) return res.status(410).json({error:error.message,code:error.code});
+  throw error;
+}
+router.post('/auth/login/enrollment/email', authLoginLimiter, async(req,res)=>{
+  if (!validEnrollmentId(req.body?.challengeId) || typeof req.body?.email!=='string') return res.status(400).json({error:'challengeId and email are required'});
+  try { return res.status(202).json(await submitLoginEmailEnrollment({challengeId:req.body.challengeId,email:req.body.email,...enrollmentContext(req)})); }
+  catch(error) { return enrollmentFailure(error,res); }
+});
+router.post('/auth/login/enrollment/resend', authLoginLimiter, async(req,res)=>{
+  if (!validEnrollmentId(req.body?.challengeId)) return res.status(400).json({error:'challengeId is required'});
+  try { return res.status(202).json(await resendLoginEmailEnrollment({challengeId:req.body.challengeId,...enrollmentContext(req)})); }
+  catch(error) { return enrollmentFailure(error,res); }
+});
+router.post('/auth/login/enrollment/verify', authLoginLimiter, async(req,res)=>{
+  if (!validEnrollmentId(req.body?.challengeId) || typeof req.body?.otp!=='string') return res.status(400).json({error:'challengeId and otp are required'});
+  try {
+    const context=enrollmentContext(req);
+    const payload=await verifyLoginEmailEnrollment({challengeId:req.body.challengeId,otp:req.body.otp,...context});
+    await completeAuthenticationSuccess({userId:payload.userId,username:payload.username,ip:context.requestIp,userAgent:context.userAgent});
+    const token=generateToken(payload); setTokenCookie(res,token);
+    return res.json({token,user:payload});
+  } catch(error) { return enrollmentFailure(error,res); }
+});
+router.post('/auth/login/enrollment/cancel', authLoginLimiter, async(req,res)=>{
+  if (!validEnrollmentId(req.body?.challengeId)) return res.status(400).json({error:'challengeId is required'});
+  const cancelled=await cancelLoginEmailEnrollment({challengeId:req.body.challengeId,...enrollmentContext(req)});
+  return cancelled?res.json({ok:true}):res.status(404).json({error:'Pending enrollment not found'});
+});
+
+router.post('/auth/login/otp/verify', authLoginLimiter, async (req, res) => {
+  if (!req.body?.challengeId || !req.body?.otp) return res.status(400).json({ error: 'challengeId and otp are required' });
+  try {
+    const context={requestIp:req.ip||req.socket.remoteAddress||null,userAgent:req.get('user-agent')||null};
+    const payload = await verifyLoginOtpChallenge({ challengeId:req.body.challengeId,otp:req.body.otp,...context });
+    await completeAuthenticationSuccess({userId:payload.userId,username:payload.username,ip:context.requestIp,userAgent:context.userAgent});
+    const token=generateToken(payload);
+    setTokenCookie(res,token);
+    res.json({token,user:payload});
+  } catch(error) {
+    if (error instanceof LoginOtpInvalidError) return res.status(401).json({error:error.message,code:error.code});
+    if (error instanceof LoginOtpNotFoundError) return res.status(404).json({error:error.message,code:error.code});
+    if (error instanceof LoginOtpStateError) return res.status(410).json({error:error.message,code:error.code});
+    throw error;
+  }
+});
+
+router.post('/auth/login/otp/resend', authLoginLimiter, async (req,res)=>{
+  if (!req.body?.challengeId) return res.status(400).json({error:'challengeId is required'});
+  try { res.status(202).json(await resendLoginOtpChallenge({challengeId:req.body.challengeId,requestIp:req.ip||req.socket.remoteAddress||null,userAgent:req.get('user-agent')||null})); }
+  catch(error) {
+    if (error instanceof LoginOtpRateLimitError) return res.status(429).json({error:error.message,code:error.code});
+    if (error instanceof LoginOtpNotFoundError) return res.status(404).json({error:error.message,code:error.code});
+    if (error instanceof LoginOtpNotReadyError || error instanceof LoginOtpDeliveryError) return res.status(503).json({error:error.message,code:error.code});
+    if (error instanceof LoginOtpStateError) return res.status(410).json({error:error.message,code:error.code});
+    throw error;
+  }
+});
+
+router.post('/auth/login/otp/cancel', authLoginLimiter, async (req,res)=>{
+  if (!req.body?.challengeId) return res.status(400).json({error:'challengeId is required'});
+  const cancelled=await cancelLoginOtpChallenge({challengeId:req.body.challengeId,requestIp:req.ip||req.socket.remoteAddress||null,userAgent:req.get('user-agent')||null});
+  if (!cancelled) return res.status(404).json({error:'Pending OTP challenge not found'});
+  res.json({ok:true});
 });
 
 router.post('/auth/cli-login', authLoginLimiter, async (req, res) => {
@@ -828,9 +1008,10 @@ function agentGwsCredentialId(projectId: string): string {
 }
 
 async function assertAgentGoogleConnectionAccess(user: { userId: number; role: string }, projectId: string): Promise<boolean> {
-  if (isPrivilegedRole(user.role)) return true;
-  if (user.role === 'viewer' || user.role === 'guest') return false;
-  return isProjectMember(projectId, user.userId);
+  try {
+    await assertCredentialManagementAccess({ actorUserId: user.userId, scope: 'project', projectId });
+    return true;
+  } catch { return false; }
 }
 
 router.get('/auth/google/readiness', authMiddleware, (_req, res) => {
@@ -862,9 +1043,8 @@ router.get('/auth/google/agent', authMiddleware, async (req, res) => {
   if (requestedCredentialId) {
     const owned = await queryOne<{ id: string }>(
       `SELECT id FROM workspace_credentials
-        WHERE id = $1 AND kind = 'gws' AND provider = 'google' AND scope = 'project'
-          AND metadata->>'connection_type' = 'agent'
-          AND metadata->>'agent_project_id' = $2`,
+        WHERE id = $1 AND kind = 'gws' AND provider = 'google'
+          AND scope = 'project' AND project_id = $2`,
       [credentialId, projectId],
     );
     if (!owned) return res.status(404).json({ error: 'Agent Google Connection not found' });
@@ -877,7 +1057,8 @@ router.get('/auth/google/organization', authMiddleware, async (req, res) => {
   const googleReadiness = getGoogleOAuthReadiness();
   if (!googleReadiness.ready) return res.status(503).json({ error: 'Google OAuth is not ready on this Tower server', reason: googleReadiness.reason, expectedRedirectUri: googleReadiness.expectedRedirectUri });
   const user = (req as any).user;
-  if (user?.role !== 'admin') return res.status(403).json({ error: 'Admin required' });
+  try { await assertCredentialManagementAccess({ actorUserId: user?.userId, scope: 'workspace' }); }
+  catch { return res.status(403).json({ error: 'Company Connection management required' }); }
   const requestedCredentialId = typeof req.query.credentialId === 'string' ? req.query.credentialId.trim() : '';
   const mode = req.query.mode === 'reauth' ? 'reauth' : req.query.mode === 'create' ? 'create' : null;
   if (!mode) return res.status(400).json({ error: 'mode must be create or reauth' });
@@ -913,10 +1094,10 @@ router.get('/auth/google/callback', async (req, res) => {
       return res.redirect(`${baseUrl}/?oauth=google-agent&status=error&message=agent_access_denied`);
     }
     if (isOrganizationFlow) {
-      const currentUser = await queryOne<{ role: string; disabled: number | boolean }>('SELECT role, disabled FROM users WHERE id = $1', [payload.userId]);
-      if (payload.role !== 'admin' || currentUser?.role !== 'admin' || Boolean(currentUser.disabled)) {
+      try { await assertCredentialManagementAccess({ actorUserId: payload.userId, scope: 'workspace' }); }
+      catch {
         const baseUrl = config.publicUrl || `${req.protocol}://${req.get('host')}`;
-        return res.redirect(`${baseUrl}/?oauth=google-organization&status=error&message=admin_required`);
+        return res.redirect(`${baseUrl}/?oauth=google-organization&status=error&message=company_management_required`);
       }
       if (payload.connectionMode === 'create') {
         const collision = await queryOne<{ id: string }>('SELECT id FROM workspace_credentials WHERE id = $1', [payload.credentialId]);
@@ -1805,17 +1986,28 @@ function renderSharedSessionError(reason: string): string {
 if (config.aiServicesEnabled) router.use('/ai-service-public', aiServicePublicRouter);
 
 // ───── Protected routes ─────
+// OAuth browser callbacks carry a single-use server-side intent, not a bearer header.
+router.use('/', publicProjectMcpOAuthRouter);
 router.use(authMiddleware);
+router.use('/', projectMcpRouter);
+router.use('/', sessionMcpSelectionRouter);
 
 // /health lives above authMiddleware — see public section near the top of this file.
 
 router.use('/runtime-box', runtimeBoxRouter);
 router.use('/credential-vault', credentialVaultRouter);
 router.use('/files/resumable-upload', resumableUploadRouter);
-router.use('/personal-space', personalSpaceRouter);
 router.use('/session-attachments', sessionAttachmentRouter);
 router.use('/file-exchange', fileExchangeRouter);
+router.use('/agent-directory', agentDirectoryRouter);
+router.use('/agent-teams', agentTeamsRouter);
+router.use('/agent-visual-teams', agentVisualTeamsRouter);
 router.use('/', projectFilesRouter);
+router.use('/automations/creation-plans', automationCreateRouter);
+router.use('/automations/results', automationResultsRouter);
+router.use('/session-welcome', sessionWelcomeRouter);
+router.use(sessionWaitRouter);
+router.use('/secretariat', secretariatRouter);
 router.use('/', sessionCoreRouter);
 // Primary Agent creation is an Agent-first product capability on both Operator
 // and self-hosted deployment VMs. Keeping this router behind towerRole=full made the
@@ -1823,7 +2015,6 @@ router.use('/', sessionCoreRouter);
 // while the AI tool path could still create the employee later.
 if (config.agentFirstEnabled) router.use('/primary-agent-commands', primaryAgentRouter);
 if (config.aiServicesEnabled) router.use('/ai-services', aiServiceRouter);
-if (config.workspaceAppsEnabled) router.use('/workspace-apps', workspaceAppsRouter);
 if (config.towerRole === 'full') router.use('/harnesses', harnessRouter);
 
 // ─── Internal Beta: Skill Workbench ─────────────────────────────────────────
@@ -2041,14 +2232,14 @@ async function proxyWorkbenchWorkerPreview(req: any, res: any) {
   const userId = (req as any).user?.userId;
   const role = (req as any).user?.role;
   if (!userId) return res.status(401).json({ error: 'Auth required' });
-  if (!isPrivilegedRole(role) && !(await isProjectMember(projectId, userId))) {
+  if (!(await isProjectMember(projectId, userId))) {
     return res.status(403).json({ error: 'Access denied: not a project member' });
   }
 
   try {
     const [{ getPersistedWorkbenchWorker }, { resolveWorkbenchWorkerTransportToken }] = await Promise.all([
-      import('../services/runtime-box/workbench-worker-repository.js'),
-      import('../services/runtime-box/workbench-worker-transport-credentials.js'),
+      import('../services/execution/worker/worker-repository.js'),
+      import('../services/execution/worker/worker-transport-credentials.js'),
     ]);
     const worker = await getPersistedWorkbenchWorker(workerId, { staleAfterMs: 300_000 });
     if (!worker || !worker.projectIds.includes(projectId)) return res.status(404).json({ error: 'Worker preview target not found' });
@@ -2185,19 +2376,11 @@ async function buildAgentGwsConfigBundle(opts: {
   if (!config.googleClientId || !config.googleClientSecret || !config.googleRedirectUri) {
     throw new Error('Google OAuth client is not configured');
   }
-  const clientConfig = {
-    web: {
-      client_id: config.googleClientId,
-      client_secret: config.googleClientSecret,
-      redirect_uris: [config.googleRedirectUri],
-    },
-  };
   const tmpRoot = await fsPromises.mkdtemp(path.join(os.tmpdir(), 'tower-gws-agent-'));
   const tmpGwsDir = path.join(tmpRoot, 'gws');
   const tmpTarPath = path.join(tmpRoot, 'gws.tar.gz');
   try {
     await fsPromises.mkdir(tmpGwsDir, { recursive: true, mode: 0o700 });
-    await fsPromises.writeFile(path.join(tmpGwsDir, 'client_secret.json'), JSON.stringify(clientConfig, null, 2), { mode: 0o600 });
     const creds = {
       type: 'authorized_user',
       token: opts.accessToken,
@@ -2207,17 +2390,10 @@ async function buildAgentGwsConfigBundle(opts: {
       client_secret: config.googleClientSecret,
       scopes: opts.scopes,
     };
-    const tokenCache = {
-      access_token: opts.accessToken,
-      refresh_token: opts.refreshToken,
-      token_uri: 'https://oauth2.googleapis.com/token',
-      client_id: config.googleClientId,
-      client_secret: config.googleClientSecret,
-      scopes: opts.scopes,
-      expiry: '',
-    };
+    // credentials.json is the OAuth source of truth. client_secret.json belongs
+    // to an interactive installed-app flow and token_cache.json is CLI-owned,
+    // runtime-local state; synthesizing either here creates incompatible files.
     await fsPromises.writeFile(path.join(tmpGwsDir, 'credentials.json'), JSON.stringify(creds, null, 2), { mode: 0o600 });
-    await fsPromises.writeFile(path.join(tmpGwsDir, 'token_cache.json'), JSON.stringify(tokenCache, null, 2), { mode: 0o600 });
     const { execFile } = await import('child_process');
     const { promisify } = await import('util');
     await promisify(execFile)('tar', ['-C', tmpRoot, '-czf', tmpTarPath, 'gws'], { timeout: 30_000 });
@@ -2236,20 +2412,12 @@ async function savePersonalGwsConfigSecretFromToken(opts: {
   if (!config.googleClientId || !config.googleClientSecret || !config.googleRedirectUri) {
     throw new Error('Google OAuth client is not configured');
   }
-  const clientConfig = {
-    web: {
-      client_id: config.googleClientId,
-      client_secret: config.googleClientSecret,
-      redirect_uris: [config.googleRedirectUri],
-    },
-  };
   const tmpRoot = await fsPromises.mkdtemp(path.join(os.tmpdir(), `tower-gws-personal-${opts.userId}-`));
   const tmpGwsDir = path.join(tmpRoot, 'gws');
   const tmpUserDir = path.join(tmpGwsDir, 'users', String(opts.userId));
   const tmpTarPath = path.join(tmpRoot, 'gws.tar.gz');
   try {
     await fsPromises.mkdir(tmpUserDir, { recursive: true, mode: 0o700 });
-    await fsPromises.writeFile(path.join(tmpGwsDir, 'client_secret.json'), JSON.stringify(clientConfig, null, 2), { mode: 0o600 });
     const creds = {
       type: 'authorized_user',
       token: opts.accessToken,
@@ -2259,17 +2427,7 @@ async function savePersonalGwsConfigSecretFromToken(opts: {
       client_secret: config.googleClientSecret,
       scopes: opts.scopes,
     };
-    const tokenCache = {
-      access_token: opts.accessToken,
-      refresh_token: opts.refreshToken,
-      token_uri: 'https://oauth2.googleapis.com/token',
-      client_id: config.googleClientId,
-      client_secret: config.googleClientSecret,
-      scopes: opts.scopes,
-      expiry: '',
-    };
     await fsPromises.writeFile(path.join(tmpUserDir, 'credentials.json'), JSON.stringify(creds, null, 2), { mode: 0o600 });
-    await fsPromises.writeFile(path.join(tmpUserDir, 'token_cache.json'), JSON.stringify(tokenCache, null, 2), { mode: 0o600 });
     const { execFile } = await import('child_process');
     const { promisify } = await import('util');
     const execFileAsync = promisify(execFile);
@@ -2295,91 +2453,10 @@ function parseGwsTowerUserState(state: unknown): number | null {
   return Number.isSafeInteger(userId) && userId > 0 ? userId : null;
 }
 
-router.get('/oauth/google/callback', async (req, res) => {
-  const code = req.query.code as string | undefined;
-  const error = req.query.error as string | undefined;
-
-  if (error) {
-    return res.status(400).send(oauthResultPage(false, `Login denied: ${error}`));
-  }
-  if (!code) {
-    return res.status(400).send(oauthResultPage(false, 'Missing authorization code'));
-  }
-
-  try {
-    // Read client config
-    const secretPath = path.join(GWS_CRED_DIR, 'client_secret.json');
-    const secret = JSON.parse(fs.readFileSync(secretPath, 'utf-8'));
-    const info = secret.installed || secret.web || {};
-    const clientId = info.client_id;
-    const clientSecret = info.client_secret;
-
-    // Determine redirect_uri (must match what was used in the auth request)
-    const publicUrl = config.publicUrl || `${req.protocol}://${req.get('host')}`;
-    const redirectUri = `${publicUrl}/api/oauth/google/callback`;
-
-    // Exchange code for tokens
-    const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
-        code,
-        client_id: clientId,
-        client_secret: clientSecret,
-        redirect_uri: redirectUri,
-        grant_type: 'authorization_code',
-      }),
-    });
-
-    const tokens = await tokenRes.json() as Record<string, any>;
-    if (tokens.error) {
-      return res.status(400).send(oauthResultPage(false, `Token error: ${tokens.error_description || tokens.error}`));
-    }
-
-    // Save credentials in gws format. New Tower GWS CLI uses users/<id>/;
-    // keep legacy root files as a compatibility cache for older host scripts.
-    const towerUserId = parseGwsTowerUserState(req.query.state);
-    const targetDir = towerUserId ? path.join(GWS_CRED_DIR, 'users', String(towerUserId)) : GWS_CRED_DIR;
-    fs.mkdirSync(targetDir, { recursive: true, mode: 0o700 });
-    const creds = {
-      type: 'authorized_user',
-      token: tokens.access_token,
-      refresh_token: tokens.refresh_token || '',
-      token_uri: 'https://oauth2.googleapis.com/token',
-      client_id: clientId,
-      client_secret: clientSecret,
-      scopes: (req.query.scope as string || '').split(' ').filter(Boolean),
-    };
-    fs.writeFileSync(path.join(targetDir, 'credentials.json'), JSON.stringify(creds, null, 2), { mode: 0o600 });
-
-    // Update token cache
-    const tokenCache = {
-      access_token: tokens.access_token,
-      refresh_token: tokens.refresh_token || '',
-      token_uri: 'https://oauth2.googleapis.com/token',
-      client_id: clientId,
-      client_secret: clientSecret,
-      scopes: creds.scopes,
-      expiry: '',
-    };
-    fs.writeFileSync(path.join(targetDir, 'token_cache.json'), JSON.stringify(tokenCache, null, 2), { mode: 0o600 });
-    if (towerUserId) {
-      await savePersonalGwsConfigSecretFromToken({
-        userId: towerUserId,
-        accessToken: tokens.access_token,
-        refreshToken: tokens.refresh_token || '',
-        scopes: creds.scopes,
-      });
-    } else {
-      fs.writeFileSync(path.join(GWS_CRED_DIR, 'credentials.json'), JSON.stringify(creds, null, 2), { mode: 0o600 });
-      fs.writeFileSync(path.join(GWS_CRED_DIR, 'token_cache.json'), JSON.stringify(tokenCache, null, 2), { mode: 0o600 });
-    }
-
-    res.send(oauthResultPage(true, towerUserId ? 'Google login successful. Personal GWS credential saved to Tower Vault.' : 'Google login successful!'));
-  } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : String(err);
-    res.status(500).send(oauthResultPage(false, `Server error: ${message}`));
-  }
+// Retired CLI callback used unsigned state to choose a host/personal account.
+// Only the signed, Agent-bound /auth/google flow may persist new connections.
+router.get('/oauth/google/callback', async (_req, res) => {
+  res.status(410).json({ error: 'AGENT_GOOGLE_CONNECTION_REQUIRED', message: 'Connect Google from Agent Connections. Legacy host/personal CLI OAuth callbacks are retired.' });
 });
 
 function oauthResultPage(success: boolean, message: string): string {
@@ -2571,8 +2648,62 @@ router.delete('/session-shares/:id', async (req, res) => {
 
 // ───── Admin: Models ─────
 
-router.get('/admin/models', adminMiddleware, (_req, res) => {
-  res.json(loadModelsFile());
+router.get('/admin/models', operatorOrAboveMiddleware, (_req, res) => {
+  // Registry management never needs provider binding metadata in the browser.
+  const { inferenceProviders: _bindings, ...models } = loadModelsFile();
+  res.json({ ...models, defaults: getModelDefaults() });
+});
+
+router.get('/admin/ai-models/router-connection', operatorOrAboveMiddleware, (_req, res) => {
+  const providers = loadModelsFile().inferenceProviders;
+  const binding = providers?.['litellm-responses'] ?? providers?.litellm;
+  res.json({ keyName: binding?.secretName ?? (process.env.LITELLM_API_KEY ? 'LITELLM_API_KEY' : null) });
+});
+
+router.get('/admin/ai-models/litellm-catalog', operatorOrAboveMiddleware, (_req, res) => {
+  res.json(getLiteLLMModelCatalog());
+});
+
+router.post('/admin/ai-models/litellm-catalog/refresh', operatorOrAboveMiddleware, async (_req, res) => {
+  try {
+    const catalog = await refreshLiteLLMModelCatalog();
+    const reloaded = reloadModels();
+    const piEngine = await getEngine('pi') as any;
+    await piEngine.reloadModelRegistry?.();
+    broadcast({ type: 'config_update', models: [], piModels: reloaded.pi, localModels: config.localEnabled ? reloaded.local : [], defaults: reloaded.defaults, claudeEnabled: false, piEnabled: config.piEnabled, localEnabled: config.localEnabled });
+    res.json(catalog);
+  } catch (error: any) {
+    res.status(502).json({ error: error?.message || 'LiteLLM catalog refresh failed', ...getLiteLLMModelCatalog() });
+  }
+});
+
+router.patch('/admin/ai-models/litellm-catalog/:modelId', operatorOrAboveMiddleware, async (req, res) => {
+  if (typeof req.body?.selectable !== 'boolean') return res.status(400).json({ error: 'selectable boolean required' });
+  try {
+    const rawModelId = Array.isArray(req.params.modelId) ? req.params.modelId[0] : req.params.modelId;
+    const catalog = setLiteLLMModelSelectable(decodeURIComponent(rawModelId), req.body.selectable);
+    const reloaded = reloadModels();
+    const piEngine = await getEngine('pi') as any;
+    await piEngine.reloadModelRegistry?.();
+    broadcast({ type: 'config_update', models: [], piModels: reloaded.pi, localModels: config.localEnabled ? reloaded.local : [], defaults: reloaded.defaults, claudeEnabled: false, piEnabled: config.piEnabled, localEnabled: config.localEnabled });
+    res.json(catalog);
+  } catch (error: any) {
+    res.status(400).json({ error: error?.message || 'LiteLLM model update failed' });
+  }
+});
+
+// Separate admin endpoint: preserves the existing model catalog and defaults.
+router.post('/admin/inference-setup/litellm', adminMiddleware, async (req, res) => {
+  const actorUserId = Number((req as any).user?.userId ?? (req as any).user?.id);
+  if (!Number.isSafeInteger(actorUserId) || actorUserId <= 0) return res.status(401).json({ error: 'Authenticated admin required' });
+  if (typeof req.body?.baseUrl !== 'string' || typeof req.body?.apiKey !== 'string') return res.status(400).json({ error: 'baseUrl and apiKey required' });
+  try {
+    const result = await configureLiteLLMVm({ baseUrl: req.body.baseUrl, apiKey: req.body.apiKey, actorUserId, bootstrapDefaults: req.body.bootstrapDefaults === true });
+    res.json({ ok: true, ...result });
+  } catch {
+    // Neither provider responses nor persistence errors may disclose credentials.
+    res.status(400).json({ error: 'LiteLLM setup failed; verify connection and configuration storage' });
+  }
 });
 
 router.get('/admin/inference-setup', adminMiddleware, (_req, res) => {
@@ -2614,7 +2745,49 @@ router.post('/admin/inference-setup/apply', adminMiddleware, async (req, res) =>
   }
 });
 
-router.put('/admin/models', adminMiddleware, (req, res) => {
+router.patch('/admin/models/defaults', operatorOrAboveMiddleware, (req, res) => {
+  const { key, model } = req.body ?? {};
+  if (!['session', 'ai_task'].includes(key) || typeof model !== 'string' || /^(?:pi:)?(?:preset|policy)\/(?:core|lite)$/.test(model) || !isSelectablePiModelId(model)) {
+    return res.status(400).json({ error: 'selectable Pi model and valid policy key required' });
+  }
+  try {
+    const file = loadModelsFile();
+    const defaults = { ...file.defaults, ...getModelDefaults(), [key]: model };
+    if (key === 'ai_task') defaults.ai_reply = model;
+    const policyIds = key === 'session' ? ['medium', 'high', 'extra-high', 'max', 'ultra', 'background'] : ['low', 'title', 'summary'];
+    const policies = { ...file.modelPolicies?.policies };
+    for (const id of policyIds) {
+      const previous = policies[id];
+      policies[id] = { ...previous, model, effort: previous?.effort ?? (id === 'title' || id === 'summary' || id === 'low' ? 'low' : 'medium') };
+    }
+    const modelPolicies = { revision: (file.modelPolicies?.revision ?? 0) + 1, policies };
+    saveModelsFile({ ...file, defaults, modelPolicies });
+    const reloaded = reloadModels();
+    broadcast({ type: 'config_update', models: config.claudeEnabled ? reloaded.claude : [], piModels: config.piEnabled ? reloaded.pi : [], localModels: config.localEnabled ? reloaded.local : [], defaults: reloaded.defaults, claudeEnabled: config.claudeEnabled, piEnabled: config.piEnabled, localEnabled: config.localEnabled });
+    res.json({ defaults: reloaded.defaults });
+  } catch (error: any) {
+    res.status(500).json({ error: error?.message || 'Model defaults update failed' });
+  }
+});
+
+router.patch('/admin/models/reasoning', operatorOrAboveMiddleware, (req, res) => {
+  const { provider, modelId, defaultReasoning } = req.body ?? {};
+  if (provider !== 'litellm-responses' || typeof modelId !== 'string' || !isReasoningEffort(defaultReasoning) || !reasoningEffortsForModel(provider, modelId).includes(defaultReasoning)) {
+    return res.status(400).json({ error: 'Valid LiteLLM model and reasoning level required' });
+  }
+  try {
+    const file = loadModelsFile();
+    const index = file.pi.findIndex(entry => entry.provider === provider && entry.modelId === modelId);
+    if (index < 0 || file.pi[index].reasoning !== true) return res.status(404).json({ error: 'Reasoning model not found' });
+    file.pi[index] = { ...file.pi[index], defaultReasoning };
+    saveModelsFile(file);
+    res.json({ provider, modelId, defaultReasoning });
+  } catch (error: any) {
+    res.status(500).json({ error: error?.message || 'Model reasoning update failed' });
+  }
+});
+
+router.put('/admin/models', adminMiddleware, async (req, res) => {
   try {
     const data = req.body;
     if (!Array.isArray(data.claude) || !Array.isArray(data.pi)) return res.status(400).json({ error: 'claude and pi arrays required' });
@@ -2623,6 +2796,10 @@ router.put('/admin/models', adminMiddleware, (req, res) => {
     if (invalidReasoningModel) return res.status(400).json({ error: 'defaultReasoning must be low, medium, high, or xhigh' });
     saveModelsFile(data);
     const reloaded = reloadModels();
+    // The selectable UI and Pi runtime must use the same model registry.
+    // Otherwise newly enabled direct models appear in the picker but cannot run.
+    const piEngine = await getEngine('pi') as any;
+    await piEngine.reloadModelRegistry?.();
     // Broadcast updated model list to all connected clients
     broadcast({
       type: 'config_update',
@@ -2645,6 +2822,12 @@ router.put('/admin/models', adminMiddleware, (req, res) => {
 // paths can leave sessions with project_id=A while cwd points at workspace root
 // or another project. Do not auto-fix: report first so operators can decide
 // whether a session intentionally works in a non-project cwd.
+// Internal snapshot of the serving process; no DB query and no background polling.
+router.get('/admin/db-pool', operatorOrAboveMiddleware, (_req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  res.json(getPgPoolDiagnostics());
+});
+
 router.get('/admin/session-context-diagnostics', operatorOrAboveMiddleware, async (req, res) => {
   try {
     const limitRaw = Number(req.query.limit ?? 100);
@@ -2728,11 +2911,28 @@ import {
 } from '../services/auth/credential-store.js';
 import { readCredentialHealth } from '../services/auth/credential-health.js';
 
+// Usage-tab metrics (ai-usage, usage-heatmap) re-run multi-join scans over `messages`
+// on every tab open / day-range toggle. Short TTL cache absorbs repeat hits from the
+// same admin without serving stale data for more than a minute.
+const USAGE_METRICS_CACHE_TTL_MS = 60_000;
+const usageMetricsCache = new Map<string, { expiresAt: number; data: any }>();
+function cachedUsageMetrics<T>(key: string, compute: () => Promise<T>): Promise<T> {
+  const cached = usageMetricsCache.get(key);
+  if (cached && cached.expiresAt > Date.now()) return Promise.resolve(cached.data as T);
+  return compute().then((data) => {
+    usageMetricsCache.set(key, { expiresAt: Date.now() + USAGE_METRICS_CACHE_TTL_MS, data });
+    return data;
+  });
+}
+
 async function handleAiUsageMetrics(req: any, res: any) {
   try {
-    const { listAiTokenBudgetSnapshots } = await import('../services/ai/ai-token-budget.js');
     const days = Math.max(1, Math.min(parseInt(String(req.query.days || '30'), 10) || 30, 180));
-    const result = await listAiTokenBudgetSnapshots(days);
+    const userId = (req as any).user?.userId ?? 'anon';
+    const result = await cachedUsageMetrics(`ai-usage:${userId}:${days}`, async () => {
+      const { listAiTokenBudgetSnapshots } = await import('../services/ai/ai-token-budget.js');
+      return listAiTokenBudgetSnapshots(days);
+    });
     res.json({ ...result, capturedAt: new Date().toISOString() });
   } catch (err: any) {
     console.error('[metrics/ai-usage] failed:', err);
@@ -2978,6 +3178,7 @@ router.post('/me/password', authMiddleware, async (req, res) => {
     userId: currentUser.userId,
     username: currentUser.username,
     role: currentUser.role,
+    authEpoch: (await getUserAuthState(currentUser.userId))?.authEpoch,
   });
   setTokenCookie(res, fresh);
   res.json({ ok: true, token: fresh });
@@ -2988,20 +3189,10 @@ router.post('/me/password', authMiddleware, async (req, res) => {
 // 단 다음은 admin 만:
 //   - role='admin' 으로 사용자 생성/변경 (escalation 차단)
 //   - admin 역할 사용자에 대한 비활성화·역할변경·비번 리셋 (admin 보호)
-router.get('/admin/users', operatorOrAboveMiddleware, async (_req, res) => {
-  res.json(await listUsers());
-});
-
-// customer_manager 담당 VM 배정 UI용. 자체 호스팅 서버 registry 자체는 Tower 전역 운영
-// 데이터라 admin 만 수정한다.
-router.get('/admin/self-hosted-servers', adminMiddleware, async (_req, res) => {
-  const rows = await query(
-    `SELECT id, customer_name AS name, profile
-       FROM gateway_customers
-      WHERE is_active = true
-      ORDER BY customer_name`,
-  );
-  res.json(rows);
+router.get('/admin/users', operatorOrAboveMiddleware, async (req, res) => {
+  const users = await listUsers();
+  res.setHeader('Cache-Control', 'no-store');
+  res.json(users.filter(user => canManageUserRole((req as any).user.role, user.role)));
 });
 
 router.get('/admin/signup-settings', adminMiddleware, async (_req, res) => {
@@ -3115,6 +3306,83 @@ router.delete('/admin/signup-invites/:id', adminMiddleware, async (req, res) => 
   res.json({ ok: true });
 });
 
+router.get('/admin/auth-email-readiness', adminMiddleware, async (_req, res) => {
+  res.json(await getAccountEmailReadiness());
+});
+
+router.get('/admin/account-email-invitations', operatorOrAboveMiddleware, async (req, res) => {
+  const rows = await listAccountEmailInvitations();
+  res.json(rows.filter(row => canManageUserRole((req as any).user.role, row.role)));
+});
+
+router.post('/admin/account-email-invitations', operatorOrAboveMiddleware, async (req, res) => {
+  const currentUser = (req as any).user;
+  if (!req.body?.email) return res.status(400).json({ error: 'email is required' });
+  if (!canManageUserRole(currentUser.role, undefined, req.body.role || 'member')) return res.status(403).json({ error: 'Only admins can invite privileged accounts' });
+  try {
+    const invitation = await createAccountEmailInvitation({
+      email: req.body.email,
+      role: req.body.role,
+      displayName: req.body.displayName,
+      affiliation: req.body.affiliation,
+      createdBy: currentUser.userId,
+    });
+    res.status(201).json(invitation);
+  } catch (error: any) {
+    if (error instanceof AccountEmailConflictError) return res.status(409).json({ error: error.message });
+    if (error instanceof AccountEmailDeliveryError) return res.status(503).json({ error: 'Invitation saved but email delivery failed' });
+    if (error instanceof AccountEmailStateError) return res.status(400).json({ error: error.message });
+    res.status(400).json({ error: error.message });
+  }
+});
+
+router.post('/admin/account-email-invitations/:id/resend', operatorOrAboveMiddleware, emailTargetAccess('invitation'), async (req, res) => {
+  try { res.json(await resendAccountEmailInvitation(req.params.id as string, (req as any).user.userId)); }
+  catch (error: any) {
+    if (error instanceof AccountEmailNotFoundError) return res.status(404).json({ error: error.message });
+    if (error instanceof AccountEmailDeliveryError) return res.status(503).json({ error: 'Invitation updated but email delivery failed' });
+    res.status(400).json({ error: error.message });
+  }
+});
+
+router.post('/admin/account-email-invitations/:id/cancel', operatorOrAboveMiddleware, emailTargetAccess('invitation'), async (req, res) => {
+  const ok = await cancelAccountEmailInvitation(req.params.id as string, (req as any).user.userId);
+  if (!ok) return res.status(404).json({ error: 'Pending invitation not found' });
+  res.json({ ok: true });
+});
+
+router.post('/admin/users/:id/account-email', operatorOrAboveMiddleware, emailTargetAccess('user'), async (req, res) => {
+  const userId = parseInt(req.params.id as string, 10);
+  if (!Number.isSafeInteger(userId) || !req.body?.email) return res.status(400).json({ error: 'Valid user id and email are required' });
+  try {
+    res.status(201).json(await registerExistingUserEmail({
+      userId, email: req.body.email, actorUserId: (req as any).user.userId,
+      requestIp: req.ip || req.socket.remoteAddress || null,
+      userAgent: req.get('user-agent') || null,
+    }));
+  } catch (error: any) {
+    if (error instanceof AccountEmailNotFoundError) return res.status(404).json({ error: error.message });
+    if (error instanceof AccountEmailConflictError) return res.status(409).json({ error: error.message });
+    if (error instanceof AccountEmailDeliveryError) return res.status(503).json({ error: 'Confirmation email could not be sent. Check mail provider configuration before retrying.' });
+    res.status(400).json({ error: error.message });
+  }
+});
+
+router.post('/admin/users/:id/account-email/resend', operatorOrAboveMiddleware, emailTargetAccess('user'), async (req, res) => {
+  try { res.json(await resendExistingUserEmail(parseInt(req.params.id as string, 10), (req as any).user.userId)); }
+  catch (error: any) {
+    if (error instanceof AccountEmailNotFoundError) return res.status(404).json({ error: error.message });
+    if (error instanceof AccountEmailDeliveryError) return res.status(503).json({ error: 'Confirmation email could not be sent. Check mail provider configuration before retrying.' });
+    res.status(400).json({ error: error.message });
+  }
+});
+
+router.delete('/admin/users/:id/account-email/pending', operatorOrAboveMiddleware, emailTargetAccess('user'), async (req, res) => {
+  const ok = await cancelPendingExistingUserEmail(parseInt(req.params.id as string, 10), (req as any).user.userId);
+  if (!ok) return res.status(404).json({ error: 'Pending email not found' });
+  res.json({ ok: true });
+});
+
 router.post('/admin/users/:id/approve', adminMiddleware, async (req, res) => {
   const userId = parseInt(req.params.id as string, 10);
   const currentUser = (req as any).user;
@@ -3131,44 +3399,33 @@ router.post('/admin/users/:id/reject', adminMiddleware, async (req, res) => {
   res.json(user);
 });
 
-router.put('/admin/users/:id/self-hosted-servers', adminMiddleware, async (req, res) => {
-  const userId = parseInt(req.params.id as string, 10);
-  const customerIds = Array.isArray(req.body?.customerIds) ? req.body.customerIds.map(String) : [];
-  await query('DELETE FROM user_customer_vms WHERE user_id = $1', [userId]);
-  for (const customerId of customerIds) {
-    await query(
-      `INSERT INTO user_customer_vms (user_id, customer_id, created_by)
-       VALUES ($1, $2, $3)
-       ON CONFLICT (user_id, customer_id) DO NOTHING`,
-      [userId, customerId, (req as any).user?.userId ?? null],
-    );
-  }
-  res.json({ ok: true });
-});
-
 router.post('/admin/users', operatorOrAboveMiddleware, async (req, res) => {
-  const { username, password, role, displayName, affiliation } = req.body;
+  const { username, password, passwordConfirm, role, displayName, affiliation, email } = req.body;
   if (!username || !password) return res.status(400).json({ error: 'username and password required' });
   const currentUser = (req as any).user;
-  if ((role === 'admin' || role === 'customer_manager') && currentUser.role !== 'admin') {
-    return res.status(403).json({ error: 'Only admins can create admin/customer_manager users' });
+  if (!canManageUserRole(currentUser.role, undefined, role || 'member')) {
+    return res.status(403).json({ error: 'Only platform admins can create administrator accounts' });
   }
   try {
-    const user = await createUser(username, password, role || 'member', {
-      displayName: displayName ?? null,
-      affiliation: affiliation ?? null,
+    if (typeof email !== 'string' || !email.trim() || !passwordConfirm || !displayName) {
+      return res.status(400).json({ error: 'email, passwordConfirm, and displayName are required for new accounts' });
+    }
+    const user = await createAdminManagedAccount({
+      username, password, passwordConfirm, role: role || 'member', displayName,
+      affiliation: affiliation ?? null, email, actorUserId: currentUser.userId,
+      requestIp: req.ip || req.socket.remoteAddress || null,
+      userAgent: req.get('user-agent') || null,
     });
-    res.json({
-      ...user,
-      display_name: displayName ?? null,
-      affiliation: affiliation ?? null,
-    });
+    return res.json(user);
   } catch (error: any) {
     if (error instanceof InvalidUsernameError) {
       return res.status(400).json({ error: error.message });
     }
+    if (error instanceof AccountEmailConflictError || error instanceof UsernameTakenError) return res.status(409).json({ error: error.message });
+    if (error instanceof AccountEmailStateError) return res.status(400).json({ error: error.message });
+    if (error instanceof AccountEmailDeliveryError) return res.status(503).json({ error: 'User created but verification email delivery failed' });
     if (error.message?.includes('UNIQUE') || error.message?.includes('duplicate key')) {
-      return res.status(409).json({ error: 'Username already exists' });
+      return res.status(409).json({ error: 'Username or email already exists' });
     }
     res.status(500).json({ error: error.message });
   }
@@ -3184,14 +3441,14 @@ router.patch('/admin/users/:id', operatorOrAboveMiddleware, async (req, res) => 
     if (currentUser.userId === userId) return res.status(403).json({ error: 'Cannot change own role' });
     if (currentUser.role !== 'admin') {
       const targetRole = await getUserRole(userId);
-      if (targetRole === 'admin') {
+      if (!canManageUserRole(currentUser.role, targetRole ?? 'unknown')) {
         return res.status(403).json({ error: 'Only admins can modify admin users' });
       }
-      if (role === 'admin' || role === 'customer_manager') {
-        return res.status(403).json({ error: 'Only admins can grant admin/customer_manager role' });
+      if (!canManageUserRole(currentUser.role, undefined, role)) {
+        return res.status(403).json({ error: 'Only platform admins can grant administrator roles' });
       }
     }
-    await updateUserRole(userId, role);
+    if (!await updateUserRole(userId, role, currentUser.role)) return res.status(403).json({ error: 'Target role changed or user not found' });
   }
 
   // ── allowed_path deprecated (2026-06-10) ──
@@ -3202,13 +3459,14 @@ router.patch('/admin/users/:id', operatorOrAboveMiddleware, async (req, res) => 
   if (username !== undefined) {
     if (currentUser.role !== 'admin') {
       const targetRole = await getUserRole(userId);
-      if (targetRole === 'admin') {
+      if (!canManageUserRole(currentUser.role, targetRole ?? 'unknown')) {
         return res.status(403).json({ error: 'Only admins can rename admin users' });
       }
     }
     try {
-      await updateUserUsername(userId, username, currentUser.userId, { reason: reason ?? null });
+      await updateUserUsername(userId, username, currentUser.userId, { reason: reason ?? null, actorRole: currentUser.role });
     } catch (err: any) {
+      if (err instanceof UserManagementForbiddenError) return res.status(403).json({ error: err.message });
       if (err instanceof InvalidUsernameError) return res.status(400).json({ error: err.message });
       if (err instanceof UsernameTakenError) return res.status(409).json({ error: err.message });
       throw err;
@@ -3219,11 +3477,11 @@ router.patch('/admin/users/:id', operatorOrAboveMiddleware, async (req, res) => 
   if (displayName !== undefined || affiliation !== undefined) {
     if (currentUser.role !== 'admin') {
       const targetRole = await getUserRole(userId);
-      if (targetRole === 'admin') {
+      if (!canManageUserRole(currentUser.role, targetRole ?? 'unknown')) {
         return res.status(403).json({ error: 'Only admins can modify admin users' });
       }
     }
-    await updateUserProfile(userId, { displayName, affiliation });
+    if (!await updateUserProfile(userId, { displayName, affiliation }, currentUser.role)) return res.status(403).json({ error: 'Target role changed or user not found' });
   }
 
   res.json({ ok: true });
@@ -3231,16 +3489,35 @@ router.patch('/admin/users/:id', operatorOrAboveMiddleware, async (req, res) => 
 
 router.patch('/admin/users/:id/password', operatorOrAboveMiddleware, async (req, res) => {
   const userId = parseInt(req.params.id as string);
-  const { password } = req.body;
-  if (!password || password.length < 8) return res.status(400).json({ error: 'Password must be at least 8 characters' });
+  const { password } = req.body ?? {};
+  if (!Number.isSafeInteger(userId) || userId <= 0 || typeof password !== 'string' || password.length < 8) return res.status(400).json({ error: 'Valid user id and password of at least 8 characters are required' });
   const currentUser = (req as any).user;
   if (currentUser.role !== 'admin') {
-    const targetRole = await getUserRole(userId);
-    if (targetRole === 'admin') {
-      return res.status(403).json({ error: 'Only admins can reset admin passwords' });
-    }
+    return res.status(403).json({ error: 'Password reset requires a platform admin; company operators cannot set another user password' });
   }
   await resetUserPassword(userId, password);
+  res.json({ ok: true });
+});
+
+router.get('/admin/users/:id/auth-events', operatorOrAboveMiddleware, async (req, res) => {
+  const id = Number(req.params.id);
+  const before = req.query.before === undefined ? undefined : Number(req.query.before);
+  if (!Number.isSafeInteger(id) || id <= 0 || (before !== undefined && (!Number.isSafeInteger(before) || before <= 0))) return res.status(400).json({ error: 'Invalid user id or cursor' });
+  res.setHeader('Cache-Control', 'no-store');
+  const events = await listUserAuthEvents({ userId: id, actorRole: (req as any).user.role, before });
+  if (events === 'not_found') return res.status(404).json({ error: 'User not found' });
+  if (events === 'forbidden') return res.status(403).json({ error: 'Only admins can view privileged account history' });
+  res.json(events);
+});
+
+router.post('/admin/users/:id/reactivate', operatorOrAboveMiddleware, async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isSafeInteger(id) || id <= 0) return res.status(400).json({ error: 'Invalid user id' });
+  const actor = (req as any).user;
+  const result = await reactivateUser({ userId: id, actorUserId: actor.userId, actorRole: actor.role });
+  if (result === 'not_found') return res.status(404).json({ error: 'User not found' });
+  if (result === 'forbidden') return res.status(403).json({ error: 'Only admins can reactivate privileged accounts' });
+  if (result === 'ineligible') return res.status(409).json({ error: 'Only disabled, approved accounts may be reactivated' });
   res.json({ ok: true });
 });
 
@@ -3248,13 +3525,10 @@ router.delete('/admin/users/:id', operatorOrAboveMiddleware, async (req, res) =>
   const userId = parseInt(req.params.id as string);
   const currentUser = (req as any).user;
   if (currentUser.userId === userId) return res.status(403).json({ error: 'Cannot delete yourself' });
-  if (currentUser.role !== 'admin') {
-    const targetRole = await getUserRole(userId);
-    if (targetRole === 'admin') {
-      return res.status(403).json({ error: 'Only admins can disable admin users' });
-    }
-  }
-  await disableUser(userId);
+  if (!Number.isSafeInteger(userId) || userId <= 0) return res.status(400).json({ error: 'Invalid user id' });
+  const result = await disableUser(userId, currentUser.role, currentUser.userId);
+  if (result === 'not_found') return res.status(404).json({ error: 'User not found' });
+  if (result === 'forbidden') return res.status(403).json({ error: 'Only admins can disable privileged accounts' });
   const disconnectedSockets = disconnectUserSockets(userId);
   res.json({ ok: true, disconnectedSockets });
 });
@@ -3300,26 +3574,59 @@ router.get('/work/challenge-timeline', async (req, res) => {
 // Filtered to projects the current user owns or is a member of.
 // Personal AI usage summary. Unlike the operator-only VM budget endpoint, this
 // route is always scoped to the authenticated user's own sessions.
+router.get('/metrics/ai-usage-breakdown', operatorOrAboveMiddleware, async (req, res) => {
+  try {
+    const days = Math.max(1, Math.min(parseInt(String(req.query.days || '30'), 10) || 30, 180));
+    const userId = req.query.userId === undefined ? undefined : Number(req.query.userId);
+    if (userId !== undefined && !Number.isInteger(userId)) return res.status(400).json({ error: 'invalid userId' });
+    const rows = await getAiUsageBreakdown({ days, userId });
+    res.json({ days, scope: userId === undefined ? 'all-users' : 'user', rows });
+  } catch (err: any) {
+    console.error('[metrics/ai-usage-breakdown] error:', err);
+    res.status(500).json({ error: err?.message || 'internal error' });
+  }
+});
+
+router.get('/metrics/router-ai-usage', operatorOrAboveMiddleware, async (req, res) => {
+  if (!validRouterUsageQuery(req.query)) {
+    return res.status(400).json({ error: 'Only scope, period and days (1–180) are accepted; key/team identity is server-resolved' });
+  }
+  try {
+    const scope = req.query.scope === 'key' ? 'key' : 'team';
+    const period = req.query.period === 'lifetime' ? 'lifetime' : 'calendar_month';
+    const days = Math.max(1, Math.min(parseInt(String(req.query.days || '30'), 10) || 30, 180));
+    const identity = await liteLLMUsageIdentity();
+    const result = await readRouterUsage({ identity, scope, period, days }, fetchLiteLLMSelfServiceUsage);
+    if (result) return res.json(result);
+    return res.status(503).json({
+      error: 'canonical router usage unavailable',
+      source: 'unavailable',
+      fallbackRoute: '/api/metrics/ai-usage',
+      fallbackSource: 'vm-key-or-local-estimate',
+    });
+  } catch (err: any) {
+    console.warn('[metrics/router-ai-usage] usage identity unavailable:', err?.message || err);
+    res.status(503).json({ error: 'canonical router usage unavailable', source: 'unavailable', fallbackRoute: '/api/metrics/ai-usage', fallbackSource: 'vm-key-or-local-estimate' });
+  }
+});
+
 router.get('/metrics/my-ai-usage', async (req, res) => {
   try {
     const userId = (req as any).user?.userId;
     if (!userId) return res.status(401).json({ error: 'unauthorized' });
     const days = Math.max(1, Math.min(parseInt(String(req.query.days || '30'), 10) || 30, 180));
 
-    const totals = await queryOne<{
-      sessions: string;
-      turns: string;
-      total_tokens: string;
-      cost_usd: string;
-    }>(
-      `SELECT COUNT(*)::text AS sessions,
-              COALESCE(SUM(turn_count), 0)::text AS turns,
-              COALESCE(SUM(total_tokens), 0)::text AS total_tokens,
-              COALESCE(SUM(total_cost), 0)::text AS cost_usd
-         FROM sessions
-        WHERE user_id = $1
-          AND updated_at >= NOW() - ($2 || ' days')::interval`,
-      [userId, String(days)],
+    const window = utcUsageWindow(days);
+    const { dates } = window;
+    const periodParams = [userId, window.start, window.end];
+    const totals = await queryOne<{ sessions: string }>(
+      `SELECT COUNT(DISTINCT s.id)::text AS sessions
+         FROM messages m
+         JOIN sessions s ON s.id = m.session_id
+        WHERE s.user_id = $1
+          AND m.created_at >= $2::timestamptz
+          AND m.created_at < $3::timestamptz`,
+      periodParams,
     );
 
     const daily = await query<{
@@ -3328,19 +3635,22 @@ router.get('/metrics/my-ai-usage', async (req, res) => {
       input_tokens: string;
       output_tokens: string;
       cost_usd: string;
+      cost_samples: string;
     }>(
-      `SELECT to_char(DATE(m.created_at), 'YYYY-MM-DD') AS date,
+      `SELECT to_char((m.created_at AT TIME ZONE 'UTC')::date, 'YYYY-MM-DD') AS date,
               COUNT(*) FILTER (WHERE m.role = 'user')::text AS turns,
               COALESCE(SUM(m.input_tokens), 0)::text AS input_tokens,
               COALESCE(SUM(m.output_tokens), 0)::text AS output_tokens,
-              COALESCE(SUM(CASE WHEN m.role = 'assistant' THEN NULLIF(m.metadata->'usage'->>'cost_usd', '')::numeric ELSE 0 END), 0)::text AS cost_usd
+              COALESCE(SUM(CASE WHEN m.role = 'assistant' THEN NULLIF(m.metadata->'usage'->>'cost_usd', '')::numeric ELSE 0 END), 0)::text AS cost_usd,
+              COUNT(*) FILTER (WHERE m.role = 'assistant' AND NULLIF(m.metadata->'usage'->>'cost_usd', '') IS NOT NULL)::text AS cost_samples
          FROM messages m
          JOIN sessions s ON s.id = m.session_id
         WHERE s.user_id = $1
-          AND m.created_at >= NOW() - ($2 || ' days')::interval
-        GROUP BY DATE(m.created_at)
-        ORDER BY DATE(m.created_at)`,
-      [userId, String(days)],
+          AND m.created_at >= $2::timestamptz
+          AND m.created_at < $3::timestamptz
+        GROUP BY (m.created_at AT TIME ZONE 'UTC')::date
+        ORDER BY (m.created_at AT TIME ZONE 'UTC')::date`,
+      periodParams,
     );
 
     const projectDaily = await query<{
@@ -3351,44 +3661,36 @@ router.get('/metrics/my-ai-usage', async (req, res) => {
     }>(
       `SELECT COALESCE(s.project_id, 'none') AS project_id,
               COALESCE(p.name, '프로젝트 없음') AS project_name,
-              to_char(DATE(m.created_at), 'YYYY-MM-DD') AS date,
+              to_char((m.created_at AT TIME ZONE 'UTC')::date, 'YYYY-MM-DD') AS date,
               COUNT(*)::text AS turns
          FROM messages m
          JOIN sessions s ON s.id = m.session_id
          LEFT JOIN projects p ON p.id = s.project_id
         WHERE s.user_id = $1
           AND m.role = 'user'
-          AND m.created_at >= NOW() - ($2 || ' days')::interval
-        GROUP BY COALESCE(s.project_id, 'none'), COALESCE(p.name, '프로젝트 없음'), DATE(m.created_at)
+          AND m.created_at >= $2::timestamptz
+          AND m.created_at < $3::timestamptz
+        GROUP BY COALESCE(s.project_id, 'none'), COALESCE(p.name, '프로젝트 없음'), (m.created_at AT TIME ZONE 'UTC')::date
         ORDER BY COUNT(*) DESC`,
-      [userId, String(days)],
+      periodParams,
     );
 
-    const dates: string[] = [];
-    for (let i = days - 1; i >= 0; i--) {
-      const date = new Date();
-      date.setDate(date.getDate() - i);
-      dates.push(date.toISOString().slice(0, 10));
-    }
-    const projectMap = new Map<string, { id: string; name: string; total: number; byDate: Map<string, number> }>();
+    const projectMap = new Map<string, { id: string; name: string; rows: Array<{ date: string; turns: string }> }>();
     for (const row of projectDaily) {
-      const item = projectMap.get(row.project_id) || { id: row.project_id, name: row.project_name, total: 0, byDate: new Map<string, number>() };
-      const turns = Number(row.turns || 0);
-      item.total += turns;
-      item.byDate.set(row.date, turns);
+      const item = projectMap.get(row.project_id) || { id: row.project_id, name: row.project_name, rows: [] };
+      item.rows.push(row);
       projectMap.set(row.project_id, item);
     }
     const dailyCost = daily.reduce((sum, row) => sum + Number(row.cost_usd || 0), 0);
-    const sessionCost = Number(totals?.cost_usd || 0);
 
     res.json({
       days,
       dates,
       totals: {
         sessions: Number(totals?.sessions || 0),
-        turns: Number(totals?.turns || 0),
-        totalTokens: Number(totals?.total_tokens || 0),
-        costUsd: dailyCost > 0 ? dailyCost : sessionCost,
+        turns: daily.reduce((sum, row) => sum + Number(row.turns || 0), 0),
+        totalTokens: daily.reduce((sum, row) => sum + Number(row.input_tokens || 0) + Number(row.output_tokens || 0), 0),
+        costUsd: dailyCost,
       },
       daily: daily.map((row) => ({
         date: row.date,
@@ -3398,11 +3700,11 @@ router.get('/metrics/my-ai-usage', async (req, res) => {
         costUsd: Number(row.cost_usd || 0),
       })),
       projects: Array.from(projectMap.values())
+        .map((project) => ({ id: project.id, name: project.name, ...usageSeries(dates, project.rows) }))
         .sort((a, b) => b.total - a.total)
-        .slice(0, 12)
-        .map((project) => ({ id: project.id, name: project.name, total: project.total, values: dates.map((date) => project.byDate.get(date) || 0) })),
-      costBasis: dailyCost > 0 ? 'message-provider-metadata' : 'session-estimate',
-      costAvailable: dailyCost > 0 || sessionCost > 0,
+        .slice(0, 12),
+      costBasis: 'message-provider-metadata',
+      costAvailable: daily.some((row) => Number(row.cost_samples) > 0),
     });
   } catch (err: any) {
     console.error('[metrics/my-ai-usage] error:', err);
@@ -3418,115 +3720,57 @@ router.get('/metrics/usage-heatmap', async (req, res) => {
     const days = Math.max(1, Math.min(parseInt(String(req.query.days || '30'), 10) || 30, 180));
     const topN = Math.max(1, Math.min(parseInt(String(req.query.top || '20'), 10) || 20, 50));
 
-    // 1) Per-project totals over window, filtered to accessible projects
-    const totalsSql = `
-      SELECT p.id, p.name,
-        COUNT(*) FILTER (WHERE m.role='user' AND m.content LIKE '[{"type":"text"%') AS turns,
-        COUNT(DISTINCT s.id) AS sessions,
-        COUNT(DISTINCT DATE(m.created_at)) AS active_days
-      FROM projects p
-      JOIN sessions s ON s.project_id = p.id
-      JOIN messages m ON m.session_id = s.id
-      WHERE (p.archived IS NULL OR p.archived = 0)
-        AND (
-          p.user_id = $1
-          OR EXISTS (SELECT 1 FROM project_members pm WHERE pm.project_id = p.id AND pm.user_id = $1)
-        )
-        AND m.created_at >= NOW() - ($2 || ' days')::interval
-      GROUP BY p.id, p.name
-      HAVING COUNT(*) FILTER (WHERE m.role='user' AND m.content LIKE '[{"type":"text"%') > 0
-      ORDER BY turns DESC
-      LIMIT $3
-    `;
-    const totals = await query<{ id: string; name: string; turns: string; sessions: string; active_days: string }>(
-      totalsSql, [userId, String(days), topN]
-    );
-
-    if (totals.length === 0) {
-      return res.json({ days, topN, dates: [], projects: [], grandTotal: 0 });
-    }
-
-    const projectIds = totals.map((t) => t.id);
-
-    // 2) Daily breakdown for those projects
-    const dailySql = `
-      SELECT s.project_id AS project_id,
-             to_char(DATE(m.created_at), 'YYYY-MM-DD') AS d,
-             COUNT(*) FILTER (WHERE m.role='user' AND m.content LIKE '[{"type":"text"%') AS turns
-      FROM sessions s
-      JOIN messages m ON m.session_id = s.id
-      WHERE s.project_id = ANY($1::text[])
-        AND m.created_at >= NOW() - ($2 || ' days')::interval
-      GROUP BY s.project_id, DATE(m.created_at)
-      HAVING COUNT(*) FILTER (WHERE m.role='user' AND m.content LIKE '[{"type":"text"%') > 0
-    `;
-    const daily = await query<{ project_id: string; d: string; turns: string }>(
-      dailySql, [projectIds, String(days)]
-    );
-
-    // 3) Build continuous date axis (days window ending today, inclusive)
-    const dates: string[] = [];
-    const now = new Date();
-    for (let i = days - 1; i >= 0; i--) {
-      const d = new Date(now);
-      d.setDate(d.getDate() - i);
-      dates.push(d.toISOString().slice(0, 10));
-    }
-
-    // 4) Build lookup and assemble per-project value arrays in the date order
-    const lookup: Record<string, Record<string, number>> = {};
-    for (const row of daily) {
-      if (!lookup[row.project_id]) lookup[row.project_id] = {};
-      lookup[row.project_id][row.d] = Number(row.turns);
-    }
-
-    let grandTotal = 0;
-    const projects = totals.map((t) => {
-      const map = lookup[t.id] || {};
-      const values = dates.map((d) => map[d] || 0);
-      const total = Number(t.turns);
-      grandTotal += total;
-      return {
-        id: t.id,
-        name: t.name,
-        total,
-        sessions: Number(t.sessions),
-        activeDays: Number(t.active_days),
-        values,
-      };
-    });
-
-    // 5) Daily totals across ALL accessible projects (not just top N)
-    const allDailySql = `
-      SELECT to_char(DATE(m.created_at), 'YYYY-MM-DD') AS d,
-             COUNT(*) AS turns
-      FROM projects p
-      JOIN sessions s ON s.project_id = p.id
-      JOIN messages m ON m.session_id = s.id
-      WHERE (p.archived IS NULL OR p.archived = 0)
-        AND (
-          p.user_id = $1
-          OR EXISTS (SELECT 1 FROM project_members pm WHERE pm.project_id = p.id AND pm.user_id = $1)
-        )
-        AND m.created_at >= NOW() - ($2 || ' days')::interval
-        AND m.role = 'user' AND m.content LIKE '[{"type":"text"%'
-      GROUP BY DATE(m.created_at)
-    `;
-    const allDaily = await query<{ d: string; turns: string }>(allDailySql, [userId, String(days)]);
-    const allDailyMap: Record<string, number> = {};
-    let allTotal = 0;
-    for (const row of allDaily) {
-      allDailyMap[row.d] = Number(row.turns);
-      allTotal += Number(row.turns);
-    }
-    const dailyTotals = dates.map((d) => allDailyMap[d] || 0);
-
-    res.json({ days, topN, dates, projects, grandTotal: allTotal, dailyTotals });
+    const result = await cachedUsageMetrics(`usage-heatmap:${userId}:${days}:${topN}`, () =>
+      computeUsageHeatmap(userId, days, topN));
+    res.json(result);
   } catch (err: any) {
     console.error('[metrics/usage-heatmap] error:', err);
     res.status(500).json({ error: err?.message || 'internal error' });
   }
 });
+
+async function computeUsageHeatmap(userId: number, days: number, topN: number) {
+    const window = utcUsageWindow(days);
+    const { dates } = window;
+
+    // Aggregate accessible user text messages once; derive ranking and the all-project axis from the same rows.
+    const dailySql = `
+      SELECT p.id AS project_id, p.name AS project_name,
+        to_char((m.created_at AT TIME ZONE 'UTC')::date, 'YYYY-MM-DD') AS d,
+        COUNT(*) AS turns, ARRAY_AGG(DISTINCT s.id) AS session_ids
+      FROM projects p
+      JOIN sessions s ON s.project_id = p.id
+      JOIN messages m ON m.session_id = s.id
+        AND m.role = 'user' AND m.content LIKE '[{"type":"text"%'
+        AND m.created_at >= $2::timestamptz
+        AND m.created_at < $3::timestamptz
+      WHERE (p.archived IS NULL OR p.archived = 0)
+        AND (
+          p.user_id = $1
+          OR EXISTS (SELECT 1 FROM project_members pm WHERE pm.project_id = p.id AND pm.user_id = $1)
+        )
+      GROUP BY p.id, p.name, (m.created_at AT TIME ZONE 'UTC')::date
+    `;
+    const daily = await query<{ project_id: string; project_name: string; d: string; turns: string; session_ids: string[] }>(
+      dailySql, [userId, window.start, window.end]
+    );
+    const byProject = new Map<string, { id: string; name: string; sessions: Set<string>; rows: Array<{ date: string; turns: string }> }>();
+    // Session counts cannot be summed across days: a session may span multiple days.
+    // The query below returns distinct session IDs in an aggregate array for exact deduplication.
+    for (const row of daily) {
+      const project = byProject.get(row.project_id) || { id: row.project_id, name: row.project_name, sessions: new Set<string>(), rows: [] };
+      for (const id of row.session_ids) project.sessions.add(id);
+      project.rows.push({ date: row.d, turns: row.turns });
+      byProject.set(row.project_id, project);
+    }
+    const projects = [...byProject.values()].map((project) => ({
+      id: project.id, name: project.name, sessions: project.sessions.size,
+      ...usageSeries(dates, project.rows),
+    })).sort((a, b) => b.total - a.total).slice(0, topN);
+    const allSeries = usageSeries(dates, daily.map((row) => ({ date: row.d, turns: row.turns })));
+
+    return { days, topN, dates, projects, grandTotal: allSeries.total, dailyTotals: allSeries.values };
+}
 
 // ───── Sessions ─────
 
@@ -3557,6 +3801,7 @@ router.put('/session-attention', authMiddleware, async (req, res) => {
       sessionId: typeof entry?.sessionId === 'string' ? entry.sessionId : '',
       state: entry?.state,
     })));
+    broadcastToUser(userId, { type: 'session_attention_updated' });
     res.json({ ok: true });
   } catch (err: any) {
     console.error('[session-attention] put error:', err);
@@ -3565,6 +3810,45 @@ router.put('/session-attention', authMiddleware, async (req, res) => {
 });
 
 
+
+router.put('/sessions/:id/subscription', authMiddleware, async (req, res) => {
+  try {
+    const userId = (req as any).user?.userId;
+    const role = (req as any).user?.role;
+    if (!userId) return res.status(401).json({ error: 'auth required' });
+    if (typeof req.body?.subscribed !== 'boolean') {
+      return res.status(400).json({ error: 'subscribed must be boolean' });
+    }
+    const sessionId = req.params.id as string;
+    const access = await canAccessSession(sessionId, userId, role);
+    if (!access.allowed) return res.status(access.status).json({ error: access.message });
+    await setSessionSubscription(userId, sessionId, req.body.subscribed);
+    res.json({ ok: true, state: await getSessionUserState(userId, sessionId) });
+  } catch (err: any) {
+    console.error('[session-subscription] put error:', err);
+    res.status(500).json({ error: err?.message || 'internal error' });
+  }
+});
+
+router.put('/sessions/:id/read-ai-response', authMiddleware, async (req, res) => {
+  try {
+    const userId = (req as any).user?.userId;
+    const role = (req as any).user?.role;
+    const sequence = Number(req.body?.sequence);
+    if (!userId) return res.status(401).json({ error: 'auth required' });
+    if (!Number.isSafeInteger(sequence) || sequence < 0) {
+      return res.status(400).json({ error: 'sequence must be a non-negative safe integer' });
+    }
+    const sessionId = req.params.id as string;
+    const access = await canAccessSession(sessionId, userId, role);
+    if (!access.allowed) return res.status(access.status).json({ error: access.message });
+    await markAiResponseRead(userId, sessionId, sequence);
+    res.json({ ok: true, state: await getSessionUserState(userId, sessionId) });
+  } catch (err: any) {
+    console.error('[session-read-ai-response] put error:', err);
+    res.status(500).json({ error: err?.message || 'internal error' });
+  }
+});
 
 router.post('/sessions/:id/project-agent-profile/latest', async (req, res) => {
   const userId = (req as any).user?.userId;
@@ -3871,35 +4155,44 @@ router.get('/sessions/:id/spawned', async (req, res) => {
 });
 
 router.patch('/sessions/:id', async (req, res) => {
-  const { name, tags, favorite, totalCost, totalTokens, engineSessionId, claudeSessionId, autoNamed, cwd, visibility, modelUsed, engine } = req.body;
+  const { name, tags, favorite, totalCost, totalTokens, engineSessionId, claudeSessionId, autoNamed, cwd, visibility, modelUsed, reasoningEffort, engine } = req.body;
   const userId = (req as any).user?.userId;
   const userRole = (req as any).user?.role;
 
-  // Session access check (owner or project member)
-  if (userId) {
-    const access = await canAccessSession(req.params.id as string, userId, userRole);
-    if (!access.allowed) return res.status(access.status).json({ error: access.message });
+  if (!userId) return res.status(401).json({ error: 'Authentication required' });
+  const changedKeys = Object.keys(req.body).filter(key => req.body[key] !== undefined && key !== 'favorite');
+  const metadataOnly = changedKeys.every(key => key === 'name' || key === 'tags');
+  const sessionPreferenceOnly = changedKeys.every(key => key === 'reasoningEffort');
+  const access = changedKeys.length === 0
+    ? await canAccessSession(req.params.id as string, userId, userRole)
+    : metadataOnly || sessionPreferenceOnly
+      ? await canMutateSessionMetadata(req.params.id as string, userId, userRole)
+      : await canAdministerSession(req.params.id as string, userId, userRole);
+  if (!access.allowed) return res.status(access.status).json({ error: access.message });
+
+  // A favorite is personal state; it never changes the shared Session metadata.
+  if (favorite !== undefined && typeof favorite !== 'boolean') {
+    return res.status(400).json({ error: 'favorite must be a boolean' });
+  }
+  if (favorite !== undefined && changedKeys.length === 0) {
+    const { setSessionFavorite } = await import('../services/session/session-manager.js');
+    await setSessionFavorite(req.params.id as string, userId, favorite);
+    return res.json({ ok: true });
   }
 
   // Visibility change: only session owner or admin (stricter than general access)
   if (visibility !== undefined) {
-    const { queryOne: pgQueryOne } = await import('../db/pg-repo.js');
-    const row = await pgQueryOne<{ user_id: number }>('SELECT user_id FROM sessions WHERE id = $1', [req.params.id]);
-    if (!row) return res.status(404).json({ error: 'Session not found' });
-    if (userRole !== 'admin' && row.user_id !== userId) {
-      return res.status(403).json({ error: 'Only session owner or admin can change visibility' });
+    if (!['private', 'project'].includes(visibility)) return res.status(400).json({ error: 'Invalid visibility' });
+    const session = await getSession(req.params.id as string);
+    if (!session) return res.status(404).json({ error: 'Session not found' });
+    const owner = await queryOne<{ user_id: number | null }>('SELECT user_id FROM sessions WHERE id = $1', [session.id]);
+    if (owner?.user_id !== userId) return res.status(403).json({ error: 'Only session owner can change visibility' });
+    if (session.roomId) return res.status(409).json({ error: 'Channel conversations follow channel membership' });
+    if (visibility === 'project' && !session.projectId) return res.status(409).json({ error: 'Agent required for a shared conversation' });
+    if (visibility === 'project' && session.projectId && !(await isProjectMember(session.projectId, userId))) {
+      return res.status(403).json({ error: 'Current Agent membership required' });
     }
   }
-
-  // favorite is now *per-user* (user_session_favorites table) — handled
-  // separately from updateSession (which writes session-global columns).
-  // 결정: workspace/decisions/2026-05-22-per-user-session-favorites.md
-  if (favorite !== undefined) {
-    if (!userId) return res.status(401).json({ error: 'auth required to set favorite' });
-    const { setSessionFavorite } = await import('../services/session/session-manager.js');
-    await setSessionFavorite(req.params.id as string, userId, !!favorite);
-  }
-
   const updates: any = { name, tags, totalCost, totalTokens };
   if (claudeSessionId !== undefined) updates.claudeSessionId = claudeSessionId;
   if (engineSessionId !== undefined) {
@@ -3907,7 +4200,7 @@ router.patch('/sessions/:id', async (req, res) => {
     if (engine === 'claude') updates.claudeSessionId = engineSessionId;
   }
   if (autoNamed !== undefined) updates.autoNamed = autoNamed;
-  if (visibility !== undefined) updates.visibility = visibility;
+
   if ('label' in req.body) updates.label = req.body.label;
   if (cwd !== undefined) {
     if (!fs.existsSync(cwd) || !fs.statSync(cwd).isDirectory()) {
@@ -3933,7 +4226,10 @@ router.patch('/sessions/:id', async (req, res) => {
       if (!normalizedModelUsed) {
         updates.modelUsed = null;
       } else if (targetEngine === 'pi') {
-        updates.modelUsed = normalizePiSessionModelId(normalizedModelUsed);
+        if (!isSelectablePiModelId(normalizedModelUsed)) return res.status(400).json({ error: 'modelUsed is not selectable' });
+        // Preserve the explicit Tower alias for future turns; execution resolves it
+        // against current admin defaults without rewriting historical direct IDs.
+        updates.modelUsed = persistPiSessionChoice(normalizedModelUsed);
       } else if (targetEngine === 'claude') {
         if (!normalizedModelUsed.startsWith('claude-')) {
           return res.status(400).json({ error: 'modelUsed does not match session engine' });
@@ -3949,6 +4245,23 @@ router.patch('/sessions/:id', async (req, res) => {
       }
     }
   }
+  if (reasoningEffort === undefined && updates.modelUsed !== undefined) {
+    const current = await getSession(req.params.id as string);
+    if (current?.reasoningEffort && !reasoningEffortsForChoice(updates.modelUsed).includes(current.reasoningEffort)) {
+      updates.reasoningEffort = null;
+    }
+  }
+
+  if (reasoningEffort !== undefined) {
+    const current = await getSession(req.params.id as string);
+    if (!current) return res.status(404).json({ error: 'Session not found' });
+    const modelChoice = updates.modelUsed !== undefined ? updates.modelUsed : current.modelUsed;
+    if (reasoningEffort !== null && (!isReasoningEffort(reasoningEffort) || !reasoningEffortsForChoice(modelChoice).includes(reasoningEffort))) {
+      return res.status(400).json({ error: 'Reasoning effort is not supported by the selected model' });
+    }
+    updates.reasoningEffort = reasoningEffort;
+  }
+
   // engine: raw engine swap is allowed ONLY for empty sessions (lossless).
   // For sessions with real history, a raw PATCH would change the engine WITHOUT
   // rehydrating the new engine's native state → silent context loss. Those must
@@ -3970,7 +4283,20 @@ router.patch('/sessions/:id', async (req, res) => {
     }
     updates.engine = engine;
   }
+  if (visibility !== undefined) {
+    await transaction(async client => {
+      await client.query('UPDATE sessions SET visibility = $2 WHERE id = $1 AND user_id = $3', [req.params.id, visibility, userId]);
+      if (visibility === 'private') {
+        await client.query('UPDATE session_shares SET revoked = 1 WHERE session_id = $1 AND revoked = 0', [req.params.id]);
+        await client.query("UPDATE session_user_states SET subscription_state = 'muted' WHERE session_id = $1 AND user_id <> $2", [req.params.id, userId]);
+      }
+    });
+  }
   await updateSession(req.params.id as string, updates);
+  if (favorite !== undefined) {
+    const { setSessionFavorite } = await import('../services/session/session-manager.js');
+    await setSessionFavorite(req.params.id as string, userId, favorite);
+  }
   // Broadcast to all clients so other users see changes in real-time
   try {
     const { broadcastToAll } = await import('./ws-handler.js');
@@ -4190,19 +4516,8 @@ router.post('/sessions/:id/auto-name', async (req, res) => {
       const access = await canAccessSession(req.params.id as string, userId, role);
       if (!access.allowed) return res.status(access.status).json({ error: access.message });
     }
-    const messages = await getMessages(req.params.id as string);
-    const userMsg = messages.find((m) => m.role === 'user');
-    const assistantMsg = messages.find((m) => m.role === 'assistant');
-    if (!userMsg || !assistantMsg) {
-      return res.status(400).json({ error: 'Need at least one user and assistant message' });
-    }
-
-    const userText = extractTextFromContent(userMsg.content);
-    const assistantText = extractTextFromContent(assistantMsg.content);
-
-    const name = await generateSessionName(userText, assistantText);
-    await updateSession(req.params.id as string, { name, autoNamed: 1 } as any);
-    res.json({ ok: true, name });
+    const result = await autoNameSession(req.params.id as string);
+    res.json({ ok: result.status !== 'retryable', ...result });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }
@@ -4319,7 +4634,7 @@ router.get('/sessions/:id/touched-files', async (req, res) => {
     const rawLimit = parseInt(String(req.query.limit ?? '10'), 10);
     const limit = Number.isFinite(rawLimit) ? Math.max(1, Math.min(50, rawLimit)) : 10;
 
-    const result = await getTouchedFiles(session.id, limit);
+    const result = await getTouchedFiles(session.id, { userId, role }, limit);
     res.json(result);
   } catch (error: any) {
     console.error('[api] touched-files failed:', error);
@@ -4333,7 +4648,7 @@ async function checkpointRequestContext(req: any, res: any, sessionId: string) {
   const role = String(req.user?.role || 'member');
   if (!userId) { res.status(401).json({ error: 'Authentication required' }); return null; }
   if (role === 'viewer' || role === 'guest') { res.status(403).json({ error: 'Checkpoint restore requires write access' }); return null; }
-  const access = await canAccessSession(sessionId, userId, role);
+  const access = await canAdministerSession(sessionId, userId, role);
   if (!access.allowed) { res.status(access.status).json({ error: access.message }); return null; }
   const session = await getSession(sessionId);
   if (!session) { res.status(404).json({ error: 'Session not found' }); return null; }
@@ -4404,7 +4719,7 @@ router.get('/sessions/:id/project-recent-files', async (req, res) => {
     const rawLimit = parseInt(String(req.query.limit ?? '20'), 10);
     const limit = Number.isFinite(rawLimit) ? Math.max(1, Math.min(50, rawLimit)) : 20;
 
-    const result = await getProjectRecentFiles(session.id, limit);
+    const result = await getProjectRecentFiles(session.id, { userId, role }, limit);
     res.json(result);
   } catch (error: any) {
     console.error('[api] project-recent-files failed:', error);
@@ -4425,18 +4740,12 @@ async function hideSessionFromSidebar(req: any, res: any) {
   const snapshot = await getSession(sessionId);
   if (!snapshot) return res.status(404).json({ error: 'Session not found' });
 
-  // Empty sessions have no recoverable value and only add noise to History.
-  // On hide, delete them outright; non-empty sessions are reversible archives.
-  const messageCount = await queryOne<{ count: string }>(
-    'SELECT COUNT(*)::text AS count FROM messages WHERE session_id = $1',
-    [sessionId],
-  );
-  const isEmpty = Number(messageCount?.count ?? 0) === 0;
+  // All ordinary sessions, including empty ones, remain recoverable in Archive.
   const agentWorker = await queryOne<{ id: string }>(
     'SELECT id FROM agent_workers WHERE backing_session_id = $1 LIMIT 1',
     [sessionId],
   );
-  const ok = isEmpty && !agentWorker ? await permanentlyDeleteSession(sessionId) : await deleteSession(sessionId);
+  const ok = await deleteSession(sessionId);
   if (!ok) return res.status(404).json({ error: 'Session not found' });
   if (agentWorker) {
     await execute(
@@ -4472,9 +4781,9 @@ async function hideSessionFromSidebar(req: any, res: any) {
   });
 }
 
-// Hide/archive a session. This is intentionally reversible via History restore.
-// DELETE is kept as a compatibility alias for older clients; permanent deletion
-// lives at DELETE /api/sessions/:id/permanent.
+// Archive only; /hide and DELETE remain non-destructive compatibility URLs.
+// All ordinary sessions can be restored at POST /api/sessions/:id/restore.
+router.post('/sessions/:id/archive', hideSessionFromSidebar);
 router.post('/sessions/:id/hide', hideSessionFromSidebar);
 router.delete('/sessions/:id', hideSessionFromSidebar);
 
@@ -4671,6 +4980,10 @@ router.get('/search', async (req, res) => {
     deep,
     currentProjectId,
   });
+  if (results.partial) {
+    res.setHeader('X-Tower-Search-Partial', 'true');
+    res.setHeader('X-Tower-Search-Failed-Sections', results.failedSections!.join(','));
+  }
   res.json(results);
 });
 
@@ -4882,6 +5195,7 @@ router.post('/files/upload', handleProjectMulterUpload, withProjectUploadCleanup
         continue;
       }
       try {
+        await assertProjectSharedMutationForHostPath(filePath);
         const workerAuthority = userId ? await resolveWorkerFileAuthorityForHostPath(filePath) : undefined;
         if (workerAuthority) {
           await uploadWorkerProjectFile({ authority: workerAuthority, actorUserId: userId, sourcePath: file.path, sizeBytes: file.size });
@@ -4920,126 +5234,14 @@ router.post('/files/upload', handleProjectMulterUpload, withProjectUploadCleanup
 });
 
 // ───── Chat File Upload (saves to .temp-uploads/ first, finalized on send) ─────
-router.post('/files/chat-upload', upload.array('files', UPLOAD_MAX_FILES), async (req, res) => {
-  try {
-    const files = req.files as Express.Multer.File[];
-    if (!files || files.length === 0) return res.status(400).json({ error: 'No files provided' });
-
-    // Determine temp upload directory. Project-scoped uploads should live inside
-    // the project from the first byte, not in workspace/.temp-uploads, so image
-    // previews and later AI [file: ...] references stay within the project ACL.
-    // Global temp remains only as admin/operator fallback when no projectId exists.
-    const projectId = req.body?.projectId;
-    let uploadDir = path.join(TEMP_UPLOADS_DIR, 'global');
-    if (projectId) {
-      try {
-        const { getProject } = await import('../services/pm/project-manager.js');
-        const project = await getProject(projectId);
-        if (project?.rootPath) {
-          uploadDir = path.join(project.rootPath, 'uploads', '.temp');
-        }
-      } catch {}
-    }
-    fs.mkdirSync(uploadDir, { recursive: true });
-
-    const results: { name: string; path: string; size?: number; mimeType?: string; error?: string }[] = [];
-
-    for (const file of files) {
-      // Deduplicate: add timestamp prefix to avoid collisions
-      // Allow Unicode letters/numbers (Korean, Japanese, etc.) while blocking path-unsafe chars
-      const safeName = `${Date.now()}-${file.originalname.replace(/[^\p{L}\p{N}._-]/gu, '_')}`;
-      const filePath = path.join(uploadDir, safeName);
-      try {
-        writeFileBinary(filePath, file.buffer, uploadDir);
-        results.push({ name: file.originalname, path: filePath, size: file.size, mimeType: file.mimetype });
-      } catch (err: any) {
-        results.push({ name: file.originalname, path: '', error: err.message });
-      }
-    }
-
-    res.json({ results });
-  } catch (error: any) {
-    res.status(500).json({ error: error.message });
-  }
+router.post('/files/chat-upload', async (_req, res) => {
+  return res.status(410).json({ error: 'Legacy chat upload is retired. Use session attachments; publish to shared Agent files explicitly.' });
 });
 
-// ───── Finalize temp uploads: move from .temp-uploads/ to permanent uploads/ ─────
-router.post('/files/finalize-uploads', async (req, res) => {
-  try {
-    const { tempPaths, projectId } = req.body;
-    if (!Array.isArray(tempPaths) || tempPaths.length === 0) {
-      return res.status(400).json({ error: 'tempPaths array required' });
-    }
-
-    const userId = (req as any).user?.userId;
-    const role = (req as any).user?.role;
-
-    // Determine permanent upload directory.
-    // 2026-05-02: Members MUST supply a projectId (so the upload lands under
-    // workspace/projects/<p>/uploads/). The legacy global UPLOADS_DIR is
-    // admin/operator-only because it's outside any project's ACL boundary.
-    let permanentDir = UPLOADS_DIR;
-    if (projectId) {
-      try {
-        const { getProject } = await import('../services/pm/project-manager.js');
-        const project = await getProject(projectId);
-        if (project?.rootPath) {
-          permanentDir = path.join(project.rootPath, 'uploads');
-          fs.mkdirSync(permanentDir, { recursive: true });
-        }
-      } catch {}
-    }
-    if (userId && !(await isPathWritableByRole(permanentDir, userId, role || 'member'))) {
-      return res.status(403).json({
-        error: 'Access denied: cannot finalize uploads to this folder. Pass a projectId you are a member of.',
-      });
-    }
-
-    const projectTempDir = path.join(permanentDir, '.temp');
-    const allowedTempRoots = [path.resolve(TEMP_UPLOADS_DIR), path.resolve(projectTempDir)];
-    const isAllowedTempPath = (candidate: string) => {
-      const resolvedCandidate = path.resolve(candidate);
-      return allowedTempRoots.some((root) => resolvedCandidate.startsWith(root + path.sep));
-    };
-
-    const results: { tempPath: string; newPath: string; error?: string }[] = [];
-
-    for (const tempPath of tempPaths) {
-      // Security: ensure tempPath is either the legacy global temp upload path
-      // or this project's uploads/.temp path.
-      const resolved = path.resolve(tempPath);
-      if (!isAllowedTempPath(resolved)) {
-        results.push({ tempPath, newPath: '', error: 'Invalid temp path' });
-        continue;
-      }
-      if (!fs.existsSync(resolved)) {
-        results.push({ tempPath, newPath: '', error: 'File not found' });
-        continue;
-      }
-      const fileName = path.basename(resolved);
-      const newPath = path.join(permanentDir, fileName);
-      try {
-        fs.renameSync(resolved, newPath);
-        results.push({ tempPath, newPath });
-      } catch {
-        // Cross-device fallback: copy + delete
-        try {
-          fs.copyFileSync(resolved, newPath);
-          fs.unlinkSync(resolved);
-          results.push({ tempPath, newPath });
-        } catch (e2: any) {
-          results.push({ tempPath, newPath: '', error: e2.message });
-        }
-      }
-    }
-
-    res.json({ results });
-  } catch (error: any) {
-    res.status(500).json({ error: error.message });
-  }
+router.post('/files/finalize-uploads', async (_req, res) => {
+  return res.status(410).json({ error: 'Legacy chat upload is retired. Use session attachments; publish to shared Agent files explicitly.' });
 });
 
-// ───── Delete a single temp upload ─────
 router.delete('/files/temp-upload', async (req, res) => {
   try {
     const tempPath = (req.query.path as string) || req.body?.path;
@@ -5764,95 +5966,6 @@ router.get('/files/cad-preview', async (req, res) => {
   }
 });
 
-// ───── CAD Workbench QA (beta) ─────
-router.post('/files/cad-qa', async (req, res) => {
-  try {
-    if (!isCadRenderEnabled()) {
-      return res.status(501).json({ error: 'CAD Workbench is not enabled on this Tower instance' });
-    }
-    if (!(config.towerRole === 'full' || process.env.CAD_WORKBENCH_BETA === 'true')) {
-      return res.status(404).json({ error: 'CAD Workbench beta is not enabled' });
-    }
-
-    const filePath = expandHome(req.body?.path as string);
-    const readable = await assertReadableFileForPreview(req, filePath);
-    if (!readable.ok) return res.status(readable.status).json({ error: readable.error });
-
-    const ext = path.extname(filePath).toLowerCase();
-    if (ext !== '.dxf') {
-      return res.status(400).json({ error: 'CAD Workbench beta currently supports .dxf only. DWG requires a separate conversion/renderer decision.' });
-    }
-
-    const userId = (req as any).user?.userId;
-    const role = (req as any).user?.role;
-    const projectsRoot = path.resolve(path.join(config.workspaceRoot, 'projects'));
-    const resolvedFile = path.resolve(filePath);
-    if (!resolvedFile.startsWith(projectsRoot + path.sep)) {
-      return res.status(400).json({ error: 'CAD Workbench outputs must stay inside a Tower project' });
-    }
-    const relFromProjects = path.relative(projectsRoot, resolvedFile);
-    const projectSlug = relFromProjects.split(path.sep)[0];
-    const projectRoot = path.join(projectsRoot, projectSlug);
-    const workCadRoot = path.join(projectRoot, 'work', 'cad');
-    if (isDotfileDenied(workCadRoot)) return res.status(403).json({ error: 'Access denied: system path' });
-    if (userId && !(await isPathWritableByRole(workCadRoot, userId, role || 'member'))) {
-      return res.status(403).json({ error: 'Access denied: cannot write CAD Workbench artifacts in this project' });
-    }
-
-    const safeBase = path.basename(filePath, ext).replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80) || 'drawing';
-    const stamp = new Date().toISOString().replace(/[-:.TZ]/g, '').slice(0, 14);
-    const jobDir = path.join(workCadRoot, `${safeBase}-qa-${stamp}`);
-    await fsPromises.mkdir(jobDir, { recursive: true });
-
-    const cliPath = path.resolve(process.cwd(), 'packages/backend/cad-workbench/cad_workbench.py');
-    const { execFile } = await import('child_process');
-    const result = await new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
-      execFile('python3', [cliPath, 'qa', filePath, '--out-dir', jobDir, '--width', '2400', '--height', '1800'], { timeout: 120_000, maxBuffer: 10 * 1024 * 1024 }, (error, stdout, stderr) => {
-        if (error) {
-          const err = new Error(stderr || stdout || error.message) as Error & { stdout?: string; stderr?: string };
-          err.stdout = stdout;
-          err.stderr = stderr;
-          reject(err);
-          return;
-        }
-        resolve({ stdout, stderr });
-      });
-    });
-
-    const qaPath = path.join(jobDir, 'qa.json');
-    const qa = JSON.parse(await fsPromises.readFile(qaPath, 'utf-8'));
-    res.json({
-      ok: true,
-      renderer: qa?.renderer ?? null,
-      status: qa?.status ?? null,
-      warnings: qa?.warnings ?? [],
-      artifacts: {
-        dir: jobDir,
-        qa: qaPath,
-        source: path.join(jobDir, 'source.dxf'),
-        previewFull: path.join(jobDir, 'preview.full.png'),
-        previewContent: path.join(jobDir, 'preview.content.png'),
-        aiBrief: path.join(jobDir, 'ai-brief.md'),
-        textIndex: path.join(jobDir, 'text-index.json'),
-        layerSummary: path.join(jobDir, 'layer-summary.json'),
-        blockIndex: path.join(jobDir, 'block-index.json'),
-        candidateReport: path.join(jobDir, 'candidate-report.json'),
-        cadModel: path.join(jobDir, 'cad-model.json'),
-        cadGeometryManifest: path.join(jobDir, 'cad-geometry', 'manifest.json'),
-        cadGeometryOverview: path.join(jobDir, 'cad-geometry', 'overview.json'),
-        cadGeometryUnsupportedSummary: path.join(jobDir, 'cad-geometry', 'unsupported-summary.json'),
-        candidateReportMd: path.join(jobDir, 'candidate-report.md'),
-        rfqIntake: path.join(jobDir, 'rfq-intake.md'),
-      },
-      qa,
-      stdout: result.stdout,
-    });
-  } catch (error: any) {
-    console.error('[cad-workbench-qa] error:', error.message);
-    res.status(500).json({ error: 'CAD Workbench QA failed: ' + error.message, stderr: error.stderr });
-  }
-});
-
 // ───── File Serve (for pin iframe) ─────
 router.get('/files/serve', async (req, res) => {
   try {
@@ -5931,6 +6044,50 @@ router.get('/files/serve', async (req, res) => {
       sqlite: 'application/vnd.sqlite3',
       sqlite3: 'application/vnd.sqlite3',
     };
+
+    const workerAuthority = userId && !isTempUploadPreview
+      ? await resolveWorkerFileAuthorityForHostPath(filePath)
+      : undefined;
+    if (workerAuthority) {
+      const abortController = new AbortController();
+      req.once('aborted', () => abortController.abort());
+      const upstream = await openWorkerProjectFileStream({
+        authority: workerAuthority,
+        actorUserId: userId,
+        range: !isDownload && ext && binaryTypes[ext] ? req.headers.range : undefined,
+        signal: abortController.signal,
+      });
+      const contentRange = upstream.headers.get('content-range');
+      const contentLength = upstream.headers.get('content-length');
+      if (upstream.status === 416) {
+        if (contentRange) res.setHeader('Content-Range', contentRange);
+        res.status(416).end();
+        return;
+      }
+      res.status(upstream.status);
+      res.setHeader('Content-Type', (ext && binaryTypes[ext]) || (isDownload ? 'application/octet-stream' : 'text/plain; charset=utf-8'));
+      res.setHeader('Content-Disposition', contentDispositionHeader(isDownload ? 'attachment' : 'inline', fileName));
+      const acceptRanges = upstream.headers.get('accept-ranges');
+      if (acceptRanges) res.setHeader('Accept-Ranges', acceptRanges);
+      if (contentRange) res.setHeader('Content-Range', contentRange);
+      if (contentLength) res.setHeader('Content-Length', contentLength);
+      if (isDownload) {
+        appendFileTransferEventSafe({
+          actorUserId: userId,
+          direction: 'download',
+          transferKind: 'single',
+          paths: [filePath],
+          itemCount: 1,
+          totalBytes: contentLength ? Number(contentLength) : null,
+        });
+      }
+      if (!upstream.body) {
+        res.end();
+        return;
+      }
+      Readable.fromWeb(upstream.body as any).on('error', error => res.destroy(error)).pipe(res);
+      return;
+    }
 
     // Download mode: stream file as attachment regardless of type. Do not buffer
     // large videos in Node or the browser before the native save dialog starts.
@@ -6092,16 +6249,13 @@ router.get('/config', (_req, res) => {
     },
     agentFirstEnabled: config.agentFirstEnabled,
     aiServicesEnabled: config.aiServicesEnabled,
-    workspaceAppsEnabled: config.workspaceAppsEnabled,
-    workspaceAppsMode: config.workspaceAppsMode,
     harnessAdministrationEnabled: config.towerRole === 'full',
     inlineEditEnabled: config.inlineEditEnabled,
     turnRewindEnabled: config.turnRewindEnabled,
     previewDirectEditEnabled: config.previewDirectEditEnabled,
     betaWorkbenchEnabled: isSkillWorkbenchEnabled(),
-    // Dev-first CAD Workbench beta. This only exposes UI affordances; actual
-    // project use still depends on the Runtime Box image/tooling being present.
-    cadWorkbenchBetaEnabled: config.towerRole === 'full' || process.env.CAD_WORKBENCH_BETA === 'true',
+    // Optional CAD vertical. Basic DXF/DWG preview remains controlled separately
+    // by TOWER_CAD_RENDER_ENABLED and does not expose Workbench affordances.
   });
 });
 
@@ -6775,26 +6929,41 @@ router.get('/projects/:id/agent-home', async (req, res) => {
   } catch (err:any) { res.status(500).json({ error: err?.message || 'failed to load agent home' }); }
 });
 
+router.get('/projects/search', async (req, res) => {
+  try {
+    const userId = (req as any).user?.userId as number | undefined;
+    const role = String((req as any).user?.role || 'member');
+    const search = String(req.query.q || '').trim();
+    if (!userId) return res.status(401).json({ error: 'auth required' });
+    if (search.length < 2) return res.status(400).json({ error: 'q (2+ chars) required' });
+    res.json({ projects: await searchAccessibleProjects(userId, role, search) });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || 'project search failed' });
+  }
+});
+
 router.get('/projects', async (req, res) => {
   const userId = (req as any).user?.userId;
   const role = (req as any).user?.role;
   const projects = await getProjects(userId, role);
   const ids = projects.map((project:any)=>project.id);
-  const [counts,usage,careerRows,membershipRows,recentWorkRows] = ids.length ? await Promise.all([
+  const [counts,usage,careerRows,membershipRows,recentWorkRows,sessionRows] = ids.length ? await Promise.all([
     query<any>(`SELECT project_id,COUNT(DISTINCT user_id)::int member_count FROM project_members WHERE project_id=ANY($1::text[]) GROUP BY project_id`, [ids]),
     query<any>(`SELECT s.project_id,DATE_TRUNC('day',m.created_at)::date AS usage_day,COUNT(*)::int AS turns FROM messages m JOIN sessions s ON s.id=m.session_id WHERE s.project_id=ANY($1::text[]) AND m.role='user' AND m.created_at>=CURRENT_DATE-INTERVAL '13 days' GROUP BY s.project_id,DATE_TRUNC('day',m.created_at)::date ORDER BY s.project_id,usage_day`, [ids]),
     query<any>(`SELECT p.id project_id,(SELECT COUNT(DISTINCT workstream_key) FROM work_ledger_records w WHERE w.project_id=p.id AND w.status='completed')::int completed_workstreams,(SELECT COUNT(*) FROM process_events e WHERE e.project_id=p.id AND e.source_type='skill_invocation' AND e.event_type='step_completed')::int successful_skill_invocations FROM projects p WHERE p.id=ANY($1::text[])`, [ids]),
     query<any>(`SELECT p.id project_id,p.user_id creator_user_id,pm.role membership_role,pm.added_at FROM projects p LEFT JOIN project_members pm ON pm.project_id=p.id AND pm.user_id=$2 WHERE p.id=ANY($1::text[])`, [ids,userId]),
     query<any>(`SELECT project_id,MAX(updated_at) last_worked_at FROM sessions WHERE project_id=ANY($1::text[]) AND user_id=$2 AND COALESCE(archived,0)=0 GROUP BY project_id`, [ids,userId]),
-  ]) : [[],[],[],[],[]];
+    query<any>(`SELECT s.project_id,COUNT(*)::int session_count,MAX(s.updated_at) last_session_at FROM sessions s WHERE s.project_id=ANY($1::text[]) AND COALESCE(s.archived,0)=0 AND (s.parent_session_id IS NULL OR s.label IN ('spawned','agent','conversation_branch')) AND (s.room_id IS NULL OR s.label='channel_ai') AND (s.user_id IS NULL OR s.user_id=$2 OR s.visibility='project') GROUP BY s.project_id`, [ids,userId]),
+  ]) : [[],[],[],[],[],[]];
   const byProject = new Map(counts.map((row:any)=>[row.project_id,Number(row.member_count)||0]));
+  const sessionByProject = new Map(sessionRows.map((row:any)=>[row.project_id,{sessionCount:Number(row.session_count)||0,lastSessionAt:row.last_session_at||null}]));
   const usageByProject = new Map<string,Map<string,number>>();
   const membershipByProject = new Map(membershipRows.map((row:any)=>[row.project_id,{creatorUserId:Number(row.creator_user_id)||null,membershipRole:row.membership_role,invitedAt:row.added_at}]));
   const recentWorkByProject = new Map(recentWorkRows.map((row:any)=>[row.project_id,row.last_worked_at]));
   const careerByProject = new Map(careerRows.map((row:any)=>[row.project_id,{completedWorkstreams:Number(row.completed_workstreams)||0,successfulSkillInvocations:Number(row.successful_skill_invocations)||0}]));
   for(const row of usage){const map=usageByProject.get(row.project_id)||new Map<string,number>();map.set(new Date(row.usage_day).toISOString().slice(0,10),Number(row.turns)||0);usageByProject.set(row.project_id,map);}
   const today=new Date();today.setUTCHours(0,0,0,0);
-  res.json(projects.map((project:any)=>{const map=usageByProject.get(project.id)||new Map<string,number>();const dailyTurns=Array.from({length:7},(_,index)=>{const day=new Date(today);day.setUTCDate(day.getUTCDate()-6+index);const key=day.toISOString().slice(0,10);return{day:key,turns:map.get(key)||0};});const previous7=Array.from({length:7},(_,index)=>{const day=new Date(today);day.setUTCDate(day.getUTCDate()-13+index);return map.get(day.toISOString().slice(0,10))||0;}).reduce((sum,value)=>sum+value,0);const recent7=dailyTurns.reduce((sum,item)=>sum+item.turns,0);const careerMetrics=(careerByProject.get(project.id)||{completedWorkstreams:0,successfulSkillInvocations:0}) as AgentCareerMetrics;const careerLevel=highestAgentCareerLevel((project.agent?.careerLevel||'intern') as AgentCareerLevel,deriveAgentCareerLevel(careerMetrics));const agent=project.agent?{...project.agent,careerLevel}:project.agent;return{...project,agent,...(membershipByProject.get(project.id)||{}),invitedByOther:(membershipByProject.get(project.id)?.creatorUserId||null)!==userId,lastWorkedAt:recentWorkByProject.get(project.id)||null,memberCount:Math.max(1,byProject.get(project.id)||0),careerMetrics,recentUsage:{recent7,previous7,changePercent:previous7?Math.round(((recent7-previous7)/previous7)*100):null,dailyTurns}};}));
+  res.json(projects.map((project:any)=>{const map=usageByProject.get(project.id)||new Map<string,number>();const dailyTurns=Array.from({length:7},(_,index)=>{const day=new Date(today);day.setUTCDate(day.getUTCDate()-6+index);const key=day.toISOString().slice(0,10);return{day:key,turns:map.get(key)||0};});const previous7=Array.from({length:7},(_,index)=>{const day=new Date(today);day.setUTCDate(day.getUTCDate()-13+index);return map.get(day.toISOString().slice(0,10))||0;}).reduce((sum,value)=>sum+value,0);const recent7=dailyTurns.reduce((sum,item)=>sum+item.turns,0);const careerMetrics=(careerByProject.get(project.id)||{completedWorkstreams:0,successfulSkillInvocations:0}) as AgentCareerMetrics;const careerLevel=highestAgentCareerLevel((project.agent?.careerLevel||'intern') as AgentCareerLevel,deriveAgentCareerLevel(careerMetrics));const agent=project.agent?{...project.agent,careerLevel}:project.agent;return{...project,agent,...(membershipByProject.get(project.id)||{}),...(sessionByProject.get(project.id)||{sessionCount:0,lastSessionAt:null}),invitedByOther:(membershipByProject.get(project.id)?.creatorUserId||null)!==userId,lastWorkedAt:recentWorkByProject.get(project.id)||null,memberCount:Math.max(1,byProject.get(project.id)||0),careerMetrics,recentUsage:{recent7,previous7,changePercent:previous7?Math.round(((recent7-previous7)/previous7)*100):null,dailyTurns}};}));
 });
 
 router.get('/channel-agents', async (req, res) => {
@@ -6856,6 +7025,11 @@ router.post('/projects', async (req, res) => {
     }
     if (agentProfile && typeof agentProfile === 'object' && !config.agentFirstEnabled) {
       return res.status(404).json({ error: 'Agent-first feature is not enabled' });
+    }
+    try { assertOrdinaryAgentCreationAuthority(agentProfile?.authorityPolicy); }
+    catch { return res.status(403).json({ error: 'Platform execution authority requires a separate platform-admin configuration' }); }
+    if (rootPath !== undefined && role !== 'admin') {
+      return res.status(403).json({ error: 'Custom storage roots require platform administration' });
     }
     const project = await createProject(name.trim(), userId, { description, rootPath, color, spaceId: spaceId ?? null, slug });
 
@@ -6937,10 +7111,11 @@ router.get('/agent-characters/readiness', async (req, res) => {
     const role = (req as any).user?.role;
     if (!userId) return res.status(401).json({ error: 'auth required' });
     const projectId = String(req.query.projectId || '');
-    if (!projectId || (!isPrivilegedRole(role) && !(await isProjectMember(projectId, userId)))) {
+    if (!projectId || !(await isProjectMember(projectId, userId))) {
       return res.status(403).json({ error: 'character readiness is unavailable for this project' });
     }
-    const ready = await hasProjectApiKeyCredential({ projectId, envName: 'OPENAI_IMAGE_API_KEY' });
+    const gateway = await resolveGatewayApiClient({ actorUserId: userId, projectId, apiId: 'openai-image' }).catch(() => null);
+    const ready = gateway !== null;
     res.json({ ready, provider: 'openai-image', reason: ready ? 'ready' : 'connection_required' });
   } catch {
     res.status(503).json({ ready: false, provider: 'openai-image', reason: 'readiness_unavailable' });
@@ -6954,7 +7129,7 @@ router.post('/agent-characters/generate', async (req, res) => {
     if (!userId) return res.status(401).json({ error: 'auth required' });
     if (role === 'guest' || role === 'viewer') return res.status(403).json({ error: 'this role cannot generate teammate characters' });
     const projectId = String(req.body?.projectId || '');
-    if (!projectId || (!isPrivilegedRole(role) && !(await isProjectMember(projectId, userId)))) {
+    if (!projectId || !(await isProjectMember(projectId, userId))) {
       return res.status(403).json({ error: '이 Project에서는 얼굴을 생성할 수 없습니다.' });
     }
     const generated = await generateAgentCharacter({ projectId, userId, prompt: String(req.body?.prompt || '') });
@@ -6976,23 +7151,48 @@ router.patch('/projects/:id/agent-profile', async (req, res) => {
     if (!isPrivilegedRole(role) && (!userId || !(await isProjectOwner(req.params.id, userId)))) return res.status(403).json({ error: 'only owner, admin or operator can update teammate' });
     const clean = (value: unknown, max: number) => typeof value === 'string' ? value.trim().slice(0, max) || null : null;
     const profile = req.body || {};
+    if (typeof profile !== 'object' || Array.isArray(profile)) return res.status(400).json({ error: 'Invalid agent profile' });
+    const textFields = ['displayName', 'face', 'role', 'tagline', 'promise'];
+    for (const field of textFields) {
+      if (Object.prototype.hasOwnProperty.call(profile, field) && typeof profile[field] !== 'string' && profile[field] !== null) {
+        return res.status(400).json({ error: `Invalid ${field}` });
+      }
+    }
+    if (Object.prototype.hasOwnProperty.call(profile, 'displayName') && (typeof profile.displayName !== 'string' || !profile.displayName.trim() || profile.displayName.trim().length > 120)) {
+      return res.status(400).json({ error: 'displayName must contain 1–120 characters' });
+    }
     const disabledSkills = Array.isArray(profile.disabledSkills)
       ? Array.from(new Set(profile.disabledSkills.filter((item: unknown): item is string => typeof item === 'string').map((item: string) => item.trim()).filter(Boolean))).slice(0, 500)
       : null;
+    // Legacy wire/storage key: `superuser` means Agent Operator access, not OS root.
+    const superuser = profile.superuser === true;
+    if (typeof profile.superuser === 'boolean' && !['admin', 'operator'].includes(role)) {
+      return res.status(403).json({ error: 'Only admins and operators can change Agent execution authority' });
+    }
     await execute(
-      `INSERT INTO project_agent_profiles(project_id,display_name,face,role,tagline,promise,tool_policy)
-       VALUES($1,$2,$3,$4,$5,$6,CASE WHEN $7::jsonb IS NULL THEN '{}'::jsonb ELSE jsonb_build_object('disabledSkills',$7::jsonb) END)
+      `INSERT INTO project_agent_profiles(project_id,display_name,face,role,tagline,promise,tool_policy,authority_policy)
+       VALUES($1,$2,$3,$4,$5,$6,CASE WHEN $7::jsonb IS NULL THEN '{}'::jsonb ELSE jsonb_build_object('disabledSkills',$7::jsonb) END,jsonb_build_object('superuser',$8::boolean))
        ON CONFLICT(project_id) DO UPDATE SET
-         display_name=EXCLUDED.display_name,
-         face=EXCLUDED.face,
-         role=EXCLUDED.role,
-         tagline=EXCLUDED.tagline,
-         promise=EXCLUDED.promise,
+         display_name=CASE WHEN $10::boolean THEN EXCLUDED.display_name ELSE project_agent_profiles.display_name END,
+         face=CASE WHEN $11::boolean THEN EXCLUDED.face ELSE project_agent_profiles.face END,
+         role=CASE WHEN $12::boolean THEN EXCLUDED.role ELSE project_agent_profiles.role END,
+         tagline=CASE WHEN $13::boolean THEN EXCLUDED.tagline ELSE project_agent_profiles.tagline END,
+         promise=CASE WHEN $14::boolean THEN EXCLUDED.promise ELSE project_agent_profiles.promise END,
          tool_policy=CASE WHEN $7::jsonb IS NULL THEN project_agent_profiles.tool_policy ELSE project_agent_profiles.tool_policy || jsonb_build_object('disabledSkills',$7::jsonb) END,
+         authority_policy=CASE WHEN $9::boolean THEN project_agent_profiles.authority_policy || jsonb_build_object('superuser',$8::boolean) ELSE project_agent_profiles.authority_policy END,
          instruction_version=project_agent_profiles.instruction_version+1,
          updated_at=NOW()`,
-      [req.params.id, clean(profile.displayName,120), clean(profile.face,160), clean(profile.role,240), clean(profile.tagline,500), clean(profile.promise,500), disabledSkills ? JSON.stringify(disabledSkills) : null],
+      [req.params.id, clean(profile.displayName,120), clean(profile.face,160), clean(profile.role,240), clean(profile.tagline,500), clean(profile.promise,500), disabledSkills ? JSON.stringify(disabledSkills) : null, superuser, typeof profile.superuser === 'boolean', ...textFields.map((field) => Object.prototype.hasOwnProperty.call(profile, field))],
     );
+    if (typeof profile.superuser === 'boolean') {
+      // Secret-free operational audit of a successfully persisted explicit assignment.
+      // Repeated saves are assignments too; do not infer a transition from a racy pre-read.
+      console.info('[operator-access-audit]', JSON.stringify({
+        event: 'operator_access_assigned', projectId: req.params.id,
+        actorUserId: userId, actorRole: role, enabled: superuser,
+        effectiveFrom: 'next-turn', recordedAt: new Date().toISOString(),
+      }));
+    }
     const project = await getProject(req.params.id);
     if (!project) return res.status(404).json({ error: 'project not found' });
     res.json(project);
@@ -7007,8 +7207,12 @@ router.patch('/projects/:id', async (req, res) => {
     // admin/operator 는 모든 프로젝트 수정 가능 (2026-05-04 결정)
     if (!isPrivilegedRole(role) && userId) {
       if (!(await isProjectOwner(req.params.id as string, userId))) {
-        return res.status(403).json({ error: 'only owner, admin or operator can update project' });
+        return res.status(403).json({ error: 'only invited owner can update project' });
       }
+    }
+    if (!userId) return res.status(401).json({ error: 'Authentication required' });
+    if (('rootPath' in req.body || 'root_path' in req.body) && role !== 'admin') {
+      return res.status(403).json({ error: 'Storage authority changes require platform administration' });
     }
     const project = await updateProject(req.params.id as string, req.body);
     if (!project) return res.status(404).json({ error: 'project not found' });
@@ -7027,7 +7231,7 @@ async function retireProjectRoute(req: any, res: any) {
     const role = req.user?.role;
     const projectId = req.params.id as string;
     if (!Number.isInteger(userId) || userId <= 0) return res.status(401).json({ error: 'Auth required' });
-    if (!isPrivilegedRole(role) && !(await isProjectOwner(projectId, userId))) {
+    if (!(await isProjectOwner(projectId, userId))) {
       return res.status(403).json({ error: 'only owner, admin or operator can retire an agent' });
     }
     const members = await getProjectMembers(projectId).catch(() => []);
@@ -7053,12 +7257,28 @@ router.post('/projects/:id/retire', retireProjectRoute);
 // Compatibility boundary: old clients now retire instead of hard-deleting.
 router.delete('/projects/:id', retireProjectRoute);
 
+router.post('/admin/agents/:id/join', async (req, res) => {
+  try {
+    const userId = (req as any).user?.userId;
+    if (!userId || !isAdminOrOperator((req as any).user?.role)) return res.status(403).json({ error: 'admin/operator only' });
+    const result = await joinAgentAsAdministrator(req.params.id as string, userId);
+    if (result.changed && result.ownerId && result.ownerId !== userId) {
+      const { notify } = await import('../services/notification-hub.js');
+      await notify(result.ownerId, null, 'agent_membership', '관리자가 에이전트에 참여했습니다', `${result.name}: ${(req as any).user.username || 'administrator'}가 일반 구성원으로 참여했습니다.`, { projectId: req.params.id }).catch(() => {});
+    }
+    res.json({ joined: result.joined, changed: result.changed, role: result.role });
+  } catch (err: any) { res.status(err.status || 500).json({ error: err.message }); }
+});
+
 router.get('/admin/agents', async (req, res) => {
   try {
     const role = (req as any).user?.role;
     if (!isAdminOrOperator(role)) return res.status(403).json({ error: 'admin/operator only' });
     const status = req.query.status === 'retired' ? 'retired' : 'active';
-    res.json({ status, agents: await listAdminAgents(status) });
+    const agents = await listAdminAgents(status);
+    const memberships = await query<{ project_id: string }>('SELECT project_id FROM project_members WHERE user_id=$1', [(req as any).user.userId]);
+    const joined = new Set(memberships.map(m => m.project_id));
+    res.json({ status, agents: agents.map(a => ({ ...a, isMember: joined.has(a.id) })) });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
@@ -7119,7 +7339,7 @@ router.post('/projects/:id/restore', async (req, res) => {
     const role = (req as any).user?.role;
     const projectId = req.params.id as string;
     if (!Number.isInteger(userId) || userId <= 0) return res.status(401).json({ error: 'Auth required' });
-    if (!isPrivilegedRole(role) && !(await isProjectOwner(projectId, userId))) {
+    if (!(await isProjectOwner(projectId, userId))) {
       return res.status(403).json({ error: 'only owner, admin or operator can restore an agent' });
     }
     const project = await restoreProject(projectId);
@@ -7153,10 +7373,10 @@ router.post('/projects/:id/members', async (req, res) => {
   const role = (req as any).user?.role;
   const projectId = req.params.id as string;
 
-  // 2026-05-04: admin/operator 는 owner 가 아니어도 멤버 add 가능
-  // (decisions/2026-05-04-five-role-model.md — 회사 운영자가 인력 배치 책임)
-  if (!isPrivilegedRole(role) && !(await isProjectOwner(projectId, userId))) {
-    return res.status(403).json({ error: 'only owner, admin or operator can add members' });
+  // Invitation is collaborative: active project owners/members may invite.
+  // Use write membership so viewer/guest and non-members cannot grant access.
+  if (!userId || !(await isProjectMember(projectId, userId, 'write'))) {
+    return res.status(403).json({ error: 'only project members can add members' });
   }
 
   const { userId: targetUserId } = req.body;
@@ -7189,8 +7409,8 @@ router.delete('/projects/:id/members/:uid', async (req, res) => {
   const targetUserId = parseInt(req.params.uid as string);
 
   // 2026-05-04: admin/operator 는 owner 가 아니어도 멤버 remove 가능
-  if (!isPrivilegedRole(role) && !(await isProjectOwner(projectId, userId))) {
-    return res.status(403).json({ error: 'only owner, admin or operator can remove members' });
+  if (!(await isProjectOwner(projectId, userId))) {
+    return res.status(403).json({ error: 'only invited owner can remove members' });
   }
 
   // Snapshot members BEFORE removal so we can notify the one being kicked.
@@ -7301,22 +7521,11 @@ router.get('/tasks/meta', async (req, res) => {
 
 router.post('/tasks', async (req, res) => {
   try {
-    const { title, description, cwd, engine, model, scheduledAt, scheduleCron, scheduleEnabled, workflow, parentTaskId, projectId, reportPolicy } = req.body;
+    const { title, description, cwd, engine, model, workflow, parentTaskId, projectId, reportPolicy } = req.body;
     if (!title || !cwd) return res.status(400).json({ error: 'title and cwd required' });
-    // Validate cron interval range (1..10080 min) — reject early so a malformed
-    // cron from API/AI can't sit in DB and silently fail at scheduler tick.
-    if (scheduleCron) {
-      try {
-        const parsed = typeof scheduleCron === 'string' ? JSON.parse(scheduleCron) : scheduleCron;
-        const { validateCron } = await import('../services/task/task-scheduler.js');
-        validateCron(parsed);
-      } catch (cronErr: any) {
-        return res.status(400).json({ error: cronErr.message });
-      }
+    if (req.body?.scheduledAt !== undefined || req.body?.scheduleCron !== undefined || req.body?.scheduleEnabled !== undefined) {
+      return res.status(410).json({ error: 'LEGACY_TASK_SCHEDULE_RETIRED: use the Automation Registry' });
     }
-    const schedule = (scheduledAt || scheduleCron || scheduleEnabled)
-      ? { scheduledAt, scheduleCron, scheduleEnabled }
-      : undefined;
     // Whitelist policy values — reject anything else so a typo can't
     // silently degrade to DB DEFAULT.
     const VALID_POLICIES = ['silent', 'notification'] as const;
@@ -7325,7 +7534,7 @@ router.post('/tasks', async (req, res) => {
     // through to createTask's default 'claude'. Added 2026-05-17 (W2).
     const VALID_ENGINES = ['claude', 'pi', 'local'] as const;
     const safeEngine = VALID_ENGINES.includes(engine) ? engine : undefined;
-    const task = await createTask(title, description || '', cwd, (req as any).user?.userId, model, schedule, workflow, parentTaskId, projectId, undefined, safePolicy, safeEngine);
+    const task = await createTask(title, description || '', cwd, (req as any).user?.userId, model, undefined, workflow, parentTaskId, projectId, undefined, safePolicy, safeEngine);
     // Broadcast to all connected clients so kanban boards update in real-time
     broadcast({ type: 'task_created', task });
     res.json(task);
@@ -7342,15 +7551,8 @@ router.patch('/tasks/:id', async (req, res) => {
       const access = await canAccessTask(req.params.id as string, userId, role);
       if (!access.allowed) return res.status(access.status).json({ error: access.message });
     }
-    // Same cron validation as POST — PATCH can replace scheduleCron too.
-    if (req.body?.scheduleCron) {
-      try {
-        const parsed = typeof req.body.scheduleCron === 'string' ? JSON.parse(req.body.scheduleCron) : req.body.scheduleCron;
-        const { validateCron } = await import('../services/task/task-scheduler.js');
-        validateCron(parsed);
-      } catch (cronErr: any) {
-        return res.status(400).json({ error: cronErr.message });
-      }
+    if (req.body?.scheduledAt !== undefined || req.body?.scheduleCron !== undefined || req.body?.scheduleEnabled !== undefined) {
+      return res.status(410).json({ error: 'LEGACY_TASK_SCHEDULE_RETIRED: use the Automation Registry' });
     }
     const task = await updateTask(req.params.id as string, req.body);
     if (!task) return res.status(404).json({ error: 'task not found' });
@@ -7428,83 +7630,6 @@ router.post('/tasks/reorder', async (req, res) => {
       if (!access.allowed) return res.status(access.status).json({ error: access.message });
     }
     await reorderTasks(taskIds, status);
-    res.json({ success: true });
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ── History (archived sessions + tasks) ──────────────────
-router.get('/history', async (req, res) => {
-  try {
-    const userId = (req as any).user?.userId;
-    const role = (req as any).user?.role;
-    const sessions = await getArchivedSessions(userId, role);
-    const tasks = await getArchivedTasks(userId);
-    res.json({ sessions, tasks });
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-router.post('/sessions/:id/restore', async (req, res) => {
-  try {
-    const userId = (req as any).user?.userId;
-    const role = (req as any).user?.role;
-    if (userId) {
-      const access = await canDeleteSession(req.params.id, userId, role);
-      if (!access.allowed) return res.status(access.status).json({ error: access.message });
-    }
-    const ok = await restoreSession(req.params.id as string);
-    if (!ok) return res.status(404).json({ error: 'session not found' });
-    res.json({ success: true });
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-router.delete('/sessions/:id/permanent', async (req, res) => {
-  try {
-    const userId = (req as any).user?.userId;
-    const role = (req as any).user?.role;
-    if (userId) {
-      const access = await canDeleteSession(req.params.id, userId, role);
-      if (!access.allowed) return res.status(access.status).json({ error: access.message });
-    }
-    const ok = await permanentlyDeleteSession(req.params.id as string);
-    if (!ok) return res.status(404).json({ error: 'session not found' });
-    res.json({ success: true });
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-router.post('/tasks/:id/restore', async (req, res) => {
-  try {
-    const userId = (req as any).user?.userId;
-    const role = (req as any).user?.role;
-    if (userId) {
-      const access = await canAccessTask(req.params.id as string, userId, role);
-      if (!access.allowed) return res.status(access.status).json({ error: access.message });
-    }
-    const ok = await restoreTask(req.params.id as string);
-    if (!ok) return res.status(404).json({ error: 'task not found' });
-    res.json({ success: true });
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-router.delete('/tasks/:id/permanent', async (req, res) => {
-  try {
-    const userId = (req as any).user?.userId;
-    const role = (req as any).user?.role;
-    if (userId) {
-      const access = await canAccessTask(req.params.id as string, userId, role);
-      if (!access.allowed) return res.status(access.status).json({ error: access.message });
-    }
-    const ok = await permanentlyDeleteTask(req.params.id as string);
-    if (!ok) return res.status(404).json({ error: 'task not found' });
     res.json({ success: true });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -8006,11 +8131,16 @@ router.get('/publish/status', authMiddleware, async (req, res) => {
     // while membership rows use DB project UUIDs. Convert before filtering.
     const { loadProjectFolderKeyMap } = await import('../services/publishing/project-display.js');
     const folderById = await loadProjectFolderKeyMap();
-    const allowed = new Set(membershipProjectIds.map((id) => folderById[id] || id));
-    status.sites = status.sites.filter((s: any) => s.project && allowed.has(s.project));
-    status.apps = status.apps.filter((a: any) => a.project && allowed.has(a.project));
+    const { scopePublications } = await import('../services/publishing/project-scope.js');
+    if (req.query.projectId !== undefined && (typeof req.query.projectId !== 'string' || !req.query.projectId)) {
+      return res.status(400).json({ error: 'Invalid projectId' });
+    }
+    const selectedProjectId = typeof req.query.projectId === 'string' ? req.query.projectId : undefined;
+    status.sites = scopePublications(status.sites, folderById, membershipProjectIds, selectedProjectId);
+    status.apps = scopePublications(status.apps, folderById, membershipProjectIds, selectedProjectId);
+    const visibleKeys = new Set([...status.sites, ...status.apps].map(item => item.project));
     status.projects = Object.fromEntries(
-      Object.entries(status.projects).filter(([projectKey]) => allowed.has(projectKey)),
+      Object.entries(status.projects).filter(([projectKey]) => visibleKeys.has(projectKey)),
     );
 
     res.json(status);
@@ -8283,7 +8413,7 @@ router.post('/deploy', authMiddleware, async (req, res) => {
     const requestedTarget = target || 'local';
     if (config.towerRole === 'managed' && requestedTarget !== 'local') {
       // Explicit external/dynamic deploys still route through the Central Publish Gateway.
-      const result = await publishViaGateway({ name, sourceDir: absSourceDir, type: undefined, target: requestedTarget, port, description });
+      const result = await atDeployStage('gateway', () => publishViaGateway({ name, sourceDir: absSourceDir, type: undefined, target: requestedTarget, port, description }));
       res.json(result);
     } else {
       // Local static publish copies into published/sites on this VM. This is the default
@@ -8291,7 +8421,7 @@ router.post('/deploy', authMiddleware, async (req, res) => {
       const result = await deploy({ name, sourceDir: absSourceDir, target: requestedTarget, port, env, description, access, slug });
       res.json(result);
     }
-  } catch (err: any) { res.status(500).json({ error: err.message }); }
+  } catch (err: any) { res.status(500).json(deployErrorResponse(err)); }
 });
 
 // List all deployments
@@ -8464,7 +8594,10 @@ router.get('/schedules/:id/runs', authMiddleware, async (req, res) => {
 
     const limit = parseInt(req.query.limit as string) || 20;
     const runs = await getAutomationRuns(id, Math.min(limit, 100));
-    res.json(runs);
+    const { sanitizeAutomationRunEvidence } = await import('../services/task/automation-results.js');
+    const { isUnverifiedAiSpawn } = await import('../services/task/automation-result-reference.js');
+    const safeRuns = await Promise.all(runs.map(async run => ({ ...(await sanitizeAutomationRunEvidence(run, automation, (req as any).user.userId, (req as any).user.role || 'member')).run, outcomeUnverified: isUnverifiedAiSpawn(run, automation) || undefined })));
+    res.json(safeRuns);
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 
@@ -8485,7 +8618,7 @@ import { canAccessAutomationJob, isScheduleOperator } from '../services/task/sch
 import { authorizeAutomationMutation } from '../services/task/automation-mutation-policy.js';
 import { applyLegacyAutomationConfig, authorizeLegacyDirectAutomationApply } from '../services/task/automation-legacy-direct-apply.js';
 import { classifyAutomationPatch } from '../services/task/automation-patch-policy.js';
-import { automationYamlDraft, evaluateAutomationConditionV1, materializeAutomationYamlV1, suggestAutomationYamlEditV1, validateAutomationYamlV1 } from '../../shared/automation-yaml.js';
+import { automationYamlDraft, evaluateAutomationConditionV1, isUnsupportedAutomationYamlInstructionV1, materializeAutomationChangeV1, suggestAutomationYamlEditV1, validateAutomationYamlV1 } from '../../shared/automation-yaml.js';
 
 router.post('/automations/validate-yaml', authMiddleware, async (req, res) => {
   try {
@@ -8581,7 +8714,7 @@ router.post('/automations/:id/editor-thread', authMiddleware, async (req, res) =
     const access = await canAccessAutomationJob(automation, userId, role, 'propose');
     if (!access.allowed) return res.status(access.status || 403).json({ error: access.message || 'forbidden' });
 
-    const bootstrapContent = [{ type: 'text', text: `이 자동화의 AI thread입니다.\n\n대상: ${automation.name}\n\n제가 도울 수 있는 일:\n- 이 자동화가 언제 실행되고 무엇을 하는지 쉽게 설명\n- 정상/실패/경고 상황에서 언제 조용히 넘어가고 언제 알려줄지 정리\n- AI가 개입해야 하는 조건과 보고 위치 점검\n- 변경안을 먼저 요약하고, 승인 후 반영\n\n예: “정상일 때는 조용히 넘어가고, 3번 연속 실패하면 알려줘”처럼 말해 주세요.` }];
+    const bootstrapContent = [{ type: 'text', text: `이 자동화의 설정을 검토하는 대화입니다.\n\n대상: ${automation.name}\n\n제가 도울 수 있는 일:\n- 현재 실행 시각과 단일 작업을 설명\n- 기존 반복 간격·프롬프트 변경안을 만들고 적용 전에 검증\n- 조건부 AI·맞춤 보고처럼 아직 예약 실행에 연결되지 않은 요청은 적용 불가로 안내\n\n예: “30분마다 실행 중인 자동화를 15분마다 실행하도록 검토해줘.”` }];
 
     if (automation.sessionId) {
       const existing = await getSession(automation.sessionId);
@@ -8651,9 +8784,16 @@ router.post('/automations/:id/editor-thread-message', authMiddleware, async (req
     await saveMessage(session.id, { id: uuidv4(), role: 'user', content: [{ type: 'text', text: instruction }], metadata: { automationId: id, kind: 'automation-editor-request' } });
 
     const fallback = suggestAutomationYamlEditV1(yaml, instruction);
+    if (isUnsupportedAutomationYamlInstructionV1(instruction)) {
+      await saveMessage(session.id, {
+        id: uuidv4(), role: 'assistant', content: [{ type: 'text', text: fallback.summary }],
+        metadata: { automationId: id, kind: 'automation-editor-suggestion', source: 'fallback' },
+      });
+      return res.json({ ...fallback, session, source: 'fallback' });
+    }
     const raw = await runUtilityTextTask({
       prompt: `Current automation YAML:\n---\n${yaml}\n---\nUser request:\n${instruction}\n\nReturn revised YAML and a short Korean summary as strict JSON only.`,
-      systemPrompt: 'You are an automation-scoped YAML editor for Tower. Return ONLY compact JSON: {"yaml":"...","summary":"..."}. Preserve unknown fields and required sections: version, trigger, run, condition, ai, report. Never add secrets. Use Korean for summary.',
+      systemPrompt: 'You are an automation-scoped YAML editor for Tower. Return ONLY compact JSON: {"yaml":"...","summary":"..."}. Only version, name, description, trigger and run are executable in YAML v1. Never add condition, ai, report or unknown fields; unsupported requests must be explained, not encoded as active configuration. Never add secrets. Use Korean for summary.',
       model: getModelDefaults().session,
       fallbackText: JSON.stringify({ yaml: fallback.yaml, summary: fallback.summary }),
       timeoutMs: 20_000,
@@ -8696,7 +8836,8 @@ router.post('/automations/:id/suggest-yaml-edit', authMiddleware, async (req, re
     if (!instruction.trim()) return res.status(400).json({ error: 'instruction required' });
 
     const fallback = suggestAutomationYamlEditV1(yaml, instruction);
-    const systemPrompt = `You edit Tower automation YAML v1. Return ONLY compact JSON: {"yaml":"...","summary":"..."}. Do not use markdown. Preserve unknown fields. The YAML must keep version: 1 and the sections trigger, run, condition, ai, report. Never add secrets. Use Korean for summary.`;
+    if (isUnsupportedAutomationYamlInstructionV1(instruction)) return res.json(fallback);
+    const systemPrompt = `You edit Tower automation YAML v1. Return ONLY compact JSON: {"yaml":"...","summary":"..."}. Do not use markdown. Only version, name, description, trigger and run are executable. Never add condition, ai, report or unknown fields; explain unsupported requests instead. Never add secrets. Use Korean for summary.`;
     const prompt = `Current automation YAML:\n---\n${yaml}\n---\nUser request in Korean or English:\n${instruction}\n\nReturn revised YAML and a short Korean summary.`;
     const raw = await runUtilityTextTask({
       prompt,
@@ -8744,7 +8885,7 @@ router.post('/automations/:id/apply-yaml', authMiddleware, async (req, res) => {
     const validation = validateAutomationYamlV1(yaml);
     if (!validation.ok) return res.status(400).json({ error: 'invalid automation yaml', validation });
 
-    const materialized = materializeAutomationYamlV1(yaml);
+    const materialized = materializeAutomationChangeV1(yaml, automation);
     const mutationPolicy = await authorizeAutomationMutation({
       actor: { userId, role },
       existing: automation,
@@ -8806,26 +8947,11 @@ router.post('/automations/:id/apply-yaml', authMiddleware, async (req, res) => {
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 
-router.post('/automations/:id/full-dry-run', authMiddleware, async (req, res) => {
-  try {
-    const id = req.params.id as string;
-    const userId = (req as any).user?.userId;
-    const role = (req as any).user?.role;
-    if (!userId) return res.status(401).json({ error: 'unauthorized' });
-
-    const automation = await getAutomation(id);
-    if (!automation) return res.status(404).json({ error: 'not found' });
-    const access = await canAccessAutomationJob(automation, userId, role, 'run');
-    if (!access.allowed) return res.status(access.status || 403).json({ error: access.message || 'forbidden' });
-
-    const yaml = typeof req.body?.yaml === 'string' && req.body.yaml.trim()
-      ? req.body.yaml
-      : automationYamlDraft(automation);
-    const { runAutomationObserveOnly } = await import('../services/task/automation-runners.js');
-    const observe = await runAutomationObserveOnly(automation);
-    const condition = evaluateAutomationConditionV1(yaml, observe.stdoutText || null);
-    res.json({ observe, condition, wouldCallAi: condition.aiNeeded, wouldReport: condition.aiNeeded });
-  } catch (err: any) { res.status(500).json({ error: err.message }); }
+// Retired: despite its name this endpoint ran the saved shell/script/webhook.
+// Never execute a stored job through a dry-run/preview URL. Use the explicit
+// run-now flow instead; it records a Run and applies the run authorization.
+router.post('/automations/:id/full-dry-run', authMiddleware, (_req, res) => {
+  res.status(410).json({ error: 'Full dry-run is retired because it could execute the saved automation. Use Run Now for an actual execution.', replacement: '/api/automations/:id/run-now' });
 });
 
 router.post('/automations/:id/condition-dry-run', authMiddleware, async (req, res) => {
@@ -8852,22 +8978,9 @@ router.post('/automations/:id/condition-dry-run', authMiddleware, async (req, re
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 
-router.post('/automations/:id/observe-dry-run', authMiddleware, async (req, res) => {
-  try {
-    const id = req.params.id as string;
-    const userId = (req as any).user?.userId;
-    const role = (req as any).user?.role;
-    if (!userId) return res.status(401).json({ error: 'unauthorized' });
-
-    const automation = await getAutomation(id);
-    if (!automation) return res.status(404).json({ error: 'not found' });
-    const access = await canAccessAutomationJob(automation, userId, role, 'run');
-    if (!access.allowed) return res.status(access.status || 403).json({ error: access.message || 'forbidden' });
-
-    const { runAutomationObserveOnly } = await import('../services/task/automation-runners.js');
-    const result = await runAutomationObserveOnly(automation);
-    res.json(result);
-  } catch (err: any) { res.status(500).json({ error: err.message }); }
+// Retired alongside full-dry-run: observe was a real command/webhook execution.
+router.post('/automations/:id/observe-dry-run', authMiddleware, (_req, res) => {
+  res.status(410).json({ error: 'Observe dry-run is retired because it could execute the saved automation. Use Run Now for an actual execution.', replacement: '/api/automations/:id/run-now' });
 });
 
 router.post('/automations/:id/save-yaml', authMiddleware, async (req, res) => {
@@ -8881,7 +8994,7 @@ router.post('/automations/:id/save-yaml', authMiddleware, async (req, res) => {
     if (!automation) return res.status(404).json({ error: 'not found' });
     const access = await canAccessAutomationJob(automation, userId, role, 'edit');
     if (!access.allowed) return res.status(access.status || 403).json({ error: access.message || 'forbidden' });
-    if (!automation.projectId) return res.status(400).json({ error: 'YAML source of truth requires a project automation' });
+    if (!automation.projectId) return res.status(400).json({ error: 'YAML file export requires a project automation' });
 
     const project = await getProject(automation.projectId);
     if (!project?.rootPath) return res.status(404).json({ error: 'project not found' });
@@ -8903,10 +9016,24 @@ router.post('/automations/:id/save-yaml', authMiddleware, async (req, res) => {
     await fsPromises.mkdir(path.dirname(filePath), { recursive: true });
     const stamp = new Date().toISOString().replace(/[:.]/g, '-');
     const historyDir = path.join(project.rootPath, 'automations', '.history', slug);
-    await fsPromises.mkdir(historyDir, { recursive: true });
-    await fsPromises.writeFile(path.join(historyDir, `${stamp}.yaml`), yaml, 'utf-8');
-    await fsPromises.writeFile(filePath, yaml, 'utf-8');
-    res.json({ ok: true, path: filePath, relativePath, historyPath: path.join(historyDir, `${stamp}.yaml`), validation });
+    const historyPath = path.join(historyDir, `${stamp}-${uuidv4()}.yaml`);
+    try {
+      // Legacy file export is not an automation config apply. Never replace a
+      // collaborator's existing YAML, even if the caller supplied a slug.
+      await fsPromises.writeFile(filePath, yaml, { encoding: 'utf-8', flag: 'wx' });
+    } catch (err: any) {
+      if (err?.code === 'EEXIST') return res.status(409).json({ error: 'YAML file already exists; choose another slug. The automation configuration was not changed.', configApplied: false, sourceOfTruth: false });
+      throw err;
+    }
+    try {
+      await fsPromises.mkdir(historyDir, { recursive: true });
+      await fsPromises.writeFile(historyPath, yaml, { encoding: 'utf-8', flag: 'wx' });
+    } catch (err: any) {
+      // The new export may exist even if history failed. Do not delete it or
+      // claim a complete save; the caller can inspect the reported path.
+      return res.status(500).json({ error: 'YAML export was created but history recording failed', path: filePath, configApplied: false, sourceOfTruth: false });
+    }
+    res.status(201).json({ ok: true, path: filePath, relativePath, historyPath, validation, configApplied: false, sourceOfTruth: false });
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 
@@ -9201,7 +9328,24 @@ router.get('/automations/:id/runs/:runId/process-map', authMiddleware, async (re
     const runs = await getAutomationRuns(id, 100);
     const run = runs.find((r) => r.id === runId);
     if (!run) return res.status(404).json({ error: 'run not found' });
-    res.json(await getAutomationRunProcessMap(automation, run));
+    const { sanitizeAutomationRunEvidence } = await import('../services/task/automation-results.js');
+    const { run: safeRun } = await sanitizeAutomationRunEvidence(run, automation, (req as any).user.userId, (req as any).user.role || 'member');
+    // A private Session must not be re-exposed through Process Map evidence.
+    if (JSON.stringify(safeRun) !== JSON.stringify(run)) {
+      return res.status(403).json({ error: 'Run evidence requires access to its Session' });
+    }
+    const map = await getAutomationRunProcessMap(automation, safeRun, {
+      userId: (req as any).user.userId, role: (req as any).user.role || 'member',
+    });
+    const sessionIds = new Set<string>();
+    const collect = (ids: unknown) => { if (Array.isArray(ids)) ids.forEach(id => { if (typeof id === 'string') sessionIds.add(id); }); };
+    collect(map.sourceRefs.sessionIds);
+    map.nodes.forEach(node => collect(node.evidence?.sessionIds));
+    for (const sessionId of sessionIds) {
+      const sessionAccess = await canAccessSession(sessionId, (req as any).user.userId, (req as any).user.role || 'member');
+      if (!sessionAccess.allowed) return res.status(403).json({ error: 'Process Map evidence requires Session access' });
+    }
+    res.json(map);
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 
@@ -9213,9 +9357,18 @@ router.get('/automations/:id/runs', authMiddleware, async (req, res) => {
     if (!automation) return res.status(404).json({ error: 'not found' });
     const access = await canAccessAutomationJob(automation, (req as any).user?.userId, (req as any).user?.role);
     if (!access.allowed) return res.status(access.status || 403).json({ error: access.message || 'forbidden' });
-    const limit = parseInt(req.query.limit as string) || 20;
-    const runs = await getAutomationRuns(id, Math.min(limit, 100));
-    res.json(runs);
+    const rawLimit = req.query.limit;
+    if (rawLimit !== undefined && (typeof rawLimit !== 'string' || !/^[1-9]\d*$/.test(rawLimit) || Number(rawLimit) > 100)) {
+      return res.status(400).json({ error: 'limit must be between 1 and 100' });
+    }
+    const runs = await getAutomationRuns(id, rawLimit === undefined ? 20 : Number(rawLimit));
+    const { sanitizeAutomationRunEvidence } = await import('../services/task/automation-results.js');
+    const { isUnverifiedAiSpawn } = await import('../services/task/automation-result-reference.js');
+    const safeRuns = await Promise.all(runs.map(async run => ({
+      ...(await sanitizeAutomationRunEvidence(run, automation, (req as any).user.userId, (req as any).user.role || 'member')).run,
+      outcomeUnverified: isUnverifiedAiSpawn(run, automation) ? true : undefined,
+    })));
+    res.json(safeRuns);
   } catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 
@@ -9280,7 +9433,7 @@ router.post('/proactive/fire', authMiddleware, async (req, res) => {
   }
 });
 
-// ───── Fleet Management (admin/operator/customer_manager scoped) ─────
+// ───── Fleet Management (admin/operator) ─────
 import {
   getCustomers, getCustomer, getFleetStatus, getVMStatus,
   checkWorkspace, getLogs, remoteExec,
@@ -9291,7 +9444,7 @@ function fleetAccessMiddleware(req: any, res: any, next: any) {
     return res.status(404).json({ error: 'Fleet management is not enabled for this deployment profile' });
   }
   const user = req.user;
-  if (!user || !['admin', 'operator', 'customer_manager'].includes(user.role)) {
+  if (!user || !['admin', 'operator'].includes(user.role)) {
     return res.status(403).json({ error: 'Fleet access required' });
   }
   next();
@@ -9318,7 +9471,7 @@ router.get('/admin/fleet', fleetAccessMiddleware, async (req, res) => {
   }
 });
 
-// Fleet status. admin/operator see all, customer_manager sees mapped VMs only.
+// Fleet status. admin/operator see all registered self-hosted servers.
 router.get('/admin/fleet/status', fleetAccessMiddleware, async (req, res) => {
   try {
     const allowed = await listAccessibleCustomerNames((req as any).user?.userId, (req as any).user?.role);

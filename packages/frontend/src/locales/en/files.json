@@ -1,4 +1,6 @@
 {
+  "cutItems": "Cut",
+  "pasteItemsHere": "Paste {{count}} items here",
   "agentCreation": {
     "newAiTeammate": "New AI teammate",
     "heading": "Describe the teammate you want to work with",
@@ -6,10 +8,22 @@
     "starters": {
       "label": "Which teammate should you start with?",
       "description": "Choose the closest starting point to fill in a face, name, and expected role. You can edit everything below.",
-      "research": { "name": "Research Partner", "expertise": "Research the web and project materials, separate claims from evidence and uncertainty, and prepare sourced answers." },
-      "editor": { "name": "Document Editor", "expertise": "Clarify the conclusion and reader for reports, proposals, and guides, then create a draft that is ready to review." },
-      "operations": { "name": "Operations Coordinator", "expertise": "Organize progress, decisions, risks, and next actions, and turn repeated work into an executable operating flow." },
-      "guide": { "name": "Knowledge Guide", "expertise": "Read project documents and decisions, explain them to new participants, and avoid guessing when the source is incomplete." }
+      "research": {
+        "name": "Research Partner",
+        "expertise": "Research the web and project materials, separate claims from evidence and uncertainty, and prepare sourced answers."
+      },
+      "editor": {
+        "name": "Document Editor",
+        "expertise": "Clarify the conclusion and reader for reports, proposals, and guides, then create a draft that is ready to review."
+      },
+      "operations": {
+        "name": "Operations Coordinator",
+        "expertise": "Organize progress, decisions, risks, and next actions, and turn repeated work into an executable operating flow."
+      },
+      "guide": {
+        "name": "Knowledge Guide",
+        "expertise": "Read project documents and decisions, explain them to new participants, and avoid guessing when the source is incomplete."
+      }
     },
     "name": "Name",
     "namePlaceholder": "For example: Customer proposal partner",
@@ -330,6 +344,8 @@
   "loadingQuickEdit": "Loading Quick Edit…",
   "loadingHtmlEditor": "Loading HTML editor…",
   "projectHome": {
+    "publishingHub": "Publishing Hub",
+    "backToTeam": "← AI team",
     "relativeTime": {
       "justNow": "Just now",
       "minutesAgo": "{{count}} minutes ago",
@@ -345,6 +361,11 @@
     "notesLoadFailed": "Could not load the note list.",
     "teammateUpdateFailed": "Could not update the teammate.",
     "teammateSaved": "Teammate settings saved.",
+    "operatorAccess": "Operator access",
+    "operatorAccessBadge": "OPERATOR ACCESS",
+    "operatorAccessDescription": "This Agent uses the operator-only native Operator execution environment for Tower code, the organization workspace, and Project execution work. Saving applies it to the next run in existing sessions.",
+    "operatorAccessEnabled": "Operator access is on. Existing sessions will use the Operator execution environment from their next run.",
+    "operatorAccessDisabled": "Operator access is off. Existing sessions will return to the Project execution environment from their next run.",
     "characterGenerateFailed": "Could not generate the character.",
     "noProjectTitle": "No project is available to open",
     "noProjectDescription": "Once a project exists, its home brings together the wiki, instructions, and files.",
@@ -364,6 +385,7 @@
     "openSession": "Open session",
     "noLinkedSessions": "No linked sessions.",
     "editTeammate": "Edit AI teammate",
+    "agentSettings": "Agent settings",
     "close": "Close",
     "name": "Name",
     "role": "Role",
@@ -417,7 +439,7 @@
     "searchProjectFiles": "Search file names and paths across the project",
     "allFiles": "All files",
     "publishedMaterials": "Published materials",
-    "sharedFiles": "Shared files",
+    "sharedFiles": "External share links",
     "createdSkills": "Created skills",
     "sharedSkills": "Shared skills",
     "selectedCount": "{{count}} selected",
@@ -519,6 +541,7 @@
     "open": "Open",
     "newFolderHere": "New folder here",
     "newFileHere": "New file here",
+    "openFolder": "Open this folder",
     "moveToFolder": "Open this folder",
     "selectionActions": "Selection actions",
     "currentPath": "Current path",
@@ -552,6 +575,7 @@
     "aiTeammate": "AI teammate",
     "joinedTeam": "Joined team {{date}}",
     "startedCollaboration": "Started working with me {{date}}",
+    "viewAllConversations": "View all conversations",
     "assignWork": "Assign work",
     "settings": "Settings",
     "externalDeployComingSoon": "Deployment coming soon",
@@ -669,7 +693,12 @@
     "quoteToggle": "Toggle quote",
     "codeBlock": "Code block",
     "attach": "Insert image or file",
-    "hint": "Markdown · Ctrl/Cmd+S to save · Paste or drop images"
+    "hint": "Markdown · Ctrl/Cmd+S to save · Paste or drop images",
+    "link": "Link",
+    "list": "List",
+    "todo": "Checkbox",
+    "quote": "Quote",
+    "code": "Code"
   },
   "cad": {
     "kind": {
@@ -743,7 +772,8 @@
     "toggleSuffix": " · Enable with the toggle",
     "hideArtifacts": "Hide developer artifacts",
     "showArtifacts": "Show developer artifacts",
-    "artifactDescription": "The original is unchanged. Preview, text/layer indexes, and QA artifacts are saved under project work/cad so the AI thread can continue drawing work using this evidence."
+    "artifactDescription": "The original is unchanged. Preview, text/layer indexes, and QA artifacts are saved under project work/cad so the AI thread can continue drawing work using this evidence.",
+    "previewAlt": "CAD drawing preview"
   },
   "selection": {
     "copied": "Copied {{count}} items. Paste them in the destination folder.",
@@ -812,5 +842,12 @@
   },
   "inlineEditOutline": {
     "selection": "Selection"
+  },
+  "htmlPreview": {
+    "sourceAttached": "Source reference attached to chat",
+    "attachAgain": "Attach again",
+    "inspectHelp": "Click a rendered element to attach its exact static HTML source range to chat.",
+    "inspectingSource": "Inspecting source",
+    "inspectSource": "Inspect source"
   }
 }

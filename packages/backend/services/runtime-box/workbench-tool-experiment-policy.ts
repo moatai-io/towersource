@@ -43,9 +43,12 @@ export function isExperimentalUnifiedShellVisible(input: {
   rolloutEnabled?: boolean;
 }): boolean {
   if (!UNIFIED_SHELL_ROLES.has(input.role ?? '')) return false;
-  if (!config.experimentalWorkbenchTools.enabled) return false;
+  // An explicit database rollout enables the ordinary unified Worker shell even
+  // when experimental Workbench management tools remain globally disabled.
+  // The global flag continues to gate install/recreate mutation surfaces below.
   const projectEnabled = input.rolloutEnabled
-    ?? config.experimentalWorkbenchTools.projectIds.includes(input.projectId);
+    ?? (config.experimentalWorkbenchTools.enabled
+      && config.experimentalWorkbenchTools.projectIds.includes(input.projectId));
   if (!projectEnabled) return false;
   if (input.sessionId && isCurrentRootTurnRecovering(input.sessionId)) return false;
   return true;

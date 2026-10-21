@@ -14,48 +14,41 @@
  *       amends 2026-04-18-session-scoped-write-guard.md)
  */
 
+import { activeAdminSql } from './session-audience.js';
+import { resolveTeamSessionGate } from './team-session-policy.js';
 import path from 'path';
 import { existsSync, realpathSync } from 'fs';
 import { getAccessibleProjectIds, isProjectMember } from './project-membership-manager.js';
 import { queryOne } from '../../db/pg-repo.js';
 import { buildDamageControl, buildPathEnforcement, buildSecretGuard, type DamageCheckResult } from '../damage-control.js';
-import { hasInternalShareAccess } from '../session/session-share-manager.js';
+import { isAdminOrOperatorRole, isReadOnlyRole, isTowerRole } from '../authority/authorization-policy.js';
+
 
 const WORKSPACE_ROOT = process.env.WORKSPACE_ROOT || path.join(process.env.HOME || '/tmp', 'workspace');
 const TOWER_REPO_ROOT = path.resolve(process.env.TOWER_REPO_ROOT || path.join(process.env.HOME || '/tmp', 'tower'));
 
 /**
- * Privileged trio — see workspace 전체 (루트 + 모든 프로젝트 + uploads/published READ).
- * admin/operator 는 Tower 전역, customer_manager 는 operator-host VM (TOWER_ROLE=full)
- * 한정으로 동일한 workspace 권한.
+ * Workspace-wide operational roles — admin and operator.
+ * Both can inspect and troubleshoot across Projects. Secret reveal and security,
+ * organization, and authentication settings remain admin-only at their API boundary.
  *
  * Single source of truth for the "workspace-class" gate (used in 30+ places).
- *
- * ⚠️ Tower 전역 *관리* (decisions/docs write, AdminPanel, library publish, 모든 self-hosted server 접근)
- *    은 `isAdminOrOperator()` 를 쓴다 — customer_manager 는 자기 담당 customer 만 만진다.
- *
- * 결정: workspace/decisions/2026-05-27-operator-host-privileged-roles-and-cross-project-relaxation.md
- *      workspace/decisions/2026-05-23-customer-manager-role.md
  */
 export function isPrivilegedRole(role: string | undefined | null): boolean {
-  return role === 'admin' || role === 'operator' || role === 'customer_manager';
+  return isAdminOrOperatorRole(role);
 }
 
 /**
- * Tower 전역 관리 권한 (admin + operator). customer_manager 는 *제외* —
- * customer_manager 는 자기 담당 self-hosted server 만 관리하며 Tower 전역 정책
- * (decisions/docs, AdminPanel, library publish, 모든 self-hosted server 운영) 의 주체가 아니다.
+ * Tower 전역 운영 권한 (admin + operator).
  *
  * 사용처:
  * - `decisions/`·`docs/` write gate
- * - AdminPanel API
+ * - AdminPanel의 비밀·핵심 설정 외 운영 API
  * - `library publish` (self-hosted server 으로 skill 배포)
- * - 모든 self-hosted server 에 대한 fleet status 등 (단 fleet 자체 호출은 privileged trio 모두 가능 — 결과 scope 만 user_customer_vms 로 필터)
- *
- * 결정: workspace/decisions/2026-05-27-operator-host-privileged-roles-and-cross-project-relaxation.md
+ * - 모든 self-hosted server 에 대한 fleet status와 트러블슈팅
  */
 export function isAdminOrOperator(role: string | undefined | null): boolean {
-  return role === 'admin' || role === 'operator';
+  return isAdminOrOperatorRole(role);
 }
 
 /**
@@ -215,22 +208,163 @@ export function invalidatePathCache(userId?: number): void {
  * Check if a user can access a session (via its project_id).
  * Returns { allowed: true } or { allowed: false, status, message }.
  */
+export type SessionOwnerMutationAccessResult =
+  | { allowed: true; reason: 'owner_match' | 'privileged_role' | 'project_participant' }
+  | { allowed: false; status: number; message: string; reason: 'session_not_found' | 'owner_mismatch' | 'readonly_role' | 'team_access_denied' };
+
+export type SessionSendAccessResult = SessionOwnerMutationAccessResult;
+
+/** Mandatory current-use prerequisite for team Session read AND mutation.
+ * Exact server opt-in is a rollout guard only. Revocation never falls back to
+ * surviving Project/share rights. Channels require both room and execution label.
+ */
+async function checkCurrentTeamSessionUse(
+  row: { project_id: string | null; user_id: number | null; room_id: string | null; label: string | null },
+  userId: number,
+): Promise<{ ownerAdmission: boolean } | { allowed: false; status: number; message: string; reason: 'team_access_denied' }> {
+  if (process.env.TOWER_TEAM_WORKSPACES_ENABLED !== '1' || !row.project_id
+    || (row.room_id && ['channel_agent', 'channel_ai'].includes(row.label ?? ''))) {
+    return { ownerAdmission: false };
+  }
+  try {
+    const gate = await resolveTeamSessionGate({
+      userId, sessionOwnerId: row.user_id, agentProjectId: row.project_id, channelBound: false,
+    });
+    return { ownerAdmission: gate.kind === 'team' && gate.ownerAdmission };
+  } catch (error) {
+    if (error instanceof Error && ['TEAM_WORKSPACE_ACCESS_DENIED', 'TEAM_WORKSPACE_CONTEXT_REQUIRED'].includes(error.message)) {
+      return { allowed: false, status: 403, message: 'Access denied: current team Agent use required', reason: 'team_access_denied' };
+    }
+    throw error;
+  }
+}
+
+/**
+ * Check whether an actor may inject a new turn into a Session.
+ *
+ * This is intentionally narrower than canAccessSession(): reading a shared
+ * Session does not grant the ability to resume or steer it. Shared project conversations additionally allow current writable Agent members
+ * through canContributeSession; company management alone does not grant control.
+ */
+async function canOwnerMutateSession(
+  sessionId: string,
+  userId: number,
+  role: string,
+  actionLabel: string,
+): Promise<SessionOwnerMutationAccessResult> {
+  const row = await queryOne<{ user_id: number | null; project_id: string | null; visibility: string | null; room_id: string | null; label: string | null }>(
+    'SELECT user_id, project_id, visibility, room_id, label FROM sessions WHERE id = $1',
+    [sessionId],
+  );
+  if (!row) return { allowed: false, status: 404, message: 'Session not found', reason: 'session_not_found' };
+  if (actionLabel === 'Session message send' && row.label === 'personal_secretary') {
+    return { allowed: false, status: 403, message: 'Use private secretary conversation', reason: 'readonly_role' };
+  }
+  if (!isTowerRole(role) || isReadOnlyRole(role)) {
+    return { allowed: false, status: 403, message: 'Access denied: read-only or unknown role', reason: 'readonly_role' };
+  }
+  // Check nonowners too: a revocation must not become owner_mismatch and then
+  // regain send/write via canContributeSession's surviving Project membership.
+  const teamUse = await checkCurrentTeamSessionUse(row, userId);
+  if ('allowed' in teamUse) return teamUse;
+  if (row.user_id === userId) return { allowed: true, reason: 'owner_match' };
+  return {
+    allowed: false,
+    status: 403,
+    message: `Access denied: ${actionLabel} requires Session ownership`,
+    reason: 'owner_mismatch',
+  };
+}
+
+/** Shared Agent conversations accept contributions from current writable members.
+ * Read-only shares, private conversations and channel audiences do not grant this.
+ * Destructive administration continues to use the owner-only guard.
+ */
+async function canContributeSession(sessionId: string, userId: number, role: string, action: string): Promise<SessionOwnerMutationAccessResult> {
+  const owner = await canOwnerMutateSession(sessionId, userId, role, action);
+  if (owner.allowed || owner.reason !== 'owner_mismatch') return owner;
+  const session = await queryOne<{ project_id: string | null; visibility: string | null; room_id: string | null }>(
+    'SELECT project_id, visibility, room_id FROM sessions WHERE id = $1', [sessionId],
+  );
+  if (!session?.project_id || session.visibility !== 'project' || session.room_id) return owner;
+  const membership = await queryOne<{ role: string }>(
+    `SELECT pm.role FROM project_members pm
+      JOIN users u ON u.id = pm.user_id JOIN projects p ON p.id = pm.project_id
+      LEFT JOIN project_agent_profiles pap ON pap.project_id = p.id
+      WHERE pm.project_id = $1 AND pm.user_id = $2 AND u.disabled = 0
+        AND u.role IN ('admin', 'operator', 'member') AND COALESCE(p.archived, 0) = 0
+        AND (pap.status IS NULL OR pap.status IN ('active', 'ready'))`,
+    [session.project_id, userId],
+  );
+  return membership && ['owner', 'member'].includes(membership.role)
+    ? { allowed: true, reason: 'project_participant' } : owner;
+}
+
+export async function canSendSessionMessage(
+  sessionId: string,
+  userId: number,
+  role: string,
+): Promise<SessionSendAccessResult> {
+  return canContributeSession(sessionId, userId, role, 'Session message send');
+}
+
+/** Ordinary name/tags metadata only. Never use for visibility, execution config, or content. */
+export async function canMutateSessionMetadata(
+  sessionId: string, userId: number, role: string,
+): Promise<SessionOwnerMutationAccessResult> {
+  return canOwnerMutateSession(sessionId, userId, role, 'Session metadata');
+}
+
+/** Add or remove Session-owned content such as attachments. */
+export async function canWriteSessionContent(
+  sessionId: string,
+  userId: number,
+  role: string,
+): Promise<SessionOwnerMutationAccessResult> {
+  return canContributeSession(sessionId, userId, role, 'Session content write');
+}
+
+/** Restore checkpoints, rewind turns, or perform other destructive Session administration. */
+export async function canAdministerSession(
+  sessionId: string,
+  userId: number,
+  role: string,
+): Promise<SessionOwnerMutationAccessResult> {
+  return canOwnerMutateSession(sessionId, userId, role, 'Session administrative mutation');
+}
+
 export async function canAccessSession(
   sessionId: string,
   userId: number,
   role: string,
 ): Promise<{ allowed: true } | { allowed: false; status: number; message: string }> {
-  // 2026-05-04: admin/operator 모두 통과 (decisions/2026-05-04-five-role-model.md)
-  if (isPrivilegedRole(role)) return { allowed: true };
-
   const row = await queryOne<{ project_id: string | null; user_id: number | null; visibility: string | null; label: string | null; room_id: string | null }>(
     'SELECT project_id, user_id, visibility, label, room_id FROM sessions WHERE id = $1',
     [sessionId],
   );
   if (!row) return { allowed: false, status: 404, message: 'Session not found' };
 
-  // Session owner can always access.
+
+  if (row.label === 'personal_secretary' && row.user_id !== userId) return { allowed: false, status: 403, message: 'Private secretary session' };
+  if (!isTowerRole(role)) return { allowed: false, status: 403, message: 'Access denied' };
+  if (row.user_id !== userId && (!row.room_id || !['channel_agent', 'channel_ai'].includes(row.label ?? '')) && row.visibility !== 'project') {
+    return { allowed: false, status: 403, message: 'Access denied: private session' };
+  }
+  // Current team use precedes all owner, Project and admin read grants.
+  const teamUse = await checkCurrentTeamSessionUse(row, userId);
+  if ('allowed' in teamUse) return teamUse;
+  const channelBound = row.room_id && (row.label === 'channel_agent' || row.label === 'channel_ai');
+  if (row.project_id && !channelBound && !teamUse.ownerAdmission) {
+    const bootstrap = role === 'admin'
+      ? await queryOne<{ ok: number }>(`SELECT 1 AS ok WHERE ${activeAdminSql('$1')}`, [userId])
+      : null;
+    if (bootstrap?.ok !== 1 && !await isProjectMember(row.project_id, userId)) {
+      return { allowed: false, status: 403, message: 'Access denied: Project membership required' };
+    }
+  }
+  // Private is owner-only within the current Project audience.
   if (row.user_id === userId) return { allowed: true };
+  if (row.visibility === 'private') return { allowed: false, status: 403, message: 'Access denied: private session' };
 
   // Channel-bound Agent sessions are shared only with current channel members.
   // Their Agent Project is an execution identity, not an audience grant.
@@ -244,19 +378,11 @@ export async function canAccessSession(
   }
 
   // Check internal share access.
-  if (await hasInternalShareAccess(sessionId, userId)) return { allowed: true };
 
-  // No project → only owner, admin, or internal share. The sole legacy exception
-  // is project-less channel AI, which is intentionally shared by the room flow.
+  // No project → only owner. A channel
+  // without a room cannot establish an audience and must fail closed.
   if (!row.project_id) {
-    if (row.user_id === null && row.label === 'channel_ai') return { allowed: true };
     return { allowed: false, status: 403, message: 'Access denied: session has no project' };
-  }
-
-  // Project-scoped system sessions are visible to project members.
-  if (row.user_id === null) {
-    if (await isProjectMember(row.project_id, userId)) return { allowed: true };
-    return { allowed: false, status: 403, message: 'Access denied: not a project member' };
   }
 
   // Private user-owned sessions are not readable by other project members. This
@@ -265,10 +391,15 @@ export async function canAccessSession(
     return { allowed: false, status: 403, message: 'Access denied: private session' };
   }
 
-  // Shared project session: project membership grants read access.
-  if (await isProjectMember(row.project_id, userId)) return { allowed: true };
+  // The Project membership/admin gate above already established the audience.
+  return { allowed: true };
+}
 
-  return { allowed: false, status: 403, message: 'Access denied: not a project member' };
+/** Company-wide ordinary metadata remains discoverable without transcript access. */
+export async function canInspectSessionMetadata(
+  sessionId: string, userId: number, role: string,
+): Promise<{ allowed: true } | { allowed: false; status: number; message: string }> {
+  return canAccessSession(sessionId, userId, role);
 }
 
 /**
@@ -299,19 +430,18 @@ export async function canDeleteSession(
     };
   }
 
-  // 2026-05-04: admin/operator 모두 통과 (decisions/2026-05-04-five-role-model.md)
-  if (isPrivilegedRole(role)) return { allowed: true };
+  if (!isTowerRole(role) || isReadOnlyRole(role)) return { allowed: false, status: 403, message: 'Access denied: read-only or unknown role' };
 
-  const row = await queryOne<{ user_id: number; project_id: string | null }>(
-    'SELECT user_id, project_id FROM sessions WHERE id = $1',
+  const row = await queryOne<{ user_id: number; project_id: string | null; visibility: string | null }>(
+    'SELECT user_id, project_id, visibility FROM sessions WHERE id = $1',
     [sessionId],
   );
   if (!row) return { allowed: false, status: 404, message: 'Session not found' };
 
   if (row.user_id === userId) return { allowed: true };
 
-  // Project owners can delete any session within their project
-  if (row.project_id) {
+  // Project administration cannot erase another user's private conversation.
+  if (row.project_id && row.visibility === 'project') {
     const membership = await queryOne<{ role: string }>(
       'SELECT role FROM project_members WHERE project_id = $1 AND user_id = $2',
       [row.project_id, userId],
@@ -331,7 +461,6 @@ export async function canAccessRoom(
   userId: number,
   role: string,
 ): Promise<{ allowed: true } | { allowed: false; status: number; message: string }> {
-  if (isPrivilegedRole(role)) return { allowed: true };
 
   const row = await queryOne<{ exists: boolean; is_member: boolean }>(
     `SELECT TRUE AS exists,
@@ -357,13 +486,15 @@ export async function canCreateInProject(
   userId: number,
   role: string,
 ): Promise<{ allowed: true } | { allowed: false; status: number; message: string }> {
-  // 2026-05-04: admin/operator 모두 통과 (decisions/2026-05-04-five-role-model.md)
-  if (isPrivilegedRole(role)) return { allowed: true };
+  if (!isTowerRole(role) || isReadOnlyRole(role)) return { allowed: false, status: 403, message: 'Access denied: Agent use requires a writable role' };
   if (!projectId) return { allowed: true }; // no project = personal (allowed for now)
 
-  if (await isProjectMember(projectId, userId)) return { allowed: true };
+  const membership = await queryOne<{ role: string }>(
+    'SELECT role FROM project_members WHERE project_id = $1 AND user_id = $2', [projectId, userId],
+  );
+  if (membership?.role === 'owner' || membership?.role === 'member') return { allowed: true };
 
-  return { allowed: false, status: 403, message: 'Access denied: not a project member' };
+  return { allowed: false, status: 403, message: 'Access denied: writable project membership required' };
 }
 
 /**
@@ -375,7 +506,6 @@ export async function canAccessTask(
   role: string,
 ): Promise<{ allowed: true } | { allowed: false; status: number; message: string }> {
   // 2026-05-04: admin/operator 모두 통과 (decisions/2026-05-04-five-role-model.md)
-  if (isPrivilegedRole(role)) return { allowed: true };
 
   const row = await queryOne<{ user_id: number | null; project_id: string | null }>(
     'SELECT user_id, project_id FROM tasks WHERE id = $1',
@@ -401,7 +531,6 @@ export async function canAccessSchedule(
   userId: number,
   role: string,
 ): Promise<{ allowed: true } | { allowed: false; status: number; message: string }> {
-  if (isPrivilegedRole(role)) return { allowed: true };
 
   const row = await queryOne<{ user_id: number | null; project_id: string | null }>(
     'SELECT user_id, project_id FROM schedules WHERE id = $1',
@@ -420,7 +549,7 @@ export async function canAccessSchedule(
 
 /**
  * Get all directory paths a user is allowed to access (for AI tool enforcement).
- * Returns null for admin/operator (= unrestricted, see workspace 루트).
+ * Returns only explicitly invited Agent roots; roles do not grant filesystem access.
  *
  * For member/viewer/guest the returned list is:
  *   - own project root_paths
@@ -433,7 +562,6 @@ export async function getUserAccessiblePaths(
   userId: number,
   role: string,
 ): Promise<string[] | null> {
-  if (isPrivilegedRole(role)) return null; // unrestricted (admin + operator)
 
   // Check cache first
   const cached = getCachedPaths(userId);
@@ -651,7 +779,7 @@ export function resolveSessionProjectRoot(cwd: string | undefined): string | nul
 }
 
 /** Tools that can mutate the filesystem (direct write path). */
-const WRITE_TOOLS = new Set(['Write', 'Edit', 'NotebookEdit', 'MultiEdit']);
+const WRITE_TOOLS = new Set(['Write', 'Edit', 'NotebookEdit', 'MultiEdit', 'CreateMarkdownArtifact', 'UpdateMarkdownArtifact', 'DocumentParse']);
 
 /** Bash subcommands that mutate the filesystem — used for shallow detection. */
 const BASH_MUTATOR_RE = /\b(mkdir|touch|mv|cp|rm|tee|ln|install|rsync|chmod|chown|tar|unzip|7z|zip|gunzip)\b/;
@@ -835,7 +963,7 @@ export function buildCrossProjectReadGuard(
 ): (toolName: string, input: Record<string, unknown>) => ToolGuardResult {
   // mgmtVmBypass: admin/operator 가 프로젝트 간 운영 작업을 수행할 때 true.
   // Read/Glob/Grep 까지 통과시켜 sibling 프로젝트의 메모리/메타데이터를 조회하도록 함.
-  // customer_manager/member/viewer 는 false 라 그대로 차단.
+  // member/viewer 는 false 라 그대로 차단.
   // 결정: workspace/decisions/2026-06-05-admin-operator-cross-project-write-on-all-vms.md
   const mgmtVmBypass = opts?.mgmtVmBypass === true;
   // SDK metadata path — always blocked.
@@ -982,6 +1110,7 @@ export function buildToolGuard(opts: {
    * not by the current session project.
    */
   sessionProjectRoot?: string;
+  operatorWriteRoot?: string;
   maintenanceGrant?: CrossProjectMaintenanceToolGrant | null;
 }): ToolGuard {
   const damageCheck = buildDamageControl(opts.role);
@@ -991,7 +1120,11 @@ export function buildToolGuard(opts: {
   // Include accessiblePaths as coarse roots so the old bridge does not block
   // policy-approved shared knowledge paths before projectPathCheck can allow them.
   const coarseAllowedPaths = opts.allowedPath
-    ? Array.from(new Set([opts.allowedPath, ...((Array.isArray(opts.accessiblePaths) ? opts.accessiblePaths : []))]))
+    ? Array.from(new Set([
+        opts.allowedPath,
+        ...((Array.isArray(opts.accessiblePaths) ? opts.accessiblePaths : [])),
+        ...(opts.role === 'operator' && opts.operatorWriteRoot ? [opts.operatorWriteRoot] : []),
+      ]))
     : [];
   const coarsePathCheck = coarseAllowedPaths.length > 0
     ? buildProjectPathEnforcement(coarseAllowedPaths)
@@ -1015,9 +1148,7 @@ export function buildToolGuard(opts: {
   // current project at /workspace. Ghost-project, secret, dotfile, and damage
   // guards remain active.
   // 결정: workspace/decisions/2026-06-13-user-accessible-cross-project-file-writes.md
-  // 2026-06-23: direct Tower repo mutation is admin-only. Operators may manage
-  // services and customer/project files, but code changes under ~/tower must be
-  // performed by admin sessions.
+  // Operator exceptions require a server-resolved, current Project write root.
   const crossProjectFree = isAdminOrOperator(opts.role);
   const isTowerRepoMutation = (toolName: string, input: Record<string, unknown>): boolean => {
     const bashCommand = toolName === 'Bash' && typeof input.command === 'string'
@@ -1116,13 +1247,13 @@ export function buildToolGuard(opts: {
     //    cross-project file writes; ghostProjectGuard below still blocks
     //    unregistered workspace/projects/<x>/ creation.
 
-    // 5a. Tower repo WRITE guard — direct codebase mutation is admin-only.
-    //     Operator sessions can manage services and customer/project files, but
-    //     must not patch ~/tower directly from tools.
-    if (opts.role !== 'admin' && isTowerRepoMutation(toolName, input)) {
+    // 5a. Tower repo writes require admin or a current, scoped Operator access grant.
+    if (opts.role !== 'admin' && isTowerRepoMutation(toolName, input)
+      && !(opts.role === 'operator' && opts.operatorWriteRoot
+        && buildProjectPathEnforcement([opts.operatorWriteRoot])(toolName, input).allowed)) {
       return {
         allowed: false,
-        message: `[Access Control] Direct Tower repo writes under ${TOWER_REPO_ROOT} require admin. Use an admin session for code changes; operators should not modify the Tower repo directly.`,
+        message: `[Access Control] Direct Tower repo writes under ${TOWER_REPO_ROOT} require admin or current Operator access for the target Project.`,
       };
     }
 
@@ -1138,11 +1269,12 @@ export function buildToolGuard(opts: {
     const gpc = ghostProjectCheck(toolName, input);
     if (!gpc.allowed) return gpc;
 
-    // 6–7. File/path containment remains mandatory for members and for all
-    // structured file tools. A privileged native Bash session is the explicit
-    // host-operation surface: admin/operator may use /etc, systemd, Docker,
-    // package managers, and paths outside the Project when the task requires it.
-    // Damage, secret, ghost-project, confirmation, and audit guards above still run.
+    // 6–7. File/path containment remains mandatory for members and structured
+    // file tools. A current operatorWriteRoot adds only the registered Operator
+    // access Project to the operator's legacy coarse roots; it does not expose the
+    // rest of HOME. Privileged native Bash remains the explicit wider host-operation
+    // surface for admin/operator. Damage, secret, ghost-project, confirmation, and
+    // audit guards above still run.
     const privilegedNativeBash = toolName === 'Bash' && isAdminOrOperator(opts.role);
     if (!privilegedNativeBash) {
       // Legacy per-user path enforcement (coarse containment).
@@ -1303,7 +1435,7 @@ export function buildGhostProjectGuard(
  * ALL tools are wrapped — damage control (role-based whitelist) applies to every tool,
  * not just file/bash tools. Path extraction only runs for known file tools.
  */
-export function wrapPiTools(tools: any[], guard: ToolGuard, opts?: { projectRoot?: string }): any[] {
+export function wrapPiTools(tools: any[], guard: ToolGuard, opts?: { projectRoot?: string; resolveGuard?: (toolName: string, input: Record<string, unknown>) => Promise<ToolGuard> }): any[] {
   const normalizeToolName = (name: string) => {
     if (!name.includes('_')) return name.charAt(0).toUpperCase() + name.slice(1);
     return name
@@ -1314,7 +1446,10 @@ export function wrapPiTools(tools: any[], guard: ToolGuard, opts?: { projectRoot
   };
 
   const mapRuntimeWorkspacePath = (value: string): string => {
-    if (!opts?.projectRoot || (value !== '/workspace' && !value.startsWith('/workspace/'))) return value;
+    if (!opts?.projectRoot) return value;
+    if (value === '~' || value.startsWith('~/')) return path.resolve(process.env.HOME || '/tmp', value.slice(2));
+    if (!path.isAbsolute(value)) return path.resolve(opts.projectRoot, value);
+    if (value !== '/workspace' && !value.startsWith('/workspace/')) return value;
     const suffix = value.slice('/workspace'.length);
     const resolvedRoot = path.resolve(opts.projectRoot);
     const resolved = path.resolve(resolvedRoot, `.${suffix || ''}`);
@@ -1334,7 +1469,17 @@ export function wrapPiTools(tools: any[], guard: ToolGuard, opts?: { projectRoot
       execute: async (...execArgs: any[]) => {
         // Pi tool execute signature: (toolCallId, params, signal)
         // Custom tools may also use (toolCallId, params, signal)
-        const args = execArgs[1] ?? execArgs[0] ?? {};
+        const args = { ...(execArgs[1] ?? execArgs[0] ?? {}) };
+        // Guard and executor must see the same target, without mutating caller arguments.
+        if (['read', 'write', 'edit', 'find', 'grep', 'ls'].includes(toolName)) {
+          for (const key of ['path', 'file_path', 'notebook_path', 'output_path']) {
+            if (typeof args[key] === 'string' && !args[key].startsWith('session://attachments/')) args[key] = mapRuntimeWorkspacePath(args[key]);
+          }
+          if (Array.isArray(args.files)) args.files = args.files.map((value: unknown) =>
+            typeof value === 'string' && !value.startsWith('session://attachments/') ? mapRuntimeWorkspacePath(value) : value);
+        }
+        const normalizedExecArgs = [...execArgs];
+        normalizedExecArgs[execArgs.length > 1 ? 1 : 0] = args;
 
         // Map Pi param names → guard expected format
         const input: Record<string, unknown> = {};
@@ -1344,17 +1489,26 @@ export function wrapPiTools(tools: any[], guard: ToolGuard, opts?: { projectRoot
         if (Array.isArray(args.files)) input.files = args.files.map((p: unknown) =>
           typeof p === 'string' && !p.startsWith('session://attachments/') ? mapRuntimeWorkspacePath(p) : p,
         );
+        if (typeof args.output_path === 'string') {
+          const mappedOutput = mapRuntimeWorkspacePath(args.output_path);
+          input.files = [...(Array.isArray(input.files) ? input.files : []), mappedOutput];
+        }
         if (isBash && args.command) input.command = args.command;
 
+        // Artifact paths are explicitly relative to the registered Project, not backend cwd.
+        if (['create_markdown_artifact', 'update_markdown_artifact', 'read_markdown_artifact'].includes(toolName) && opts?.projectRoot && typeof input.file_path === 'string') {
+          input.file_path = path.resolve(opts.projectRoot, input.file_path);
+        }
         const guardName = normalizeToolName(toolName);
-        const check = guard(guardName, input);
+        const currentGuard = opts?.resolveGuard ? await opts.resolveGuard(guardName, input) : guard;
+        const check = currentGuard(guardName, input);
         if (!check.allowed) {
           return {
             content: [{ type: 'text', text: `[Access Denied] ${check.message}` }],
           };
         }
 
-        return origExecute.call(tool, ...execArgs);
+        return origExecute.call(tool, ...normalizedExecArgs);
       },
     };
   });
@@ -1372,20 +1526,88 @@ export async function getVisibleFilePaths(
   userId: number,
   role: string,
 ): Promise<{ projectPaths: string[]; publicPaths: string[]; isAdmin: boolean }> {
-  if (isPrivilegedRole(role)) {
-    return {
-      projectPaths: [], // empty = show all (admin/operator see workspace root)
-      publicPaths: [...READ_PUBLIC_DIRS, ...PRIVILEGED_DIRS],
-      isAdmin: true, // legacy field name — really means "privileged" (admin/operator)
-    };
-  }
-
   const accessiblePaths = await getUserAccessiblePaths(userId, role);
   return {
     projectPaths: accessiblePaths || [],
     publicPaths: READ_PUBLIC_DIRS, // members see only docs + decisions (read-only)
     isAdmin: false,
   };
+}
+
+/** Fresh Project membership authority for file APIs; the most specific root wins. */
+export async function isProjectMembershipPath(filePath: string, userId: number): Promise<boolean> {
+  const target = resolvePathForAccessBoundary(filePath);
+  if (isDeniedByDotfilePolicy(filePath)) return false;
+  const { query } = await import('../../db/pg-repo.js');
+  const rows = await query<{ root_path: string; role: string | null }>(
+    `SELECT p.root_path, pm.role FROM projects p
+       LEFT JOIN project_members pm ON pm.project_id = p.id AND pm.user_id = $1
+       JOIN users u ON u.id = $1 AND u.disabled = 0
+      WHERE p.root_path IS NOT NULL AND (p.archived IS NULL OR p.archived = 0)`,
+    [userId],
+  );
+  const match = rows
+    .map(row => ({ ...row, root: resolveRootForAccessBoundary(row.root_path) }))
+    .filter(row => isInsidePath(row.root, target))
+    .sort((a, b) => b.root.length - a.root.length)[0];
+  return match?.role === 'owner' || match?.role === 'member';
+}
+
+/** Company file APIs are not host filesystem browsers, even for a repo-backed Agent. */
+/** Fresh DB authority; the most specific registered root wins. Never grant system roots. */
+export async function isOperatorAccessProjectPath(filePath: string, userId: number): Promise<boolean> {
+  const target = resolvePathForAccessBoundary(filePath);
+  if (isDeniedByDotfilePolicy(filePath)) return false;
+  const home = process.env.HOME || '/tmp';
+  const blocked = ['/etc', '/var', '/proc', '/sys', '/run', '/root', '/nix',
+    path.join(TOWER_REPO_ROOT, 'data'), process.env.TOWER_DATA_DIR, process.env.DATA_DIR,
+    path.join(home, '.ssh'), path.join(home, '.config'), path.join(home, '.pi'), path.join(home, '.tower'),
+    path.join(WORKSPACE_ROOT, 'personal'), path.join(WORKSPACE_ROOT, '.personal')].filter((p): p is string => Boolean(p));
+  if (blocked.some(root => isInsidePath(resolveRootForAccessBoundary(root), target))) return false;
+  if ((/^\.env(?:\.|$)/i.test(path.basename(target)) && !['.env.example', '.env.sample', '.env.template'].includes(path.basename(target)))
+    || ['.npmrc', '.netrc', '.pypirc'].includes(path.basename(target))) return false;
+  const { query } = await import('../../db/pg-repo.js');
+  const rows = await query<{ root_path: string; enabled: boolean; status: string; archived: number | null; membership_role: string | null }>(
+    `SELECT p.root_path, p.archived, pap.status, pm.role AS membership_role, (pap.authority_policy->'superuser' = 'true'::jsonb) AS enabled
+       FROM projects p LEFT JOIN project_agent_profiles pap ON pap.project_id = p.id
+       JOIN users u ON u.id = $1 AND u.role = 'operator' AND u.disabled = 0
+       LEFT JOIN project_members pm ON pm.project_id = p.id AND pm.user_id = u.id
+      WHERE p.root_path IS NOT NULL`, [userId]);
+  const match = rows.map(row => ({ ...row, root: resolveRootForAccessBoundary(row.root_path) }))
+    .filter(row => isInsidePath(row.root, target)).sort((a, b) => b.root.length - a.root.length)[0];
+  return Boolean(match && ['owner', 'member'].includes(match.membership_role ?? '') && match.enabled === true && ['active', 'ready'].includes(match.status)
+    && (match.archived === null || match.archived === 0)
+    && ![path.parse(target).root, home, resolveRootForAccessBoundary(WORKSPACE_ROOT)].includes(match.root)
+ );
+}
+
+async function isCompanyBusinessPath(filePath: string): Promise<boolean> {
+  const target = resolvePathForAccessBoundary(filePath);
+  const home = process.env.HOME || '/tmp';
+  const platformRoots = ['/etc', '/var/lib', '/var/log', '/proc', '/sys', '/run', '/root', '/nix', TOWER_REPO_ROOT, process.env.TOWER_DATA_DIR || process.env.DATA_DIR || path.join(TOWER_REPO_ROOT, 'data'),
+    path.join(home, '.ssh'), path.join(home, '.config'), path.join(home, '.pi'),
+    path.join(home, '.tower'), path.join(WORKSPACE_ROOT, 'personal'), path.join(WORKSPACE_ROOT, '.personal')];
+  if (platformRoots.some(root => isInsidePath(resolveRootForAccessBoundary(root), target))) return false;
+  // Ordinary business names (sessions/, credentials/, .github/) are not app
+  // storage. Protect concrete runtime roots above and secret config files only.
+  const basename = path.basename(target);
+  if ((/^\.env(?:\.|$)/i.test(basename) && !['.env.example', '.env.sample', '.env.template'].includes(basename))
+    || ['.npmrc', '.netrc', '.pypirc'].includes(basename)) return false;
+  // docs/decisions are existing approved company knowledge. Legacy uploads are
+  // deliberately excluded because they can contain historical private attachments.
+  if (READ_PUBLIC_DIRS.some(root => isInsidePath(resolveRootForAccessBoundary(root), target))) return true;
+  if (isInsidePath(resolveRootForAccessBoundary(WORKSPACE_ROOT), target)
+    && !isInsidePath(resolveRootForAccessBoundary(path.join(WORKSPACE_ROOT, 'projects')), target)) return false;
+  const { query: pgQuery } = await import('../../db/pg-repo.js');
+  const projects = await pgQuery<{ root_path: string }>('SELECT root_path FROM projects WHERE root_path IS NOT NULL AND (archived IS NULL OR archived = 0)');
+  return projects.some(({ root_path }) => {
+    const root = resolveRootForAccessBoundary(root_path);
+    // Reject dangerous broad registrations such as /, HOME, workspace, or a
+    // platform checkout. They cannot turn arbitrary host/app files into business data.
+    if (root === path.parse(root).root || root === home || root === resolveRootForAccessBoundary(WORKSPACE_ROOT)) return false;
+    if (platformRoots.some(blocked => isInsidePath(root, resolveRootForAccessBoundary(blocked)) || isInsidePath(resolveRootForAccessBoundary(blocked), root))) return false;
+    return isInsidePath(root, target);
+  });
 }
 
 /**
@@ -1395,7 +1617,7 @@ export async function getVisibleFilePaths(
  *
  * Policy (2026-05-02 — workspace root isolation):
  *   1. Dotfile/system-dir denylist applies to ALL roles (incl. admin)
- *   2. admin/operator → unrestricted (workspace root visible)
+ *   2. admin → platform exception; operator → registered business roots only
  *   3. member/viewer → projects they're a member of + READ_PUBLIC_DIRS
  *      (docs, decisions). PRIVILEGED_DIRS (uploads, published) blocked.
  *      Workspace root direct files (principles.md etc) blocked.
@@ -1412,8 +1634,8 @@ export async function isPathAccessible(
   // path and the symlink-resolved target.
   if (isDeniedByDotfilePolicy(resolved)) return false;
 
-  // 2. Privileged roles see everything else
-  if (isPrivilegedRole(role)) return true;
+  // Platform exception is not inherited by company file management. Operators
+  // retain explicit Project membership in addition to their optional access Agent.
 
   const projectsDir = resolveRootForAccessBoundary(path.join(WORKSPACE_ROOT, 'projects'));
   const workspaceRoot = resolveRootForAccessBoundary(WORKSPACE_ROOT);
@@ -1441,11 +1663,11 @@ export async function isPathAccessible(
     return accessiblePaths.some(root => isInsidePath(resolveRootForAccessBoundary(root), boundaryResolved));
   }
 
-  // 6. Under projects/ → project membership check
-  const accessiblePaths = await getUserAccessiblePaths(userId, role);
-  if (accessiblePaths === null) return true; // privileged (defensive)
-
-  return accessiblePaths.some(root => isInsidePath(resolveRootForAccessBoundary(root), boundaryResolved));
+  // 6. Under projects/ → current Project membership check. File read authority
+  // must not depend on the broader AI-tool path cache: membership promotion,
+  // import, and legacy seeding can otherwise make the Project list visible while
+  // the file browser denies the same root. The most specific registered root wins.
+  return await isProjectMembershipPath(resolved, userId);
 }
 
 /**
@@ -1454,12 +1676,10 @@ export async function isPathAccessible(
  * - Dotfiles → never (anyone)
  * - Privileged → all paths writable
  * - Member → project root_paths + READ_PUBLIC_DIRS writable.
- * - Viewer/guest → READ_PUBLIC_DIRS read-only; project writes depend on role/tool guards.
+ * - Viewer/guest → never writable, even with project membership.
  *   PRIVILEGED_DIRS blocked.
  *
- * NOTE: This is the policy gate. The session-scope guard (buildSessionWriteGuard)
- * adds an orthogonal restriction for non-admin/operator sessions (writes must
- * stay inside the session's project). Both must pass.
+ * File writes use current writable membership, never a cached readable root.
  */
 export async function isPathWritableByRole(
   filePath: string,
@@ -1469,17 +1689,16 @@ export async function isPathWritableByRole(
   const resolved = path.resolve(filePath);
   const boundaryResolved = resolvePathForAccessBoundary(resolved);
   if (isDeniedByDotfilePolicy(resolved)) return false;
-  if (isPrivilegedRole(role)) return true;
+  if (!isTowerRole(role) || isReadOnlyRole(role)) return false;
 
   // Members: project roots + shared knowledge dirs. Viewer/guest: shared knowledge read-only.
-  const projectsDir = resolveRootForAccessBoundary(path.join(WORKSPACE_ROOT, 'projects'));
   const workspaceRoot = resolveRootForAccessBoundary(WORKSPACE_ROOT);
 
-  // Block writes to READ_PUBLIC_DIRS only for viewer/guest.
-  if (role === 'viewer' || role === 'guest') {
-    for (const pub of READ_PUBLIC_DIRS) {
-      const pubResolved = resolveRootForAccessBoundary(pub);
-      if (isInsidePath(pubResolved, boundaryResolved)) return false;
+  // Shared knowledge dirs are policy-defined and do not require a project-membership lookup.
+  for (const pub of READ_PUBLIC_DIRS) {
+    const pubResolved = resolveRootForAccessBoundary(pub);
+    if (isInsidePath(pubResolved, boundaryResolved)) {
+      return true;
     }
   }
   // Block writes to PRIVILEGED_DIRS for non-privileged
@@ -1487,19 +1706,23 @@ export async function isPathWritableByRole(
     const privResolved = resolveRootForAccessBoundary(priv);
     if (isInsidePath(privResolved, boundaryResolved)) return false;
   }
-  // Block writes to workspace root direct files
-  if (boundaryResolved === workspaceRoot) return false;
-  if (isInsidePath(workspaceRoot, boundaryResolved) && !isInsidePath(projectsDir, boundaryResolved)) {
-    // Outside projects/, not a public/privileged dir → check accessible roots.
-    const accessiblePaths = await getUserAccessiblePaths(userId, role);
-    if (accessiblePaths === null) return true;
-    return accessiblePaths.some(root => isInsidePath(resolveRootForAccessBoundary(root), boundaryResolved));
-  }
-
-  // Inside projects/ → project membership
-  const accessiblePaths = await getUserAccessiblePaths(userId, role);
-  if (accessiblePaths === null) return true;
-  return accessiblePaths.some(root => isInsidePath(resolveRootForAccessBoundary(root), boundaryResolved));
+  // Block writes to the workspace root itself and direct files such as principles.md.
+  if (boundaryResolved === workspaceRoot || path.dirname(boundaryResolved) === workspaceRoot) return false;
+  // Readable roots (including their cache) are not write authority. Query current
+  // membership so a downgrade/revocation affects the next file mutation. The most
+  // specific registered root wins, including a nested read-only project.
+  const { query: pgQuery } = await import('../../db/pg-repo.js');
+  const rows = await pgQuery<{ root_path: string; role: string | null }>(
+    `SELECT p.root_path, pm.role FROM projects p
+       LEFT JOIN project_members pm ON pm.project_id = p.id AND pm.user_id = $1
+      WHERE p.root_path IS NOT NULL AND (p.archived IS NULL OR p.archived = 0)`,
+    [userId],
+  );
+  const match = rows
+    .map(row => ({ ...row, root: resolveRootForAccessBoundary(row.root_path) }))
+    .filter(row => isInsidePath(row.root, boundaryResolved))
+    .sort((a, b) => b.root.length - a.root.length)[0];
+  return match?.role === 'owner' || match?.role === 'member';
 }
 
 // ─── Auto-mapping: cwd → project_id ──────────────────────────────────────────

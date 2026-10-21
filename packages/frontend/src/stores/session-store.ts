@@ -1,3 +1,4 @@
+import { towerHttpUrl } from '../features/client-connection/connection';
 import { create } from 'zustand';
 import { applyTurnTerminal, type TurnTerminalEvent, type TurnTerminalProjection } from '../features/session-run-state/turn-terminal-projection';
 import { useRoomStore } from './room-store';
@@ -33,10 +34,10 @@ export type MobileTab = 'sessions' | 'ai' | 'files' | 'edit' | 'pins' | 'board' 
  *   legacy "sessions tab" in the product sense.
  * - `rooms` is a legacy compatibility identifier for preserved internal-channel
  *   links. It is not an active navigation surface and renders retirement guidance.
- * - `files`, `prompts`, `pins`, and `history` are non-primary left-panel
+ * - `files`, `prompts`, and `pins` are non-primary left-panel
  *   utility surfaces retained for focused workflows.
  */
-export type SidebarTab = 'sessions' | 'files' | 'prompts' | 'pins' | 'rooms' | 'history';
+export type SidebarTab = 'sessions' | 'files' | 'prompts' | 'pins' | 'rooms';
 
 /**
  * Main body rendering surface.
@@ -51,7 +52,7 @@ export type SidebarTab = 'sessions' | 'files' | 'prompts' | 'pins' | 'rooms' | '
  * - `rooms` remains only so preserved `/r/` and `/rooms/` links can resolve to
  *   `RetiredChannelNotice`; new product flows must not navigate to it.
  */
-export type ActiveView = 'chat' | 'aiTeam' | 'kanban' | 'history' | 'rooms' | 'files' | 'projectFiles' | 'favorites' | 'inbox' | 'work' | 'schedules' | 'automations' | 'aiServices' | 'beta';
+export type ActiveView = 'chat' | 'aiTeam' | 'kanban' | 'rooms' | 'files' | 'projectFiles' | 'favorites' | 'inbox' | 'secretariat' | 'work' | 'schedules' | 'automations' | 'aiServices' | 'beta';
 
 /**
  * A cached "last AI turn text" per session — populated live from WebSocket
@@ -126,6 +127,8 @@ interface SessionState {
   /** Create completion attention only from an authoritative completed terminal outcome. */
   markSessionCompleted: (id: string) => void;
   markSessionRead: (id: string) => void;
+  setSessionSubscription: (id: string, subscribed: boolean) => Promise<boolean>;
+  markAiResponseRead: (id: string, sequence: number) => Promise<boolean>;
   /**
    * Write/update the cached last-turn text for a session.
    * When msgId is provided, accumulates text across multiple assistant messages
@@ -219,12 +222,14 @@ export const useSessionStore = create<SessionState>((set) => ({
     if (!projectId || initial.projectSessionsLoading.has(projectId)) return;
     if (!options?.force && initial.hydratedProjectSessionIds.has(projectId)) return;
 
+    // A list snapshot cannot delete sessions created while its request is in flight.
+    const initialIds = new Set(initial.sessions.map(session => session.id));
     set((s) => ({ projectSessionsLoading: new Set(s.projectSessionsLoading).add(projectId) }));
     try {
       const token = typeof localStorage !== 'undefined' ? localStorage.getItem('token') : null;
       const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
       const params = new URLSearchParams({ projectId });
-      const response = await fetch(`/api/sessions?${params.toString()}`, { headers });
+      const response = await fetch(towerHttpUrl(`/api/sessions?${params.toString()}`), { headers });
       if (!response.ok) throw new Error(`project session hydration failed: ${response.status}`);
       const data = await response.json().catch(() => []);
       if (!Array.isArray(data)) throw new Error('project session hydration returned a non-array payload');
@@ -232,7 +237,7 @@ export const useSessionStore = create<SessionState>((set) => ({
       set((s) => {
         const byId = new Map<string, SessionMeta>();
         for (const session of s.sessions) {
-          if (session.projectId !== projectId) byId.set(session.id, session);
+          if (session.projectId !== projectId || !initialIds.has(session.id)) byId.set(session.id, session);
         }
         for (const session of data) byId.set(session.id, session);
         const hydratedProjectSessionIds = new Set(s.hydratedProjectSessionIds);
@@ -257,15 +262,31 @@ export const useSessionStore = create<SessionState>((set) => ({
     projectSessionsLoading: new Set(),
   }),
   hydrateLatestAttentionFromServer: async () => {
+    const startedWith = useSessionStore.getState();
+    const initialUnread = new Set(startedWith.unreadSessions);
+    const initialRecentlyRead = { ...startedWith.recentlyReadSessionUntil };
     try {
       const entries = await loadLatestAttentionFromServer();
       const next = applyServerLatestAttention(entries);
       set((s) => {
-        const unreadSessions = new Set([...s.unreadSessions, ...next.unreadSessions]);
-        const recentlyReadSessionUntil = {
-          ...s.recentlyReadSessionUntil,
-          ...next.recentlyReadSessionUntil,
-        };
+        // The server is authoritative across devices. Preserve only attention
+        // changes that happened locally while this request was in flight; do
+        // not union stale persisted unread rows back into a server-side read.
+        const unreadSessions = new Set(next.unreadSessions);
+        for (const id of s.unreadSessions) {
+          if (!initialUnread.has(id)) unreadSessions.add(id);
+        }
+        for (const id of initialUnread) {
+          if (!s.unreadSessions.has(id)) unreadSessions.delete(id);
+        }
+
+        const recentlyReadSessionUntil = { ...next.recentlyReadSessionUntil };
+        for (const [id, value] of Object.entries(s.recentlyReadSessionUntil)) {
+          if (!(id in initialRecentlyRead)) recentlyReadSessionUntil[id] = value;
+        }
+        for (const id of Object.keys(initialRecentlyRead)) {
+          if (!(id in s.recentlyReadSessionUntil)) delete recentlyReadSessionUntil[id];
+        }
         for (const id of unreadSessions) delete recentlyReadSessionUntil[id];
         saveLatestAttentionState(unreadSessions, recentlyReadSessionUntil, { syncServer: false });
         return { unreadSessions, recentlyReadSessionUntil };
@@ -384,6 +405,54 @@ export const useSessionStore = create<SessionState>((set) => ({
         recentlyReadSessionUntil,
       };
     }),
+  setSessionSubscription: async (id, subscribed) => {
+    const token = typeof localStorage !== 'undefined' ? localStorage.getItem('token') : null;
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (token) headers.Authorization = `Bearer ${token}`;
+    try {
+      const response = await fetch(towerHttpUrl(`/api/sessions/${id}/subscription`), {
+        method: 'PUT',
+        headers,
+        body: JSON.stringify({ subscribed }),
+      });
+      if (!response.ok) return false;
+      const body = await response.json().catch(() => null);
+      set((s) => ({ sessions: s.sessions.map((session) => session.id === id ? {
+        ...session,
+        currentUserSubscribed: body?.state?.subscribed === true,
+        unreadAiResponse: body?.state?.unreadAiResponse === true,
+        lastFinalAiSequence: Number(body?.state?.lastFinalAiSequence ?? session.lastFinalAiSequence ?? 0),
+        lastReadAiSequence: Number(body?.state?.lastReadAiSequence ?? session.lastReadAiSequence ?? 0),
+      } : session) }));
+      return true;
+    } catch {
+      return false;
+    }
+  },
+  markAiResponseRead: async (id, sequence) => {
+    if (!Number.isSafeInteger(sequence) || sequence < 0) return false;
+    const token = typeof localStorage !== 'undefined' ? localStorage.getItem('token') : null;
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (token) headers.Authorization = `Bearer ${token}`;
+    try {
+      const response = await fetch(towerHttpUrl(`/api/sessions/${id}/read-ai-response`), {
+        method: 'PUT',
+        headers,
+        body: JSON.stringify({ sequence }),
+      });
+      if (!response.ok) return false;
+      const body = await response.json().catch(() => null);
+      set((s) => ({ sessions: s.sessions.map((session) => session.id === id ? {
+        ...session,
+        unreadAiResponse: body?.state?.unreadAiResponse === true,
+        lastFinalAiSequence: Number(body?.state?.lastFinalAiSequence ?? session.lastFinalAiSequence ?? 0),
+        lastReadAiSequence: Number(body?.state?.lastReadAiSequence ?? sequence),
+      } : session) }));
+      return true;
+    } catch {
+      return false;
+    }
+  },
   setLastTurnText: (sessionId, text, finalized = false, msgId?: string) =>
     set((s) => {
       const prev = s.lastTurnTextBySession[sessionId];

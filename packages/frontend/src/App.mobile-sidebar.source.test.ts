@@ -3,6 +3,7 @@ import path from 'path';
 import { describe, expect, it } from 'vitest';
 
 const source = fs.readFileSync(path.resolve(import.meta.dirname, './App.tsx'), 'utf8');
+const lifecycle = fs.readFileSync(path.resolve(import.meta.dirname, './hooks/useSessionLifecycle.ts'), 'utf8');
 const mobileSidebarStart = source.indexOf('{sidebarOpen && isMobile');
 const mobileSidebarEnd = source.indexOf('{sidebarOpen && !isMobile', mobileSidebarStart);
 const mobileSidebarBlock = source.slice(mobileSidebarStart, mobileSidebarEnd);
@@ -14,17 +15,18 @@ describe('mobile sidebar visual hierarchy', () => {
   });
 
   it('does not reopen the mobile drawer after creating a new conversation', () => {
-    expect(source).toContain('Do not reopen the');
-    expect(source).toContain('if (!useSessionStore.getState().isMobile)');
-    expect(source).toContain('useSessionStore.getState().setSidebarOpen(true);');
+    expect(lifecycle).toContain('Do not reopen the');
+    expect(lifecycle).toContain('if (!useSessionStore.getState().isMobile)');
+    expect(lifecycle).toContain('useSessionStore.getState().setSidebarOpen(true);');
   });
 
   it('covers the previous conversation while mobile session creation is pending', () => {
-    expect(source).toContain('const [newSessionCreating, setNewSessionCreating] = useState(false);');
-    expect(source).toContain('const newSessionCreatingRef = useRef(false);');
-    expect(source).toContain('newSessionCreatingRef.current = true;');
-    expect(source).toContain('newSessionCreatingRef.current = false;');
-    expect(source).toContain('isMobile && newSessionCreating ?');
+    expect(lifecycle).toContain('const [newSessionCreating, setNewSessionCreating] = useState(false);');
+    expect(lifecycle).toContain('const newSessionCreatingRef = useRef(false);');
+    expect(lifecycle).toContain('newSessionCreatingRef.current = true;');
+    expect(lifecycle).toContain('newSessionCreatingRef.current = false;');
+    expect(source).toContain('const mobileSessionLoadingSurface = newSessionCreating ?');
+    expect(source).toContain('mobileSessionLoading={mobileSessionLoadingSurface}');
     expect(source).toContain('data-testid="new-session-loading"');
     expect(source).toContain("t('layout:preparingNewSession')");
     expect(mobileSidebarBlock).toContain("useSessionStore.getState().setActiveView('chat');");
@@ -32,8 +34,13 @@ describe('mobile sidebar visual hierarchy', () => {
   });
 
   it('keeps the previous session selected and reports an error when creation fails', () => {
-    expect(source).toContain("toastError(t('layout:newSessionCreateFailed'))");
-    expect(source).toContain('if (!session) {');
+    expect(lifecycle).toContain("toastError(t('layout:newSessionCreateFailed'))");
+    expect(lifecycle).toContain('if (!session) {');
+  });
+
+  it('keeps the mobile app shell height-owned so content scroll does not move fixed chrome', () => {
+    expect(source).toContain('<div className="flex min-h-0 flex-1 overflow-hidden">');
+    expect(source).toContain('<main className="flex min-h-0 min-w-0 flex-1 justify-center">');
   });
 
   it('closes the drawer after mobile file-sidebar actions that open content', () => {

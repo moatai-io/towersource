@@ -223,7 +223,7 @@ async function prepareToolMount(
       '-o', 'BatchMode=yes',
       '-o', 'StrictHostKeyChecking=accept-new',
       userHost,
-      // sudo 없이 사용자 홈 외에 쓰기 — execution VM 의 toweradmin 이 ~/sandbox-tools 에 owner 권한 가져야.
+      // sudo 없이 사용자 홈 외에 쓰기 — execution VM 의 tower-user 이 ~/sandbox-tools 에 owner 권한 가져야.
       // 일단 mkdir -p 가 되는 영역으로 fallback: ~/sandbox-tools/<id>/
       // rm -rf <source>/* — tool_restart 시 멱등 갱신. tar 가 added/modified 만 덮어쓰고
       //                     deleted 파일은 stale 로 남는 문제 회피. scratch 는 보존.

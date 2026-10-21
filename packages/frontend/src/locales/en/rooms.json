@@ -158,11 +158,26 @@
   },
   "thread": {
     "noConversationYet": "No session yet",
-    "cadWorkbenchPrefix": "CAD Workbench: ",
     "automationPrefix": "Automation: ",
     "currentFilePrefix": "Current file: ",
-    "currentCadSelection": "Current CAD selection",
-    "selectionArea": "Selected area",
     "answerQuestionPlaceholder": "Type your answer…"
+  },
+  "aiPanelCopy": {
+    "justNow": "just now",
+    "minutesAgo": "{{count}}m",
+    "hoursAgo": "{{count}}h",
+    "daysAgo": "{{count}}d",
+    "newSharedThread": "New shared project thread",
+    "sharedProject": "shared project",
+    "confirmDeleteThread": "Confirm delete thread {{name}}",
+    "delete": "Delete",
+    "cancel": "Cancel",
+    "deleteThread": "Delete thread",
+    "deleteNamedThread": "Delete thread {{name}}",
+    "backToThreads": "Back to threads",
+    "stopResponse": "Stop AI panel response",
+    "stop": "Stop",
+    "projectThread": "project thread",
+    "subagent": "subagent"
   }
 }

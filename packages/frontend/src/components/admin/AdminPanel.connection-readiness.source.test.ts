@@ -3,108 +3,33 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const source = fs.readFileSync(path.join(__dirname, 'AdminPanel.tsx'), 'utf8');
+const credentials = source.slice(source.indexOf('function CredentialVaultManagement'), source.indexOf('// ───── System Tab'));
 
 describe('Connection-centered management UI contract', () => {
-  it('does not present project grant as verified Provider readiness', () => {
-    expect(source).toContain("'connected_unverified'");
-    expect(source).toContain("adminText('credentialConnections.readiness.connectedUnverified')");
-    expect(source).toContain("adminText('credentialConnections.readiness.connectedUnverifiedDescription'");
-    expect(source).not.toContain("if (status === 'connected') return { label: '정상 사용 가능'");
-  });
-
-  it('uses a service Connection as the primary user-facing surface', () => {
+  it('uses VM Vault as the Admin surface for team-shared and Agent-dedicated Credentials', () => {
     expect(source).toContain("renderTab('credentials', t('navigation.connections'))");
-    expect(source).toContain("adminText('credentialConnections.readiness.connectedUnverified')");
-    expect(source).toContain('connectionPrimaryAction');
-    expect(source).toContain('connectionPrimaryAction');
+    expect(credentials).toContain("t('credentialConnections.vmVault')");
+    expect(credentials).toContain("credential.scope === 'workspace'");
+    expect(credentials).toContain("credential.scope === 'project'");
   });
 
-  it('keeps one primary management action and hides low-level credential operations by default', () => {
-    expect(source).toContain("t('credentialConnections.advancedCredentialManagement')");
-    expect(source).toContain('showAdvanced && !isPersonalCredentialMode');
-    expect(source).toContain('handleConnectionPrimaryAction');
-    expect(source).toContain("return { label: adminText('credentialConnections.primaryAction'), kind: 'detail' as const }");
-    expect(source).not.toContain("label: '연결 확인'");
+  it('shows a compact card with usage status without fabricated health or usage counts', () => {
+    expect(credentials).toContain("t('credentialConnections.vmVaultDescription')");
+    expect(credentials).not.toContain("t('credentialConnections.verified')");
+    expect(credentials).not.toContain("t('credentialConnections.unverified')");
+    expect(credentials).toContain("t('credentialConnections.replace')");
+    expect(credentials).toContain("t('credentialConnections.disable')");
+    expect(credentials).toContain("t('credentialConnections.delete')");
   });
 
-  it('uses a comparable desktop table and a compact mobile list', () => {
-    expect(source).toContain('hidden overflow-x-auto md:block');
-    expect(source).toContain('w-full min-w-[920px]');
-    expect(source).toContain('divide-y divide-surface-800/60 md:hidden');
-    expect(source).toContain("<th className=\"px-4 py-2.5 text-left font-semibold\">{t('credentialConnections.service')}</th>");
-    expect(source).toContain("<th className=\"px-4 py-2.5 text-left font-semibold\">{t('credentialConnections.providerAuth')}</th>");
-    expect(source).toContain('min-h-11 flex-1');
-    expect(source).not.toContain('xl:grid-cols-3 gap-3 p-4');
-  });
-
-  it('makes the single management action open the Connection management flow', () => {
-    expect(source).toContain('handleConnectionPrimaryAction');
-    expect(source).toContain('openConnectionDetail(connection.id)');
-    expect(source).not.toContain('copyText(askPrompt)');
-    expect(source).not.toContain('>상세 보기</button>');
-    expect(source).not.toContain('>상세</button>');
-  });
-
-  it('opens a responsive right drawer with two focused areas', () => {
-    expect(source).toContain('role="dialog"');
-    expect(source).toContain('aria-modal="true"');
-    expect(source).toContain('md:max-w-[560px]');
-    expect(source).toContain("'management' | 'agents'");
-    expect(source).toContain("['management', t('credentialConnections.detailTabs.management')]");
-    expect(source).toContain("['agents', t('credentialConnections.detailTabs.agents')]");
-    expect(source).not.toContain("['summary', '요약']");
-    expect(source).not.toContain("['diagnostics', '진단']");
-    expect(source).toContain("if (event.key === 'Escape') closeConnectionDetail()");
-    expect(source).toContain('connectionDetailTriggerRef.current?.focus()');
-    expect(source).not.toContain('ref={selectedConnectionRef}');
-  });
-
-  it('keeps Credential values hidden while exposing only safe structure and identifiers', () => {
-    expect(source).toContain("t('credentialConnections.advancedCredentialManagement')");
-    expect(source).toContain("t('credentialConnections.advancedMessages.structuredHidden')");
-    expect(source).toContain("t('credentialConnections.advancedActions.technicalNames')");
-    expect(source).not.toContain('credential.secretValue');
-  });
-
-  it('adds ephemeral reveal and structure inspection without persistent storage', () => {
-    expect(source).toContain("t('credentialConnections.advancedActions.reveal')");
-    expect(source).toContain("t('credentialConnections.advancedActions.inspect')");
-    expect(source).toContain("cache: 'no-store'");
-    expect(source).toContain("document.addEventListener('visibilitychange', handleVisibility)");
-    expect(source).toContain('setCredentialRevealValue(null)');
-    expect(source).not.toContain('localStorage.setItem');
-    expect(source).not.toContain('sessionStorage.setItem');
-  });
-
-  it('exposes the safe actions allowed by the backend reveal policy', () => {
-    expect(source).toContain('credential.allowedActions?.reveal !== false');
-    expect(source).toContain("credential.allowedActions?.replacementAction === 'rotate'");
-    expect(source).toContain("t('credentialConnections.advancedMessages.oauthHidden')");
-    expect(source).toContain("t('credentialConnections.advancedMessages.sshHidden')");
-    expect(source).toContain("t('credentialConnections.advancedMessages.structuredHidden')");
-    expect(source).toContain("t('credentialConnections.advancedActions.inspect')");
-  });
-
-  it('rotates through no-store preview and exact confirmed apply while preserving project grants', () => {
-    expect(source).toContain('/rotate/preview`');
-    expect(source).toContain('/rotate/apply`');
-    expect(source).toContain("t('credentialConnections.advancedMessages.replaceDescription')");
-    expect(source).toContain("t('credentialConnections.advancedActions.reviewAndReplace')");
-    expect(source).toContain('confirmed: true');
-  });
-
-  it('uses exact preview and apply for project Connection changes', () => {
-    expect(source).toContain("/preview`");
-    expect(source).toContain("/apply`");
-    expect(source).toContain('proposalHash: preview.proposalHash');
-    expect(source).toContain('confirmed: true');
-    expect(source).toContain('서비스 연결 승인');
-  });
-
-  it('guides the agent with the same safe Connection vocabulary', () => {
-    expect(source).toContain('실제 Provider 사용 가능 여부를 구분');
-    expect(source).toContain('다음 행동 하나');
-    expect(source).toContain('present만으로 성공 판정하지 말고');
-    expect(source).toContain('secret, token, env 이름, 파일 경로는 출력하지 마');
+  it('removes profiles, defaults, targets, advanced reveal, and preview hash flows', () => {
+    expect(credentials).not.toContain('credential_profiles');
+    expect(credentials).not.toContain('connection-defaults');
+    expect(credentials).not.toContain('/targets');
+    expect(credentials).not.toContain('/reveal');
+    expect(credentials).not.toContain('/inspect');
+    expect(credentials).not.toContain('/preview`');
+    expect(credentials).not.toContain('proposalHash');
+    expect(credentials).not.toContain('intentId');
   });
 });

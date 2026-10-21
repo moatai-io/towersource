@@ -2,6 +2,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { safeStr } from '../shared/parse-loose-json';
 import type { PendingQuestion } from '../../stores/chat-store';
+import { useShortcutStore, matchesShortcut } from '../../stores/shortcut-store';
+import { useSettingsStore } from '../../stores/settings-store';
 
 interface FloatingQuestionCardProps {
   question: PendingQuestion;
@@ -43,11 +45,14 @@ function getQuestionOptions(q: any, t: (key: string) => string): Array<{ label: 
 
 export function FloatingQuestionCard({ question, onAnswer, answered, onDismiss, minimized = false, onMinimize, onRestore }: FloatingQuestionCardProps) {
   const { t } = useTranslation('chat');
+  const bindings = useShortcutStore(s => s.bindings);
+  const cardRef = useRef<HTMLDivElement>(null);
   const [answers, setAnswers] = useState<Record<number, AnswerValue>>({});
   const prevQuestionId = useRef(question.questionId);
   const [otherOpen, setOtherOpen] = useState<Record<number, boolean>>({});
   const [otherText, setOtherText] = useState<Record<number, string>>({});
-  const otherInputRef = useRef<HTMLInputElement | HTMLTextAreaElement>(null);
+  const otherInputRefs = useRef<Record<number, HTMLInputElement | HTMLTextAreaElement | null>>({});
+  const activeOtherIndex = useRef<number | null>(null);
 
   useEffect(() => {
     if (question.questionId !== prevQuestionId.current) {
@@ -59,10 +64,32 @@ export function FloatingQuestionCard({ question, onAnswer, answered, onDismiss, 
   }, [question.questionId]);
 
   useEffect(() => {
-    if (Object.values(otherOpen).some(Boolean)) {
-      otherInputRef.current?.focus();
-    }
+    const qi = activeOtherIndex.current;
+    if (qi === null || !otherOpen[qi]) return;
+    const input = otherInputRefs.current[qi];
+    input?.focus({ preventScroll: true });
+    // Reveal the entire input row, including its action, inside the body.
+    input?.parentElement?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
   }, [otherOpen]);
+
+  useEffect(() => {
+    const viewport = window.visualViewport;
+    if (!viewport) return;
+    let frame = 0;
+    const revealFocusedInput = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        const input = Object.values(otherInputRefs.current)
+          .find(element => element === document.activeElement);
+        input?.parentElement?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+      });
+    };
+    viewport.addEventListener('resize', revealFocusedInput);
+    return () => {
+      viewport.removeEventListener('resize', revealFocusedInput);
+      cancelAnimationFrame(frame);
+    };
+  }, []);
 
   const totalQuestions = question.questions.length;
   const getSubmittableAnswers = (baseAnswers: Record<number, AnswerValue> = answers) => {
@@ -77,11 +104,15 @@ export function FloatingQuestionCard({ question, onAnswer, answered, onDismiss, 
     return nextAnswers;
   };
   const answeredCount = Object.values(getSubmittableAnswers()).filter(hasAnswer).length;
-  const canSubmit = !answered && answeredCount > 0;
+  const isSubmitting = question.submissionStatus === 'submitting';
+  const canSubmit = !answered && !isSubmitting && answeredCount > 0;
   const isAnswered = !!answered;
 
+  // Keep the global listener stable while reading current answers and bindings.
+  const shortcutHandlerRef = useRef<(event: KeyboardEvent) => void>(() => {});
+
   const handleSelect = (qi: number, label: string, multiSelect?: boolean) => {
-    if (isAnswered) return;
+    if (isAnswered || isSubmitting) return;
     setOtherOpen(prev => ({ ...prev, [qi]: false }));
     setAnswers(prev => {
       if (!multiSelect) return { ...prev, [qi]: label };
@@ -102,6 +133,40 @@ export function FloatingQuestionCard({ question, onAnswer, answered, onDismiss, 
   };
 
   const submitAnswers = () => sendAnswers(getSubmittableAnswers());
+
+  shortcutHandlerRef.current = (event) => {
+    if (minimized || isAnswered || isSubmitting || useSettingsStore.getState().isOpen
+      || document.querySelector('[aria-modal="true"]')
+      || event.defaultPrevented || event.isComposing || event.keyCode === 229 || event.repeat) return;
+    const target = event.target instanceof Element ? event.target : null;
+    const focused = document.activeElement;
+    const isEditing = (element: Element | null) => !!element?.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"])');
+    if (isEditing(target) || isEditing(focused)) return;
+    if (matchesShortcut(event, bindings['question.submit'])) {
+      if (!canSubmit) return;
+      event.preventDefault();
+      submitAnswers();
+      return;
+    }
+    const optionIndex = Array.from({ length: 9 }, (_, index) => index)
+      .find(index => matchesShortcut(event, bindings[`question.option${index + 1}`]));
+    if (optionIndex === undefined) return;
+    const focusedQuestion = cardRef.current?.contains(focused)
+      ? focused?.closest<HTMLElement>('[data-question-index]') : null;
+    const unansweredIndex = question.questions.findIndex((_, qi) => !hasAnswer(getSubmittableAnswers()[qi]));
+    const qi = focusedQuestion ? Number(focusedQuestion.dataset.questionIndex) : Math.max(0, unansweredIndex);
+    const q = question.questions[qi];
+    const option = q && getQuestionOptions(q, t)[optionIndex];
+    if (!option) return;
+    event.preventDefault();
+    handleSelect(qi, option.label, q.multiSelect);
+  };
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => shortcutHandlerRef.current(event);
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
 
   const handleOtherSubmit = (qi: number, sendImmediately = false, immediateText?: string) => {
     // Mobile keyboards and paste can dispatch Enter before React has committed
@@ -162,27 +227,22 @@ export function FloatingQuestionCard({ question, onAnswer, answered, onDismiss, 
 
   return (
     <div
+      ref={cardRef}
       data-testid="floating-question-card"
-      className="mx-auto flex max-h-full w-full max-w-3xl flex-col overflow-hidden rounded-[20px] border shadow-[0_18px_52px_rgba(0,0,0,0.22)] backdrop-blur-xl transition-all duration-300"
-      onKeyDown={(event) => {
-        if (
-          event.key === 'Enter'
-          && !event.nativeEvent.isComposing
-          && event.target instanceof HTMLButtonElement
-          && question.questions.some((q, qi) => q.multiSelect && hasAnswer(answers[qi]))
-        ) {
-          event.preventDefault();
-          sendAnswers(answers);
-        }
-      }}
+      className="mx-auto flex min-h-0 max-h-full w-full max-w-3xl flex-col overflow-hidden rounded-[20px] border shadow-[0_18px_52px_rgba(0,0,0,0.22)] backdrop-blur-xl transition-all duration-300"
       style={{
         background: 'color-mix(in srgb, var(--th-bg-primary) 96%, transparent)',
         borderColor: isAnswered ? 'var(--th-q-done-border)' : 'var(--th-border-subtle)',
         animation: 'slideUp 0.22s ease-out',
       }}
     >
-      <span className="sr-only">{isAnswered ? 'Answered' : 'AI is asking'}</span>
-      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4 md:px-5 md:py-5">
+      <span className="sr-only">{isAnswered ? 'Answered' : isSubmitting ? 'Submitting answer' : 'AI is asking'}</span>
+      <div data-testid="question-scroll-body" className="min-h-0 flex-1 overflow-y-auto overscroll-contain scroll-py-4 px-4 py-4 md:px-5 md:py-5">
+        {question.submissionStatus === 'send_failed' && (
+          <div role="alert" className="mb-3 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[12px] text-amber-800 dark:text-amber-200">
+            {t('runtime.questionAnswerFailed')}
+          </div>
+        )}
         {question.questions.map((q, qi) => {
           const answeredParts = answered?.answer.split('\n') || [];
           const storedAnswer = answers[qi];
@@ -195,7 +255,7 @@ export function FloatingQuestionCard({ question, onAnswer, answered, onDismiss, 
             .filter(value => !optionLabels.has(value));
 
           return (
-            <div key={qi} className="space-y-2">
+            <div key={qi} data-question-index={qi} className="space-y-2">
               <div className="flex items-start gap-2.5">
                 <div className="min-w-0 flex-1 text-[15px] md:text-[16px] font-medium leading-snug" style={{ color: 'var(--th-text-primary)' }}>
                   {safeStr(q.question || (q as any).prompt || (q as any).title)}
@@ -234,7 +294,7 @@ export function FloatingQuestionCard({ question, onAnswer, answered, onDismiss, 
               {options.length > 0 && (
                 <div
                   data-testid={`question-options-${qi}`}
-                  className="max-h-[42vh] overflow-y-auto overscroll-contain rounded-xl md:max-h-none"
+                  className="rounded-xl"
                   style={{ borderColor: 'var(--th-border-subtle)' }}
                 >
                   {options.map((opt, oi) => {
@@ -247,8 +307,9 @@ export function FloatingQuestionCard({ question, onAnswer, answered, onDismiss, 
                         key={oi}
                         type="button"
                         aria-label={opt.label}
+                        aria-pressed={isSelected}
                         onClick={() => handleSelect(qi, opt.label, q.multiSelect)}
-                        disabled={rowDisabled}
+                        disabled={rowDisabled || isSubmitting}
                         className="group flex w-full items-center gap-3 border-b px-2.5 py-2 text-left transition-colors hover:bg-black/5 dark:hover:bg-white/5 last:border-b-0 disabled:cursor-default disabled:hover:bg-transparent"
                         style={{
                           borderColor: 'var(--th-border-subtle)',
@@ -319,7 +380,10 @@ export function FloatingQuestionCard({ question, onAnswer, answered, onDismiss, 
                   {!isAnswered && !otherOpen[qi] && (
                     <button
                       type="button"
-                      onClick={() => setOtherOpen(prev => ({ ...prev, [qi]: true }))}
+                      onClick={() => {
+                        activeOtherIndex.current = qi;
+                        setOtherOpen(prev => ({ ...prev, [qi]: true }));
+                      }}
                       className="flex w-full items-center gap-3 px-2.5 py-2 text-left transition-colors hover:bg-black/5 dark:hover:bg-white/5"
                     >
                       <span
@@ -343,7 +407,7 @@ export function FloatingQuestionCard({ question, onAnswer, answered, onDismiss, 
                 >
                   {options.length === 0 ? (
                     <textarea
-                      ref={element => { otherInputRef.current = element; }}
+                      ref={element => { otherInputRefs.current[qi] = element; }}
                       value={otherText[qi] || ''}
                       rows={3}
                       onChange={e => setOtherText(prev => ({ ...prev, [qi]: e.target.value }))}
@@ -365,7 +429,7 @@ export function FloatingQuestionCard({ question, onAnswer, answered, onDismiss, 
                     />
                   ) : (
                     <input
-                      ref={element => { otherInputRef.current = element; }}
+                      ref={element => { otherInputRefs.current[qi] = element; }}
                       type="text"
                       value={otherText[qi] || ''}
                       onChange={e => setOtherText(prev => ({ ...prev, [qi]: e.target.value }))}
@@ -378,7 +442,7 @@ export function FloatingQuestionCard({ question, onAnswer, answered, onDismiss, 
                         if (e.key === 'Escape') setOtherOpen(prev => ({ ...prev, [qi]: false }));
                       }}
                       placeholder={t('typeYourAnswer')}
-                      className="min-h-[36px] min-w-0 flex-1 rounded-lg border px-2.5 text-[14px] outline-none focus:ring-2"
+                      className="min-h-[44px] min-w-0 flex-1 rounded-lg border px-2.5 text-[16px] md:text-[14px] outline-none focus:ring-2"
                       style={{
                         background: 'var(--th-bg-secondary)',
                         borderColor: 'var(--th-border-subtle)',
@@ -392,7 +456,7 @@ export function FloatingQuestionCard({ question, onAnswer, answered, onDismiss, 
                       type="button"
                       onClick={() => handleOtherSubmit(qi)}
                       disabled={!(otherText[qi] || '').trim()}
-                      className="min-h-[36px] shrink-0 rounded-lg px-3 text-[13px] font-semibold shadow-sm transition disabled:opacity-40"
+                      className="min-h-[44px] shrink-0 rounded-lg px-3 text-[13px] font-semibold shadow-sm transition disabled:opacity-40"
                       style={{ background: 'var(--th-q-pending-btn-bg)', color: 'var(--th-q-pending-btn-text)' }}
                     >
                       {t('add')}
@@ -404,9 +468,12 @@ export function FloatingQuestionCard({ question, onAnswer, answered, onDismiss, 
           );
         })}
 
+      </div>
+
         {!isAnswered && (
           <div
-            className="sticky bottom-0 -mx-4 -mb-4 mt-4 flex justify-end gap-2 border-t px-4 py-3 backdrop-blur-xl md:-mx-5 md:-mb-5 md:px-5"
+            data-testid="question-actions"
+            className="flex shrink-0 justify-end gap-2 border-t px-4 py-3 md:px-5"
             style={{
               background: 'color-mix(in srgb, var(--th-bg-primary) 96%, transparent)',
               borderColor: 'var(--th-border-subtle)',
@@ -431,11 +498,10 @@ export function FloatingQuestionCard({ question, onAnswer, answered, onDismiss, 
               className="min-h-[40px] rounded-lg px-4 py-2 text-[13px] font-semibold shadow-sm transition disabled:opacity-40"
               style={{ background: 'var(--th-q-pending-btn-bg)', color: 'var(--th-q-pending-btn-text)' }}
             >
-              {t('sendResponse')}
+              {isSubmitting ? t('working') : t('sendResponse')}
             </button>
           </div>
         )}
-      </div>
     </div>
   );
 }

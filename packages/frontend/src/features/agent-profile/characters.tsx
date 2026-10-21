@@ -24,7 +24,7 @@ export const AGENT_CHARACTERS: AgentCharacter[] = characterManifest.characters.m
   src: `/agent-characters/${character.file}`,
 }));
 
-const KOREAN_CHARACTER_IDS = AGENT_CHARACTERS.filter((item) => item.group === 'korean').map((item) => item.id);
+const KOREAN_CHARACTER_IDS = AGENT_CHARACTERS.filter((item) => item.id.startsWith('korean-')).map((item) => item.id);
 
 export function characterFace(id: string | undefined | null): string | null {
   return id?.startsWith('character:') ? id.slice(10) : null;
@@ -56,7 +56,7 @@ export function agentCharacterListPresentation(id: string | undefined | null): {
   return { crop: character?.listCrop, accent: character?.listAccent };
 }
 
-export function AgentCharacterAvatar({ id, className = 'h-16 w-16', title, variant = 'default', showListAccent = true }: { id: string; className?: string; title?: string; variant?: AgentAvatarVariant; showListAccent?: boolean }) {
+export function AgentCharacterAvatar({ id, className = 'h-16 w-16', title, variant = 'default', showListAccent = false }: { id: string; className?: string; title?: string; variant?: AgentAvatarVariant; showListAccent?: boolean }) {
   const character = AGENT_CHARACTERS.find((item) => item.id === id) || AGENT_CHARACTERS[0];
   const fallbackCharacter = AGENT_CHARACTERS[0];
   const [failedSources, setFailedSources] = React.useState<string[]>([]);
@@ -75,7 +75,7 @@ export function AgentCharacterAvatar({ id, className = 'h-16 w-16', title, varia
   }, [character.src]);
 
   return (
-    <span className={`${className} relative inline-block overflow-hidden bg-surface-800`} style={ringStyle}>
+    <span className={`${className} relative inline-block overflow-hidden`} style={ringStyle}>
       {imageUnavailable ? (
         <span className="grid h-full w-full place-items-center text-[0.65em] font-semibold text-surface-300" aria-label={title || 'AI 팀원'}>
           {(title || 'AI').trim().slice(0, 1).toUpperCase()}

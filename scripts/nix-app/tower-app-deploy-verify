@@ -2,4 +2,29 @@
 set -euo pipefail
 
 app_root="${TOWER_APP_ROOT:?TOWER_APP_ROOT is required}"
+python3 - <<'PY'
+import os, pathlib, pwd, re
+worker = os.environ.get('TOWER_PRIMARY_WORKER_ID', '').strip()
+if not re.fullmatch(r'[A-Za-z0-9._-]{1,120}', worker):
+    raise SystemExit('tower-app-deploy-verify: NEW_PROJECT_STORAGE_WORKER_IDENTITY_REQUIRED')
+unit = pathlib.Path('/etc/systemd/system') / f'tower-workbench-worker-{worker}.service'
+try:
+    meta = unit.lstat()
+    text = unit.read_text()
+except OSError:
+    raise SystemExit('tower-app-deploy-verify: NEW_PROJECT_STORAGE_WORKER_IDENTITY_REQUIRED')
+if unit.is_symlink() or not unit.is_file() or meta.st_uid != 0 or meta.st_mode & 0o022 or meta.st_nlink != 1:
+    raise SystemExit('tower-app-deploy-verify: NEW_PROJECT_STORAGE_INSTALLATION_UNTRUSTED')
+users = re.findall(r'^User=([^\s#]+)$', text, re.M)
+if len(users) != 1:
+    raise SystemExit('tower-app-deploy-verify: NEW_PROJECT_STORAGE_WORKER_IDENTITY_REQUIRED')
+try: worker_uid = pwd.getpwnam(users[0]).pw_uid
+except KeyError: raise SystemExit('tower-app-deploy-verify: NEW_PROJECT_STORAGE_WORKER_IDENTITY_REQUIRED')
+if worker_uid <= 0 or worker_uid == os.getuid():
+    raise SystemExit('tower-app-deploy-verify: NEW_PROJECT_STORAGE_BACKEND_IDENTITY_MISMATCH')
+projects = pathlib.Path(os.environ.get('WORKSPACE_ROOT', str(pathlib.Path.home() / 'workspace'))).resolve() / 'projects'
+if not projects.is_dir() or projects.is_symlink() or projects.resolve() != projects:
+    raise SystemExit('tower-app-deploy-verify: NEW_PROJECT_STORAGE_ROOT_NOT_ALLOWED')
+print('new_project_storage_contract=ready')
+PY
 exec node "$app_root/lib/tower/scripts/deploy-verify.mjs" "$@"

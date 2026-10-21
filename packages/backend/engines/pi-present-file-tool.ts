@@ -7,15 +7,19 @@
  * Public API: createPresentFileTool(ctx).
  */
 import path from 'path';
-import { promises as fs } from 'fs';
+import { constants } from 'node:fs';
+import fs from 'node:fs/promises';
 import { Type } from '@sinclair/typebox';
 import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
 import { isPathAccessible } from '../services/pm/project-access.js';
+import { projectWorkspaceEntryExists, resolveProjectWorkspaceFile } from '../services/project-environment/project-workspace-files.js';
 
 export interface PresentFileToolContext {
   userId?: number;
   userRole?: string;
   cwd: string;
+  projectId?: string;
+  projectRoot?: string;
 }
 
 const PresentFileParams = Type.Object({
@@ -92,8 +96,22 @@ export function createPresentFileTool(ctx: PresentFileToolContext): ToolDefiniti
         if (!await isPathAccessible(absPath, ctx.userId, ctx.userRole || 'member')) {
           return textResult(`present_file failed: path is not accessible: ${absPath}`, true);
         }
-        const st = await fs.stat(absPath).catch(() => null);
-        if (!st?.isFile()) return textResult(`present_file failed: path is not an existing file: ${absPath}`, true);
+        if (ctx.projectId && ctx.projectRoot && ctx.userId) {
+          const root = path.resolve(ctx.projectRoot);
+          if (absPath === root || !absPath.startsWith(`${root}${path.sep}`)) return textResult(`present_file failed: path is outside the current Project: ${absPath}`, true);
+          const reference = await resolveProjectWorkspaceFile({ projectId: ctx.projectId, projectRoot: root, relativePath: path.relative(root, absPath).split(path.sep).join('/') });
+          const entry = await projectWorkspaceEntryExists({ reference, actorUserId: ctx.userId });
+          if (!entry.exists) return textResult(`present_file failed: path is not an existing file: ${absPath}`, true);
+          // Explicit publication, never automatic ACL widening on access failure.
+          if (entry.storageAuthority === 'host') {
+            try { await fs.access(reference.hostPath, constants.R_OK); }
+            catch { return textResult('present_file failed: SHARED_OUTPUT_NOT_READABLE. Explicitly publish the designated non-secret output before presenting it; do not widen private-file ACLs automatically.', true); }
+          }
+        } else {
+          const { promises: fs } = await import('fs');
+          const st = await fs.stat(absPath).catch(() => null);
+          if (!st?.isFile()) return textResult(`present_file failed: path is not an existing file: ${absPath}`, true);
+        }
         const split = normalizeSplit(params.split, params.pane);
         const label = params.label?.trim() || path.basename(absPath);
         return textResult(JSON.stringify({

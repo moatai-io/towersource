@@ -87,6 +87,12 @@ PUBLIC_URL="${PUBLIC_URL%/}"
 case "${VERSION_ID:-}" in 22.04|24.04) ;; *) fail "Ubuntu 22.04 or 24.04 required (found ${VERSION_ID:-unknown})" ;; esac
 
 export DEBIAN_FRONTEND=noninteractive
+# Hold through backend environment/migration/restart and Worker enrollment.
+if [[ -f /var/lib/tower-worker-maintenance/deployment.lock ]]; then
+  exec 197</var/lib/tower-worker-maintenance/deployment.lock
+  flock -s -n 197 || fail 'Worker maintenance owns deployment lock'
+fi
+
 log "Installing base packages"
 apt-get update -qq
 apt-get install -y -qq curl ca-certificates gnupg lsb-release git build-essential nginx python3 openssl rsync xz-utils sudo
@@ -300,7 +306,8 @@ TOWER_PRIMARY_WORKER_ID=tower-oss-local-01
 
 # AI response-language fallback before a user or organization preference exists.
 # This does not force the web UI language and users can override it later.
-WORKSPACE_LANGUAGE=en
+WORKSPACE_LANGUAGE=ko
+TOWER_DEFAULT_LANGUAGE=ko
 EOF
 chmod 600 "$ENV_FILE"
 
@@ -393,6 +400,8 @@ systemctl enable tower tower-oss-worker-bootstrap.path >/dev/null
 systemctl restart tower
 systemctl start tower-oss-worker-bootstrap.path
 if [[ -s "$DATA_DIR/workers/tower-oss-local-01/activated" ]]; then
+  # Re-enroll existing Workers on upgrade without reissuing identity or restarting work.
+  systemctl start tower-oss-worker-bootstrap.service
   systemctl disable --now tower-oss-worker-bootstrap.timer >/dev/null 2>&1 || true
 else
   systemctl enable --now tower-oss-worker-bootstrap.timer >/dev/null

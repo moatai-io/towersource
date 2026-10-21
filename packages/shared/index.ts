@@ -36,11 +36,15 @@ export interface SessionMeta {
   cwd: string;
   tags: string[];
   favorite: boolean;
+  /** Archived sessions may be opened, but stay out of normal navigation by default. */
+  archived?: boolean;
   totalCost: number;
   totalTokens: number;
   createdAt: string;
   updatedAt: string;
   modelUsed?: string;
+  /** Per-session reasoning override. Undefined/null follows the model's current VM default each turn. */
+  reasoningEffort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max' | null;
   autoNamed?: number;
   summary?: string;
   summaryAtTurn?: number;
@@ -49,6 +53,8 @@ export interface SessionMeta {
    *  Excludes tool_result bounces and intermediate assistant tool_use/thinking.
    *  Computed live by getSessions() via a LEFT JOIN over a partial index. */
   userTurnCount?: number;
+  /** Distinct persisted human usernames that authored a real user turn. */
+  participantCount?: number;
   filesEdited?: string[];
   projectId?: string | null;
   engine?: string;
@@ -59,6 +65,16 @@ export interface SessionMeta {
   ownerUsername?: string | null;
   /** Username of the latest real user text turn in this session, if known. */
   lastUserUsername?: string | null;
+  /** Whether the current API caller owns the session or has authored a real user turn in it. */
+  currentUserParticipated?: boolean;
+  /** Whether the current API caller receives future completed AI responses for this Session. */
+  currentUserSubscribed?: boolean;
+  /** Server-computed unread state for a completed AI response after both subscription/read cursors. */
+  unreadAiResponse?: boolean;
+  /** Latest completed root-turn sequence for this Session. */
+  lastFinalAiSequence?: number;
+  /** Current caller's monotonic AI-response read cursor. */
+  lastReadAiSequence?: number;
   label?: string | null;
   /** Present only for the first Session provisioned with a new Primary Agent. */
   agentCreationCommandId?: string | null;
@@ -432,6 +448,17 @@ export interface ProjectAgentProfile {
   explicit: boolean;
 }
 
+/** Discovery-only metadata; never treat this DTO as an accessible Project. */
+export type AgentDirectoryVisibility = 'listed' | 'unlisted' | 'confidential';
+export interface AgentDirectoryEntry {
+  projectId: string;
+  name: string;
+  shortRole: string | null;
+  contactName: string | null;
+  /** available = existing access, enter = operator entry, contact = introduction only. */
+  access: 'available' | 'enter' | 'contact';
+}
+
 export interface Project {
   id: string;
   name: string;
@@ -458,6 +485,15 @@ export interface Project {
   pinOrder?: number | null;
   /** The Project's single Primary Agent Workcell identity. Present on current APIs; optional for older cached payloads. */
   agent?: ProjectAgentProfile;
+  /** Accessible first-class, non-archived conversations in this Project. */
+  sessionCount?: number;
+  /** Server-derived career evidence used by compact teammate directory surfaces. */
+  careerMetrics?: {
+    completedWorkstreams: number;
+    successfulSkillInvocations: number;
+  };
+  /** Most recent accessible conversation activity, independent from the startup session window. */
+  lastSessionAt?: string | null;
 }
 
 // ── Pin ──────────────────────────────────────────────────────────

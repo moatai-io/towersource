@@ -1,3 +1,4 @@
+import { parseArtifactFences } from '../../../shared/artifact-fences';
 import i18n from '../i18n';
 import type { ContentBlock } from '../stores/chat-store';
 
@@ -71,7 +72,7 @@ function extractThinkingFromText(raw: string): ContentBlock[] {
   return result;
 }
 
-const ARTIFACT_FENCE_RE = /```tower-artifact\s+([^\n`]*)\n([\s\S]*?)\n```/g;
+
 
 function parseArtifactAttrs(raw: string): Record<string, string> {
   const attrs: Record<string, string> = {};
@@ -86,25 +87,23 @@ function isOnlyFenceWrapperRemainder(text: string): boolean {
   return /^```(?:md|markdown)?$/i.test(trimmed) || trimmed === '```';
 }
 
-function normalizeTextWithArtifactFallback(raw: string): ContentBlock[] {
+function normalizeTextWithArtifactFallback(raw: string, streaming = false): ContentBlock[] {
   if (!raw.includes('```tower-artifact')) return extractThinkingFromText(raw);
 
   const result: ContentBlock[] = [];
   let lastIndex = 0;
-  let match: RegExpExecArray | null;
-  ARTIFACT_FENCE_RE.lastIndex = 0;
-  while ((match = ARTIFACT_FENCE_RE.exec(raw))) {
+  for (const match of parseArtifactFences(raw, streaming)) {
     const before = raw.slice(lastIndex, match.index);
     if (before.trim() && !isOnlyFenceWrapperRemainder(before)) result.push(...extractThinkingFromText(before));
-    const attrs = parseArtifactAttrs(match[1] || '');
+    const attrs = parseArtifactAttrs(match.attrs);
     result.push({
       type: 'artifact_markdown',
       path: attrs.path || undefined,
       title: attrs.title || undefined,
-      text: match[2] || '',
+      text: match.body,
       status: 'pending',
     });
-    lastIndex = ARTIFACT_FENCE_RE.lastIndex;
+    lastIndex = match.end;
   }
   const after = raw.slice(lastIndex);
   if (after.trim() && !isOnlyFenceWrapperRemainder(after)) result.push(...extractThinkingFromText(after));
@@ -117,7 +116,7 @@ function normalizeTextWithArtifactFallback(raw: string): ContentBlock[] {
  * SDK assistant messages have:
  *   message.content: Array<{ type: 'text', text } | { type: 'tool_use', id, name, input } | { type: 'thinking', thinking }>
  */
-export function parseSDKMessage(sdkMsg: any): ContentBlock[] {
+export function parseSDKMessage(sdkMsg: any, streaming = false): ContentBlock[] {
   if (!sdkMsg?.message?.content) return [];
 
   const blocks: ContentBlock[] = [];
@@ -133,7 +132,7 @@ export function parseSDKMessage(sdkMsg: any): ContentBlock[] {
       blocks.push(normalizeThinkingBlock(thinkingText, thinkingTitle));
     } else if (item.type === 'text') {
       const raw = item.text || '';
-      blocks.push(...normalizeTextWithArtifactFallback(raw));
+      blocks.push(...normalizeTextWithArtifactFallback(raw, streaming));
     } else if (item.type === 'commentary') {
       blocks.push({
         type: 'commentary',
@@ -176,7 +175,7 @@ export function parseSDKMessage(sdkMsg: any): ContentBlock[] {
  * Raw SDK: { type: 'tool_use', id, name, input }
  * ContentBlock: { type: 'tool_use', toolUse: { id, name, input } }
  */
-export function normalizeContentBlocks(blocks: any[], previousBlocks: ContentBlock[] = []): ContentBlock[] {
+export function normalizeContentBlocks(blocks: any[], previousBlocks: ContentBlock[] = [], streaming = false): ContentBlock[] {
   if (!Array.isArray(blocks)) return [];
 
   const previousToolResults = new Map<string, string>();
@@ -244,7 +243,7 @@ export function normalizeContentBlocks(blocks: any[], previousBlocks: ContentBlo
     // but this frontend fallback keeps live/legacy messages from rendering raw
     // control fences when a message bypassed that normalization path.
     if (item.type === 'text' && item.text) {
-      const extracted = normalizeTextWithArtifactFallback(item.text);
+      const extracted = normalizeTextWithArtifactFallback(item.text, streaming);
       // Only expand when a special block was actually found; otherwise return
       // the original text block to preserve streaming identity/reference shape.
       if (extracted.some((b) => b.type === 'thinking' || b.type === 'artifact_markdown')) return extracted;
@@ -301,12 +300,16 @@ export function normalizeContentBlocks(blocks: any[], previousBlocks: ContentBlo
 }
 
 function canonicalToolName(name: string): string {
+  if (normalizedToolName(name) === 'sleep') return 'Sleep';
   const shortName = name.split('.').pop()?.replace(/^functions__/, '') || name;
   return shortName.charAt(0).toUpperCase() + shortName.slice(1);
 }
 
 function normalizedToolName(name: string): string {
-  return (name.split('.').pop() || name).replace(/^functions__/, '').toLowerCase();
+  const shortName = (name.split('.').pop() || name).replace(/^functions__/, '').toLowerCase();
+  if (shortName === 'wait' || /^mcp__wait__wait$/.test(shortName)) return 'sleep';
+  if (/^mcp__(?:sleep|session[-_]wait)__sleep$/.test(shortName)) return 'sleep';
+  return shortName;
 }
 
 export function toToolActivityNoun(phrase: string): string {
@@ -339,6 +342,7 @@ function toolActivityKey(name: string, input: Record<string, any> = {}) {
   if (kind === 'edit') return 'edit';
   if (kind === 'bash' || kind === 'project_shell' || kind === 'mcp__sandbox__run') return shellActivityKey(input);
   if (kind === 'todowrite') return 'todo';
+  if (kind === 'sleep') return 'sleep';
   if (kind === 'websearch') return 'webSearch';
   if (kind === 'webfetch') return 'webFetch';
   if (kind === 'pdf_view' || kind === 'pdf_read' || kind === 'pdf_render') return 'pdf';
@@ -359,6 +363,7 @@ function toolActivityKey(name: string, input: Record<string, any> = {}) {
 /** Get a human-friendly label for a tool name */
 export function getToolLabel(name: string): string {
   const fallbackLabels: Record<string, string> = {
+    sleep: 'Wait',
     bash: 'Run command',
     read: 'Read file',
     write: 'Create file',
@@ -412,63 +417,80 @@ export function getThinkingLabel(title?: string, text?: string): string {
   return raw === 'thinking' || !raw ? i18n.t('chat:thinking') : raw;
 }
 
+/** Requested duration only: without a measured tool start time, this is not a countdown. */
+export function getSleepDurationLabel(input: Record<string, any>): string | undefined {
+  const seconds = input.durationSeconds;
+  if (typeof seconds !== 'number' || !Number.isFinite(seconds) || seconds < 0) return undefined;
+  return i18n.t('chat:toolSummary.sleepDuration', {
+    seconds,
+    defaultValue: '예상 대기 시간 {{seconds}}초',
+  });
+}
+
 /** Get a summary string for a tool use */
 export function getToolSummary(name: string, input: Record<string, any>): string {
   // Normalize: SDK may send "bash" or "Bash"
   const n = canonicalToolName(name);
   switch (n) {
+    case 'Sleep': {
+      const duration = getSleepDurationLabel(input);
+      const reason = typeof input.reason === 'string' ? input.reason.trim() : '';
+      return [duration || getToolLabel(name), reason && truncate(reason, 60)].filter(Boolean).join(' · ');
+    }
     case 'Bash':
       return input.command ? `$ ${truncate(input.command, 60)}` : 'Bash';
     case 'Read': {
       const filePath = input.file_path || input.path;
-      return filePath ? `📄 ${basename(filePath)}` : 'Read';
+      return filePath ? `📄 ${basename(filePath)}` : getToolLabel(name);
     }
     case 'Write': {
       const filePath = input.file_path || input.path;
-      return filePath ? `✏️ ${basename(filePath)}` : 'Write';
+      return filePath ? `✏️ ${basename(filePath)}` : getToolLabel(name);
     }
     case 'Edit': {
       const filePath = input.file_path || input.path;
-      return filePath ? `📝 ${basename(filePath)}` : 'Edit';
+      return filePath ? `📝 ${basename(filePath)}` : getToolLabel(name);
     }
     case 'Glob':
-      return input.pattern ? `🔍 ${input.pattern}` : 'Search files';
+      return input.pattern ? `🔍 ${input.pattern}` : getToolLabel(name);
     case 'Grep':
-      return input.pattern ? `🔎 "${truncate(input.pattern, 40)}"` : 'Search content';
+      return input.pattern ? `🔎 "${truncate(input.pattern, 40)}"` : getToolLabel(name);
     case 'WebSearch':
-      return input.query ? `🌐 ${truncate(input.query, 50)}` : 'Web search';
+      return input.query ? `🌐 ${truncate(input.query, 50)}` : getToolLabel(name);
     case 'AskUserQuestion': {
       const q = input.questions?.[0]?.question;
-      return q ? truncate(q, 50) : 'Ask user';
+      return q ? truncate(q, 50) : getToolLabel(name);
     }
     case 'credential_vault_input':
     case 'Credential_vault_input':
-      return input.displayName ? `🔐 ${truncate(input.displayName, 50)}` : 'Secure credential input';
+      return input.displayName ? `🔐 ${truncate(input.displayName, 50)}` : getToolLabel(name);
+    case 'Task':
+      return input.description ? truncate(input.description, 50) : getToolLabel(name);
     case 'EnterPlanMode':
-      return 'Entering plan mode';
+      return getToolLabel(name);
     case 'ExitPlanMode':
-      return 'Plan complete';
+      return getToolLabel(name);
     case 'present_file': {
       const filePath = input.path;
-      return filePath ? `📎 ${basename(filePath)}` : 'Present file';
+      return filePath ? `📎 ${basename(filePath)}` : getToolLabel(name);
     }
     case 'TodoWrite': {
       const todos = Array.isArray(input.todos)
         ? (input.todos as Array<{ content: string; status: string }>)
         : undefined;
-      if (!todos?.length) return 'Work steps';
+      if (!todos?.length) return getToolLabel(name);
       const done = todos.filter(t => t.status === 'completed').length;
       const inProg = todos.filter(t => t.status === 'in_progress').length;
       const total = todos.length;
-      if (done === total) return `Work steps complete (${total}/${total})`;
-      if (inProg > 0) return `Work steps ${done}/${total}`;
-      return `${total} work steps planned`;
+      if (done === total) return i18n.t('chat:toolSummary.workStepsComplete', { total });
+      if (inProg > 0) return i18n.t('chat:toolSummary.workStepsProgress', { completed: done, total });
+      return i18n.t('chat:toolSummary.workStepsPlanned', { total });
     }
     default: {
       const normalized = name.replace(/^mcp__agent-worker__/, '');
-      if (normalized === 'agent_session_run_once') return input.name ? `🤖 ${truncate(input.name, 50)}` : 'Agent Session';
-      if (normalized === 'persistent_agent_create') return input.name ? `🤖 ${truncate(input.name, 50)}` : 'Create agent';
-      if (normalized === 'persistent_agent_send') return input.worker ? `🤖 ${truncate(input.worker, 50)}` : 'Send to agent';
+      if (normalized === 'agent_session_run_once') return input.name ? `🤖 ${truncate(input.name, 50)}` : getToolLabel(name);
+      if (normalized === 'persistent_agent_create') return input.name ? `🤖 ${truncate(input.name, 50)}` : getToolLabel(name);
+      if (normalized === 'persistent_agent_send') return input.worker ? `🤖 ${truncate(input.worker, 50)}` : getToolLabel(name);
       return name;
     }
   }

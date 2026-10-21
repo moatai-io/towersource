@@ -80,7 +80,7 @@ describe('ToolUseCard file previews', () => {
     expect(onFileClick).toHaveBeenCalledWith(path);
   });
 
-  it('hides completed present_file cards because the Viewer opens the artifact directly', () => {
+  it('keeps completed present_file links accessible after the final answer fails', () => {
     const path = '/home/tower/workspace/projects/tower/final/report.md';
 
     const { container } = render(
@@ -92,7 +92,7 @@ describe('ToolUseCard file previews', () => {
       />
     );
 
-    expect(container).toBeEmptyDOMElement();
+    expect(screen.getByRole('button', { name: path })).toBeInTheDocument();
   });
 
   it('shows a larger head/tail preview and lazy-renders full results on demand', () => {
@@ -459,4 +459,102 @@ describe('ToolUseCard streaming state', () => {
     expect(screen.getByText('Copy visible content')).toBeInTheDocument();
     expect(screen.getByText(/60 lines omitted from the middle/)).toBeInTheDocument();
   });
+});
+
+
+it('reopens a persisted present_file result without relying on its original Viewer event', () => {
+  const onFileClick = vi.fn();
+  const path = '/project/final/report.pdf';
+  render(<ToolUseCard name="present_file" input={{ path: '/incorrect-input.pdf' }} result={JSON.stringify({ ok: true, action: 'present_file', path })} onFileClick={onFileClick} />);
+  fireEvent.click(screen.getByRole('button', { name: path }));
+  expect(onFileClick).toHaveBeenCalledWith(path);
+  expect(screen.queryByRole('button', { name: '/incorrect-input.pdf' })).toBeNull();
+});
+
+describe('sleep wait UI', () => {
+  const input = { durationSeconds: 90, reason: '외부 작업의 결과를 기다립니다.' };
+  function startLiveWait() {
+    useChatStore.setState({
+      turnStateBySession: {
+        s1: { phase: 'tool_running', startedAt: Date.now(), lastActivityAt: Date.now(), pendingMessageCount: 0 },
+      },
+    });
+    useSessionStore.setState({ streamingSessions: new Set(['s1']) });
+  }
+
+  it('shows a static duration, reason and clock while waiting, without a countdown or wake control', () => {
+    startLiveWait();
+    const { container, rerender } = render(<ToolUseCard name="functions.sleep" input={input} isLive defaultExpanded />);
+    expect(screen.getAllByText('대기 중')).toHaveLength(2);
+    expect(screen.getByText('예상 대기 시간 90초')).toBeInTheDocument();
+    expect(screen.getByText(input.reason)).toBeInTheDocument();
+    expect(screen.getByText('대기를 취소하려면 현재 응답을 중지하세요.')).toBeInTheDocument();
+    expect(container.querySelector('circle[cx="12"][cy="12"][r="9"]')).toBeInTheDocument();
+    expect(container.querySelector('.animate-spin')).toBeNull();
+    expect(container.querySelector('.tower-run-indicator')).toBeNull();
+    expect(screen.queryByRole('button', { name: /깨우기|지금 깨우기|Wake/i })).toBeNull();
+    expect(screen.queryByText(/남은 시간|remaining/i)).toBeNull();
+    rerender(<ToolUseCard name="functions.sleep" input={input} isLive defaultExpanded result='{"ok":true,"status":"completed"}' />);
+    expect(screen.getByText('대기 완료')).toBeInTheDocument();
+    expect(screen.queryByText('대기 중')).toBeNull();
+    expect(screen.queryByText('대기를 취소하려면 현재 응답을 중지하세요.')).toBeNull();
+    expect(screen.getByText('예상 대기 시간 90초')).toBeInTheDocument();
+  });
+
+  it('does not animate or show a running claim for historical unresolved waits', () => {
+    startLiveWait();
+    const { container } = render(<ToolUseCard name="sleep" input={input} defaultExpanded />);
+    expect(screen.queryByText('대기 중')).toBeNull();
+    expect(screen.queryByText('대기 완료')).toBeNull();
+    expect(container.querySelector('.animate-spin')).toBeNull();
+  });
+
+  it.each(['wait', 'functions.wait', 'functions__wait', 'mcp__wait__wait', 'sleep', 'Sleep', 'functions.sleep', 'functions__sleep', 'mcp__sleep__sleep', 'mcp__session-wait__sleep', 'mcp__session_wait__sleep'])('shows a clock and wait status for %s chips', (name) => {
+    startLiveWait();
+    const { container, rerender } = render(<ToolChip name={name} input={input} isActive={false} isLast isLive onClick={() => {}} />);
+    expect(screen.getByText('대기 중')).toHaveAttribute('title', expect.stringContaining('예상 대기 시간 90초'));
+    expect(screen.getByText('대기 중')).toHaveAttribute('title', expect.stringContaining(input.reason));
+    expect(container.querySelector('circle[cx="12"]')).toBeInTheDocument();
+    expect(container.querySelector('.tower-run-indicator')).toBeNull();
+    rerender(<ToolChip name={name} input={input} result='{"ok":true}' isActive={false} isLast isLive onClick={() => {}} />);
+    expect(screen.getByText('대기 완료')).toBeInTheDocument();
+    expect(screen.queryByText('대기 중')).toBeNull();
+  });
+
+  it.each([
+    ['{"ok":false,"status":"cancelled"}', '대기 취소됨'],
+    ['{"cancelled":true}', '대기 취소됨'],
+    ['AbortError: Sleep aborted', '대기 취소됨'],
+    ['{"ok":false,"error":"Invalid duration"}', '대기 실패'],
+    ['Error: Invalid duration', '대기 실패'],
+  ])('does not label cancellation/failure as completion: %s', (result, label) => {
+    render(<><ToolUseCard name="sleep" input={input} result={result} /><ToolChip name="sleep" input={input} result={result} isActive={false} onClick={() => {}} /></>);
+    expect(screen.getAllByText(label)).toHaveLength(2);
+    expect(screen.queryByText('대기 완료')).toBeNull();
+    expect(screen.queryByText('Done')).toBeNull();
+  });
+
+  it('keeps the requested duration and reason visible in compact cards', () => {
+    render(<ToolUseCard name="mcp__sleep__sleep" input={input} compact result='{"ok":true,"status":"completed"}' />);
+    expect(screen.getByText('예상 대기 시간 90초')).toBeInTheDocument();
+    expect(screen.getByText(input.reason)).toBeInTheDocument();
+    expect(screen.getByText('대기 완료')).toBeInTheDocument();
+  });
+
+  it('uses English wait labels without translating the reason', async () => {
+    await i18n.changeLanguage('en');
+    startLiveWait();
+    const { rerender } = render(<ToolUseCard name="sleep" input={input} isLive defaultExpanded />);
+    expect(screen.getAllByText('Waiting')).toHaveLength(2);
+    expect(screen.getByText('Expected wait: 90 seconds')).toBeInTheDocument();
+    expect(screen.getByText(input.reason)).toBeInTheDocument();
+    expect(screen.getByText('To cancel the wait, stop the current response.')).toBeInTheDocument();
+    rerender(<ToolUseCard name="sleep" input={input} result='{"ok":true}' />);
+    expect(screen.getByText('Wait complete')).toBeInTheDocument();
+  });
+  it('shows saved wait as an alarm rather than completed waiting', () => {
+    render(<ToolUseCard name="wait" input={{durationSeconds:86400,reason:'check'}} result='{"ok":true,"status":"scheduled"}' />);
+    expect(screen.getAllByText('알람 설정됨').length).toBeGreaterThan(0);
+  });
+
 });

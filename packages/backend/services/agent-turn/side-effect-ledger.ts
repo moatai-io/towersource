@@ -27,11 +27,11 @@ export async function beginSideEffectExecution(params: {
   semanticHash: string;
   recovering: boolean;
   leaseSeconds?: number;
-}): Promise<SideEffectExecutionDisposition> {
+}, transact: typeof transaction = transaction): Promise<SideEffectExecutionDisposition> {
   const leaseSeconds = Math.max(15, Math.min(params.leaseSeconds ?? 300, 1800));
   const operationId = `${params.rootTurnId}:${params.toolName}:${params.toolCallId}`;
 
-  return transaction(async client => {
+  return transact(async client => {
     const db = withClient(client);
     await db.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [
       `side-effect:${params.rootTurnId}:${params.toolName}:${params.semanticHash}`,
@@ -104,8 +104,8 @@ export async function finishSideEffectExecution(params: {
   executionId: string;
   ownerToken: string;
   result: unknown;
-}): Promise<boolean> {
-  return transaction(async client => {
+}, transact: typeof transaction = transaction): Promise<boolean> {
+  return transact(async client => {
     const db = withClient(client);
     const changed = await db.execute(
       `UPDATE side_effect_executions
@@ -123,8 +123,8 @@ export async function failSideEffectExecution(params: {
   executionId: string;
   ownerToken: string;
   error: string;
-}): Promise<boolean> {
-  return transaction(async client => {
+}, transact: typeof transaction = transaction): Promise<boolean> {
+  return transact(async client => {
     const db = withClient(client);
     const changed = await db.execute(
       `UPDATE side_effect_executions

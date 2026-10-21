@@ -1,5 +1,7 @@
 # skill 모듈 — 구조 결정
 
+> 역사적 설계 이유를 보존한 문서다. 아래 DB 정본·DB→파일 sync·personal scope 설명은 현재 동작이 아니다. 현재 [모듈 README](README.md)와 `skill-registry.ts`를 따른다. Project 파일과 teamskills가 본문 source이며 sync 함수는 no-op이다. Docker bind-ro 설명도 모든 Worker 구현의 보장이 아니다.
+
 ## 왜 bind-ro MVP가 Docker child mount인가
 
 2026-07-10 결정에 따라 Runtime Box의 조직 스킬은 스킬별 read-only bind mount를 사용한다. Privileged host mount helper와 mount propagation을 만들지 않고, 프로젝트 root rw mount 뒤 manifest-listed teamskills source를 Docker child `--mount ... readonly`로 overlay한다. schema v3 manifest 자체가 desired-state gate이며 프로젝트에는 host discovery와 mount target을 위한 `SKILL.md`, `skill.yaml`, marker만 남긴다. schema v2는 명시적 copy mode로 남는다. schema v3 source 하나라도 missing/unsafe이면 불완전한 control-only 폴더로 실행하지 않고 box start를 fail-closed한다.

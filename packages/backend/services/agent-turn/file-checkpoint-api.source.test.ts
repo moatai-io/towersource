@@ -4,9 +4,9 @@ import { describe, expect, it } from 'vitest';
 const api = fs.readFileSync(path.resolve(import.meta.dirname, '../../routes/api.ts'), 'utf8');
 
 describe('checkpoint REST safety contract', () => {
-  it('uses session access and rejects readonly roles', () => {
+  it('uses owner/admin/operator administrative access and rejects readonly roles', () => {
     expect(api).toContain("role === 'viewer' || role === 'guest'");
-    expect(api).toContain('canAccessSession(sessionId, userId, role)');
+    expect(api).toContain('canAdministerSession(sessionId, userId, role)');
     expect(api).toContain('Checkpoint restore requires write access');
   });
   it('exposes checkpoint read and preview without returning blobs', () => {

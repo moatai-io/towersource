@@ -1,7 +1,7 @@
 // Owns Pi steering queue_update → Tower steer_delivered conversion.
 // Public API: handlePiQueueUpdate.
 
-import type { TowerMessage } from '../types.js';
+import type { TowerContentBlock, TowerMessage } from '../types.js';
 import { diffConsumedSteers } from '../pi-steer-tracker.js';
 import type { PiSessionEntry } from './session-entry.js';
 
@@ -9,8 +9,10 @@ export function handlePiQueueUpdate(params: {
   event: any;
   entry: PiSessionEntry;
   sessionId: string;
+  assistantMsgId?: string;
+  assistantContent?: TowerContentBlock[];
 }): TowerMessage[] {
-  const { event, entry, sessionId } = params;
+  const { event, entry, sessionId, assistantMsgId, assistantContent } = params;
   const current: string[] = Array.isArray(event.steering) ? event.steering.slice() : [];
   if (entry.suppressSteerDelivery) {
     entry.lastSteering = current;
@@ -37,6 +39,8 @@ export function handlePiQueueUpdate(params: {
           msgId: pending.msgId,
           text: pending.text,
           username: pending.username,
+          assistantMsgId,
+          assistantContent: assistantContent?.map((block) => ({ ...block })),
         });
       } else {
         remaining.push(pending);

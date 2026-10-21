@@ -34,9 +34,22 @@ describe('RichContent file path links', () => {
 
     expect(screen.getByRole('menuitem', { name: 'Open in new tab' })).toBeInTheDocument();
     expect(screen.getByRole('menuitem', { name: 'Download' })).toBeInTheDocument();
-    expect(screen.getByRole('menuitem', { name: 'Save to My Files' })).toBeInTheDocument();
+    expect(screen.queryByRole('menuitem', { name: 'Save to My Files' })).not.toBeInTheDocument();
     expect(screen.getByRole('menuitem', { name: 'Copy file path' })).toBeInTheDocument();
     expect(screen.getByRole('menuitem', { name: 'Show file location' })).toBeInTheDocument();
+  });
+
+  it('opens a plain workspace file path inside a tight Markdown list item', () => {
+    const path = '~/workspace/projects/tower-project-dev/final/report.pdf';
+    const onFileClick = vi.fn();
+
+    render(<RichContent text={`결과물:\n- ${path}`} onFileClick={onFileClick} />);
+
+    const link = screen.getByText(path);
+    expect(link.closest('li')).not.toBeNull();
+    expect(link).toHaveClass('cursor-pointer', 'underline');
+    fireEvent.click(link);
+    expect(onFileClick).toHaveBeenCalledWith(path);
   });
 });
 
@@ -72,7 +85,7 @@ describe('RichContent plain JSON rendering', () => {
 
     render(<RichContent text={json} />);
 
-    const block = screen.getByLabelText('JSON response');
+    const block = screen.getByLabelText(i18n.t('jsonResponse', { ns: 'chat', defaultValue: 'JSON 응답' }));
     expect(block.tagName).toBe('PRE');
     expect(block).toHaveClass('whitespace-pre-wrap');
     expect(block.textContent).toContain('\n  "todos"');
@@ -82,7 +95,7 @@ describe('RichContent plain JSON rendering', () => {
   it('continues to render ordinary markdown through the markdown renderer', () => {
     render(<RichContent text={'**not json**'} />);
 
-    expect(screen.queryByLabelText('JSON response')).toBeNull();
+    expect(screen.queryByLabelText(i18n.t('jsonResponse', { ns: 'chat', defaultValue: 'JSON 응답' }))).toBeNull();
     expect(screen.getByText('not json').tagName).toBe('STRONG');
   });
 });

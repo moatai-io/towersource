@@ -1,3 +1,5 @@
+import { towerHttpUrl, readBrowserAuthToken } from '../../features/client-connection/connection';
+import { isAnswerSoundEnabled, setAnswerSoundEnabled, playAnswerSound, ANSWER_SOUND_STYLES, getAnswerSoundStyle, setAnswerSoundStyle, type AnswerSoundStyle } from '../../features/answer-sound/answer-sound';
 import React from 'react';
 import { useTranslation } from 'react-i18next';
 import { toastError, toastQuiet, toastSuccess } from '../../utils/toast';
@@ -5,15 +7,15 @@ import {
   getNotificationPermission,
   getVapidInfo,
   isPushSupported,
+  hasLocalPushSubscription,
   sendTestPush,
   subscribeToWebPush,
   unsubscribeFromWebPush,
 } from '../../lib/push-notifications';
 
-const API = import.meta.env.VITE_API_URL || '';
 
 function getToken() {
-  return localStorage.getItem('token') || '';
+  return readBrowserAuthToken() || '';
 }
 
 type EventPreference = {
@@ -50,10 +52,8 @@ type NotificationPreferences = {
   projects: ProjectPreference[];
 };
 
-type GroupId = 'direct' | 'longTaskDone' | 'needsAction' | 'aiDone' | 'updates';
-
 type GroupConfig = {
-  id: GroupId;
+  id: string;
   titleKey: string;
   descKey: string;
   events: string[];
@@ -61,45 +61,19 @@ type GroupConfig = {
   off: Pick<EventPreference, 'inApp' | 'toast' | 'webPush'>;
 };
 
+// Expose only current session and scheduled-work controls. Legacy event
+// preferences remain untouched in the payload for compatibility.
 const groups: GroupConfig[] = [
   {
-    id: 'direct',
-    titleKey: 'groupDirectTitle',
-    descKey: 'groupDirectDescription',
-    events: ['message.mention'],
+    id: 'answers', titleKey: 'groupAnswersTitle', descKey: 'groupAnswersDescription',
+    events: ['session.completed', 'spawn.completed', 'proactive.message', 'task.completed', 'task.failed'],
     on: { inApp: true, toast: true, webPush: true },
     off: { inApp: false, toast: false, webPush: false },
   },
   {
-    id: 'longTaskDone',
-    titleKey: 'groupLongTaskDoneTitle',
-    descKey: 'groupLongTaskDoneDescription',
-    events: ['task.completed'],
+    id: 'scheduled', titleKey: 'groupScheduledTitle', descKey: 'groupScheduledDescription',
+    events: ['automation.completed', 'automation.failed'],
     on: { inApp: true, toast: true, webPush: true },
-    off: { inApp: false, toast: false, webPush: false },
-  },
-  {
-    id: 'needsAction',
-    titleKey: 'groupNeedsActionTitle',
-    descKey: 'groupNeedsActionDescription',
-    events: ['task.failed', 'automation.failed'],
-    on: { inApp: true, toast: true, webPush: true },
-    off: { inApp: false, toast: false, webPush: false },
-  },
-  {
-    id: 'aiDone',
-    titleKey: 'groupAiDoneTitle',
-    descKey: 'groupAiDoneDescription',
-    events: ['session.completed', 'spawn.completed', 'proactive.message'],
-    on: { inApp: true, toast: true, webPush: false },
-    off: { inApp: false, toast: false, webPush: false },
-  },
-  {
-    id: 'updates',
-    titleKey: 'groupUpdatesTitle',
-    descKey: 'groupUpdatesDescription',
-    events: ['automation.completed', 'message.room', 'system.announcement'],
-    on: { inApp: true, toast: false, webPush: false },
     off: { inApp: false, toast: false, webPush: false },
   },
 ];
@@ -110,20 +84,22 @@ const globalChannels = [
   { key: 'webPushEnabled', labelKey: 'channelWebPushLabel', descKey: 'channelWebPushDescription' },
 ] as const;
 
-function Toggle({ checked, onChange, disabled = false }: { checked: boolean; onChange: (next: boolean) => void; disabled?: boolean }) {
+function Toggle({ checked, onChange, disabled = false, label }: { label: string; checked: boolean; onChange: (next: boolean) => void; disabled?: boolean }) {
   return (
     <button
       type="button"
       disabled={disabled}
       onClick={() => onChange(!checked)}
-      className={`relative h-6 w-11 rounded-full transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-400/60 ${
+      className={`relative h-8 w-14 shrink-0 rounded-full transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-400/60 ${
         checked ? 'tone-success tone-bg' : 'bg-surface-700'
       } ${disabled ? 'opacity-40 cursor-not-allowed' : 'hover:brightness-110'}`}
-      aria-pressed={checked}
+      role="switch"
+      aria-label={label}
+      aria-checked={checked}
     >
       <span
-        className={`absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white shadow-sm transition-transform duration-150 ${
-          checked ? 'translate-x-5' : 'translate-x-0'
+        className={`absolute left-1 top-1 h-6 w-6 rounded-full bg-white shadow-sm transition-transform duration-150 ${
+          checked ? 'translate-x-6' : 'translate-x-0'
         }`}
       />
     </button>
@@ -132,6 +108,8 @@ function Toggle({ checked, onChange, disabled = false }: { checked: boolean; onC
 
 export function NotificationSettingsPanel() {
   const { t } = useTranslation('settings');
+  const [soundStyle, setSoundStyle] = React.useState(getAnswerSoundStyle);
+  const [soundEnabled, setSoundEnabled] = React.useState(isAnswerSoundEnabled);
   const [prefs, setPrefs] = React.useState<NotificationPreferences | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [saving, setSaving] = React.useState(false);
@@ -141,12 +119,15 @@ export function NotificationSettingsPanel() {
   const [pushPermission, setPushPermission] = React.useState<NotificationPermission | 'unsupported'>(
     typeof window === 'undefined' ? 'unsupported' : getNotificationPermission(),
   );
+  const saveLock = React.useRef(false);
+  const [deviceSubscribed, setDeviceSubscribed] = React.useState(false);
+  const [pushLookupFailed, setPushLookupFailed] = React.useState(false);
   const [pushBusy, setPushBusy] = React.useState(false);
 
   React.useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    fetch(`${API}/api/notification-preferences`, {
+    fetch(towerHttpUrl(`/api/notification-preferences`), {
       headers: { Authorization: `Bearer ${getToken()}` },
     })
       .then((r) => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`)))
@@ -155,9 +136,10 @@ export function NotificationSettingsPanel() {
       .finally(() => { if (!cancelled) setLoading(false); });
 
     if (isPushSupported()) {
+      hasLocalPushSubscription().then(value => { if (!cancelled) setDeviceSubscribed(value); }).catch(() => {});
       getVapidInfo()
         .then((info) => { if (!cancelled) setPushConfigured(info.configured); })
-        .catch(() => { if (!cancelled) setPushConfigured(false); });
+        .catch(() => { if (!cancelled) setPushLookupFailed(true); });
     } else {
       setPushConfigured(false);
     }
@@ -165,11 +147,12 @@ export function NotificationSettingsPanel() {
   }, []);
 
   const save = React.useCallback(async (next: NotificationPreferences) => {
-    setPrefs(next);
+    if (saveLock.current) return false;
+    saveLock.current = true;
     setSaving(true);
     setError(null);
     try {
-      const res = await fetch(`${API}/api/notification-preferences`, {
+      const res = await fetch(towerHttpUrl(`/api/notification-preferences`), {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
         body: JSON.stringify(next),
@@ -178,39 +161,38 @@ export function NotificationSettingsPanel() {
       const data = await res.json();
       setPrefs(data);
       setSavedAt(Date.now());
+      return true;
     } catch (err: any) {
       setError(err?.message || t('saveFailed'));
+      return false;
     } finally {
+      saveLock.current = false;
       setSaving(false);
     }
   }, []);
 
   const updateGlobal = (key: keyof NotificationPreferences['global'], value: boolean) => {
-    if (!prefs) return;
+    if (!prefs || saveLock.current || pushBusy) return;
     void save({ ...prefs, global: { ...prefs.global, [key]: value } });
   };
 
   const handlePushToggle = async (next: boolean) => {
-    if (!prefs) return;
+    if (!prefs || saveLock.current || pushBusy) return;
     setPushBusy(true);
     try {
       if (next) {
+        setError(null);
         await subscribeToWebPush();
         setPushPermission(getNotificationPermission());
-        const recommendedPushEvents = new Set(['message.mention', 'task.failed', 'automation.failed', 'task.completed']);
-        await save({
-          ...prefs,
-          global: { ...prefs.global, webPushEnabled: true },
-          events: prefs.events.map((event) => recommendedPushEvents.has(event.eventType)
-            ? { ...event, webPush: true }
-            : { ...event, webPush: false }),
-        });
+        setDeviceSubscribed(true);
+        if (!await save({ ...prefs, global: { ...prefs.global, webPushEnabled: true } })) return;
         toastSuccess(t('browserNotificationsEnabled'));
       } else {
         // Turning off should never be blocked by browser/SW cleanup. Persist the
         // Tower preference first, then best-effort unsubscribe this browser.
-        await save({ ...prefs, global: { ...prefs.global, webPushEnabled: false } });
+        if (!await save({ ...prefs, global: { ...prefs.global, webPushEnabled: false } })) return;
         await unsubscribeFromWebPush().catch(() => {});
+        setDeviceSubscribed(false);
         setPushPermission(getNotificationPermission());
         toastQuiet(t('browserNotificationsDisabled'));
       }
@@ -223,10 +205,13 @@ export function NotificationSettingsPanel() {
   };
 
   const handleTestPush = async () => {
+    if (pushBusy || saveLock.current) return;
     setPushBusy(true);
     try {
       const result = await sendTestPush();
-      toastQuiet(t('testNotificationSent', { count: result.sent }));
+      if (result.sent === 0 || result.failed > 0) {
+        toastError(t('testNotificationIncomplete', { sent: result.sent, failed: result.failed }));
+      } else toastQuiet(t('testNotificationSent', { count: result.sent }));
     } catch (err: any) {
       toastError(err?.message || t('testNotificationFailed'));
     } finally {
@@ -242,7 +227,7 @@ export function NotificationSettingsPanel() {
   };
 
   const updateGroup = (group: GroupConfig, enabled: boolean) => {
-    if (!prefs) return;
+    if (!prefs || saveLock.current || pushBusy) return;
     const patch = enabled ? group.on : group.off;
     void save({
       ...prefs,
@@ -280,6 +265,42 @@ export function NotificationSettingsPanel() {
         </div>
       </div>
 
+      <label className="flex items-start gap-3 rounded-xl border border-surface-700 p-4">
+        <input type="checkbox" className="mt-1" checked={soundEnabled} onChange={(event) => {
+          const enabled = event.target.checked;
+          void setAnswerSoundEnabled(enabled).then((played) => {
+            if (enabled && !played) setError(t('answerSoundFailed'));
+          });
+          setSoundEnabled(isAnswerSoundEnabled());
+        }} />
+        <span>
+          <span className="block text-sm font-medium">{t('answerSoundTitle')}</span>
+          <span className="mt-1 block text-sm text-surface-500">{t('answerSoundDescription')}</span>
+        </span>
+      </label>
+
+      <label className="block text-sm">
+        <span className="mr-3">{t('answerSoundStyle')}</span>
+        <select className="rounded border border-surface-600 bg-surface-900 p-2" value={soundStyle} onChange={(event) => {
+          const style = event.target.value as AnswerSoundStyle;
+          setAnswerSoundStyle(style);
+          setSoundStyle(getAnswerSoundStyle());
+          setError(null);
+          void playAnswerSound(style).then((played) => {
+            if (!played) setError(t('answerSoundFailed'));
+          });
+        }}>
+          {ANSWER_SOUND_STYLES.map((style) => <option key={style} value={style}>{t(`answerSoundStyles.${style}`)}</option>)}
+        </select>
+      </label>
+
+      <button type="button" className="text-sm underline text-surface-400" onClick={() => {
+        setError(null);
+        void playAnswerSound().then((played) => {
+          if (!played) setError(t('answerSoundFailed'));
+        });
+      }}>{t('answerSoundPreview')}</button>
+
       {error && <div className="text-[13px] text-red-300 p-3 border border-red-500/20 rounded-xl bg-red-500/8">{error}</div>}
 
       <div className="space-y-2">
@@ -287,20 +308,27 @@ export function NotificationSettingsPanel() {
         <div className="divide-y divide-surface-800 border-y border-surface-800">
           {globalChannels.map((item) => {
             const isPush = item.key === 'webPushEnabled';
-            const disabled = isPush && (!isPushSupported() || pushConfigured === false || pushPermission === 'denied' || pushBusy);
+            const disabled = saving || pushBusy || (isPush && !prefs.global.webPushEnabled && (!isPushSupported() || pushConfigured !== true || pushPermission === 'denied'));
             return (
               <div key={item.key} className="py-3 flex items-center justify-between gap-4">
                 <div className="min-w-0">
                   <div className="text-[14px] font-medium text-gray-200">{t(item.labelKey)}</div>
                   <div className="mt-0.5 text-[12px] text-surface-500">
-                    {isPush && pushPermission === 'denied'
+                    {isPush && !isPushSupported()
+                      ? t(/iPhone|iPad|iPod/i.test(navigator.userAgent) ? 'iosPushHint' : 'pushUnsupported')
+                      : isPush && pushLookupFailed
+                      ? t('pushLookupFailed')
+                      : isPush && pushPermission === 'denied'
                       ? t('browserPermissionRequired')
                       : isPush && pushConfigured === false
                         ? t('webPushConfigurationRequired')
-                        : t(item.descKey)}
+                        : isPush && /iPhone|iPad|iPod/i.test(navigator.userAgent)
+                          ? t('iosPushHint')
+                          : t(item.descKey)}
                   </div>
                 </div>
                 <Toggle
+                  label={t(item.labelKey)}
                   checked={!!prefs.global[item.key]}
                   disabled={disabled}
                   onChange={(next) => isPush ? void handlePushToggle(next) : updateGlobal(item.key, next)}
@@ -309,10 +337,18 @@ export function NotificationSettingsPanel() {
             );
           })}
         </div>
-        {prefs.global.webPushEnabled && pushPermission === 'granted' && (
+        {prefs.global.webPushEnabled && (
+          <div className="mt-2 text-sm" role="status">
+            {t(deviceSubscribed && pushPermission === 'granted' ? 'pushDeviceRegistered' : 'pushDeviceNeeded')}
+            {(!deviceSubscribed || pushPermission !== 'granted') && isPushSupported() && pushPermission !== 'denied' && (
+              <button type="button" disabled={saving || pushBusy || pushConfigured !== true} className="ml-2 underline" onClick={() => void handlePushToggle(true)}>{t('pushConnectDevice')}</button>
+            )}
+          </div>
+        )}
+        {prefs.global.webPushEnabled && deviceSubscribed && pushPermission === 'granted' && (
           <button
             type="button"
-            disabled={pushBusy}
+            disabled={pushBusy || saving}
             onClick={handleTestPush}
             className="mt-2 text-[13px] text-surface-400 hover:text-gray-200 disabled:opacity-50"
           >
@@ -330,14 +366,14 @@ export function NotificationSettingsPanel() {
                 <div className="text-[14px] font-medium text-gray-200">{t(group.titleKey)}</div>
                 <div className="mt-0.5 text-[12px] text-surface-500 leading-snug">{t(group.descKey)}</div>
               </div>
-              <Toggle checked={isGroupOn(group)} onChange={(next) => updateGroup(group, next)} />
+              <Toggle label={t(group.titleKey)} disabled={saving || pushBusy} checked={isGroupOn(group)} onChange={(next) => updateGroup(group, next)} />
             </div>
           ))}
         </div>
       </div>
 
       <p className="text-[12px] leading-relaxed text-surface-500">
-        {t('projectNotificationHint')}
+        {t('notificationDeliveryHint')}
       </p>
     </section>
   );

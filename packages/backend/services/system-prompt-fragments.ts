@@ -44,7 +44,7 @@ const FRAGMENT_RULES: ReadonlyArray<{ key: SystemPromptFragmentKey; pattern: Reg
   { key: 'git', pattern: /(?:\bgit\b|\bcommit\b|\bpush\b|\bpull request\b|\bPR\b|\bmerge\b|\brebase\b|\btag\b|커밋|푸시|풀리퀘|브랜치|머지|리베이스|태그)/i },
   { key: 'agent-orchestration', pattern: /(?:\bsubagent\b|\bmulti-agent\b|\bspawn(?:ed)?\s+session\b|\bagent\s+team\b|서브에이전트|멀티.?에이전트|에이전트\s*(?:팀|위임)|별도\s*세션|병렬(?:로|\s*검토|\s*분석|\s*조사|\s*세션)|세션\s*spawn)/i },
   { key: 'external-skill-install', pattern: /(?:\bskill\s*(?:pack)?\s*install\b|\binstall\b.*\b(?:skill|github|repository|repo)\b|외부\s*스킬|스킬팩|GitHub.*설치|(?:스킬|skill).*(?:저장소|repository|repo).*(?:설치|clone|복제)|(?:저장소|repository|repo).*(?:설치|clone|복제))/i },
-  { key: 'durable-artifact', pattern: /(?:\b(?:strategy|plan|proposal|specification|requirements?|design\s+doc|decision\s+record|research\s+report|implementation\s+plan)\b|기획(?:안|서|을|해|하|이|과|서)?|아키텍처|전략(?:안|을|이|과|서)?|설계(?:안|서|를|해|하|와|도)?|실행\s*계획|요구사항|비교\s*검토|상세\s*분석|정책\s*(?:초안|안)|의사결정\s*(?:문서|기록)|조사\s*결과.{0,12}정리|연구\s*보고서|검토\s*보고서|운영\s*계획|제안\s*논리)/i },
+  { key: 'durable-artifact', pattern: /(?:\b(?:strategy|plan|proposal|specification|requirements?|design\s+doc|decision\s+record|research\s+report|implementation\s+plan)\b|기획(?:안|서|을|해|하|이|과|서)?|아키텍처|전략(?:안|을|이|과|서)?|설계(?:안|서|를|해|하|와|도)?|실행\s*계획|요구사항|비교\s*검토|상세\s*분석|정책\s*(?:초안|안)|(?:의사결정|결정)\s*(?:문서|기록)|조사\s*결과.{0,12}정리|연구\s*보고서|검토\s*보고서|운영\s*계획|제안\s*논리)/i },
 ];
 
 export function selectSystemPromptFragmentsForMessage(message: string | undefined | null): SystemPromptFragmentKey[] {

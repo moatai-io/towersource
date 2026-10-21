@@ -10,7 +10,7 @@
 
 import { createSdkMcpServer, tool } from '@anthropic-ai/claude-agent-sdk';
 import { z } from 'zod';
-import { canAccessSession } from '../services/pm/project-access.js';
+import { canMutateSessionMetadata } from '../services/pm/project-access.js';
 import { updateSession } from '../services/session/session-manager.js';
 
 export interface SessionControlMcpContext {
@@ -70,7 +70,7 @@ export function createSessionControlMcpServer(ctx: SessionControlMcpContext) {
               };
             }
 
-            const access = await canAccessSession(ctx.sessionId, ctx.userId, ctx.userRole || 'member');
+            const access = await canMutateSessionMetadata(ctx.sessionId, ctx.userId, ctx.userRole || 'member');
             if (!access.allowed) {
               return {
                 content: [{ type: 'text' as const, text: `rename_current_session denied: ${access.message}` }],

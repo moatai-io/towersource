@@ -6,12 +6,24 @@
  * AI still proposes the commit message; this script owns file selection,
  * specific git add, commit execution, and Tower-Session trailer insertion.
  */
-import { existsSync, statSync } from 'node:fs';
+import { existsSync, statSync, appendFileSync } from 'node:fs';
+import { sessionReviewHash, assertSessionReview } from './session-review.mjs';
+import { readBashObservations } from './bash-observations.mjs';
+import { selectSessionCandidates } from './session-selection.mjs';
 import { homedir } from 'node:os';
 import { dirname, isAbsolute, join, normalize, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 
 const HOME = homedir();
+const BLOCKED_PATTERNS = [
+  /(^|\/)\.env(?:\.|$)/i,
+  /(^|\/)(?:id_rsa|id_ed25519|.*\.pem|.*\.key|.*\.p12|.*\.pfx)$/i,
+  /(^|\/)(?:node_modules|dist|coverage|\.worktrees|\.git|\.npm)(\/|$)/,
+  /^(?:data|logs?|cache|\.cache)(\/|$)/i,
+  /\.(?:dump|sql\.gz|log)$/i,
+];
+const SECRET_FILE_PATTERN = /(^|\/)(?:secrets?|tokens?|credentials?|private[-_]?keys?)(?:\.(?:json|ya?ml|txt|env))?$/i;
+const MAX_UNTRACKED_BYTES = 5 * 1024 * 1024;
 const DEFAULT_PG = {
   host: process.env.PGHOST || '127.0.0.1',
   port: process.env.PGPORT || '5433',
@@ -29,6 +41,8 @@ function parseArgs(argv) {
     verbose: false,
     includeUntracked: true,
     fallbackProvenance: true,
+    reviewedHash: '',
+    selectedPaths: [],
     message: '',
     repo: '',
     sessionId: process.env.TOWER_SESSION_ID || '',
@@ -40,6 +54,8 @@ function parseArgs(argv) {
     else if (arg === '--yes' || arg === '-y') opts.yes = true;
     else if (arg === '--all-repos') opts.allRepos = true;
     else if (arg === '--verbose' || arg === '-v') opts.verbose = true;
+    else if (arg === '--path') opts.selectedPaths.push(argv[++i] || '');
+    else if (arg === '--reviewed-hash') opts.reviewedHash = argv[++i] || '';
     else if (arg === '--no-untracked') opts.includeUntracked = false;
     else if (arg === '--no-provenance-fallback') opts.fallbackProvenance = false;
     else if (arg === '--message' || arg === '-m') opts.message = argv[++i] || '';
@@ -72,6 +88,8 @@ Options:
                                 Default is the current working directory's repo.
   --session-id <uuid>           Override TOWER_SESSION_ID.
   --json                        Emit machine-readable JSON summary.
+  --path <relative-path>       Repeat to narrow recorded candidates; requires reviewed hash for commit.
+  --reviewed-hash <sha256>      Exact dry-run review hash approved after checking temporal overlaps; never adds files.
   --verbose, -v                 Print every untouched dirty file.
   --no-untracked                Exclude untracked files from the candidate set.
   --no-provenance-fallback      Do not read legacy ~/workspace/.audit/provenance.jsonl.
@@ -202,6 +220,17 @@ function repoStatus(repo) {
   return parseStatusPorcelain(out, repo);
 }
 
+function blockedReason(candidate) {
+  const normalized = candidate.rel.replaceAll('\\', '/');
+  const isPublicEnvTemplate = /(^|\/)\.env\.(?:example|sample|template)$/i.test(normalized);
+  if (!isPublicEnvTemplate && BLOCKED_PATTERNS.some((pattern) => pattern.test(normalized))) return 'blocked path pattern';
+  if (candidate.status === '??' && SECRET_FILE_PATTERN.test(normalized)) return 'untracked secret-like filename';
+  if (candidate.status === '??' && existsSync(candidate.abs) && statSync(candidate.abs).isFile() && statSync(candidate.abs).size > MAX_UNTRACKED_BYTES) {
+    return `untracked file exceeds ${MAX_UNTRACKED_BYTES} bytes`;
+  }
+  return '';
+}
+
 function groupCandidates(paths, opts) {
   const byRepo = new Map();
   const skipped = [];
@@ -225,7 +254,10 @@ function groupCandidates(paths, opts) {
       const isTouched = entry.touched.has(abs);
       const isUntracked = info.status === '??';
       if (isTouched && (opts.includeUntracked || !isUntracked)) {
-        entry.candidates.push({ abs, rel: info.rel, status: info.status });
+        const candidate = { abs, rel: info.rel, status: info.status };
+        const reason = blockedReason(candidate);
+        if (reason) entry.skipped.push({ path: abs, reason });
+        else entry.candidates.push(candidate);
       } else if (!isTouched) {
         entry.untouchedDirty.push({ abs, rel: info.rel, status: info.status });
       } else if (isUntracked) {
@@ -264,6 +296,10 @@ function printSummary(summary, opts) {
   console.log(`source=${summary.source}${summary.sourceError ? ` (${summary.sourceError})` : ''}`);
   console.log(`scope=${summary.allRepos ? 'all repos touched by this session' : summary.targetRepo}`);
   console.log(`touched_paths=${summary.touchedPathCount}`);
+  for (const observation of summary.bashObservations || []) {
+    console.log(`bash evidence (${observation.repo}): ${observation.status}; review-only=${observation.candidates.length}; overlap=${observation.conflicts.length}`);
+    for (const file of observation.candidates) console.log(`  ${observation.conflicts.includes(file) ? 'overlap' : 'unconfirmed'} ${file}`);
+  }
   for (const repo of summary.repos) {
     console.log(`\n[${repo.repo}]`);
     if (repo.candidates.length) {
@@ -340,13 +376,27 @@ function main() {
   }
 
   const grouped = groupCandidates(paths, opts);
-  const summary = buildSummary(opts, source, sourceError, paths, grouped);
+  const summary = selectSessionCandidates(buildSummary(opts, source, sourceError, paths, grouped), opts.selectedPaths);
+  // Evidence is deliberately separate from confirmed candidates, even if PG returned zero rows.
+  summary.bashObservations = [...new Set([opts.repo, ...summary.repos.map(r => r.repo)].filter(Boolean))].map(repo => {
+    const gitDir = runOk('git', ['rev-parse', '--git-common-dir'], { cwd: repo }).trim();
+    return { repo, ...readBashObservations(resolve(repo, gitDir, 'tower-bash-observations.jsonl'), opts.sessionId) };
+  });
 
+  summary.reviewHash = sessionReviewHash(summary);
   if (opts.json) console.log(JSON.stringify(summary, null, 2));
   else printSummary(summary, opts);
 
+  // A temporal overlap cannot establish who owns the current diff. Fail closed.
+  const overlapBlocked = summary.repos.flatMap(repo => {
+    const observation = summary.bashObservations.find(o => o.repo === repo.repo);
+    return repo.candidates.filter(f => observation?.conflicts.includes(f.rel)).map(f => f.rel);
+  });
   const totalCandidates = summary.repos.reduce((n, repo) => n + repo.candidates.length, 0);
   if (opts.dryRun) return;
+  if (opts.selectedPaths.length && !opts.reviewedHash) die('Selected paths require --reviewed-hash from the approved dry-run');
+  if (overlapBlocked.length && !opts.reviewedHash) die(`Cross-session bash evidence requires review: ${overlapBlocked.join(', ')}`);
+  if (opts.reviewedHash) assertSessionReview(summary, opts.reviewedHash);
   if (!opts.message.trim()) die('Real commit requires --message. Let AI propose the message, then pass it here.');
   if (!opts.yes) die('Real commit requires --yes after the user has confirmed paths + message.');
   if (totalCandidates === 0) die('No dirty files touched by this session; nothing to commit.', 2);
@@ -354,6 +404,11 @@ function main() {
   for (const repo of summary.repos) {
     if (!repo.candidates.length) continue;
     console.log(`\nCommitting ${repo.candidates.length} file(s) in ${repo.repo}`);
+    if (opts.reviewedHash) {
+      assertSessionReview(summary, opts.reviewedHash);
+      const gitDir = runOk('git', ['rev-parse', '--git-common-dir'], { cwd: repo.repo }).trim();
+      appendFileSync(resolve(repo.repo, gitDir, 'tower-session-reviews.jsonl'), JSON.stringify({ sessionId: opts.sessionId, hash: opts.reviewedHash, paths: repo.candidates.map(f => f.rel), conflicts: overlapBlocked, message: opts.message, reviewedAt: new Date().toISOString() }) + '\n', { mode: 0o600 });
+    }
     commitRepo(repo.repo, repo.candidates, opts.message, opts.sessionId);
   }
 }

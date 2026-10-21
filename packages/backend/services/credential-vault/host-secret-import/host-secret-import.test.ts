@@ -5,12 +5,11 @@ import path from 'node:path';
 
 vi.mock('../credential-vault-service.js', () => ({
   upsertApiKeyCredential: vi.fn(async () => ({ id: 'imported' })),
-  setProjectCredentialPolicy: vi.fn(async () => undefined),
   auditCredentialEvent: vi.fn(async () => undefined),
 }));
 
 import { applyHostSecretImport, previewHostSecretImport } from './host-secret-import.js';
-import { auditCredentialEvent, setProjectCredentialPolicy, upsertApiKeyCredential } from '../credential-vault-service.js';
+import { auditCredentialEvent, upsertApiKeyCredential } from '../credential-vault-service.js';
 
 const request = (sourcePath: string) => ({
   sourcePath, sourceKey: 'SOURCE_KEY', projectId: 'project-1', credentialId: 'imported-key',
@@ -47,8 +46,7 @@ describe('host secret import', () => {
   it('imports the approved key and returns only non-secret metadata', async () => {
     const preview = await previewHostSecretImport(request(sourcePath));
     const result = await applyHostSecretImport({ intentId: preview.intentId, proposalHash: preview.proposalHash, actorUserId: 1 });
-    expect(upsertApiKeyCredential).toHaveBeenCalledWith(expect.objectContaining({ secretValue: 'super-secret-value', scope: 'project' }));
-    expect(setProjectCredentialPolicy).toHaveBeenCalledWith(expect.objectContaining({ projectId: 'project-1', credentialId: 'imported-key', mode: 'allow' }));
+    expect(upsertApiKeyCredential).toHaveBeenCalledWith(expect.objectContaining({ secretValue: 'super-secret-value', scope: 'project', projectId: 'project-1' }));
     expect(auditCredentialEvent).toHaveBeenCalledWith(expect.objectContaining({
       eventType: 'host_secret_import_applied', actorUserId: 1,
       credentialId: 'imported-key', projectId: 'project-1',

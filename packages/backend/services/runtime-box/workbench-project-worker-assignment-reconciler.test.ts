@@ -35,9 +35,10 @@ describe('Project Worker assignment reconciler', () => {
     await expect(reconcileClaimedProjectWorkerAssignment(assignment as any, deps)).resolves.toMatchObject({ ok: false });
     if (failAt !== 'binding') expect(deps.activateBinding).not.toHaveBeenCalled();
     expect(deps.complete).not.toHaveBeenCalled();
-    expect(deps.fail).toHaveBeenCalledOnce();
+    if (failAt === 'prepare') expect(deps.recoveryRequired).toHaveBeenCalledOnce();
+    else expect(deps.fail).toHaveBeenCalledOnce();
     expect(rollback).toHaveBeenCalledTimes(failAt === 'prepare' ? 0 : 1);
-    expect(order.at(-1)).toBe('fail');
+    expect(order.at(-1)).toBe(failAt === 'prepare' ? 'recovery-required' : 'fail');
   });
 
   it('does not roll back prepared Worker scope after binding activation', async () => {
@@ -47,5 +48,38 @@ describe('Project Worker assignment reconciler', () => {
     expect(rollback).not.toHaveBeenCalled();
     expect(deps.fail).not.toHaveBeenCalled();
     expect(deps.recoveryRequired).toHaveBeenCalledOnce();
+  });
+});
+
+ describe('assignment recovery boundaries', () => {
+  it('requires recovery review if rollback fails', async () => {
+    const { deps, rollback } = dependencies('verify');
+    rollback.mockRejectedValueOnce(new Error('rollback unavailable'));
+    await expect(reconcileClaimedProjectWorkerAssignment(assignment as any, deps)).resolves.toMatchObject({ ok: false });
+    expect(deps.recoveryRequired).toHaveBeenCalledOnce();
+    expect(deps.fail).not.toHaveBeenCalled();
+    expect(deps.activateBinding).not.toHaveBeenCalled();
+  });
+  it('rejects an unclaimed request without external effects', async () => {
+    const { deps } = dependencies();
+    await expect(reconcileClaimedProjectWorkerAssignment({ ...assignment, status: 'pending' } as any, deps)).rejects.toThrow('NOT_CLAIMED');
+    expect(deps.prepareWorker).not.toHaveBeenCalled();
+  });
+});
+
+ describe('partial preparation failure', () => {
+  it('quarantines a failure after identity mutation instead of declaring safe retry', async () => {
+    const { deps } = dependencies();
+    const state = { identity: 'old', config: 'old', binding: 'old' };
+    deps.prepareWorker.mockImplementationOnce(async () => {
+      state.identity = 'new';
+      throw new Error('config write failed after rotation');
+    });
+    await expect(reconcileClaimedProjectWorkerAssignment(assignment as any, deps)).resolves.toMatchObject({ ok: false });
+    expect(state).toEqual({ identity: 'new', config: 'old', binding: 'old' });
+    expect(deps.recoveryRequired).toHaveBeenCalledWith(expect.objectContaining({ error: 'config write failed after rotation' }));
+    expect(deps.fail).not.toHaveBeenCalled();
+    expect(deps.verifyWorker).not.toHaveBeenCalled();
+    expect(deps.activateBinding).not.toHaveBeenCalled();
   });
 });

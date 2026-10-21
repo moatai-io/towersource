@@ -33,7 +33,7 @@ function writeTeamskillsSkill(home: string, name: string, content?: string): str
   const dir = path.join(home, 'workspace', 'projects', 'teamskills', 'skills', name);
   fs.mkdirSync(path.join(dir, 'scripts'), { recursive: true });
   fs.writeFileSync(path.join(dir, 'SKILL.md'), content ?? `---\nname: ${name}\ndescription: org ${name}\nversion: 9.9.9\n---\n\n# org ${name}\n`);
-  fs.writeFileSync(path.join(dir, 'skill.yaml'), `name: ${name}\nversion: 9.9.9\nrequiredSecrets:\n- ORG_TOKEN\n`);
+  fs.writeFileSync(path.join(dir, 'skill.yaml'), `name: ${name}\nversion: 9.9.9\nrequiredSecrets:\n- ORG_TOKEN\ngatewayApis: '[{"apiId":"openai-image","apiKeyEnv":"OPENAI_IMAGE_API_KEY","baseUrlEnv":"OPENAI_IMAGE_BASE_URL"}]'\n`);
   fs.writeFileSync(path.join(dir, 'scripts', 'run.sh'), '#!/usr/bin/env bash\necho org\n');
   return dir;
 }
@@ -72,6 +72,7 @@ describe('skill-bundle-resolver', () => {
     expect(bundle?.ownership).toBe('org');
     expect(bundle?.version).toBe('9.9.9');
     expect(bundle?.requiredSecrets).toEqual(['ORG_TOKEN']);
+    expect(bundle?.gatewayApis).toEqual([{ apiId: 'openai-image', apiKeyEnv: 'OPENAI_IMAGE_API_KEY', baseUrlEnv: 'OPENAI_IMAGE_BASE_URL' }]);
     expect(bundle?.sourceProject).toBe('teamskills');
     expect(bundle?.sourcePath).toBe('skills/shared-skill');
     expect(bundle?.origin).toBe('org');
