@@ -320,7 +320,7 @@
         dontFixup = true;
         outputHashMode = "recursive";
         outputHashAlgo = "sha256";
-        outputHash = "sha256-u1peDeQ5D2usfmuWd1mfILQn/AAd1YVReRRvlLr42J0=";
+        outputHash = "sha256-gFUAP65VtoXipcsFeYJjeUcY8N5KEKZ0nVmdhTBbELE=";
       };
 
       # Runtime dependencies are ~1.08 GB but change only with the lockfile or
@@ -431,18 +431,14 @@
           ln -s ../../packages/shared "$app/node_modules/@tower/shared"
           cp packages/frontend/package.json "$app/packages/frontend/package.json"
           ln -s ${towerAppRuntime}/packages/backend/node_modules "$app/packages/backend/node_modules"
+          # The public package supports scripts/oss/install.sh's single-host
+          # deployment. Managed provisioning, shared-host enrollment/ACL repair,
+          # and owner-initiated cross-identity publication are operator tooling;
+          # do not package private helpers or silently substitute permission repair.
+          # Canonical migration still fails closed if its required preflight is absent.
           cp ${./scripts/nix-app/tower-app-probe} "$out/bin/tower-app-probe"
           cp ${./scripts/nix-app/tower-app-start-shadow} "$out/bin/tower-app-start-shadow"
           cp ${./scripts/nix-app/tower-app-start-production} "$out/bin/tower-app-start-production"
-          cp ${./scripts/nix-app/tower-app-start-provisioning} "$out/bin/tower-app-start-provisioning"
-          cp ${./scripts/nix-app/tower-app-provisioning-command} "$out/bin/tower-app-provisioning-command"
-          cp ${./scripts/nix-app/prepare-provisioning-host} "$out/bin/prepare-provisioning-host"
-          cp ${./scripts/nix-app/enroll-provisioning-worker} "$out/bin/enroll-provisioning-worker"
-          cp ${./scripts/nix-app/provisioning-runtime-context} "$out/bin/provisioning-runtime-context"
-          cp ${./scripts/nix-app/prepare-provisioning-managed-skills} "$out/bin/prepare-provisioning-managed-skills"
-          cp ${./scripts/nix-app/prepare-provisioning-bwrap-policy} "$out/bin/prepare-provisioning-bwrap-policy"
-          cp ${./scripts/nix-app/prepare-provisioning-main-https} "$out/bin/prepare-provisioning-main-https"
-          cp ${./scripts/nix-app/prepare-provisioning-owner} "$out/bin/prepare-provisioning-owner"
           ln -s ${pkgs.bubblewrap}/bin/bwrap "$out/bin/tower-provisioning-bwrap"
           cp ${./scripts/nix-app/tower-app-deploy-verify} "$out/bin/tower-app-deploy-verify"
           cp ${./scripts/nix-app/tower-app-probe-isolated-db} "$out/bin/tower-app-probe-isolated-db"
@@ -471,29 +467,11 @@
           cp ${./packages/backend/project-compute-baseline.json} "$out/share/tower/compute-baseline.json"
           cp ${./scripts/nix-app/install-local-workbench-worker-units} "$out/bin/install-local-workbench-worker-units"
           cp ${./scripts/nix-app/install-system-workbench-worker-units} "$out/bin/install-system-workbench-worker-units"
-          cp ${./scripts/nix-app/tower-worker-permission-preflight} "$out/bin/tower-worker-permission-preflight"
-          cp ${./scripts/nix-app/tower-shared-worker-install-preflight} "$out/bin/tower-shared-worker-install-preflight"
-          cp ${./scripts/nix-app/tower-shared-worker-host-policy} "$out/bin/tower-shared-worker-host-policy"
-          cp ${./scripts/nix-app/tower-protected-input-publish} "$out/bin/tower-protected-input-publish"
-          cp ${./scripts/nix-app/tower-shared-output-publish} "$out/bin/tower-shared-output-publish"
-          chmod +x "$out/bin/tower-protected-input-publish" "$out/bin/tower-shared-output-publish"
-          patchShebangs "$out/bin/tower-protected-input-publish" "$out/bin/tower-shared-output-publish"
-          wrapProgram "$out/bin/tower-protected-input-publish" --prefix PATH : ${lib.makeBinPath [ pkgs.acl pkgs.python3 ]}
-          wrapProgram "$out/bin/tower-shared-output-publish" --prefix PATH : ${lib.makeBinPath [ pkgs.acl pkgs.python3 ]}
-          chmod +x "$out/bin/tower-worker-permission-preflight" "$out/bin/tower-shared-worker-install-preflight" "$out/bin/tower-shared-worker-host-policy"
-          patchShebangs "$out/bin/tower-worker-permission-preflight" "$out/bin/tower-shared-worker-install-preflight" "$out/bin/tower-shared-worker-host-policy"
-          wrapProgram "$out/bin/tower-worker-permission-preflight" \
-            --prefix PATH : ${lib.makeBinPath [ pkgs.python3 ]}
-          wrapProgram "$out/bin/tower-shared-worker-install-preflight" \
-            --prefix PATH : ${lib.makeBinPath [ pkgs.bash pkgs.coreutils pkgs.curl pkgs.acl pkgs.shadow pkgs.util-linux pkgs.python3 ]}
-          wrapProgram "$out/bin/tower-shared-worker-host-policy" \
-            --prefix PATH : ${lib.makeBinPath [ pkgs.python3 ]}
           cp ${./scripts/nix-app/tower-workbench-assignment-reconciler} "$out/bin/tower-workbench-assignment-reconciler"
           cp ${./scripts/nix-app/install-workbench-assignment-reconciler-unit} "$out/bin/install-workbench-assignment-reconciler-unit"
-          cp ${./scripts/nix-app/install-worker-scope-coordinator} "$out/bin/install-worker-scope-coordinator"
           ln -s ${towerNixRender}/bin/tower-nix-render "$out/bin/tower-nix-render"
-          chmod +x "$out/bin/tower-app-probe" "$out/bin/tower-app-start-shadow" "$out/bin/tower-app-start-production" "$out/bin/tower-app-deploy-verify" "$out/bin/tower-app-probe-isolated-db" "$out/bin/tower-app-pdf-smoke" "$out/bin/tower-app-document-smoke" "$out/bin/tower-workbench-worker" "$out/bin/tower-workbench-worker-heartbeat" "$out/bin/runtime-compute-doctor" "$out/bin/tower-html-render" "$out/bin/install-local-workbench-worker-units" "$out/bin/install-system-workbench-worker-units" "$out/bin/tower-workbench-assignment-reconciler" "$out/bin/install-workbench-assignment-reconciler-unit" "$out/bin/install-worker-scope-coordinator"
-          patchShebangs "$out/bin/tower-app-probe" "$out/bin/tower-app-start-shadow" "$out/bin/tower-app-start-production" "$out/bin/tower-app-deploy-verify" "$out/bin/tower-app-probe-isolated-db" "$out/bin/tower-app-pdf-smoke" "$out/bin/tower-app-document-smoke" "$out/bin/tower-workbench-worker" "$out/bin/tower-workbench-worker-heartbeat" "$out/bin/runtime-compute-doctor" "$out/bin/tower-html-render" "$out/bin/install-local-workbench-worker-units" "$out/bin/install-system-workbench-worker-units" "$out/bin/tower-workbench-assignment-reconciler" "$out/bin/install-workbench-assignment-reconciler-unit" "$out/bin/install-worker-scope-coordinator"
+          chmod +x "$out/bin/tower-app-probe" "$out/bin/tower-app-start-shadow" "$out/bin/tower-app-start-production" "$out/bin/tower-app-deploy-verify" "$out/bin/tower-app-probe-isolated-db" "$out/bin/tower-app-pdf-smoke" "$out/bin/tower-app-document-smoke" "$out/bin/tower-workbench-worker" "$out/bin/tower-workbench-worker-heartbeat" "$out/bin/runtime-compute-doctor" "$out/bin/tower-html-render" "$out/bin/install-local-workbench-worker-units" "$out/bin/install-system-workbench-worker-units" "$out/bin/tower-workbench-assignment-reconciler" "$out/bin/install-workbench-assignment-reconciler-unit"
+          patchShebangs "$out/bin/tower-app-probe" "$out/bin/tower-app-start-shadow" "$out/bin/tower-app-start-production" "$out/bin/tower-app-deploy-verify" "$out/bin/tower-app-probe-isolated-db" "$out/bin/tower-app-pdf-smoke" "$out/bin/tower-app-document-smoke" "$out/bin/tower-workbench-worker" "$out/bin/tower-workbench-worker-heartbeat" "$out/bin/runtime-compute-doctor" "$out/bin/tower-html-render" "$out/bin/install-local-workbench-worker-units" "$out/bin/install-system-workbench-worker-units" "$out/bin/tower-workbench-assignment-reconciler" "$out/bin/install-workbench-assignment-reconciler-unit"
           wrapProgram "$out/bin/tower-app-probe" \
             --prefix PATH : ${lib.makeBinPath [ pkgs.nodejs_22 pkgs.python3 pkgs.coreutils pkgs.gh ]}
           wrapProgram "$out/bin/tower-app-start-shadow" \
@@ -501,19 +479,6 @@
             --prefix PATH : ${lib.makeBinPath [ pkgs.nodejs_22 pkgs.coreutils ]}
           # Backend issue MCP invokes gh; do not depend on mutable host packages.
           wrapProgram "$out/bin/tower-app-start-production" \
-            --set TOWER_PROJECT_SETFACL_BIN "${lib.getBin pkgs.acl}/bin/setfacl" \
-            --prefix PATH : ${lib.makeBinPath [ pkgs.nodejs_22 towerAnalysisPython pkgs.coreutils pkgs.gh ]} \
-            --set TOWER_DOCUMENT_PYTHON "${towerAnalysisPython}/bin/python3" \
-            --set TOWER_CAD_PYTHON "${towerAnalysisPython}/bin/python3" \
-            --set PDF_EXPORT_RENDERER_MODE nix \
-            --set NIX_RENDERER_BIN "$out/bin/tower-nix-render"
-          chmod +x "$out/bin/tower-app-start-provisioning" "$out/bin/tower-app-provisioning-command" "$out/bin/prepare-provisioning-host" "$out/bin/enroll-provisioning-worker" "$out/bin/provisioning-runtime-context" "$out/bin/prepare-provisioning-managed-skills" "$out/bin/prepare-provisioning-bwrap-policy" "$out/bin/prepare-provisioning-main-https" "$out/bin/prepare-provisioning-owner"
-          patchShebangs "$out/bin/tower-app-start-provisioning" "$out/bin/tower-app-provisioning-command" "$out/bin/prepare-provisioning-host" "$out/bin/enroll-provisioning-worker" "$out/bin/provisioning-runtime-context" "$out/bin/prepare-provisioning-managed-skills" "$out/bin/prepare-provisioning-bwrap-policy" "$out/bin/prepare-provisioning-main-https" "$out/bin/prepare-provisioning-owner"
-          wrapProgram "$out/bin/enroll-provisioning-worker" \
-            --prefix PATH : ${lib.makeBinPath [ pkgs.nodejs_22 pkgs.coreutils pkgs.postgresql_16 pkgs.curl pkgs.python3 pkgs.util-linux pkgs.systemd ]}
-          wrapProgram "$out/bin/tower-app-provisioning-command" \
-            --prefix PATH : ${lib.makeBinPath [ pkgs.nodejs_22 pkgs.coreutils pkgs.nix pkgs.systemd ]}
-          wrapProgram "$out/bin/tower-app-start-provisioning" \
             --set TOWER_PROJECT_SETFACL_BIN "${lib.getBin pkgs.acl}/bin/setfacl" \
             --prefix PATH : ${lib.makeBinPath [ pkgs.nodejs_22 towerAnalysisPython pkgs.coreutils pkgs.gh ]} \
             --set TOWER_DOCUMENT_PYTHON "${towerAnalysisPython}/bin/python3" \
@@ -567,9 +532,6 @@
           wrapProgram "$out/bin/install-workbench-assignment-reconciler-unit" \
             --prefix PATH : ${lib.makeBinPath [ pkgs.coreutils pkgs.systemd ]} \
             --set TOWER_APP_ROOT "$out"
-          wrapProgram "$out/bin/install-worker-scope-coordinator" \
-            --prefix PATH : ${lib.makeBinPath [ pkgs.nodejs_22 pkgs.coreutils pkgs.systemd ]} \
-            --set TOWER_APP_ROOT "$out"
           cat > "$out/share/tower/release-manifest.json" <<'JSON'
           ${builtins.toJSON {
             schemaVersion = 1;
@@ -596,20 +558,9 @@
           "$out/bin/tower-app-probe" "$out"
           test -x "$out/bin/tower-app-start-shadow"
           test -x "$out/bin/tower-app-start-production"
-          test -x "$out/bin/tower-app-start-provisioning"
-          test -x "$out/bin/tower-app-provisioning-command"
-          test -x "$out/bin/prepare-provisioning-host"
-          test -x "$out/bin/enroll-provisioning-worker"
-          test -x "$out/bin/provisioning-runtime-context"
-          test -x "$out/bin/prepare-provisioning-managed-skills"
-          test -x "$out/bin/prepare-provisioning-bwrap-policy"
-          test -x "$out/bin/prepare-provisioning-main-https"
-          test -x "$out/bin/prepare-provisioning-owner"
           test -x "${lib.getBin pkgs.acl}/bin/setfacl"
           grep -F '${lib.getBin pkgs.acl}/bin/setfacl' "$out/bin/tower-app-start-production"
           grep -F '${lib.getBin pkgs.acl}/bin/setfacl' "$out/bin/tower-app-start-shadow"
-          "$out/bin/tower-shared-output-publish" --help >/dev/null
-          "$out/bin/tower-protected-input-publish" --help >/dev/null
           test -x "$out/bin/tower-app-deploy-verify"
           test -x "$out/bin/tower-app-probe-isolated-db"
           test -x "$out/bin/tower-app-pdf-smoke"
@@ -620,10 +571,8 @@
           test -s "$out/share/tower/compute-baseline.json"
           test -x "$out/bin/install-local-workbench-worker-units"
           test -x "$out/bin/install-system-workbench-worker-units"
-          test -x "$out/bin/tower-worker-permission-preflight"
           test -x "$out/bin/tower-workbench-assignment-reconciler"
           test -x "$out/bin/install-workbench-assignment-reconciler-unit"
-          test -x "$out/bin/install-worker-scope-coordinator"
           test -x "$out/bin/tower-nix-render"
           "$out/bin/tower-app-pdf-smoke"
           "$out/bin/tower-app-document-smoke"

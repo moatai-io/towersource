@@ -1,3 +1,7 @@
+import { installModelRegistryFixture } from '../../__tests__/fixtures/model-registry.js';
+import { beforeEach as beforeRegistryTest, afterEach as afterRegistryTest } from 'vitest';
+beforeRegistryTest(() => { installModelRegistryFixture(); });
+afterRegistryTest(() => vi.restoreAllMocks());
 import fs from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 import { isAllowedTowerPiModel, isAllowedTowerPiProvider } from '../pi/provider-boundary.js';

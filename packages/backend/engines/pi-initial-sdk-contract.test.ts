@@ -1,6 +1,8 @@
 import {it,expect,vi} from 'vitest';import type {EngineCallbacks,RunOpts} from './types.js';
 vi.mock('../services/agent-turn/recovery-coordinator.js',()=>({tryClaimForegroundAgentTurn:async()=>({claimed:true,token:'fixture'}),completeAgentTurnRecovery:async()=>{},releaseAgentTurnRecovery:async()=>{},renewAgentTurnRecovery:async()=>true}));
 vi.mock('../services/workbench/workbench-rollout.js',()=>({resolveWorkbenchRollout:async()=>({enabled:false})}));
+// Alarm-root database authority is covered by agent-sleep/alarms.test.ts; this test owns SDK event delivery.
+vi.mock('../services/agent-sleep/alarms.js',()=>({validateWaitAlarmRoot:async()=>true,clearRequestedWait:()=>{},getRequestedWait:()=>undefined,invalidateWaitAlarm:async()=>{}}));
 import {PiEngine} from './pi-engine.js';
 it('real Pi run drives SDK-shaped events through actual saveMessage and clears busy state',async()=>{
  const engine=new PiEngine();let listener:(e:unknown)=>void=()=>{};const msg={role:'assistant',content:[{type:'text',text:'{"greeting":"안내","question":"목표는?","plan":null}'}],stopReason:'stop',usage:{input:1,output:2,totalTokens:3,cost:{input:0,output:0,total:0}},timestamp:Date.now()};

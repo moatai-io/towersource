@@ -1,3 +1,7 @@
+import { installModelRegistryFixture } from '../../__tests__/fixtures/model-registry.js';
+import { beforeEach as beforeRegistryTest, afterEach as afterRegistryTest } from 'vitest';
+beforeRegistryTest(() => { installModelRegistryFixture(); });
+afterRegistryTest(() => vi.restoreAllMocks());
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../task/automation-runners.js', () => ({ resolveAutomationAiCwd: vi.fn(async () => '/resolved-project') }));

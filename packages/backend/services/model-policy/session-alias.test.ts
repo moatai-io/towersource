@@ -1,3 +1,7 @@
+import { installModelRegistryFixture, packagedModels } from '../../__tests__/fixtures/model-registry.js';
+import { beforeEach as beforeRegistryTest, afterEach as afterRegistryTest } from 'vitest';
+beforeRegistryTest(() => { installModelRegistryFixture(); });
+afterRegistryTest(() => vi.restoreAllMocks());
 import fs from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 import { getModelDefaults, getModelsConfigPath } from '../../config.js';
@@ -5,7 +9,7 @@ import { choiceAfterPiTurn, isPiPresetMappingReady, persistPiSessionChoice, pres
 
 describe('Tower Core/Lite session intent', () => {
   it('ships GPT-6.1 Sol as Core and retires Smartest selections', () => {
-    const packaged = JSON.parse(fs.readFileSync(new URL('../../models.json', import.meta.url), 'utf8'));
+    const packaged = packagedModels;
     expect(packaged.defaults.session).toBe('litellm-responses/gpt-6.1-sol');
     expect(packaged.pi.find((entry: { modelId: string }) => entry.modelId === 'gpt-6.1-sol')).toMatchObject({
       provider: 'litellm-responses', enabled: true, api: 'openai-responses',
@@ -32,6 +36,12 @@ describe('Tower Core/Lite session intent', () => {
     expect(presetForPiTurn(undefined, 'policy/lite')).toBe('lite');
   });
 
+  it('fails closed until Core is present in the current router snapshot', () => {
+    const registry = installModelRegistryFixture();
+    delete (registry.pi[0] as { lastSeenAt?: string }).lastSeenAt;
+    expect(isPiPresetMappingReady('preset/core')).toBe(false);
+    expect(persistPiSessionChoice('preset/core')).toBe('preset/core');
+  });
   it('rejects missing or recursive preset mappings without changing the selected slot', () => {
     const configPath = getModelsConfigPath();
     const originalRead = fs.readFileSync;

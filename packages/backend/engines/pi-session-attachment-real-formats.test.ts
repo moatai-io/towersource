@@ -4,6 +4,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { describe, it, expect, vi, afterEach } from 'vitest';
 const auth = vi.hoisted(() => ({ resolve: vi.fn() }));
+vi.mock('../services/agent-workspaces/team-context.js', () => ({ resolveTeamAgentContext: vi.fn(async () => null) }));
 vi.mock('../services/session-attachments/session-attachment-store.js', () => ({ resolveAuthorizedSessionAttachment: auth.resolve }));
 import { createPdfAwareReadTool } from './pi-pdf-aware-read-tool.js';
 import { createPdfViewTool } from './pi-pdf-view-tool.js';

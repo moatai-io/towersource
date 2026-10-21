@@ -82,6 +82,25 @@ describe('Tower OSS single-host installer contract', () => {
     expect(doctor).toContain('/api/auth/status');
   });
 
+  it('resolves public Nix script inputs while retaining the single-host Worker safety tools', () => {
+    const flake = fs.readFileSync(path.join(process.cwd(), 'flake.nix'), 'utf8');
+    const scriptInputs = [...flake.matchAll(/\$\{(\.\/scripts\/[A-Za-z0-9_./-]+)\}/g)]
+      .map((match) => match[1]);
+    expect(scriptInputs.length).toBeGreaterThan(0);
+    for (const input of scriptInputs) {
+      expect(fs.existsSync(path.join(process.cwd(), input)), input).toBe(true);
+    }
+    // Missing inputs fail before a fresh host can build the installer closure.
+    expect(installer).toContain('#towerApp');
+    expect(flake).not.toContain('scripts/nix-app/prepare-provisioning-');
+    expect(flake).not.toContain('scripts/nix-app/tower-app-start-provisioning');
+    expect(flake).not.toContain('"$out/bin/install-worker-scope-coordinator"');
+    expect(flake).toContain('pkgs.acl');
+    expect(flake).toContain('pkgs.bubblewrap');
+    expect(flake).toContain('scripts/nix-app/install-system-workbench-worker-units');
+    expect(flake).toContain('scripts/nix-app/tower-workbench-worker');
+  });
+
   it('requires the committed npm lockfile instead of silently selecting new dependencies', () => {
     expect(installer).toContain('npm ci --no-audit --no-fund');
     expect(installer).not.toContain('npm install --no-audit --no-fund');

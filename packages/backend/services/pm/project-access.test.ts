@@ -18,6 +18,9 @@ const TEST_HOME = process.env.HOME || '/tmp';
 const TEST_WORKSPACE_ROOT = process.env.WORKSPACE_ROOT || path.join(TEST_HOME, 'workspace');
 const TEST_TOWER_REPO_ROOT = process.env.TOWER_REPO_ROOT || path.join(TEST_HOME, 'tower');
 
+// Path-policy tests use an unregistered root; registered Project authority is tested separately.
+vi.mock('../../db/pg-repo.js', () => ({ query: vi.fn(async () => []), queryOne: vi.fn(async () => undefined) }));
+
 describe('project path boundary realpath hardening', () => {
   let tmp: string;
 

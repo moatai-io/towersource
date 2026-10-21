@@ -15,7 +15,13 @@ const watcherCode = `
   import { resolveRegistrySkillBundle } from './packages/backend/services/skill/skill-bundle-resolver.ts';
   import { buildRuntimeSkillBindMountPlan } from './packages/backend/services/skill/runtime-skill-bind-mount.ts';
   import { resolveOperatorSkillAssets } from './packages/backend/services/skill/operator-skill-assets.ts';
-  import { getSkill } from './packages/backend/services/skill/skill-registry.ts';
+  // Filesystem propagation does not require a running legacy registry database.
+  import { registerHooks } from 'node:module';
+  registerHooks({ resolve(specifier, context, nextResolve) {
+    if (specifier.endsWith('/db/pg-repo.js')) return { url: 'data:text/javascript,' + encodeURIComponent('export const query=async()=>[];export const queryOne=async()=>undefined;export const execute=async()=>({changes:0});export const transaction=async()=>{throw new Error("Unexpected transaction")};export const withClient=async()=>{throw new Error("Unexpected client")};'), shortCircuit: true };
+    return nextResolve(specifier, context);
+  }});
+  const { getSkill } = await import('./packages/backend/services/skill/skill-registry.ts');
   import { readTeamskillsSkillset } from './packages/backend/services/skill/teamskills-source.ts';
   const project = process.argv[1];
   for await (const line of readline.createInterface({ input: process.stdin })) {
@@ -64,6 +70,8 @@ function child(code: string, args: string[], env: NodeJS.ProcessEnv): ChildProce
 function observer(proc: ChildProcessWithoutNullStreams) {
   let pending: ((value: any) => void) | null = null;
   let buffer = '';
+  let diagnostics = '';
+  proc.stderr.on('data', chunk => { diagnostics += chunk.toString(); });
   proc.stdout.on('data', chunk => {
     buffer += chunk.toString();
     while (buffer.includes('\n')) {
@@ -74,7 +82,7 @@ function observer(proc: ChildProcessWithoutNullStreams) {
   });
   return (step: string) => new Promise<any>((resolve, reject) => {
     if (pending) return reject(new Error('overlapping observation'));
-    const timeout = setTimeout(() => { pending = null; reject(new Error(`watcher timed out: ${step}`)); }, 10_000);
+    const timeout = setTimeout(() => { pending = null; reject(new Error(`watcher timed out: ${step}: ${diagnostics}`)); }, 10_000);
     pending = value => { clearTimeout(timeout); resolve(value); };
     proc.stdin.write(step + '\n');
   });
@@ -140,7 +148,7 @@ it('two long-lived processes re-read activation and same-mtime changed digest; r
   const observe = watchers.map(observer);
   const both = async (step: string) => { const rows = []; for (const fn of observe) rows.push(await fn(step)); return rows; };
   const before = await both('before');
-  expect(before.every(row => !row.error && !row.digest && row.enabled === false)).toBe(true);
+  expect(before.every(row => !row.error && !row.digest && row.enabled === false), JSON.stringify(before)).toBe(true);
   const first = build('v1.0.1');
   expect(updateStableSkills({ sourceRoot, releasesRoot, projectRoots: [project], input: first, mode: 'apply' }).status).toBe('applied');
   materializeProjectRegistrySkills({ projectRootPath: project, skillNames: ['alpha'], storageMode: 'bind-ro', prune: false });

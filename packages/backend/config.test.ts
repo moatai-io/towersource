@@ -215,16 +215,22 @@ describe('Pi hidden-model compatibility', () => {
 
   it('keeps the full Tower model selector controlled by the registry', () => {
     const previousRole = process.env.TOWER_ROLE;
+    const originalRead = fs.readFileSync.bind(fs);
+    const fixture = { claude: [], local: [{ id: 'fixture-local', name: 'Fixture Local', enabled: true }], pi: [
+      { provider: 'litellm-responses', modelId: 'fixture-listed', name: 'Listed', enabled: true, lastSeenAt: '2026-01-01' },
+      { provider: 'litellm-responses', modelId: 'fixture-disabled', name: 'Disabled', enabled: false },
+      { provider: 'litellm-responses', modelId: 'gpt55', name: 'Retired', enabled: true },
+    ], litellmCatalog: { syncedAt: '2026-01-01' } };
+    const readSpy = vi.spyOn(fs, 'readFileSync').mockImplementation(((file: any, ...args: any[]) => String(file) === config.getModelsConfigPath() ? JSON.stringify(fixture) : (originalRead as any)(file, ...args)) as any);
     process.env.TOWER_ROLE = 'full';
     try {
       const models = config.reloadModels();
       expect(models.pi.map((model) => model.id)).not.toContain('pi:litellm-responses/gpt55');
-      expect(models.pi.map((model) => model.id)).toContain('pi:openrouter/moonshotai/kimi-k2.6');
-      // Fleet-aligned VM registry flags expose Team-authorized models routed through LiteLLM.
-      expect(models.pi.map((model) => model.id)).toContain('pi:litellm-responses/z-ai/glm-5.3');
-      expect(models.pi.map((model) => model.id)).toContain('pi:litellm-responses/~deepseek/deepseek-pro-latest');
-      expect(models.local.map((model) => model.id)).toContain('local:local-default');
+      expect(models.pi.map(model => model.id)).toContain('pi:litellm-responses/fixture-listed');
+      expect(models.pi.map(model => model.id)).not.toContain('pi:litellm-responses/fixture-disabled');
+      expect(models.local.map(model => model.id)).toContain('local:fixture-local');
     } finally {
+      readSpy.mockRestore();
       if (previousRole === undefined) delete process.env.TOWER_ROLE;
       else process.env.TOWER_ROLE = previousRole;
       config.reloadModels();

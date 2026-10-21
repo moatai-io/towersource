@@ -14,8 +14,8 @@ concurrency:
 
 jobs:
   verify:
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -26,6 +26,16 @@ jobs:
           node-version: 22.23.1
           cache: npm
 
+      - name: Prepare integration test prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bubblewrap python3-venv python3-pil python3-fitz python3-openpyxl python3-reportlab
+          /usr/bin/python3 -c "import PIL, fitz, openpyxl, reportlab"
+          docker pull postgres:16-alpine
+          # Ubuntu restricts unprivileged user namespaces by default; this
+          # disposable runner executes the sandbox integration tests explicitly.
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+
       - name: Install (clean)
         run: npm ci
 
@@ -33,6 +43,7 @@ jobs:
         run: npm test
         env:
           VITEST_MAX_WORKERS: 2
+          TOWER_DOCUMENT_PYTHON: /usr/bin/python3
 
       - name: Typecheck
         run: npm run typecheck

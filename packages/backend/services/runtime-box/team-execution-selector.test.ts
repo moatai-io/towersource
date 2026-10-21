@@ -19,6 +19,7 @@ let selectWorker: ReturnType<typeof vi.fn>;
 let resolveToken: ReturnType<typeof vi.fn>;
 beforeEach(() => {
   vi.resetAllMocks(); vi.stubEnv('TOWER_TEAM_WORKSPACES_ENABLED', '1');
+  vi.stubEnv('TOWER_WORKBENCH_WORKSTATION_PROJECT_IDS', 'p1');
   vi.mocked(resolveTeamAgentContext).mockResolvedValue({ agentProjectId: 'a', userId: 1, teamId: 'team-a' });
   vi.mocked(createLocalWorkbenchExecutionProvider).mockReturnValue(local);
   vi.mocked(createRemoteWorkbenchExecutionProvider).mockReturnValue(remote);

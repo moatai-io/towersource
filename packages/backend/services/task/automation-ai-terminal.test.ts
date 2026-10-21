@@ -1,3 +1,7 @@
+import { installModelRegistryFixture } from '../../__tests__/fixtures/model-registry.js';
+import { beforeEach as beforeRegistryTest, afterEach as afterRegistryTest } from 'vitest';
+beforeRegistryTest(() => { installModelRegistryFixture(); });
+afterRegistryTest(() => vi.restoreAllMocks());
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 vi.mock('./task-manager.js', () => ({ createTask: vi.fn(async () => ({ id: 'task-1' })), getTask: vi.fn() }));
 vi.mock('../pm/project-manager.js', () => ({ getProject: vi.fn(async () => ({ rootPath: '/workspace', archived: false, lifecycleStatus: 'active' })) }));

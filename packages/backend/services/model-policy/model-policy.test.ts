@@ -1,3 +1,7 @@
+import { installModelRegistryFixture } from '../../__tests__/fixtures/model-registry.js';
+import { beforeEach as beforeRegistryTest, afterEach as afterRegistryTest } from 'vitest';
+beforeRegistryTest(() => { installModelRegistryFixture(); });
+afterRegistryTest(() => vi.restoreAllMocks());
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import * as configuration from '../../config.js';
 import { getModelDefaults, loadModelsFile } from '../../config.js';

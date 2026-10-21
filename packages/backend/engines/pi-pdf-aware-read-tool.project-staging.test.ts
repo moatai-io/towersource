@@ -4,6 +4,7 @@ import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const renderMock = vi.hoisted(() => vi.fn());
+vi.mock('../services/agent-workspaces/team-context.js', () => ({ resolveTeamAgentContext: vi.fn(async () => null) }));
 vi.mock('./pi-pdf-view-tool.js', () => ({
   renderPdfToCachedImages: renderMock,
   pdfViewResultContent: vi.fn(async (rendered: any) => [{ type: 'text', text: `[Source: ${rendered.pdfPath}]` }]),
